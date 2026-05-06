@@ -64,7 +64,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `feal-linear-cryptanalysis` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-linear-cryptanalysis-speed1-20260506-0426` | proof_5 deferred until controller selects close proof |
 | `fix-git` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-fix-git-speed1-20260506-0435` | proof_5 deferred until controller selects close proof |
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
-| `kv-store-grpc` | 4/5 | pending | none | run v2 speed_1 |
+| `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pending | none | run v2 speed_1 |
 | `make-doom-for-mips` | 1/5 | pending | none | run v2 speed_1 |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
@@ -129,6 +129,16 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `replay_valid=true`, `model_turns=7`, `tool_calls=7`, `tool_results=7`,
   and external verifier `4/4` passing. Exact replay and matching
   terminal-bench replay dogfood passed.
+- `kv-store-grpc` live v2 speed_1
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050`
+  scored reward `1.0` with runner errors `0`, total runtime `2m27s`,
+  `work_exit_code=0`, `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, `model_turns=4`, `tool_calls=11`, `tool_results=11`,
+  and external verifier `7/7` passing. Exact replay and matching
+  terminal-bench replay dogfood passed. The replay contains three recovered
+  failed tool results before finish; they are not score blockers because final
+  reward, replay, and dogfood are clean, but they remain efficiency evidence.
 
 ## Repair Trigger
 
