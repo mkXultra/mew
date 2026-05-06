@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | repair validated locally; live rerun inconclusive after transient backend error | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1144-finish-gate`, `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1158-visual-quality-gate` | rerun v2 speed_1 once; 1158 stopped on Codex Web API `IncompleteRead`, not a product score |
+| `make-doom-for-mips` | 1/5 | hard-runtime profile repair reviewed; speed_1 pending | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1214-post-commit` | commit profile repair, then rerun v2 speed_1 once |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -185,6 +185,20 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   false completion occurred and the model backend failed before a finish
   attempt, rerun exactly one same-shape `make-doom-for-mips` v2 `speed_1`
   before classifying the remaining product gap.
+- The post-commit same-shape rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1214-post-commit`
+  scored reward `0.0` with runner errors `0` and total runtime `8m21s`, but
+  `implement_v2` ended `blocked` with `completion_credit=false` and
+  `finish_gate_block_count=3`. The gate no longer grants false completion.
+  The remaining issue is a hard-runtime strategy/profile gap: v2 inspected the
+  provided Doom/VM source, then generated a handcrafted MIPS ELF and synthetic
+  frame producer instead of preserving the source-provided implementation
+  path. The next repair is a generic cacheable `implement_v2_hard_runtime_profile`
+  prompt section for provided-source plus VM/emulator/binary/runtime-artifact
+  tasks. Focused tests, replay/dogfood on the 1214 artifact, scoped ruff,
+  JSONL validation, and codex-ultra review session
+  `019dfb51-9ee5-7400-b46f-e07737e056a3` passed. Commit the profile repair,
+  then run exactly one same-shape live speed_1.
 
 ## Repair Trigger
 

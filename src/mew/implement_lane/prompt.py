@@ -82,36 +82,65 @@ def build_implement_v2_prompt_sections(
             cache_policy=CACHE_POLICY_CACHEABLE,
             profile="implement_v2",
         ),
-        PromptSection(
-            id="implement_v2_task_contract",
-            version="v0",
-            title="Implement V2 Task Contract",
-            content=_stable_json(lane_input.task_contract),
-            stability=STABILITY_SEMI_STATIC,
-            cache_policy=CACHE_POLICY_SESSION,
-            profile="implement_v2",
-        ),
-        PromptSection(
-            id="implement_v2_lane_state",
-            version="v0",
-            title="Implement V2 Lane State",
-            content=_stable_json(
-                {
-                    "work_session_id": lane_input.work_session_id,
-                    "task_id": lane_input.task_id,
-                    "lane": lane_input.lane,
-                    "model_backend": lane_input.model_backend,
-                    "model": lane_input.model,
-                    "effort": lane_input.effort,
-                    "lane_config": lane_input.lane_config,
-                    "lane_local_state": _lane_local_state(lane_input.persisted_lane_state),
-                }
-            ),
-            stability=STABILITY_DYNAMIC,
-            cache_policy=CACHE_POLICY_DYNAMIC,
-            profile="implement_v2",
-        ),
     ]
+    if _is_hard_runtime_artifact_task(lane_input.task_contract):
+        sections.append(
+            PromptSection(
+                id="implement_v2_hard_runtime_profile",
+                version="v0",
+                title="Implement V2 Hard Runtime Profile",
+                content=(
+                    "For tasks involving provided source plus a VM, emulator, interpreter, ELF/binary, "
+                    "or runtime-generated artifact, preserve the source-provided implementation path. "
+                    "Do not replace the requested program with a handcrafted stub, surrogate binary, "
+                    "or synthetic artifact producer unless the task explicitly asks for a shim. Treat "
+                    "minimal stand-ins as diagnostic probes only. Inspect the provided source/build files, "
+                    "build or repair that source, and keep verifier evidence tied to the final deliverable. "
+                    "For runtime visual, frame, screenshot, log, socket, or pid artifacts, final proof must "
+                    "come from a fresh verifier-shaped run in the final cwd and must ground the required "
+                    "stdout/boot markers plus artifact quality such as expected dimensions, reference "
+                    "similarity, semantic content, or exact output markers. If the final verifier is expected "
+                    "to create the artifact, remove stale self-check artifacts before finish. If those "
+                    "conditions are not proven, continue or report a precise runtime gap; do not complete."
+                ),
+                stability=STABILITY_STATIC,
+                cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="implement_v2",
+            )
+        )
+    sections.extend(
+        [
+            PromptSection(
+                id="implement_v2_task_contract",
+                version="v0",
+                title="Implement V2 Task Contract",
+                content=_stable_json(lane_input.task_contract),
+                stability=STABILITY_SEMI_STATIC,
+                cache_policy=CACHE_POLICY_SESSION,
+                profile="implement_v2",
+            ),
+            PromptSection(
+                id="implement_v2_lane_state",
+                version="v0",
+                title="Implement V2 Lane State",
+                content=_stable_json(
+                    {
+                        "work_session_id": lane_input.work_session_id,
+                        "task_id": lane_input.task_id,
+                        "lane": lane_input.lane,
+                        "model_backend": lane_input.model_backend,
+                        "model": lane_input.model,
+                        "effort": lane_input.effort,
+                        "lane_config": lane_input.lane_config,
+                        "lane_local_state": _lane_local_state(lane_input.persisted_lane_state),
+                    }
+                ),
+                stability=STABILITY_DYNAMIC,
+                cache_policy=CACHE_POLICY_DYNAMIC,
+                profile="implement_v2",
+            ),
+        ]
+    )
     return sections
 
 
@@ -127,6 +156,61 @@ def _tool_surface_json(tool_specs: tuple[ImplementLaneToolSpec, ...]) -> str:
 
 def _stable_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, indent=2)
+
+
+def _is_hard_runtime_artifact_task(task_contract: object) -> bool:
+    text = _contract_text(task_contract)
+    if not text:
+        return False
+    runtime_markers = (
+        "vm",
+        "emulator",
+        "interpreter",
+        "elf",
+        "binary",
+        "cross-compile",
+        "cross compile",
+        "runtime",
+        "node ",
+    )
+    artifact_markers = (
+        "/tmp/",
+        "frame",
+        "screenshot",
+        "image",
+        "bmp",
+        "stdout",
+        "boot",
+        "log",
+        "socket",
+        "pid file",
+    )
+    source_markers = (
+        "provided",
+        "source",
+        "source code",
+        "build",
+        "compile",
+        "make",
+        "project",
+        "repository",
+    )
+    return (
+        any(marker in text for marker in runtime_markers)
+        and any(marker in text for marker in artifact_markers)
+        and any(marker in text for marker in source_markers)
+    )
+
+
+def _contract_text(task_contract: object) -> str:
+    if task_contract is None:
+        return ""
+    if isinstance(task_contract, str):
+        return task_contract.lower()
+    try:
+        return json.dumps(task_contract, ensure_ascii=True, sort_keys=True).lower()
+    except TypeError:
+        return str(task_contract).lower()
 
 
 def _lane_local_state(persisted_lane_state: dict[str, object]) -> dict[str, object]:

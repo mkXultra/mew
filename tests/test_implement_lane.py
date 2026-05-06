@@ -1194,6 +1194,47 @@ def test_implement_v2_v0_filters_memory_even_when_memory_summary_exists() -> Non
     assert "lane_safe_resume_token" in lane_state.content
 
 
+def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={
+            "description": (
+                "I provided /app/game source code and vm.js expects a game_mips ELF. "
+                "Build the source so node vm.js prints stdout appropriately and writes "
+                "/tmp/frame.bmp."
+            )
+        },
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    by_id = {section.id: section for section in sections}
+
+    assert "implement_v2_hard_runtime_profile" in by_id
+    assert "handcrafted stub" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "provided source" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "fresh verifier-shaped run" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "reference similarity" in by_id["implement_v2_hard_runtime_profile"].content
+
+
+def test_implement_v2_prompt_omits_hard_runtime_profile_for_simple_task() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Update the README wording and run markdown checks."},
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+
+    assert "implement_v2_hard_runtime_profile" not in {section.id for section in sections}
+
+
 def test_implement_v2_prompt_read_only_mode_does_not_surface_exec_or_write_tools() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
