@@ -179,6 +179,7 @@ def _implement_v2_replay_summary(report_path, report):
     if not isinstance(history, list):
         history = []
     tool_results = manifest.get("tool_results") if isinstance(manifest.get("tool_results"), list) else []
+    updated_lane_state = result.get("updated_lane_state") if isinstance(result.get("updated_lane_state"), dict) else {}
     model_error = _implement_v2_model_error_from_report(report, history=history, metrics=metrics, manifest=manifest)
     if not history and not tool_results and not model_error:
         return {}
@@ -205,6 +206,11 @@ def _implement_v2_replay_summary(report_path, report):
         "latest_failure": _implement_v2_latest_failure(failed_results),
         "model_error": model_error,
         "active_command_closeout_failed": _implement_v2_active_command_closeout_failed(failed_results),
+        "tool_contract_shell_surface_misuse": _implement_v2_tool_contract_shell_surface_misuse(failed_results),
+        "tool_contract_shell_surface_misuse_seen": _implement_v2_any_tool_contract_shell_surface_misuse(failed_results),
+        "tool_contract_recovery_observed": _implement_v2_tool_contract_recovery_observed(tool_results),
+        "hard_runtime_frontier_present": isinstance(updated_lane_state.get("lane_hard_runtime_frontier"), dict)
+        and bool(updated_lane_state.get("lane_hard_runtime_frontier")),
         "compiled_source_frontier_observed": _implement_v2_history_mentions_compiled_source_frontier(history),
         "artifact_dir": str(artifact_dir) if artifact_dir else "",
     }
@@ -305,6 +311,13 @@ def _implement_v2_latest_failure(failed_results):
     }
 
 
+def _implement_v2_latest_failed_terminal_result(failed_results):
+    for result in reversed(failed_results):
+        if isinstance(result, dict) and str(result.get("tool_name") or "") in _IMPLEMENT_V2_TERMINAL_TOOLS:
+            return result
+    return {}
+
+
 def _implement_v2_active_command_closeout_failed(failed_results):
     for result in failed_results:
         if not isinstance(result, dict):
@@ -314,6 +327,53 @@ def _implement_v2_active_command_closeout_failed(failed_results):
         reason = str(first_content.get("reason") or "")
         status = str(result.get("status") or "")
         if status == "interrupted" and "closed before command finalized" in reason:
+            return True
+    return False
+
+
+def _implement_v2_tool_contract_shell_surface_misuse(failed_results):
+    result = _implement_v2_latest_failed_terminal_result(failed_results)
+    if str(result.get("tool_name") or "") != "run_tests":
+        return False
+    content = result.get("content")
+    first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+    return (
+        first_content.get("failure_class") == "tool_contract_misuse"
+        and first_content.get("failure_subclass") == "run_tests_shell_surface"
+        and first_content.get("recoverable_tool_contract_misuse") is True
+        and first_content.get("suggested_tool") == "run_command"
+    )
+
+
+def _implement_v2_any_tool_contract_shell_surface_misuse(failed_results):
+    return any(
+        _implement_v2_tool_result_is_run_tests_shell_surface_misuse(result)
+        for result in failed_results
+        if isinstance(result, dict)
+    )
+
+
+def _implement_v2_tool_result_is_run_tests_shell_surface_misuse(result):
+    if str(result.get("tool_name") or "") != "run_tests":
+        return False
+    content = result.get("content")
+    first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+    return (
+        first_content.get("failure_class") == "tool_contract_misuse"
+        and first_content.get("failure_subclass") == "run_tests_shell_surface"
+        and first_content.get("recoverable_tool_contract_misuse") is True
+        and first_content.get("suggested_tool") == "run_command"
+    )
+
+
+def _implement_v2_tool_contract_recovery_observed(tool_results):
+    for result in tool_results:
+        if not isinstance(result, dict):
+            continue
+        content = result.get("content")
+        first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+        recovery = first_content.get("tool_contract_recovery") if isinstance(first_content, dict) else {}
+        if isinstance(recovery, dict) and recovery.get("kind") == "run_tests_shell_surface_routed_to_run_command":
             return True
     return False
 
@@ -354,6 +414,14 @@ def _implement_v2_next_action(summary, *, external_reward=None):
     latest = summary.get("latest_failure") if isinstance(summary.get("latest_failure"), dict) else {}
     if summary.get("active_command_closeout_failed"):
         return "debug implement_v2 divergence: repair active command closeout before another live speed run"
+    if summary.get("tool_contract_shell_surface_misuse") and not summary.get("tool_contract_recovery_observed"):
+        return (
+            "debug implement_v2 divergence: recover run_tests shell-surface verifier through "
+            "run_command before another live speed run"
+        )
+    if summary.get("tool_contract_shell_surface_misuse_seen") and latest:
+        tool = latest.get("tool_name") or "tool"
+        return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
     if model_error.get("failure_class") == "max_turns_before_finish":
         if latest:
             tool = latest.get("tool_name") or "tool"
@@ -771,7 +839,8 @@ def format_terminal_bench_replay(report):
                 f"status={current_v2.get('lane_status') or '-'} "
                 f"turns={current_v2.get('history_turn_count') or 0} "
                 f"tool_results={current_v2.get('tool_result_count') or 0} "
-                f"compiled_frontier={current_v2.get('compiled_source_frontier_observed')}"
+                f"compiled_frontier={current_v2.get('compiled_source_frontier_observed')} "
+                f"tool_contract_misuse={current_v2.get('tool_contract_shell_surface_misuse')}"
             )
     failed = [check for check in report.get("checks") or [] if not check.get("passed")]
     if failed:

@@ -493,6 +493,110 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertTrue(current_v2["active_command_closeout_failed"])
             self.assertIn("active command closeout", trial["current"]["next_action"])
 
+    def test_replay_terminal_bench_job_routes_run_tests_shell_surface_to_tool_contract_recovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "build-cython-ext__v2fixture"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "final-shell-verifier",
+                                "tool_name": "run_tests",
+                                "status": "failed",
+                                "content": [
+                                    {
+                                        "failure_class": "tool_contract_misuse",
+                                        "failure_subclass": "run_tests_shell_surface",
+                                        "recoverable_tool_contract_misuse": True,
+                                        "suggested_tool": "run_command",
+                                        "suggested_use_shell": True,
+                                        "preserved_command": "printf ok > frame.txt && test -s frame.txt",
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+            next_action = trial["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(current_v2["tool_contract_shell_surface_misuse"])
+            self.assertFalse(current_v2["tool_contract_recovery_observed"])
+            self.assertIn("recover run_tests shell-surface verifier through run_command", next_action)
+            self.assertNotIn("compiled/native source frontier", next_action)
+
+    def test_replay_terminal_bench_job_prefers_later_real_terminal_failure_over_old_tool_contract_misuse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "build-cython-ext__v2fixture"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "old-shell-verifier",
+                                "tool_name": "run_tests",
+                                "status": "failed",
+                                "content": [
+                                    {
+                                        "failure_class": "tool_contract_misuse",
+                                        "failure_subclass": "run_tests_shell_surface",
+                                        "recoverable_tool_contract_misuse": True,
+                                        "suggested_tool": "run_command",
+                                    }
+                                ],
+                            },
+                            {
+                                "provider_call_id": "later-real-failure",
+                                "tool_name": "run_command",
+                                "status": "failed",
+                                "content": [{"exit_code": 2, "stderr_tail": "real linker failure"}],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertFalse(current_v2["tool_contract_shell_surface_misuse"])
+            self.assertIn("latest failed run_command result", next_action)
+            self.assertNotIn("recover run_tests shell-surface", next_action)
+
     def test_replay_terminal_bench_job_does_not_debug_completed_implement_v2_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_implement_v2_replay_fixture(tmp)

@@ -114,6 +114,7 @@ DOGFOOD_SCENARIOS = (
     "m6_24-same-family-compatibility-emulator",
     "m6_24-runtime-finish-gate-emulator",
     "m6_24-implement-v2-terminal-failure-reaction-emulator",
+    "m6_24-implement-v2-tool-contract-recovery-emulator",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -16397,6 +16398,223 @@ def run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(workspace
     return report
 
 
+def run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    verifier_command = "printf recovered > tool-contract-recovery.txt && test -s tool-contract-recovery.txt"
+    outputs = [
+        {
+            "summary": "spend final base turn on shell-shaped run_tests",
+            "frontier_state_update": {
+                "status": "active",
+                "source_roles": [
+                    {
+                        "path": "fabricated-source.c",
+                        "role": "primary_source",
+                        "state": "grounded",
+                        "evidence_refs": [{"kind": "provider_call", "id": "fabricated-call"}],
+                    }
+                ],
+                "next_verifier_shaped_command": {
+                    "tool": "run_command",
+                    "cwd": ".",
+                    "command": verifier_command,
+                    "use_shell": True,
+                    "evidence_refs": [{"kind": "provider_call", "id": "bad-shell-verifier"}],
+                },
+            },
+            "tool_calls": [
+                {
+                    "id": "bad-shell-verifier",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": verifier_command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "execution_contract": {
+                            "purpose": "verification",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "candidate_final_proof",
+                            "expected_artifact": {"path": "tool-contract-recovery.txt", "kind": "log"},
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "retry preserved verifier with run_command",
+            "tool_calls": [
+                {
+                    "id": "corrected-shell-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": verifier_command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "execution_contract": {
+                            "purpose": "verification",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "candidate_final_proof",
+                            "expected_artifact": {"path": "tool-contract-recovery.txt", "kind": "log"},
+                        },
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "tool-contract recovery verified artifact",
+                "acceptance_evidence": ["corrected-shell-verifier wrote tool-contract-recovery.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-tool-contract-recovery",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Recover a shell-shaped verifier sent to run_tests and verify the generated artifact.",
+                "max_wall_seconds": 10,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "route_run_tests_shell_surface": False,
+                "terminal_failure_reaction_turns": 1,
+                "tool_contract_recovery_turns": 1,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state.get("proof_manifest") or {}
+    tool_calls = manifest.get("tool_calls") or []
+    tool_results = manifest.get("tool_results") or []
+    first_result = tool_results[0] if tool_results else {}
+    first_payload = ((first_result.get("content") or [])[:1] or [{}])[0]
+    metrics = result.metrics
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier") or {}
+    next_verifier = frontier.get("next_verifier_shaped_command") if isinstance(frontier, dict) else {}
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_completes",
+        result.status == "completed"
+        and int(metrics.get("terminal_evidence_count") or 0) > 0
+        and metrics.get("runtime_id") == "implement_v2_model_json_tool_loop",
+        {
+            "status": result.status,
+            "finish": result.updated_lane_state.get("finish"),
+            "terminal_evidence_count": metrics.get("terminal_evidence_count"),
+            "runtime_id": metrics.get("runtime_id"),
+        },
+        "completed only after corrected terminal verifier evidence in implement_v2",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_pairs_provider_calls",
+        len(tool_calls) == len(tool_results) == 2 and metrics.get("replay_valid") is True,
+        {"tool_calls": len(tool_calls), "tool_results": len(tool_results), "replay_valid": metrics.get("replay_valid")},
+        "every provider call has exactly one paired result",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_marks_tool_contract_misuse",
+        first_payload.get("failure_class") == "tool_contract_misuse"
+        and first_payload.get("failure_subclass") == "run_tests_shell_surface"
+        and first_payload.get("terminal_failure_reaction_eligible") is False,
+        first_payload,
+        "shell-shaped run_tests returns structured tool-contract misuse",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_spends_only_tool_contract_turn",
+        int(metrics.get("tool_contract_recovery_turns_used") or 0) == 1
+        and int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 0,
+        {
+            "tool_contract_recovery_turns_used": metrics.get("tool_contract_recovery_turns_used"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+        },
+        "tool-contract recovery does not consume terminal-failure reaction budget",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_prompts_narrow_retry",
+        len(prompts) >= 2
+        and "Tool-contract recovery turn" in prompts[1]
+        and "terminal-failure reaction turn" not in prompts[1],
+        {"prompt_count": len(prompts), "second_prompt_excerpt": (prompts[1] if len(prompts) >= 2 else "")[:500]},
+        "second prompt is the narrow run_command retry prompt",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_updates_frontier",
+        isinstance(next_verifier, dict)
+        and next_verifier.get("tool") == "run_command"
+        and next_verifier.get("command") == verifier_command
+        and isinstance(frontier.get("final_artifact"), dict)
+        and frontier["final_artifact"].get("path") == "tool-contract-recovery.txt"
+        and (
+            (frontier.get("source_roles") or [{}])[0].get("path") == "fabricated-source.c"
+            and (frontier.get("source_roles") or [{}])[0].get("state") == "hypothesis"
+            and not (frontier.get("source_roles") or [{}])[0].get("evidence_refs")
+        ),
+        {
+            "next_verifier": next_verifier,
+            "final_artifact": frontier.get("final_artifact"),
+            "source_roles": frontier.get("source_roles"),
+        },
+        "frontier preserves verifier command, derives final artifact, and drops fabricated refs",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_writes_artifact",
+        (Path(workspace) / "tool-contract-recovery.txt").read_text(encoding="utf-8", errors="replace") == "recovered",
+        {"path": str(Path(workspace) / "tool-contract-recovery.txt")},
+        "corrected verifier command produced the expected artifact",
+    )
+    report = _scenario_report("m6_24-implement-v2-tool-contract-recovery-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "tool_contract_recovery_turn_limit": metrics.get("tool_contract_recovery_turn_limit"),
+            "tool_contract_recovery_turns_used": metrics.get("tool_contract_recovery_turns_used"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "terminal_evidence_count": metrics.get("terminal_evidence_count"),
+            "runtime_id": metrics.get("runtime_id"),
+        },
+        "first_tool_result_status": first_result.get("status"),
+        "frontier": frontier,
+        "repair_artifact": str(Path(workspace) / "tool-contract-recovery.txt"),
+    }
+    return report
+
+
 def run_dogfood_scenario(args):
     workspace, created_temp = prepare_dogfood_workspace(args.workspace)
     env = dogfood_subprocess_env()
@@ -16535,6 +16753,8 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_24_runtime_finish_gate_emulator_scenario(scenario_workspace))
         elif name == "m6_24-implement-v2-terminal-failure-reaction-emulator":
             reports.append(run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(scenario_workspace))
+        elif name == "m6_24-implement-v2-tool-contract-recovery-emulator":
+            reports.append(run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(scenario_workspace))
         elif name == "m6_9-active-memory-recall":
             reports.append(run_m6_9_active_memory_recall_scenario(scenario_workspace, env=env))
         elif name == "m6_9-repeated-task-recall":
