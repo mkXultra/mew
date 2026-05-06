@@ -570,6 +570,14 @@ def run_live_json_implement_v2(
                 reason="continue_terminal_failure",
             ):
                 continue
+            if (
+                not _has_terminal_failure_result(current_results)
+                and extend_for_terminal_failure_reaction_if_available(
+                    tuple(tool_results),
+                    reason="continue_unresolved_prior_terminal_failure",
+                )
+            ):
+                continue
         else:
             finish_arguments = {
                 "outcome": "blocked",

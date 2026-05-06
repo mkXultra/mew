@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | current-head miss after reference compare | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-152558-reference-compare` | repair generic final tool-contract selection gap, then replay/dogfood/emulator before one same-shape v2 speed_1 |
+| `make-doom-for-mips` | 1/5 | current-head miss after VM-timeout frontier repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-204057-vm-timeout-frontier` | repair generic prior-terminal-failure reaction gap, then replay/dogfood/emulator before one same-shape v2 speed_1 |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -353,6 +353,25 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   generic rebuild loop. Focused implement-lane tests, scoped ruff, and
   `git diff --check` passed; codex-ultra review session
   `019dfd13-6160-72b3-871e-fae47d4c99bb` approved.
+- The VM-timeout-frontier rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-204057-vm-timeout-frontier`
+  scored reward `0.0` with runner errors `0` and total runtime `14m23s`.
+  Replay and terminal-bench dogfood pass. The lane reached a source-backed
+  MIPS ELF, repaired past the previous VM timeout, and executed a final fresh
+  verifier, but `node vm.js` terminated at `PC=0x0` after `9` instructions and
+  did not create `/tmp/frame.bmp`. The run then spent its final base turn on a
+  successful diagnostic command and stopped at `max_turns_before_finish` with
+  `terminal_failure_reaction_turns_used=0`. The generic gap is not Doom/MIPS:
+  `implement_v2` only extended reaction turns when the final base turn itself
+  produced a terminal failure, not when an unresolved prior terminal failure
+  was followed by final diagnostic evidence. The bounded repair lets the lane
+  spend one terminal-failure reaction turn from accumulated tool evidence when
+  the base budget expires with a prior terminal failure still actionable.
+  Focused implement-lane tests, focused dogfood tests, exact replay on the
+  artifact, matching terminal-bench dogfood, the new
+  `m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator`, scoped
+  ruff, and `git diff --check` must pass before the next same-shape live
+  speed_1.
 
 ## Repair Trigger
 

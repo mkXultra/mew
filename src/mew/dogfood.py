@@ -114,6 +114,7 @@ DOGFOOD_SCENARIOS = (
     "m6_24-same-family-compatibility-emulator",
     "m6_24-runtime-finish-gate-emulator",
     "m6_24-implement-v2-terminal-failure-reaction-emulator",
+    "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator",
     "m6_24-implement-v2-tool-contract-recovery-emulator",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
@@ -16398,6 +16399,162 @@ def run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(workspace
     return report
 
 
+def run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    outputs = [
+        {
+            "summary": "verifier fails before the final base turn",
+            "tool_calls": [
+                {
+                    "id": "failed-runtime-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'runtime failed\\n' >&2; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "final base turn diagnoses the unresolved failure",
+            "tool_calls": [
+                {
+                    "id": "diagnose-runtime-failure",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf diagnostic > diagnostic.txt && test -s diagnostic.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "bounded reaction turn repairs and verifies",
+            "tool_calls": [
+                {
+                    "id": "repair-prior-terminal-failure",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf repaired > prior-terminal-reaction.txt "
+                            "&& test \"$(cat prior-terminal-reaction.txt)\" = repaired"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "prior terminal failure repaired",
+                "acceptance_evidence": ["repair-prior-terminal-failure confirmed prior-terminal-reaction.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-prior-terminal-failure-diagnostic",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Repair a failed runtime verifier after diagnostic evidence.",
+                "max_wall_seconds": 5,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    manifest = result.updated_lane_state.get("proof_manifest") or {}
+    tool_results = manifest.get("tool_results") or []
+    metrics = result.metrics
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_completes",
+        result.status == "completed",
+        {"status": result.status, "finish": result.updated_lane_state.get("finish")},
+        "completed after a diagnostic-only final base turn plus one bounded reaction turn",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_keeps_prior_failure",
+        len(tool_results) >= 3
+        and tool_results[0].get("status") == "failed"
+        and tool_results[1].get("status") == "completed",
+        {"tool_result_statuses": [item.get("status") for item in tool_results[:3]]},
+        "prior terminal failure remains actionable after a successful diagnostic command",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_spends_one_reaction_turn",
+        int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 1
+        and int(metrics.get("model_turns") or 0) == 3,
+        {
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "one reaction turn is added after final diagnostic evidence",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_prompts_reaction_scope",
+        len(prompts) >= 3 and "terminal_failure_reaction_turns_used: 1/1" in prompts[2],
+        {"prompt_count": len(prompts), "third_prompt_excerpt": (prompts[2] if len(prompts) >= 3 else "")[:300]},
+        "reaction prompt carries reaction-turn counter",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_writes_repair_artifact",
+        (Path(workspace) / "prior-terminal-reaction.txt").read_text(encoding="utf-8", errors="replace") == "repaired",
+        {"path": str(Path(workspace) / "prior-terminal-reaction.txt")},
+        "repair verification command wrote the expected artifact",
+    )
+    report = _scenario_report(
+        "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator",
+        workspace,
+        commands,
+        checks,
+    )
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "tool_result_statuses": [item.get("status") for item in tool_results[:3]],
+        "repair_artifact": str(Path(workspace) / "prior-terminal-reaction.txt"),
+    }
+    return report
+
+
 def run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(workspace):
     from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
     from .work_lanes import IMPLEMENT_V2_LANE
@@ -16753,6 +16910,10 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_24_runtime_finish_gate_emulator_scenario(scenario_workspace))
         elif name == "m6_24-implement-v2-terminal-failure-reaction-emulator":
             reports.append(run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(scenario_workspace))
+        elif name == "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator":
+            reports.append(
+                run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(scenario_workspace)
+            )
         elif name == "m6_24-implement-v2-tool-contract-recovery-emulator":
             reports.append(run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(scenario_workspace))
         elif name == "m6_9-active-memory-recall":

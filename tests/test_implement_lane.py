@@ -945,6 +945,96 @@ def test_implement_v2_live_json_extends_after_final_closeout_failure(tmp_path) -
     assert (tmp_path / "closeout.txt").read_text(encoding="utf-8") == "closeout-repaired"
 
 
+def test_implement_v2_live_json_extends_after_final_diagnostic_of_prior_terminal_failure(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "verifier fails before final budget turn",
+            "tool_calls": [
+                {
+                    "id": "failed-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'runtime failed\\n' >&2; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "diagnose the failure on the final base turn",
+            "tool_calls": [
+                {
+                    "id": "diagnose-failure",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf diagnostic > diagnostic.txt && test -f diagnostic.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "react to the unresolved terminal failure",
+            "tool_calls": [
+                {
+                    "id": "repair-after-diagnostic",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf repaired > repaired.txt && test \"$(cat repaired.txt)\" = repaired",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "prior terminal failure repaired after diagnostic",
+                "acceptance_evidence": ["repair-after-diagnostic confirmed repaired.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Diagnose and repair terminal failure"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["base_max_turns"] == 2
+    assert result.metrics["turn_budget_limit"] == 3
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 1
+    assert result.metrics["model_turns"] == 3
+    assert "terminal_failure_reaction_turns_used: 1/1" in prompts[2]
+    assert (tmp_path / "diagnostic.txt").read_text(encoding="utf-8") == "diagnostic"
+    assert (tmp_path / "repaired.txt").read_text(encoding="utf-8") == "repaired"
+
+
 def test_implement_v2_live_json_extends_after_final_failed_tool_claims_completed(tmp_path) -> None:
     outputs = [
         {
