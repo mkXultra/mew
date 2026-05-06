@@ -33,7 +33,7 @@ from mew.implement_lane import (
     validate_proof_manifest_pairing,
     validate_tool_result_pairing,
 )
-from mew.implement_lane.v2_runtime import _finish_evidence_refs
+from mew.implement_lane.v2_runtime import _finish_evidence_refs, _provider_visible_tool_result_for_history
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
 
@@ -1317,6 +1317,109 @@ def test_nonterminal_result_is_provider_visible_content_not_protocol_error() -> 
     assert payload["tool_result"]["is_error"] is False
     assert payload["tool_result"]["content"]["mew_status"] == "yielded"
     assert payload["tool_result"]["content"]["acceptance_evidence"] is False
+
+
+def test_implement_v2_history_compacts_large_tool_output_for_next_turn() -> None:
+    large_output = "first error\n" + ("warning: noisy linker output\n" * 700) + "final linker error\n"
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane-v2-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="lane-v2-1:tool:1:1",
+        tool_name="read_command_output",
+        status="completed",
+        content=(
+            {
+                "command_run_id": "cmd-1",
+                "output_path": "/tmp/output.log",
+                "content": large_output,
+                "chars": len(large_output),
+                "truncated": False,
+                "status": "completed",
+            },
+        ),
+        content_refs=("implement-v2-exec://lane-v2-1/cmd-1/output",),
+    )
+
+    visible = _provider_visible_tool_result_for_history(result)
+    history_content = visible["content"]
+    item = history_content["content"][0]
+
+    assert history_content["history_compacted"] is True
+    assert item["content_history_chars"] == len(large_output)
+    assert item["content_history_truncated"] is True
+    assert len(item["content"]) < 3000
+    assert "first error" in item["content"]
+    assert "final linker error" in item["content"]
+    assert history_content["content_refs"] == ["implement-v2-exec://lane-v2-1/cmd-1/output"]
+
+
+def test_implement_v2_compacts_prompt_history_without_clipping_history_artifact(tmp_path) -> None:
+    prompts: list[str] = []
+    artifact_dir = tmp_path / "artifacts"
+    outputs = [
+        {
+            "summary": "produce noisy output",
+            "tool_calls": [
+                {
+                    "id": "call-noisy",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": shlex.join(
+                            [
+                                sys.executable,
+                                "-c",
+                                "print('first error'); print('warning: noisy output\\n' * 160); print('final linker error')",
+                            ]
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "blocked after reading compacted history",
+            "finish": {"outcome": "blocked", "summary": "enough evidence"},
+        },
+    ]
+
+    def fake_model(_backend, _auth, prompt, *_args, **_kwargs):
+        prompts.append(prompt)
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "artifact_dir": str(artifact_dir),
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    history_path = next(path for path in result.proof_artifacts if path.endswith("history.json"))
+    history = json.loads(open(history_path, encoding="utf-8").read())
+    persisted_output = history[0]["tool_results"][0]["content"]["content"][0]["stdout"]
+
+    assert result.status == "blocked"
+    assert "history clipped" in prompts[1]
+    assert "stdout_history_truncated" in prompts[1]
+    assert persisted_output not in prompts[1]
+    assert "history clipped" not in persisted_output
+    assert "final linker error" in persisted_output
 
 
 def test_proof_manifest_serializes_lane_attempt_calls_results_and_metrics() -> None:

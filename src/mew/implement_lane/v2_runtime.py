@@ -26,6 +26,21 @@ from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
 _COMPLETED_FINISH_OUTCOMES = {"completed", "task_complete", "done", "success"}
 _EVIDENCE_PROVIDER_CALL_RE = re.compile(r"\bcall-[A-Za-z0-9_.:-]+\b")
 _PROVIDER_ID_TOKEN_RE = re.compile(r"[A-Za-z0-9_.:-]+")
+_PROVIDER_HISTORY_TEXT_LIMIT = 2400
+_PROVIDER_HISTORY_TEXT_HEAD = 1200
+_PROVIDER_HISTORY_TEXT_TAIL = 900
+_PROVIDER_HISTORY_LIST_LIMIT = 24
+_PROVIDER_HISTORY_CLIP_KEYS = {
+    "command",
+    "content",
+    "diff",
+    "stderr",
+    "stderr_tail",
+    "stdout",
+    "stdout_tail",
+    "summary",
+    "text",
+}
 
 
 def describe_implement_v2_runtime(*, work_session_id: object, task_id: object) -> dict[str, object]:
@@ -106,6 +121,7 @@ def run_live_json_implement_v2(
     tool_calls: list[object] = []
     tool_results: list[ToolResultEnvelope] = []
     history: list[dict[str, object]] = []
+    prompt_history: list[dict[str, object]] = []
     finish_arguments: dict[str, object] = {}
     seen_provider_call_ids: set[str] = set()
     model_elapsed_seconds = 0.0
@@ -162,7 +178,7 @@ def run_live_json_implement_v2(
                 base_max_turns=base_max_turns,
                 terminal_failure_reaction_turns_used=terminal_failure_reaction_turns_used,
                 terminal_failure_reaction_turn_limit=terminal_failure_reaction_turn_limit,
-                history=tuple(history),
+                history=tuple(prompt_history),
             )
             prompt_chars_total += len(prompt)
             if progress:
@@ -212,6 +228,7 @@ def run_live_json_implement_v2(
                         "tool_results": [],
                     }
                 )
+                prompt_history.append(dict(history[-1]))
                 if progress:
                     progress(
                         f"implement_v2 turn #{turn_index}: model_json failed "
@@ -259,6 +276,7 @@ def run_live_json_implement_v2(
                                     continuation_prompt=continuation_prompt,
                                 )
                             )
+                            prompt_history.append(dict(history[-1]))
                             finish_arguments = {
                                 "outcome": "continue",
                                 "summary": continuation_prompt,
@@ -354,16 +372,20 @@ def run_live_json_implement_v2(
                     tool_results=current_results,
                 )
             )
-            history.append(
-                {
-                    "turn": turn_index,
-                    "summary": str(normalized.get("summary") or ""),
-                    "tool_calls": [call.as_dict() for call in current_calls],
-                    "tool_results": [
-                        _provider_visible_tool_result_for_history(result) for result in current_results
-                    ],
-                }
-            )
+            history_entry = {
+                "turn": turn_index,
+                "summary": str(normalized.get("summary") or ""),
+                "tool_calls": [call.as_dict() for call in current_calls],
+                "tool_results": [_full_tool_result_for_history(result) for result in current_results],
+            }
+            prompt_history_entry = {
+                "turn": history_entry["turn"],
+                "summary": history_entry["summary"],
+                "tool_calls": history_entry["tool_calls"],
+                "tool_results": [_provider_visible_tool_result_for_history(result) for result in current_results],
+            }
+            history.append(history_entry)
+            prompt_history.append(prompt_history_entry)
             if progress:
                 progress(
                     f"implement_v2 turn #{turn_index}: "
@@ -396,6 +418,7 @@ def run_live_json_implement_v2(
                                 continuation_prompt=continuation_prompt,
                             )
                         )
+                        prompt_history.append(dict(history[-1]))
                         finish_arguments = {
                             "outcome": "continue",
                             "summary": continuation_prompt,
@@ -1648,7 +1671,7 @@ def _auto_approval_records(lane_input: ImplementLaneInput, tool_calls) -> tuple[
 
 
 def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:
-    content = result.provider_visible_content()
+    content = _compact_provider_visible_content_for_history(result.provider_visible_content())
     return {
         "provider_call_id": result.provider_call_id,
         "tool_name": result.tool_name,
@@ -1656,6 +1679,86 @@ def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dic
         "is_error": result.is_error,
         "content": content,
     }
+
+
+def _full_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:
+    return {
+        "provider_call_id": result.provider_call_id,
+        "tool_name": result.tool_name,
+        "status": result.status,
+        "is_error": result.is_error,
+        "content": result.provider_visible_content(),
+    }
+
+
+def _compact_provider_visible_content_for_history(content: dict[str, object]) -> dict[str, object]:
+    compacted = dict(content)
+    clipped = False
+    compacted_items = []
+    for item in compacted.get("content") if isinstance(compacted.get("content"), list) else []:
+        compacted_item, item_clipped = _compact_provider_history_value(item)
+        compacted_items.append(compacted_item)
+        clipped = clipped or item_clipped
+    if compacted_items:
+        compacted["content"] = compacted_items
+    if clipped:
+        compacted["history_compacted"] = True
+        compacted["history_compaction_note"] = (
+            "large provider-visible tool output was clipped for the next model turn; "
+            "use content_refs/evidence_refs/read_command_output for full artifacts"
+        )
+    return compacted
+
+
+def _compact_provider_history_value(value: object, *, key: str = "", depth: int = 0) -> tuple[object, bool]:
+    if isinstance(value, str):
+        limit = _PROVIDER_HISTORY_TEXT_LIMIT if key in _PROVIDER_HISTORY_CLIP_KEYS or not key else 4000
+        return _clip_provider_history_text(value, limit=limit)
+    if isinstance(value, dict):
+        clipped = False
+        output: dict[str, object] = {}
+        for item_key, item_value in value.items():
+            compacted, item_clipped = _compact_provider_history_value(
+                item_value,
+                key=str(item_key),
+                depth=depth + 1,
+            )
+            output[str(item_key)] = compacted
+            clipped = clipped or item_clipped
+            if item_clipped and isinstance(item_value, str):
+                output[f"{item_key}_history_chars"] = len(item_value)
+                output[f"{item_key}_history_truncated"] = True
+        return output, clipped
+    if isinstance(value, list):
+        clipped = len(value) > _PROVIDER_HISTORY_LIST_LIMIT
+        compacted_list = []
+        for item in value[:_PROVIDER_HISTORY_LIST_LIMIT]:
+            compacted, item_clipped = _compact_provider_history_value(item, key=key, depth=depth + 1)
+            compacted_list.append(compacted)
+            clipped = clipped or item_clipped
+        if len(value) > _PROVIDER_HISTORY_LIST_LIMIT:
+            compacted_list.append(
+                {
+                    "history_list_truncated": True,
+                    "omitted_items": len(value) - _PROVIDER_HISTORY_LIST_LIMIT,
+                }
+            )
+        return compacted_list, clipped
+    return value, False
+
+
+def _clip_provider_history_text(text: str, *, limit: int) -> tuple[str, bool]:
+    if len(text) <= limit:
+        return text, False
+    head = text[:_PROVIDER_HISTORY_TEXT_HEAD]
+    tail = text[-_PROVIDER_HISTORY_TEXT_TAIL:]
+    omitted = len(text) - len(head) - len(tail)
+    return (
+        f"{head}\n"
+        f"...[history clipped {omitted} chars; full content remains in artifact refs]...\n"
+        f"{tail}",
+        True,
+    )
 
 
 def _finish_outcome(finish_arguments: dict[str, object]) -> str:
