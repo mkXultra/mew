@@ -206,6 +206,14 @@ Scope:
   `replay_valid=true`, and external verifier `7/7` passing. Exact replay and
   matching terminal-bench replay dogfood on the passing artifact also pass.
   This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- `largest-eigenval` true-v2 scoped rebaseline evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053/result.json`
+  scored `1.0` with runner errors `0`, runtime `7m11s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `27/27` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
 - True-v2 canary evidence:
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
   scored `1.0` with runner errors `0`; the mew report recorded
@@ -232,8 +240,8 @@ selected_lane=implement_v2 is now the active M6.24 measurement lane; remeasure s
 Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
 `cobol-modernization`, `distribution-search`,
 `feal-differential-cryptanalysis`, `feal-linear-cryptanalysis`, `fix-git`,
-`hf-model-inference`, and `kv-store-grpc` v2 speed_1 runs passed with exact
-replay and terminal-bench replay dogfood. The
+`hf-model-inference`, `kv-store-grpc`, and `largest-eigenval` v2 speed_1 runs
+passed with exact replay and terminal-bench replay dogfood. The
 current decision is no longer
 "build-cython proof_5 now"; it is "continue the implement_v2 scoped rebaseline,
 while preserving immediate repair on any miss or structural lane gap."
@@ -271,7 +279,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> implement_v2 scoped rebaseline -> next pending task is largest-eigenval -> selected_lane=implement_v2 speed_1 per scoped software/coding task -> if pass, record v2 evidence and continue queue -> if miss/harness-invalid/missing-replay/structural-gap, stop unrelated measurement, reproduce through replay/dogfood/emulator, repair, then rerun same shape
+M6.24 -> implement_v2 scoped rebaseline -> next pending task is make-doom-for-mips -> selected_lane=implement_v2 speed_1 per scoped software/coding task -> if pass, record v2 evidence and continue queue -> if miss/harness-invalid/missing-replay/structural-gap, stop unrelated measurement, reproduce through replay/dogfood/emulator, repair, then rerun same shape
 ```
 
 The 2026-05-05 Codex/Claude Code reference traces both pass
