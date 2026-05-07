@@ -5074,8 +5074,8 @@ def cmd_work_oneshot(args):
     report_path = _work_oneshot_report_path(args)
     if report_path:
         work_args.oneshot_report_path = str(report_path)
-        work_args.oneshot_artifacts = _work_oneshot_artifacts(args)
         work_args.oneshot_workspace_cwd = task.get("cwd") or ""
+    work_args.oneshot_artifacts = _work_oneshot_artifacts(args)
 
     stdout = StringIO()
     with redirect_stdout(stdout):
@@ -7088,6 +7088,49 @@ def _work_guidance_selected_lane(guidance):
     return ""
 
 
+def _work_guidance_json_payload(guidance):
+    text = str(guidance or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _coerce_guidance_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return False
+
+
+def _work_guidance_bool_option(guidance, *names):
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        if name in payload:
+            return _coerce_guidance_bool(payload.get(name))
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            if name in lane_config:
+                return _coerce_guidance_bool(lane_config.get(name))
+    text = str(guidance or "")
+    for name in names:
+        pattern = rf"(?:^|\s){re.escape(name)}\s*=\s*([A-Za-z0-9_.-]+)"
+        match = re.search(pattern, text)
+        if match:
+            return _coerce_guidance_bool(match.group(1))
+    return False
+
+
 def _work_ai_workspace_roots(roots, workspace):
     workspace_path = Path(str(workspace or ".")).expanduser().resolve(strict=False)
     normalized = []
@@ -7173,6 +7216,11 @@ def _run_work_ai_implement_v2(
             "auto_approve_writes": work_auto_approve_edits_enabled(effective_args),
             "artifact_dir": getattr(effective_args, "oneshot_artifacts", "") or "",
             "max_steps": max_steps,
+            "write_integration_observation_detail": _work_guidance_bool_option(
+                getattr(effective_args, "work_guidance", None),
+                "write_integration_observation_detail",
+                "integration_observation_detail",
+            ),
         },
     )
     if progress:

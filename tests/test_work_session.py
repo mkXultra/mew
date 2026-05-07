@@ -10929,6 +10929,123 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_selected_implement_v2_can_enable_integration_observation_detail(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            artifact_dir = Path(tmp) / "artifacts"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
+                )
+                guidance = "selected_lane=implement_v2 write_integration_observation_detail=true"
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_json_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--artifacts",
+                                        str(artifact_dir),
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertTrue(lane_input.lane_config["write_integration_observation_detail"])
+                self.assertEqual(lane_input.lane_config["artifact_dir"], str(artifact_dir.resolve(strict=False)))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_accepts_json_integration_observation_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
+                )
+                guidance = json.dumps(
+                    {
+                        "selected_lane": "implement_v2",
+                        "lane_config": {"write_integration_observation_detail": True},
+                    }
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_json_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertTrue(lane_input.lane_config["write_integration_observation_detail"])
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_oneshot_stops_before_model_when_wall_budget_too_small(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
