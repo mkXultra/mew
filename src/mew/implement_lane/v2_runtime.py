@@ -1313,10 +1313,29 @@ def _terminal_failure_reaction_turn_limit(lane_input: ImplementLaneInput, base_m
     configured = lane_input.lane_config.get("terminal_failure_reaction_turns")
     if configured not in (None, ""):
         try:
-            return max(0, min(5, int(configured)))
+            return max(0, min(12, int(configured)))
         except (TypeError, ValueError):
             return 0
-    return max(1, min(3, int(base_max_turns) // 8 or 1))
+    default_limit = max(1, min(3, int(base_max_turns) // 8 or 1))
+    if _uses_expanded_hard_runtime_reaction_budget(lane_input, base_max_turns=base_max_turns):
+        return max(default_limit, min(8, max(4, int(base_max_turns) // 3 or 1)))
+    return default_limit
+
+
+def _uses_expanded_hard_runtime_reaction_budget(lane_input: ImplementLaneInput, *, base_max_turns: int) -> bool:
+    if int(base_max_turns) < 8:
+        return False
+    if not is_hard_runtime_artifact_task(lane_input.task_contract):
+        frontier = lane_input.persisted_lane_state.get("lane_hard_runtime_frontier")
+        if not isinstance(frontier, dict) or str(frontier.get("status") or "") not in {"active", "blocked"}:
+            return False
+    max_wall = lane_input.task_contract.get("max_wall_seconds")
+    if max_wall in (None, ""):
+        return False
+    try:
+        return float(max_wall) >= 600.0
+    except (TypeError, ValueError):
+        return False
 
 
 def _tool_contract_recovery_turn_limit(lane_input: ImplementLaneInput) -> int:
@@ -2698,10 +2717,8 @@ def _live_json_prompt(
         recovery_instruction_section = f"tool_contract_recovery_instruction:\n{tool_contract_recovery_instruction}"
     terminal_reaction_guidance = ""
     if terminal_failure_reaction_turns_used > 0 and not tool_contract_recovery_instruction:
-        terminal_reaction_guidance = (
-            "If this is a terminal-failure reaction turn, do not broaden the task: make the smallest "
-            "repair/check that directly responds to the latest failed terminal result, or finish blocked "
-            "with the exact blocker.\n"
+        terminal_reaction_guidance = _terminal_failure_reaction_guidance(
+            hard_runtime_frontier_state=hard_runtime_frontier_state,
         )
     return (
         f"{sections}\n\n"
@@ -2726,6 +2743,38 @@ def _live_json_prompt(
         f"response_contract_json:\n{json.dumps(response_contract, ensure_ascii=False, indent=2)}\n"
         f"history_json:\n{json.dumps(list(history)[-8:], ensure_ascii=False, indent=2)}\n"
         "[/section:implement_v2_live_json_transport]"
+    )
+
+
+def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str, object] | None) -> str:
+    guidance = (
+        "If this is a terminal-failure reaction turn, do not broaden the task: make the smallest "
+        "repair/check that directly responds to the latest failed terminal result, or finish blocked "
+        "with the exact blocker.\n"
+    )
+    if not hard_runtime_frontier_state:
+        return guidance
+    latest_failure = hard_runtime_frontier_state.get("latest_runtime_failure")
+    if not isinstance(latest_failure, dict):
+        latest_failure = hard_runtime_frontier_state.get("latest_build_failure")
+    if not isinstance(latest_failure, dict):
+        latest_failure = {}
+    required_next_probe = _frontier_clip_text(latest_failure.get("required_next_probe"), limit=360)
+    failure_class = _frontier_clip_text(latest_failure.get("failure_class"), limit=120)
+    verifier = hard_runtime_frontier_state.get("next_verifier_shaped_command")
+    verifier_hint = ""
+    if isinstance(verifier, dict):
+        verifier_hint = f" latest_verifier_shaped_command={json.dumps(verifier, ensure_ascii=True, sort_keys=True)[:500]}"
+    next_probe_hint = f" required_next_probe={required_next_probe}" if required_next_probe else ""
+    class_hint = f" latest_failure_class={failure_class}" if failure_class else ""
+    return (
+        guidance
+        + "Hard-runtime frontier continuation gate: continue from lane_hard_runtime_frontier instead of "
+        "rediscovering the whole task. Inspect the producing substep/artifact path, make the smallest "
+        "source/runtime repair, then run one verifier-shaped command tied to the expected runtime artifact. "
+        "If mutating source/config, prefer write_file/edit_file/apply_patch; keep run_command for build, "
+        "runtime, and verification."
+        f"{class_hint}{next_probe_hint}{verifier_hint}\n"
     )
 
 

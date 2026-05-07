@@ -37,6 +37,7 @@ from mew.implement_lane.v2_runtime import (
     _finish_evidence_refs,
     _frontier_failure_payload,
     _provider_visible_tool_result_for_history,
+    _terminal_failure_reaction_turn_limit,
 )
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
@@ -2126,6 +2127,72 @@ def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() ->
     assert "artifact ABI/ISA/endianness/entrypoint" in by_id["implement_v2_hard_runtime_profile"].content
     assert "implement_v2_hard_runtime_frontier_state" in by_id
     assert "Do not finish from this state alone" in by_id["implement_v2_hard_runtime_frontier_state"].content
+
+
+def test_implement_v2_hard_runtime_profile_expands_terminal_reaction_budget() -> None:
+    hard_runtime_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={
+            "description": (
+                "I provided /app/game source code and vm.js expects a game_mips ELF. "
+                "Build the source so node vm.js prints stdout appropriately and writes "
+                "/tmp/frame.bmp."
+            ),
+            "max_wall_seconds": 1800,
+        },
+        lane_config={"mode": "full"},
+    )
+    simple_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-2",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Fix a small Python unit test."},
+        lane_config={"mode": "full"},
+    )
+    configured_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-3",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract=hard_runtime_input.task_contract,
+        lane_config={"mode": "full", "terminal_failure_reaction_turns": 2},
+    )
+    persisted_frontier_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-4",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Continue a task with persisted lane frontier.", "max_wall_seconds": 1800},
+        lane_config={"mode": "full"},
+        persisted_lane_state={"lane_hard_runtime_frontier": {"status": "active"}},
+    )
+    missing_wall_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-5",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": hard_runtime_input.task_contract["description"]},
+        lane_config={"mode": "full"},
+    )
+    invalid_wall_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-6",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": hard_runtime_input.task_contract["description"], "max_wall_seconds": "later"},
+        lane_config={"mode": "full"},
+    )
+
+    assert _terminal_failure_reaction_turn_limit(simple_input, 24) == 3
+    assert _terminal_failure_reaction_turn_limit(hard_runtime_input, 24) == 8
+    assert _terminal_failure_reaction_turn_limit(persisted_frontier_input, 24) == 8
+    assert _terminal_failure_reaction_turn_limit(missing_wall_input, 24) == 3
+    assert _terminal_failure_reaction_turn_limit(invalid_wall_input, 24) == 3
+    assert _terminal_failure_reaction_turn_limit(configured_input, 24) == 2
 
 
 def test_implement_v2_prompt_adds_dynamic_frontier_state_when_persisted() -> None:

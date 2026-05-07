@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | runtime-frontier repair rerun still 0/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-frontier-make-doom-speed1-20260507-0838` | classify next generic runtime/task-solving frontier repair from replay/dogfood before another live speed |
+| `make-doom-for-mips` | 1/5 | hard-runtime continuation-gate repair pending rerun | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-frontier-make-doom-speed1-20260507-0838` | run pre-speed, then one same-shape v2 speed_1 if green |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -480,6 +480,19 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   failure is `runtime_artifact_missing` with mismatch count `0`; no another
   live speed should be spent until the next generic repair has local
   UT/replay/dogfood/emulator coverage.
+- Post-classification repair on 2026-05-07 JST: `implement_v2` now treats
+  hard-runtime/frontier tasks as a bounded continuation gate instead of using
+  the normal small terminal-failure reaction budget. The default expansion is
+  generic and capped: it requires hard-runtime task markers or persisted
+  active/blocked `lane_hard_runtime_frontier`, sufficient wall budget, and still
+  excludes tool-contract misuse. The prompt now explicitly tells reaction turns
+  to continue from `lane_hard_runtime_frontier`, inspect the producing
+  substep/artifact path, make the smallest source/runtime repair, and then run a
+  verifier-shaped command. Local validation passed with focused UT, the
+  hard-runtime reaction-budget emulator, exact replay dogfood on the `0838`
+  artifact, scoped ruff, and `git diff --check`. Next action is current-head
+  pre-speed, then exactly one same-shape `make-doom-for-mips`
+  `selected_lane=implement_v2` speed_1 if green.
 
 ## Repair Trigger
 

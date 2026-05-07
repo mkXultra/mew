@@ -115,6 +115,7 @@ DOGFOOD_SCENARIOS = (
     "m6_24-same-family-compatibility-emulator",
     "m6_24-runtime-finish-gate-emulator",
     "m6_24-implement-v2-terminal-failure-reaction-emulator",
+    "m6_24-implement-v2-hard-runtime-reaction-budget-emulator",
     "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator",
     "m6_24-implement-v2-tool-contract-recovery-emulator",
 )
@@ -16697,6 +16698,197 @@ def run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(workspace
     return report
 
 
+def run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    outputs = []
+    for index in range(1, 8):
+        outputs.append(
+            {
+                "summary": f"cheap runtime diagnostic {index}",
+                "tool_calls": [
+                    {
+                        "id": f"diagnostic-{index}",
+                        "name": "run_command",
+                        "arguments": {
+                            "command": f"printf diagnostic-{index} > diagnostic-{index}.txt",
+                            "cwd": ".",
+                            "use_shell": True,
+                        },
+                    }
+                ],
+                "finish": {"outcome": "continue"},
+            }
+        )
+    outputs.extend(
+        [
+            {
+                "summary": "base budget reaches a runtime artifact miss",
+                "tool_calls": [
+                    {
+                        "id": "runtime-miss-1",
+                        "name": "run_command",
+                        "arguments": {
+                            "command": "printf 'Program terminated at PC=0x0\\n' >&2; exit 2",
+                            "cwd": ".",
+                            "use_shell": True,
+                        },
+                    }
+                ],
+                "finish": {"outcome": "continue"},
+            },
+            {
+                "summary": "first hard-runtime reaction still misses the artifact",
+                "tool_calls": [
+                    {
+                        "id": "runtime-miss-2",
+                        "name": "run_command",
+                        "arguments": {
+                            "command": "printf 'still no runtime artifact\\n' >&2; exit 2",
+                            "cwd": ".",
+                            "use_shell": True,
+                        },
+                    }
+                ],
+                "finish": {"outcome": "continue"},
+            },
+            {
+                "summary": "second hard-runtime reaction repairs and verifies",
+                "tool_calls": [
+                    {
+                        "id": "runtime-repair-verify",
+                        "name": "run_command",
+                        "arguments": {
+                            "command": (
+                                "printf repaired > hard-runtime-reaction.txt "
+                                "&& printf 'runtime-ready\\n' > runtime.log "
+                                "&& test \"$(cat hard-runtime-reaction.txt)\" = repaired "
+                                "&& test -s runtime.log"
+                            ),
+                            "cwd": ".",
+                            "use_shell": True,
+                            "execution_contract": {
+                                "role": "runtime",
+                                "stage": "verification",
+                                "proof_role": "verifier",
+                                "acceptance_kind": "external_verifier",
+                                "expected_exit": 0,
+                                "expected_artifacts": [
+                                    {
+                                        "path": "runtime.log",
+                                        "checks": [{"exists": True}, {"non_empty": True}],
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                ],
+                "finish": {
+                    "outcome": "completed",
+                    "summary": "hard runtime artifact failure repaired",
+                    "acceptance_evidence": ["runtime-repair-verify confirmed hard-runtime-reaction.txt"],
+                },
+            },
+        ]
+    )
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        if not outputs:
+            return {
+                "summary": "unexpected extra hard-runtime reaction turn",
+                "finish": {"outcome": "failed", "summary": "unexpected extra hard-runtime reaction turn"},
+            }
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-hard-runtime-reaction-budget",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and a vm.js runtime harness. Build the source-backed "
+                    "MIPS ELF so node vm.js prints stdout and writes runtime.log."
+                ),
+                "final_artifact": "runtime.log",
+                "max_wall_seconds": 1800,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+                "artifact_dir": str(Path(workspace) / "artifacts"),
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=8,
+    )
+    metrics = result.metrics
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_reaction_budget_emulator_completes",
+        result.status == "completed",
+        {"status": result.status, "finish": result.updated_lane_state.get("finish")},
+        "hard-runtime task can spend more than one terminal-failure reaction turn",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_reaction_budget_emulator_expands_limit",
+        int(metrics.get("terminal_failure_reaction_turn_limit") or 0) >= 4
+        and int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 2
+        and int(metrics.get("model_turns") or 0) == 10,
+        {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "expanded hard-runtime budget permits a second bounded reaction turn",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_reaction_budget_emulator_prompts_counter",
+        len(prompts) >= 10
+        and "terminal_failure_reaction_turns_used: 2/" in prompts[9]
+        and "Hard-runtime frontier continuation gate" in prompts[9],
+        {"prompt_count": len(prompts), "tenth_prompt_excerpt": (prompts[9] if len(prompts) >= 10 else "")[:300]},
+        "second reaction prompt carries the expanded reaction counter and frontier continuation gate",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_reaction_budget_emulator_writes_repair_artifact",
+        (Path(workspace) / "hard-runtime-reaction.txt").exists()
+        and (Path(workspace) / "hard-runtime-reaction.txt").read_text(encoding="utf-8", errors="replace") == "repaired",
+        {"path": str(Path(workspace) / "hard-runtime-reaction.txt")},
+        "second reaction turn wrote the expected repair artifact",
+    )
+    report = _scenario_report("m6_24-implement-v2-hard-runtime-reaction-budget-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "repair_artifact": str(Path(workspace) / "hard-runtime-reaction.txt"),
+    }
+    return report
+
+
 def run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(workspace):
     from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
     from .work_lanes import IMPLEMENT_V2_LANE
@@ -17225,6 +17417,10 @@ def run_dogfood_scenario(args):
             reports.append(run_m6_24_runtime_finish_gate_emulator_scenario(scenario_workspace))
         elif name == "m6_24-implement-v2-terminal-failure-reaction-emulator":
             reports.append(run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(scenario_workspace))
+        elif name == "m6_24-implement-v2-hard-runtime-reaction-budget-emulator":
+            reports.append(
+                run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(scenario_workspace)
+            )
         elif name == "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator":
             reports.append(
                 run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(scenario_workspace)
