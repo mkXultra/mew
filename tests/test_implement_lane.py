@@ -3737,6 +3737,8 @@ def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() ->
     assert "implement_v2_hard_runtime_profile" in by_id
     assert "handcrafted stub" in by_id["implement_v2_hard_runtime_profile"].content
     assert "provided source" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "recursive source frontier pass" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "source-declared output paths" in by_id["implement_v2_hard_runtime_profile"].content
     assert "fresh verifier-shaped run" in by_id["implement_v2_hard_runtime_profile"].content
     assert "reference similarity" in by_id["implement_v2_hard_runtime_profile"].content
     assert "artifact ABI/ISA/endianness/entrypoint" in by_id["implement_v2_hard_runtime_profile"].content
