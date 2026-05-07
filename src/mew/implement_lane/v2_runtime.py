@@ -16,7 +16,7 @@ from ..acceptance import (
 )
 from ..errors import ModelBackendError
 from ..work_lanes import IMPLEMENT_V2_LANE
-from .execution_evidence import normalize_execution_contract
+from .execution_evidence import build_oracle_bundle, evidence_events_from_tool_payload, normalize_execution_contract
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from ..prompt_sections import render_prompt_sections
@@ -846,6 +846,8 @@ def run_live_json_implement_v2(
             else ""
         ),
     )
+    typed_acceptance_snapshot = _typed_acceptance_session_from_tool_results(tuple(tool_results), lane_input=lane_input)
+    typed_metrics = _typed_acceptance_metrics(typed_acceptance_snapshot, finish_gate_decision)
     manifest = ImplementLaneProofManifest(
         lane=IMPLEMENT_V2_LANE,
         lane_attempt_id=lane_attempt_id,
@@ -873,6 +875,7 @@ def run_live_json_implement_v2(
             "orphaned_command_cleanup_count": len(cleanup_payloads),
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
+            **typed_metrics,
             "wall_timeout": dict(wall_timeout),
             "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
             "integration_observation": integration_observation,
@@ -939,6 +942,7 @@ def run_live_json_implement_v2(
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
+            **typed_metrics,
             "wall_timeout": dict(wall_timeout),
             "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
             "prompt_chars_total": prompt_chars_total,
@@ -3450,13 +3454,48 @@ def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dic
     if result.tool_name in _PROVIDER_HISTORY_TERMINAL_TOOL_NAMES:
         visible = _project_terminal_result_for_provider_history(visible)
     content = _compact_provider_visible_content_for_history(visible)
-    return {
+    projected = {
         "provider_call_id": result.provider_call_id,
         "tool_name": result.tool_name,
         "status": result.status,
         "is_error": result.is_error,
         "content": content,
     }
+    typed_digest = _typed_evidence_digest_for_result(result)
+    if typed_digest:
+        projected["typed_evidence"] = typed_digest
+    return projected
+
+
+def _typed_evidence_digest_for_result(result: ToolResultEnvelope) -> list[dict[str, object]]:
+    payload = _first_result_payload(result)
+    if not payload:
+        return []
+    events = evidence_events_from_tool_payload(
+        tool_index=0,
+        tool_name=result.tool_name,
+        tool_status=result.status,
+        provider_call_id=result.provider_call_id,
+        payload=payload,
+    )
+    digest: list[dict[str, object]] = []
+    for event in events[:8]:
+        observed = dict(event.observed)
+        compact_observed = {
+            key: observed.get(key)
+            for key in ("artifact_id", "path", "kind", "status", "verdict", "reason", "failure_class", "phase")
+            if observed.get(key) not in (None, "", [], {})
+        }
+        digest.append(
+            {
+                "id": event.id,
+                "kind": event.kind,
+                "status": event.status,
+                "obligation_id": event.obligation_id,
+                "observed": compact_observed,
+            }
+        )
+    return digest
 
 
 def _full_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:
@@ -3705,7 +3744,7 @@ def _live_acceptance_done_gate(
     return acceptance_done_gate_decision(
         _live_task_description(lane_input),
         _finish_acceptance_action(finish_arguments, tool_results, task_description=_live_task_description(lane_input)),
-        session=_acceptance_session_from_tool_results(tool_results),
+        session=_acceptance_session_from_tool_results(tool_results, lane_input=lane_input),
     )
 
 
@@ -3742,7 +3781,49 @@ def _finish_acceptance_action(
     ]
     acceptance_checks = _merge_finish_acceptance_sidecar_checks(acceptance_checks, sidecar_checks)
     action["acceptance_checks"] = acceptance_checks
+    if not action.get("evidence_refs"):
+        typed_refs = _typed_finish_evidence_refs(tool_results, task_description=task_description)
+        if typed_refs:
+            action["evidence_refs"] = typed_refs
     return action
+
+
+def _typed_finish_evidence_refs(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    task_description: object = "",
+) -> list[dict[str, object]]:
+    refs: list[dict[str, object]] = []
+    for index, result in enumerate(tool_results, start=1):
+        payload = _first_result_payload(result)
+        if not payload:
+            continue
+        for event in evidence_events_from_tool_payload(
+            tool_index=index,
+            tool_name=result.tool_name,
+            tool_status=result.status,
+            provider_call_id=result.provider_call_id,
+            payload=payload,
+        ):
+            if event.status != "passed":
+                continue
+            if event.kind not in {"artifact_check", "verifier_result", "oracle_check", "source_grounding"}:
+                continue
+            ref = {"kind": "evidence_event", "id": event.id}
+            if ref not in refs:
+                refs.append(ref)
+    for requirement in implementation_contract_source_requirements(task_description):
+        if not isinstance(requirement, dict):
+            continue
+        source_ref = str(requirement.get("path") or "").strip()
+        match = _source_grounding_tool_result(source_ref, tool_results)
+        if match is None:
+            continue
+        tool_index, result = match
+        ref = {"kind": "evidence_event", "id": f"ev:source:{source_ref}:{result.provider_call_id or tool_index}"}
+        if ref not in refs:
+            refs.append(ref)
+    return refs[:16]
 
 
 def _merge_finish_acceptance_sidecar_checks(
@@ -3971,15 +4052,35 @@ def _structured_finish_evidence_text(result: ToolResultEnvelope, artifact_ids: l
             if not value:
                 continue
             for marker in (
-                "FRAME_QUALITY_OK",
-                "expected dimensions",
-                "expected resolution",
                 "reference similarity",
                 "similarity passed",
                 "SSIM passed",
             ):
                 if marker.casefold() in value.casefold() and marker not in previews:
                     previews.append(marker)
+            for line in value.splitlines():
+                lowered_line = line.casefold()
+                if not re.search(r"\b\d{2,5}\s*(?:x|×|by)\s*\d{2,5}\b", line):
+                    continue
+                if not any(
+                    token in lowered_line
+                    for token in ("dimension", "dimensions", "resolution", "screen size", "framebuffer")
+                ):
+                    continue
+                if any(
+                    token in lowered_line
+                    for token in ("actual", "different", "error", "failed", "mismatch", "not", "wrong")
+                ):
+                    continue
+                if not any(
+                    token in lowered_line for token in ("confirmed", "matches", "ok", "passed", "same", "verified")
+                ):
+                    continue
+                preview = line.strip()
+                if len(preview) > 120:
+                    preview = preview[:117] + "..."
+                if preview and preview not in previews:
+                    previews.append(preview)
     artifacts = ", ".join(artifact_ids[:4])
     provider_call_id = str(result.provider_call_id or "").strip()
     pieces = [
@@ -4093,13 +4194,172 @@ def _provider_call_id_mentioned(evidence: str, provider_call_id: object) -> bool
     return False
 
 
-def _acceptance_session_from_tool_results(tool_results: tuple[ToolResultEnvelope, ...]) -> dict[str, object]:
-    return {
+def _acceptance_session_from_tool_results(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    lane_input: ImplementLaneInput | None = None,
+) -> dict[str, object]:
+    session: dict[str, object] = {
         "tool_calls": [
             _acceptance_tool_call_from_result(index, result)
             for index, result in enumerate(tool_results, start=1)
         ]
     }
+    typed_acceptance = _typed_acceptance_session_from_tool_results(tool_results, lane_input=lane_input)
+    if typed_acceptance:
+        session["typed_acceptance"] = typed_acceptance
+    return session
+
+
+def _typed_acceptance_session_from_tool_results(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    lane_input: ImplementLaneInput | None = None,
+) -> dict[str, object]:
+    events = []
+    execution_contracts: list[dict[str, object]] = []
+    verifier_evidence: list[dict[str, object]] = []
+    artifact_evidence: list[dict[str, object]] = []
+    source_grounding_refs: list[dict[str, object]] = []
+    for index, result in enumerate(tool_results, start=1):
+        payload = _first_result_payload(result)
+        if not payload:
+            continue
+        events.extend(
+            event.as_dict()
+            for event in evidence_events_from_tool_payload(
+                tool_index=index,
+                tool_name=result.tool_name,
+                tool_status=result.status,
+                provider_call_id=result.provider_call_id,
+                payload=payload,
+            )
+        )
+        contract = payload.get("execution_contract_normalized") or payload.get("execution_contract")
+        if isinstance(contract, dict):
+            execution_contracts.append(dict(contract))
+        verifier = payload.get("verifier_evidence")
+        if isinstance(verifier, dict):
+            verifier_evidence.append(dict(verifier))
+        artifacts = payload.get("artifact_evidence")
+        if isinstance(artifacts, list):
+            artifact_evidence.extend(dict(item) for item in artifacts if isinstance(item, dict))
+    if lane_input is not None:
+        task_description = _live_task_description(lane_input)
+        for requirement in implementation_contract_source_requirements(task_description):
+            if isinstance(requirement, dict):
+                source_grounding_refs.append(dict(requirement))
+                source_ref = str(requirement.get("path") or "").strip()
+                match = _source_grounding_tool_result(source_ref, tool_results)
+                if match is not None:
+                    tool_index, result = match
+                    events.append(
+                        {
+                            "schema_version": 1,
+                            "id": f"ev:source:{source_ref}:{result.provider_call_id or tool_index}",
+                            "kind": "source_grounding",
+                            "status": "passed",
+                            "observed": {"path": source_ref, "grounded": True},
+                            "refs": [{"kind": "tool_call", "id": tool_index}],
+                            "provider_call_id": result.provider_call_id,
+                        }
+                    )
+    task_contract = lane_input.task_contract if lane_input is not None and isinstance(lane_input.task_contract, dict) else {}
+    oracle_bundle = build_oracle_bundle(
+        task_contract=task_contract,
+        execution_contracts=execution_contracts,
+        verifier_evidence=verifier_evidence,
+        artifact_evidence=artifact_evidence,
+        source_grounding_refs=source_grounding_refs,
+    )
+    if not events and oracle_bundle is None:
+        return {}
+    typed: dict[str, object] = {
+        "evidence_events": events,
+        "digest": _typed_acceptance_digest(events, oracle_bundle.as_dict() if oracle_bundle is not None else {}),
+    }
+    if oracle_bundle is not None:
+        typed["oracle_bundle"] = oracle_bundle.as_dict()
+    return typed
+
+
+def _typed_acceptance_digest(events: list[dict[str, object]], oracle_bundle: dict[str, object]) -> dict[str, object]:
+    obligations = oracle_bundle.get("obligations") if isinstance(oracle_bundle, dict) else []
+    missing = []
+    if isinstance(obligations, list):
+        event_text = "\n".join(str(event.get("id") or "") + "\n" + str(event.get("observed") or {}) for event in events)
+        for obligation in obligations:
+            if not isinstance(obligation, dict):
+                continue
+            obligation_id = str(obligation.get("id") or "")
+            subject = str(obligation.get("subject") or "")
+            if obligation_id and (obligation_id not in event_text and subject not in event_text):
+                missing.append(obligation_id)
+    return {
+        "typed_evidence_event_count": len(events),
+        "oracle_obligation_count": len(obligations) if isinstance(obligations, list) else 0,
+        "missing_obligations": missing[:12],
+        "evidence": [
+            {
+                "id": event.get("id"),
+                "kind": event.get("kind"),
+                "status": event.get("status"),
+                "obligation_id": event.get("obligation_id"),
+            }
+            for event in events[:12]
+            if isinstance(event, dict)
+        ],
+    }
+
+
+def _typed_acceptance_metrics(
+    typed_acceptance: dict[str, object],
+    finish_gate_decision: dict[str, object],
+) -> dict[str, object]:
+    events = typed_acceptance.get("evidence_events") if isinstance(typed_acceptance, dict) else []
+    bundle = typed_acceptance.get("oracle_bundle") if isinstance(typed_acceptance, dict) else {}
+    obligations = bundle.get("obligations") if isinstance(bundle, dict) else []
+    gate_source = str(finish_gate_decision.get("gate_source") or "")
+    decision = str(finish_gate_decision.get("decision") or "")
+    blockers = finish_gate_decision.get("blockers")
+    return {
+        "typed_evidence_event_count": len(events) if isinstance(events, list) else 0,
+        "oracle_obligation_count": len(obligations) if isinstance(obligations, list) else 0,
+        "typed_evidence_gate_block_count": 1 if gate_source == "typed_evidence" and decision == "block_continue" else 0,
+        "missing_typed_evidence_count": _missing_typed_evidence_count(finish_gate_decision),
+        "legacy_string_gate_block_count": 1 if gate_source != "typed_evidence" and decision == "block_continue" else 0,
+        "model_claim_without_refs_count": _model_claim_without_refs_count(finish_gate_decision),
+        "typed_coverage_gap_count": _typed_coverage_gap_count(blockers),
+    }
+
+
+def _missing_typed_evidence_count(finish_gate_decision: dict[str, object]) -> int:
+    missing = finish_gate_decision.get("missing_obligations")
+    if isinstance(missing, list):
+        return len(missing)
+    return 0
+
+
+def _model_claim_without_refs_count(finish_gate_decision: dict[str, object]) -> int:
+    blockers = finish_gate_decision.get("blockers")
+    if not isinstance(blockers, list):
+        return 0
+    return sum(
+        1
+        for blocker in blockers
+        if isinstance(blocker, dict)
+        and str(blocker.get("code") or "").casefold() in {"missing_typed_evidence", "missing_evidence_ref"}
+    )
+
+
+def _typed_coverage_gap_count(blockers: object) -> int:
+    if not isinstance(blockers, list):
+        return 0
+    return sum(
+        1
+        for blocker in blockers
+        if isinstance(blocker, dict) and str(blocker.get("code") or "").casefold() == "typed_coverage_gap"
+    )
 
 
 def _acceptance_tool_call_from_result(index: int, result: ToolResultEnvelope) -> dict[str, object]:

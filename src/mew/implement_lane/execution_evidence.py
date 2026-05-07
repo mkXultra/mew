@@ -8,7 +8,7 @@ the filesystem or the live tool runtime.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, Sequence
 
 EXECUTION_CONTRACT_SCHEMA_VERSION = 3
 COMMAND_RUN_SCHEMA_VERSION = 1
@@ -16,6 +16,7 @@ TOOL_RUN_RECORD_SCHEMA_VERSION = 1
 ARTIFACT_EVIDENCE_SCHEMA_VERSION = 1
 VERIFIER_EVIDENCE_SCHEMA_VERSION = 1
 FAILURE_CLASSIFICATION_SCHEMA_VERSION = 1
+TYPED_ACCEPTANCE_SCHEMA_VERSION = 1
 
 Role = Literal[
     "setup",
@@ -182,6 +183,27 @@ FailureClass = Literal[
     "internal_failure",
     "unknown_failure",
 ]
+OracleObligationKind = Literal[
+    "artifact_exists",
+    "artifact_fresh",
+    "visual_dimension",
+    "visual_similarity",
+    "verifier_pass",
+    "source_grounding",
+]
+EvidenceEventKind = Literal[
+    "tool_result",
+    "artifact_check",
+    "oracle_check",
+    "verifier_result",
+    "source_grounding",
+    "failure_classification",
+    "structured_finish_gate",
+    "cleanup",
+]
+EvidenceEventStatus = Literal["passed", "failed", "partial", "unknown"]
+DoneDecisionKind = Literal["allow_complete", "block_continue", "no_typed_decision"]
+DoneDecisionGateSource = Literal["typed_evidence", "legacy_string_safety", "none"]
 
 ROLES = set(Role.__args__)
 PURPOSES = set(Purpose.__args__)
@@ -197,6 +219,9 @@ TOOL_RUN_STATUSES = set(ToolRunStatus.__args__)
 FAILURE_CLASSES = set(FailureClass.__args__)
 FAILURE_KINDS = set(FailureKind.__args__)
 FAILURE_PHASES = set(FailurePhase.__args__)
+ORACLE_OBLIGATION_KINDS = set(OracleObligationKind.__args__)
+EVIDENCE_EVENT_KINDS = set(EvidenceEventKind.__args__)
+EVIDENCE_EVENT_STATUSES = set(EvidenceEventStatus.__args__)
 ROLE_ALIASES = {
     # These are model-facing source/frontier roles that sometimes leak into
     # execution_contract.role. Keep them as compatibility aliases rather than
@@ -573,6 +598,136 @@ class FinishGateResult:
         }
 
 
+@dataclass(frozen=True)
+class OracleObligation:
+    id: str
+    kind: OracleObligationKind
+    subject: dict[str, Any]
+    expected: dict[str, Any]
+    source: str
+    provenance_refs: tuple[dict[str, Any], ...] = ()
+    candidate_derived_allowed: bool = False
+    required: bool = True
+    schema_version: int = TYPED_ACCEPTANCE_SCHEMA_VERSION
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "id": self.id,
+            "kind": self.kind,
+            "subject": dict(self.subject),
+            "expected": dict(self.expected),
+            "source": self.source,
+            "provenance_refs": [dict(ref) for ref in self.provenance_refs],
+            "candidate_derived_allowed": self.candidate_derived_allowed,
+            "required": self.required,
+        }
+
+
+@dataclass(frozen=True)
+class OracleBundle:
+    id: str
+    source: str
+    obligations: tuple[OracleObligation, ...]
+    provenance_refs: tuple[dict[str, Any], ...] = ()
+    schema_version: int = TYPED_ACCEPTANCE_SCHEMA_VERSION
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "id": self.id,
+            "source": self.source,
+            "obligations": [obligation.as_dict() for obligation in self.obligations],
+            "provenance_refs": [dict(ref) for ref in self.provenance_refs],
+        }
+
+
+@dataclass(frozen=True)
+class EvidenceEvent:
+    id: str
+    kind: EvidenceEventKind
+    status: EvidenceEventStatus
+    observed: dict[str, Any]
+    refs: tuple[dict[str, Any], ...] = ()
+    contract_id: str = ""
+    oracle_id: str = ""
+    obligation_id: str = ""
+    tool_call_id: str = ""
+    provider_call_id: str = ""
+    command_run_id: str = ""
+    tool_run_record_id: str = ""
+    freshness: dict[str, Any] = field(default_factory=dict)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    supersedes: tuple[str, ...] = ()
+    schema_version: int = TYPED_ACCEPTANCE_SCHEMA_VERSION
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "id": self.id,
+            "kind": self.kind,
+            "status": self.status,
+            "observed": dict(self.observed),
+            "refs": [dict(ref) for ref in self.refs],
+            "contract_id": self.contract_id,
+            "oracle_id": self.oracle_id,
+            "obligation_id": self.obligation_id,
+            "tool_call_id": self.tool_call_id,
+            "provider_call_id": self.provider_call_id,
+            "command_run_id": self.command_run_id,
+            "tool_run_record_id": self.tool_run_record_id,
+            "freshness": dict(self.freshness),
+            "provenance": dict(self.provenance),
+            "supersedes": list(self.supersedes),
+        }
+
+
+@dataclass(frozen=True)
+class FinishClaim:
+    outcome: str
+    summary: str = ""
+    evidence_refs: tuple[dict[str, Any], ...] = ()
+    oracle_refs: tuple[str, ...] = ()
+    legacy_acceptance_checks: tuple[dict[str, Any], ...] = ()
+    schema_version: int = TYPED_ACCEPTANCE_SCHEMA_VERSION
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "outcome": self.outcome,
+            "summary": self.summary,
+            "evidence_refs": [dict(ref) for ref in self.evidence_refs],
+            "oracle_refs": list(self.oracle_refs),
+            "legacy_acceptance_checks": [dict(check) for check in self.legacy_acceptance_checks],
+        }
+
+
+@dataclass(frozen=True)
+class DoneDecision:
+    decision: DoneDecisionKind
+    gate_source: DoneDecisionGateSource
+    missing_obligations: tuple[dict[str, Any], ...] = ()
+    failed_evidence_refs: tuple[dict[str, Any], ...] = ()
+    stale_evidence_refs: tuple[dict[str, Any], ...] = ()
+    invalid_evidence_refs: tuple[dict[str, Any], ...] = ()
+    blockers: tuple[dict[str, Any], ...] = ()
+    continuation_prompt: str = ""
+    schema_version: int = TYPED_ACCEPTANCE_SCHEMA_VERSION
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "decision": self.decision,
+            "gate_source": self.gate_source,
+            "missing_obligations": [dict(item) for item in self.missing_obligations],
+            "failed_evidence_refs": [dict(item) for item in self.failed_evidence_refs],
+            "stale_evidence_refs": [dict(item) for item in self.stale_evidence_refs],
+            "invalid_evidence_refs": [dict(item) for item in self.invalid_evidence_refs],
+            "blockers": [dict(item) for item in self.blockers],
+            "continuation_prompt": self.continuation_prompt,
+        }
+
+
 def normalize_execution_contract(
     value: object,
     *,
@@ -912,6 +1067,270 @@ def apply_finish_gate(
     return FinishGateResult(blocked=bool(reasons), reasons=tuple(dict.fromkeys(reasons)), evidence_refs=tuple(evidence_refs))
 
 
+def evidence_events_from_tool_payload(
+    *,
+    tool_index: int,
+    tool_name: str,
+    tool_status: str,
+    provider_call_id: str,
+    payload: Mapping[str, Any],
+) -> tuple[EvidenceEvent, ...]:
+    """Reduce an existing v2 tool result payload into replay-stable typed events."""
+
+    events: list[EvidenceEvent] = []
+    raw_tool_record = payload.get("tool_run_record")
+    tool_record = _tool_run_record(raw_tool_record) if isinstance(raw_tool_record, Mapping) else None
+    command_run_id = str(payload.get("command_run_id") or "")
+    if tool_record is not None:
+        command_run_id = tool_record.command_run_id or command_run_id
+        events.append(
+            EvidenceEvent(
+                id=f"ev:tool:{tool_record.command_run_id}:{tool_record.record_id}",
+                kind="tool_result",
+                status=_event_status_from_tool_record(tool_record),
+                observed={
+                    "tool_name": tool_name,
+                    "tool_status": tool_status,
+                    "exit_code": tool_record.exit_code,
+                    "timed_out": tool_record.timed_out,
+                    "semantic_exit": dict(tool_record.semantic_exit),
+                },
+                refs=(
+                    {"kind": "tool_run_record", "id": tool_record.record_id},
+                    {"kind": "command_run", "id": tool_record.command_run_id},
+                ),
+                contract_id=tool_record.contract_id,
+                provider_call_id=provider_call_id or tool_record.provider_call_id,
+                command_run_id=tool_record.command_run_id,
+                tool_run_record_id=tool_record.record_id,
+                freshness={"started_at": tool_record.started_at, "finished_at": tool_record.finished_at},
+            )
+        )
+    for raw_artifact in _list(payload.get("artifact_evidence")):
+        if not isinstance(raw_artifact, Mapping):
+            continue
+        artifact = _artifact_evidence(raw_artifact)
+        events.append(
+            EvidenceEvent(
+                id=f"ev:artifact:{artifact.evidence_id}",
+                kind="artifact_check",
+                status=_event_status_from_artifact(artifact),
+                observed={
+                    "artifact_id": artifact.artifact_id,
+                    "path": artifact.path,
+                    "kind": artifact.kind,
+                    "status": artifact.status,
+                    "blocking": artifact.blocking,
+                    "checks": [dict(check) for check in artifact.checks],
+                    "post_run_stat": dict(artifact.post_run_stat),
+                },
+                refs=(
+                    {"kind": "artifact_evidence", "id": artifact.evidence_id},
+                    {"kind": "command_run", "id": artifact.command_run_id},
+                    {"kind": "tool_run_record", "id": artifact.tool_run_record_id},
+                ),
+                contract_id=artifact.contract_id,
+                provider_call_id=provider_call_id,
+                command_run_id=artifact.command_run_id,
+                tool_run_record_id=artifact.tool_run_record_id,
+                freshness={
+                    "freshness": artifact.freshness,
+                    "pre_run_stat": dict(artifact.pre_run_stat),
+                    "post_run_stat": dict(artifact.post_run_stat),
+                },
+                provenance={"source": artifact.source, "confidence": artifact.confidence},
+            )
+        )
+        events.extend(_oracle_check_events_from_artifact(artifact, provider_call_id=provider_call_id))
+    raw_verifier = payload.get("verifier_evidence")
+    if isinstance(raw_verifier, Mapping):
+        verifier = _verifier_evidence(raw_verifier)
+        events.append(
+            EvidenceEvent(
+                id=f"ev:verifier:{verifier.verifier_id}",
+                kind="verifier_result",
+                status=_event_status_from_verifier(verifier),
+                observed={
+                    "verdict": verifier.verdict,
+                    "reason": verifier.reason,
+                    "checks": [dict(check) for check in verifier.checks],
+                    "missing_evidence": [dict(item) for item in verifier.missing_evidence],
+                },
+                refs=({"kind": "verifier_evidence", "id": verifier.verifier_id},),
+                contract_id=verifier.contract_id,
+                provider_call_id=provider_call_id,
+                command_run_id=command_run_id,
+                tool_run_record_id=tool_record.record_id if tool_record is not None else "",
+            )
+        )
+    raw_classification = payload.get("failure_classification")
+    if isinstance(raw_classification, Mapping):
+        classification = _failure_classification(raw_classification)
+        events.append(
+            EvidenceEvent(
+                id=f"ev:failure:{classification.classification_id}",
+                kind="failure_classification",
+                status=("unknown" if classification.failure_class == "unknown_failure" else "failed"),
+                observed=classification.as_dict(),
+                refs=tuple(dict(ref) for ref in classification.evidence_refs),
+                contract_id=str(_mapping(payload.get("execution_contract_normalized")).get("id") or ""),
+                provider_call_id=provider_call_id,
+                command_run_id=command_run_id,
+                tool_run_record_id=tool_record.record_id if tool_record is not None else "",
+            )
+        )
+    raw_finish_gate = payload.get("structured_finish_gate")
+    if isinstance(raw_finish_gate, Mapping):
+        blocked = bool(raw_finish_gate.get("blocked"))
+        events.append(
+            EvidenceEvent(
+                id=f"ev:finish_gate:{command_run_id or provider_call_id or tool_index}",
+                kind="structured_finish_gate",
+                status="failed" if blocked else "passed",
+                observed=dict(raw_finish_gate),
+                refs=_tuple_dicts(raw_finish_gate.get("evidence_refs")),
+                provider_call_id=provider_call_id,
+                command_run_id=command_run_id,
+                tool_run_record_id=tool_record.record_id if tool_record is not None else "",
+            )
+        )
+    return tuple(events)
+
+
+def build_oracle_bundle(
+    *,
+    task_contract: Mapping[str, Any],
+    execution_contracts: Sequence[Mapping[str, Any] | ExecutionContract] = (),
+    verifier_evidence: Sequence[Mapping[str, Any] | VerifierEvidence] = (),
+    artifact_evidence: Sequence[Mapping[str, Any] | ArtifactEvidence] = (),
+    source_grounding_refs: Sequence[Mapping[str, Any]] = (),
+) -> OracleBundle | None:
+    """Build v0 typed acceptance obligations from structured sources only."""
+
+    obligations: list[OracleObligation] = []
+    provenance_refs: list[dict[str, Any]] = []
+    normalized_contracts = tuple(
+        item if isinstance(item, ExecutionContract) else normalize_execution_contract(item, task_contract=task_contract)
+        for item in execution_contracts
+    )
+    for contract in normalized_contracts:
+        provenance_refs.append({"kind": "execution_contract", "id": contract.id})
+        for artifact in contract.expected_artifacts:
+            obligations.extend(_obligations_from_expected_artifact(contract, artifact))
+        if contract.verifier_required or contract.acceptance_kind == "external_verifier":
+            obligations.append(
+                OracleObligation(
+                    id=f"oracle:{contract.id}:verifier_pass",
+                    kind="verifier_pass",
+                    subject={"contract_id": contract.id},
+                    expected={"verdict": "pass"},
+                    source="execution_contract",
+                    provenance_refs=({"kind": "execution_contract", "id": contract.id},),
+                )
+            )
+    for verifier in (_verifier_evidence(item) for item in verifier_evidence):
+        provenance_refs.append({"kind": "verifier_evidence", "id": verifier.verifier_id})
+        if verifier.verdict in {"pass", "fail", "partial"}:
+            obligations.append(
+                OracleObligation(
+                    id=f"oracle:{verifier.verifier_id}:verifier_pass",
+                    kind="verifier_pass",
+                    subject={"verifier_id": verifier.verifier_id, "contract_id": verifier.contract_id},
+                    expected={"verdict": "pass"},
+                    source="verifier_evidence",
+                    provenance_refs=({"kind": "verifier_evidence", "id": verifier.verifier_id},),
+                )
+            )
+    for ref in source_grounding_refs:
+        path = str(ref.get("path") or ref.get("source_ref") or "").strip()
+        if not path:
+            continue
+        obligations.append(
+            OracleObligation(
+                id=f"oracle:source:{_stable_token(path)}",
+                kind="source_grounding",
+                subject={"path": path},
+                expected={"grounded": True},
+                source=str(ref.get("source") or "source_grounding"),
+                provenance_refs=(dict(ref),),
+            )
+        )
+    artifacts = tuple(_artifact_evidence(item) for item in artifact_evidence)
+    if not obligations and artifacts:
+        for artifact in artifacts:
+            if artifact.required:
+                obligations.append(_artifact_exists_obligation("artifact_evidence", artifact.contract_id, artifact))
+                provenance_refs.append({"kind": "artifact_evidence", "id": artifact.evidence_id})
+    if not obligations:
+        return None
+    bundle_id_source = "|".join(obligation.id for obligation in obligations[:16])
+    return OracleBundle(
+        id=f"oracle:bundle:{_stable_token(bundle_id_source)}",
+        source="structured_execution_evidence",
+        obligations=tuple(_dedupe_obligations(obligations)),
+        provenance_refs=_unique_refs(provenance_refs),
+    )
+
+
+def resolve_typed_finish(
+    finish_claim: FinishClaim | Mapping[str, Any],
+    oracle_bundle: OracleBundle | Mapping[str, Any] | None,
+    evidence_events: tuple[EvidenceEvent | Mapping[str, Any], ...] | list[EvidenceEvent | Mapping[str, Any]],
+) -> DoneDecision:
+    """Resolve completion from cited typed evidence ids."""
+
+    claim = _finish_claim(finish_claim)
+    bundle = _oracle_bundle(oracle_bundle) if oracle_bundle is not None else None
+    if bundle is None:
+        return DoneDecision(decision="no_typed_decision", gate_source="none")
+    if claim.outcome not in {"completed", "task_complete", "done", "success"}:
+        return DoneDecision(decision="allow_complete", gate_source="typed_evidence")
+    events = tuple(_evidence_event(event) for event in evidence_events)
+    event_by_id = {event.id: event for event in events}
+    cited_ids = tuple(dict.fromkeys(_finish_claim_ref_ids(claim)))
+    if not cited_ids:
+        return _typed_block(
+            code="missing_typed_evidence",
+            message="Finish must cite typed evidence_refs for required oracle obligations.",
+            missing_obligations=tuple(obligation.as_dict() for obligation in bundle.obligations if obligation.required),
+        )
+    invalid = tuple({"id": event_id, "reason": "not_found"} for event_id in cited_ids if event_id not in event_by_id)
+    if invalid:
+        return _typed_block(
+            code="invalid_typed_evidence_ref",
+            message="Finish cited typed evidence ids that do not exist.",
+            invalid_evidence_refs=invalid,
+        )
+    cited_events = tuple(event_by_id[event_id] for event_id in cited_ids)
+    failed_refs = tuple(_failed_event_ref(event) for event in cited_events if event.status in {"failed", "partial", "unknown"})
+    if failed_refs:
+        return _typed_block(
+            code="failed_typed_evidence_ref",
+            message="Finish cited failed, partial, or unknown typed evidence.",
+            failed_evidence_refs=failed_refs,
+        )
+    missing: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for obligation in bundle.obligations:
+        if not obligation.required:
+            continue
+        covering_event = _covering_event_for_obligation(obligation, cited_events)
+        if covering_event is None:
+            missing.append(obligation.as_dict())
+            continue
+        superseding_failure = _superseding_failed_event(obligation, covering_event, events)
+        if superseding_failure is not None:
+            failed.append(_failed_event_ref(superseding_failure))
+    if missing or failed:
+        return _typed_block(
+            code="missing_typed_obligation",
+            message="Finish is missing passing typed evidence for required oracle obligations.",
+            missing_obligations=tuple(missing),
+            failed_evidence_refs=tuple(failed),
+        )
+    return DoneDecision(decision="allow_complete", gate_source="typed_evidence")
+
+
 def _normalize_contract_role(raw: Mapping[str, Any]) -> Role:
     role = _enum(raw.get("role"), ROLES, "")
     if role:
@@ -1191,6 +1610,586 @@ def _failure_classification(value: FailureClassification | Mapping[str, Any]) ->
         evidence_refs=_tuple_dicts(raw.get("evidence_refs")),
         required_next_probe=str(raw.get("required_next_probe") or ""),
     )
+
+
+def _oracle_obligation(value: OracleObligation | Mapping[str, Any]) -> OracleObligation:
+    if isinstance(value, OracleObligation):
+        return value
+    raw = _mapping(value)
+    return OracleObligation(
+        id=str(raw.get("id") or "oracle:obligation:unknown"),
+        kind=_enum(raw.get("kind"), ORACLE_OBLIGATION_KINDS, "artifact_exists"),
+        subject=dict(_mapping(raw.get("subject"))),
+        expected=dict(_mapping(raw.get("expected"))),
+        source=str(raw.get("source") or ""),
+        provenance_refs=_tuple_dicts(raw.get("provenance_refs")),
+        candidate_derived_allowed=bool(raw.get("candidate_derived_allowed")),
+        required=bool(raw.get("required", True)),
+    )
+
+
+def _oracle_bundle(value: OracleBundle | Mapping[str, Any]) -> OracleBundle:
+    if isinstance(value, OracleBundle):
+        return value
+    raw = _mapping(value)
+    return OracleBundle(
+        id=str(raw.get("id") or "oracle:bundle:unknown"),
+        source=str(raw.get("source") or ""),
+        obligations=tuple(_oracle_obligation(item) for item in _list(raw.get("obligations"))),
+        provenance_refs=_tuple_dicts(raw.get("provenance_refs")),
+    )
+
+
+def _evidence_event(value: EvidenceEvent | Mapping[str, Any]) -> EvidenceEvent:
+    if isinstance(value, EvidenceEvent):
+        return value
+    raw = _mapping(value)
+    return EvidenceEvent(
+        id=str(raw.get("id") or "ev:unknown"),
+        kind=_enum(raw.get("kind"), EVIDENCE_EVENT_KINDS, "tool_result"),
+        status=_enum(raw.get("status"), EVIDENCE_EVENT_STATUSES, "unknown"),
+        observed=dict(_mapping(raw.get("observed"))),
+        refs=_tuple_dicts(raw.get("refs")),
+        contract_id=str(raw.get("contract_id") or ""),
+        oracle_id=str(raw.get("oracle_id") or ""),
+        obligation_id=str(raw.get("obligation_id") or ""),
+        tool_call_id=str(raw.get("tool_call_id") or ""),
+        provider_call_id=str(raw.get("provider_call_id") or ""),
+        command_run_id=str(raw.get("command_run_id") or ""),
+        tool_run_record_id=str(raw.get("tool_run_record_id") or ""),
+        freshness=dict(_mapping(raw.get("freshness"))),
+        provenance=dict(_mapping(raw.get("provenance"))),
+        supersedes=tuple(str(item) for item in _list(raw.get("supersedes")) if str(item)),
+    )
+
+
+def _finish_claim(value: FinishClaim | Mapping[str, Any]) -> FinishClaim:
+    if isinstance(value, FinishClaim):
+        return value
+    raw = _mapping(value)
+    finish = _mapping(raw.get("finish")) if isinstance(raw.get("finish"), Mapping) else raw
+    legacy_checks = _tuple_dicts(finish.get("acceptance_checks") or raw.get("acceptance_checks"))
+    return FinishClaim(
+        outcome=str(finish.get("outcome") or finish.get("status") or ""),
+        summary=str(finish.get("summary") or raw.get("summary") or ""),
+        evidence_refs=_tuple_dicts(finish.get("evidence_refs") or finish.get("evidence_ref")),
+        oracle_refs=tuple(str(item) for item in _list(finish.get("oracle_refs")) if str(item)),
+        legacy_acceptance_checks=legacy_checks,
+    )
+
+
+def _event_status_from_tool_record(record: ToolRunRecord) -> EvidenceEventStatus:
+    if record.status in NONTERMINAL_TOOL_STATUSES:
+        return "partial"
+    semantic_exit = dict(record.semantic_exit)
+    if semantic_exit:
+        return "passed" if bool(semantic_exit.get("ok")) else "failed"
+    return "passed" if record.status == "completed" and record.exit_code in {None, 0} else "failed"
+
+
+def _event_status_from_artifact(artifact: ArtifactEvidence) -> EvidenceEventStatus:
+    if artifact.status == "passed" and not artifact.blocking:
+        return "passed"
+    if artifact.status == "partial":
+        return "partial"
+    return "failed"
+
+
+def _event_status_from_verifier(verifier: VerifierEvidence) -> EvidenceEventStatus:
+    if verifier.verdict == "pass":
+        return "passed"
+    if verifier.verdict == "partial":
+        return "partial"
+    if verifier.verdict == "fail":
+        return "failed"
+    return "unknown"
+
+
+def _float_or_none(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _visual_similarity_check_status(check: Mapping[str, Any], artifact: ArtifactEvidence) -> EvidenceEventStatus:
+    observed = _mapping(check.get("observed"))
+    expected = _mapping(check.get("expected"))
+    reference = (
+        check.get("reference_path")
+        or check.get("reference")
+        or expected.get("reference_path")
+        or observed.get("reference_path")
+    )
+    score = _float_or_none(check.get("score") or observed.get("score"))
+    threshold = _float_or_none(check.get("threshold") or expected.get("threshold"))
+    if not reference or score is None or threshold is None:
+        return "failed"
+    comparator = str(check.get("comparator") or expected.get("comparator") or ">=").strip()
+    if comparator in {">=", "gte", "at_least"}:
+        passed = score >= threshold
+    elif comparator in {">", "gt"}:
+        passed = score > threshold
+    elif comparator in {"<=", "lte", "at_most"}:
+        passed = score <= threshold
+    elif comparator in {"<", "lt"}:
+        passed = score < threshold
+    else:
+        passed = score >= threshold
+    if not bool(check.get("passed", artifact.status == "passed")):
+        passed = False
+    return "passed" if passed else "failed"
+
+
+def _oracle_check_events_from_artifact(
+    artifact: ArtifactEvidence,
+    *,
+    provider_call_id: str = "",
+) -> tuple[EvidenceEvent, ...]:
+    events: list[EvidenceEvent] = []
+    for index, check in enumerate(artifact.checks):
+        check_type = str(check.get("type") or check.get("kind") or "").casefold()
+        if check_type in {"image_dimensions", "dimensions", "visual_dimension"}:
+            obligation_id = f"oracle:{artifact.contract_id}:{artifact.artifact_id}:visual_dimension"
+            events.append(
+                EvidenceEvent(
+                    id=f"ev:oracle:{obligation_id}:{artifact.evidence_id}:{index}",
+                    kind="oracle_check",
+                    status="passed" if bool(check.get("passed", artifact.status == "passed")) else "failed",
+                    observed={
+                        "kind": "visual_dimension",
+                        "artifact_id": artifact.artifact_id,
+                        "path": artifact.path,
+                        "width": check.get("width") or _mapping(check.get("observed")).get("width"),
+                        "height": check.get("height") or _mapping(check.get("observed")).get("height"),
+                        "expected_width": check.get("expected_width") or _mapping(check.get("expected")).get("width"),
+                        "expected_height": check.get("expected_height") or _mapping(check.get("expected")).get("height"),
+                    },
+                    refs=(
+                        {"kind": "artifact_evidence", "id": artifact.evidence_id},
+                        {"kind": "command_run", "id": artifact.command_run_id},
+                    ),
+                    contract_id=artifact.contract_id,
+                    oracle_id=obligation_id,
+                    obligation_id=obligation_id,
+                    provider_call_id=provider_call_id,
+                    command_run_id=artifact.command_run_id,
+                    tool_run_record_id=artifact.tool_run_record_id,
+                    provenance={"source": artifact.source, "confidence": artifact.confidence},
+                )
+            )
+        elif check_type in {"visual_similarity", "similarity", "ssim"}:
+            obligation_id = f"oracle:{artifact.contract_id}:{artifact.artifact_id}:visual_similarity"
+            observed = _mapping(check.get("observed"))
+            expected = _mapping(check.get("expected"))
+            events.append(
+                EvidenceEvent(
+                    id=f"ev:oracle:{obligation_id}:{artifact.evidence_id}:{index}",
+                    kind="oracle_check",
+                    status=_visual_similarity_check_status(check, artifact),
+                    observed={
+                        "kind": "visual_similarity",
+                        "artifact_id": artifact.artifact_id,
+                        "candidate_path": artifact.path,
+                        "reference_path": check.get("reference_path")
+                        or check.get("reference")
+                        or expected.get("reference_path")
+                        or observed.get("reference_path"),
+                        "metric": check.get("metric") or observed.get("metric") or check_type,
+                        "score": check.get("score") or observed.get("score"),
+                        "threshold": check.get("threshold") or expected.get("threshold"),
+                        "comparator": check.get("comparator") or expected.get("comparator") or ">=",
+                    },
+                    refs=(
+                        {"kind": "artifact_evidence", "id": artifact.evidence_id},
+                        {"kind": "command_run", "id": artifact.command_run_id},
+                    ),
+                    contract_id=artifact.contract_id,
+                    oracle_id=obligation_id,
+                    obligation_id=obligation_id,
+                    provider_call_id=provider_call_id,
+                    command_run_id=artifact.command_run_id,
+                    tool_run_record_id=artifact.tool_run_record_id,
+                    provenance={"source": artifact.source, "confidence": artifact.confidence},
+                )
+            )
+    return tuple(events)
+
+
+def _obligations_from_expected_artifact(
+    contract: ExecutionContract,
+    artifact: ExpectedArtifact,
+) -> tuple[OracleObligation, ...]:
+    obligations: list[OracleObligation] = []
+    if artifact.required:
+        obligations.append(_expected_artifact_exists_obligation(contract.id, artifact))
+    if artifact.required and artifact.freshness != "exists_before_or_after":
+        obligations.append(
+            OracleObligation(
+                id=f"oracle:{contract.id}:{artifact.id}:fresh",
+                kind="artifact_fresh",
+                subject={"artifact_id": artifact.id, "path": artifact.path, "target": dict(artifact.target)},
+                expected={"freshness": artifact.freshness},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": contract.id},),
+            )
+        )
+    for check in artifact.checks:
+        check_type = str(check.get("type") or "").casefold()
+        if check_type in {"image_dimensions", "dimensions", "visual_dimension"}:
+            expected = {
+                key: check.get(key)
+                for key in ("width", "height", "expected_width", "expected_height")
+                if check.get(key) is not None
+            }
+            obligations.append(
+                OracleObligation(
+                    id=f"oracle:{contract.id}:{artifact.id}:visual_dimension",
+                    kind="visual_dimension",
+                    subject={"artifact_id": artifact.id, "path": artifact.path, "target": dict(artifact.target)},
+                    expected=expected,
+                    source="execution_contract",
+                    provenance_refs=({"kind": "execution_contract", "id": contract.id},),
+                )
+            )
+        if check_type in {"visual_similarity", "similarity", "ssim"}:
+            reference = str(check.get("reference_path") or check.get("reference") or check.get("oracle_path") or "")
+            expected = {
+                "reference_path": reference,
+                "metric": str(check.get("metric") or check_type),
+                "threshold": check.get("threshold"),
+                "comparator": str(check.get("comparator") or ">="),
+            }
+            if not reference:
+                expected["missing_reference"] = True
+            obligations.append(
+                OracleObligation(
+                    id=f"oracle:{contract.id}:{artifact.id}:visual_similarity",
+                    kind="visual_similarity",
+                    subject={"artifact_id": artifact.id, "path": artifact.path, "target": dict(artifact.target)},
+                    expected=expected,
+                    source="execution_contract",
+                    provenance_refs=({"kind": "execution_contract", "id": contract.id},),
+                )
+            )
+    return tuple(obligations)
+
+
+def _expected_artifact_exists_obligation(contract_id: str, artifact: ExpectedArtifact) -> OracleObligation:
+    return OracleObligation(
+        id=f"oracle:{contract_id}:{artifact.id}:exists",
+        kind="artifact_exists",
+        subject={"artifact_id": artifact.id, "path": artifact.path, "target": dict(artifact.target)},
+        expected={"exists": True},
+        source="execution_contract",
+        provenance_refs=({"kind": "execution_contract", "id": contract_id},),
+    )
+
+
+def _artifact_exists_obligation(source: str, contract_id: str, artifact: ArtifactEvidence) -> OracleObligation:
+    return OracleObligation(
+        id=f"oracle:{contract_id or 'artifact'}:{artifact.artifact_id}:exists",
+        kind="artifact_exists",
+        subject={"artifact_id": artifact.artifact_id, "path": artifact.path, "target": dict(artifact.target)},
+        expected={"exists": True},
+        source=source,
+        provenance_refs=({"kind": "artifact_evidence", "id": artifact.evidence_id},),
+    )
+
+
+def _dedupe_obligations(obligations: list[OracleObligation]) -> list[OracleObligation]:
+    seen: set[str] = set()
+    deduped: list[OracleObligation] = []
+    for obligation in obligations:
+        if obligation.id in seen:
+            continue
+        seen.add(obligation.id)
+        deduped.append(obligation)
+    return deduped
+
+
+def _finish_claim_ref_ids(claim: FinishClaim) -> list[str]:
+    ids: list[str] = []
+    for ref in claim.evidence_refs:
+        value = str(ref.get("id") or ref.get("evidence_id") or ref.get("ref") or "").strip()
+        if value:
+            ids.append(value)
+    return ids
+
+
+def _typed_block(
+    *,
+    code: str,
+    message: str,
+    missing_obligations: tuple[dict[str, Any], ...] = (),
+    failed_evidence_refs: tuple[dict[str, Any], ...] = (),
+    invalid_evidence_refs: tuple[dict[str, Any], ...] = (),
+) -> DoneDecision:
+    blockers = ({"code": code, "message": message},)
+    return DoneDecision(
+        decision="block_continue",
+        gate_source="typed_evidence",
+        missing_obligations=missing_obligations,
+        failed_evidence_refs=failed_evidence_refs,
+        invalid_evidence_refs=invalid_evidence_refs,
+        blockers=blockers,
+        continuation_prompt=_typed_continuation_prompt(
+            message=message,
+            missing_obligations=missing_obligations,
+            failed_evidence_refs=failed_evidence_refs,
+            invalid_evidence_refs=invalid_evidence_refs,
+        ),
+    )
+
+
+def _failed_event_ref(event: EvidenceEvent) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "kind": event.kind,
+        "status": event.status,
+        "obligation_id": event.obligation_id,
+        "observed": dict(event.observed),
+    }
+
+
+def _covering_event_for_obligation(
+    obligation: OracleObligation,
+    cited_events: tuple[EvidenceEvent, ...],
+) -> EvidenceEvent | None:
+    for event in cited_events:
+        if event.status != "passed":
+            continue
+        if event.obligation_id == obligation.id:
+            if obligation.kind == "verifier_pass":
+                if _event_matches_verifier_obligation(event, obligation):
+                    return event
+                continue
+            if obligation.kind == "source_grounding":
+                if _event_matches_source_grounding_obligation(event, obligation):
+                    return event
+                continue
+            if obligation.kind in {"artifact_exists", "artifact_fresh"}:
+                if _event_matches_artifact_obligation(event, obligation):
+                    return event
+                continue
+            if obligation.kind == "visual_dimension":
+                if _event_matches_visual_dimension_obligation(event, obligation):
+                    return event
+                continue
+            if obligation.kind == "visual_similarity":
+                if _event_matches_visual_similarity_obligation(event, obligation):
+                    return event
+                continue
+            return event
+        if obligation.kind == "verifier_pass" and event.kind == "verifier_result":
+            if str(event.observed.get("verdict") or "") == "pass" and _event_matches_verifier_obligation(
+                event,
+                obligation,
+            ):
+                return event
+        if obligation.kind in {"artifact_exists", "artifact_fresh"} and event.kind == "artifact_check":
+            if _event_matches_artifact_obligation(event, obligation):
+                return event
+        if obligation.kind == "source_grounding" and event.kind == "source_grounding":
+            if _event_matches_source_grounding_obligation(event, obligation):
+                return event
+        if obligation.kind in {"visual_dimension", "visual_similarity"} and event.kind == "oracle_check":
+            if obligation.kind == "visual_dimension" and _event_matches_visual_dimension_obligation(event, obligation):
+                return event
+            if obligation.kind == "visual_similarity" and _event_matches_visual_similarity_obligation(
+                event,
+                obligation,
+            ):
+                return event
+    return None
+
+
+def _event_matches_verifier_obligation(event: EvidenceEvent, obligation: OracleObligation) -> bool:
+    subject = obligation.subject
+    verifier_id = str(subject.get("verifier_id") or "")
+    contract_id = str(subject.get("contract_id") or "")
+    if verifier_id:
+        return any(str(ref.get("id") or "") == verifier_id for ref in event.refs)
+    if contract_id:
+        return event.contract_id == contract_id or str(event.observed.get("contract_id") or "") == contract_id
+    return False
+
+
+def _event_matches_source_grounding_obligation(event: EvidenceEvent, obligation: OracleObligation) -> bool:
+    expected_path = str(obligation.subject.get("path") or "")
+    observed_path = str(event.observed.get("path") or "")
+    return bool(expected_path and observed_path and expected_path == observed_path)
+
+
+def _event_matches_artifact_obligation(event: EvidenceEvent, obligation: OracleObligation) -> bool:
+    subject = obligation.subject
+    artifact_id = str(subject.get("artifact_id") or "")
+    path = str(subject.get("path") or "")
+    target = _mapping(subject.get("target"))
+    event_artifact = str(event.observed.get("artifact_id") or "")
+    event_path = str(event.observed.get("path") or "")
+    if artifact_id and event_artifact == artifact_id:
+        return True
+    if path and event_path == path:
+        return True
+    target_path = str(target.get("path") or "")
+    return bool(target_path and event_path == target_path)
+
+
+def _event_matches_visual_dimension_obligation(event: EvidenceEvent, obligation: OracleObligation) -> bool:
+    if event.kind != "oracle_check" or event.status != "passed":
+        return False
+    if event.oracle_id and event.oracle_id != obligation.id:
+        return False
+    if not _event_matches_artifact_obligation(
+        EvidenceEvent(
+            id=event.id,
+            kind="artifact_check",
+            status=event.status,
+            observed={
+                "artifact_id": event.observed.get("artifact_id"),
+                "path": event.observed.get("path") or event.observed.get("candidate_path"),
+            },
+        ),
+        obligation,
+    ):
+        return False
+    expected = obligation.expected
+    observed_width = _float_or_none(event.observed.get("width"))
+    observed_height = _float_or_none(event.observed.get("height"))
+    expected_width = _float_or_none(
+        expected.get("width") or expected.get("expected_width") or event.observed.get("expected_width")
+    )
+    expected_height = _float_or_none(
+        expected.get("height") or expected.get("expected_height") or event.observed.get("expected_height")
+    )
+    if expected_width is not None and observed_width != expected_width:
+        return False
+    if expected_height is not None and observed_height != expected_height:
+        return False
+    return True
+
+
+def _event_matches_visual_similarity_obligation(event: EvidenceEvent, obligation: OracleObligation) -> bool:
+    if event.kind != "oracle_check" or event.status != "passed":
+        return False
+    if obligation.expected.get("missing_reference"):
+        return False
+    if event.oracle_id and event.oracle_id != obligation.id:
+        return False
+    if not _event_matches_artifact_obligation(
+        EvidenceEvent(
+            id=event.id,
+            kind="artifact_check",
+            status=event.status,
+            observed={
+                "artifact_id": event.observed.get("artifact_id"),
+                "path": event.observed.get("candidate_path") or event.observed.get("path"),
+            },
+        ),
+        obligation,
+    ):
+        return False
+    expected_reference = str(obligation.expected.get("reference_path") or "")
+    observed_reference = str(event.observed.get("reference_path") or "")
+    if not observed_reference:
+        return False
+    if expected_reference and observed_reference != expected_reference:
+        if observed_reference.rsplit("/", 1)[-1] != expected_reference.rsplit("/", 1)[-1]:
+            return False
+    score = _float_or_none(event.observed.get("score"))
+    threshold = _float_or_none(event.observed.get("threshold") or obligation.expected.get("threshold"))
+    if score is None or threshold is None:
+        return False
+    comparator = str(event.observed.get("comparator") or obligation.expected.get("comparator") or ">=").strip()
+    if comparator in {">=", "gte", "at_least"}:
+        return score >= threshold
+    if comparator in {">", "gt"}:
+        return score > threshold
+    if comparator in {"<=", "lte", "at_most"}:
+        return score <= threshold
+    if comparator in {"<", "lt"}:
+        return score < threshold
+    return score >= threshold
+
+
+def _superseding_failed_event(
+    obligation: OracleObligation,
+    covering_event: EvidenceEvent,
+    events: tuple[EvidenceEvent, ...],
+) -> EvidenceEvent | None:
+    seen_covering = False
+    for event in events:
+        if event.id == covering_event.id:
+            seen_covering = True
+            continue
+        if not seen_covering:
+            continue
+        if event.status not in {"failed", "partial"}:
+            continue
+        if event.obligation_id == obligation.id:
+            return event
+        if obligation.kind in {"artifact_exists", "artifact_fresh"} and event.kind == "artifact_check":
+            if _event_matches_artifact_obligation(event, obligation):
+                return event
+        if obligation.kind == "verifier_pass" and event.kind == "verifier_result":
+            if _event_matches_verifier_obligation(event, obligation):
+                return event
+        if obligation.kind == "source_grounding" and event.kind == "source_grounding":
+            if _event_matches_source_grounding_obligation(event, obligation):
+                return event
+        if obligation.kind == "visual_dimension" and event.kind == "oracle_check":
+            if _event_matches_visual_dimension_obligation(event, obligation):
+                return event
+        if obligation.kind == "visual_similarity" and event.kind == "oracle_check":
+            if _event_matches_visual_similarity_obligation(event, obligation):
+                return event
+    return None
+
+
+def _typed_continuation_prompt(
+    *,
+    message: str,
+    missing_obligations: tuple[dict[str, Any], ...],
+    failed_evidence_refs: tuple[dict[str, Any], ...],
+    invalid_evidence_refs: tuple[dict[str, Any], ...],
+) -> str:
+    lines = ["Finish was blocked by the typed evidence gate.", message]
+    for obligation in missing_obligations[:6]:
+        lines.append(
+            "- missing "
+            f"{obligation.get('kind') or 'obligation'} "
+            f"{obligation.get('id') or ''}".strip()
+        )
+    for ref in failed_evidence_refs[:6]:
+        lines.append(f"- failed evidence {ref.get('id')}: status={ref.get('status')}")
+    for ref in invalid_evidence_refs[:6]:
+        lines.append(f"- invalid evidence ref {ref.get('id')}: {ref.get('reason')}")
+    lines.append("Next action: produce or cite passing typed evidence_refs for the missing obligation ids.")
+    return "\n".join(line for line in lines if line)
+
+
+def _stable_token(value: object) -> str:
+    import hashlib
+
+    text = str(value or "")
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _hashable_ref(ref: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((str(key), str(value)) for key, value in ref.items()))
+
+
+def _unique_refs(refs: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    deduped: list[dict[str, Any]] = []
+    for ref in refs:
+        key = _hashable_ref(ref)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(dict(ref))
+    return tuple(deduped)
 
 
 def _expected_exit_for_record(run: ToolRunRecord, contract: ExecutionContract) -> dict[str, Any]:

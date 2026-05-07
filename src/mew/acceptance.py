@@ -3331,12 +3331,22 @@ def acceptance_done_gate_decision(
     if not action.get("task_done"):
         return {
             "decision": "allow_complete",
+            "gate_source": "none",
             "reason": "",
             "blockers": [],
             "invalid_evidence_refs": [],
             "continuation_prompt": "",
         }
     blockers: list[str] = []
+    typed_gate = _typed_acceptance_done_gate_decision(action, session)
+    typed_decision = str(typed_gate.get("decision") or "")
+    typed_blockers = [dict(item) for item in typed_gate.get("blockers") or [] if isinstance(item, dict)]
+    if typed_decision == "block_continue":
+        blockers.extend(
+            blocker.get("message")
+            for blocker in typed_blockers
+            if blocker.get("message")
+        )
     runtime_component_gate = runtime_component_finish_gate_decision(task_description, action, session=session)
     if runtime_component_gate.get("decision") != "allow_complete":
         blockers.extend(
@@ -3360,21 +3370,61 @@ def acceptance_done_gate_decision(
     if not blockers:
         return {
             "decision": "allow_complete",
+            "gate_source": typed_gate.get("gate_source") or "none",
             "reason": "",
             "blockers": [],
             "invalid_evidence_refs": [],
             "continuation_prompt": "",
+            "missing_obligations": [],
+            "failed_evidence_refs": [],
         }
     return {
         "decision": "block_continue",
+        "gate_source": "typed_evidence" if typed_decision == "block_continue" else "legacy_string_safety",
         "reason": blockers[0],
         "blockers": [
+            *typed_blockers,
+            *[
             {
                 "code": finish_blocker_code(blocker),
                 "message": blocker,
             }
             for blocker in blockers
+            if blocker not in {str(item.get("message") or "") for item in typed_blockers}
+            ],
         ],
         "invalid_evidence_refs": [dict(item) for item in evidence_ref_findings.get("invalid_refs") or []],
-        "continuation_prompt": finish_continuation_prompt(blockers),
+        "missing_obligations": [dict(item) for item in typed_gate.get("missing_obligations") or []],
+        "failed_evidence_refs": [dict(item) for item in typed_gate.get("failed_evidence_refs") or []],
+        "continuation_prompt": str(typed_gate.get("continuation_prompt") or "") or finish_continuation_prompt(blockers),
     }
+
+
+def _typed_acceptance_done_gate_decision(action: dict, session: object) -> dict:
+    typed = _typed_acceptance_session(session)
+    if not typed:
+        return {"decision": "no_typed_decision", "gate_source": "none", "blockers": []}
+    try:
+        from .implement_lane.execution_evidence import resolve_typed_finish
+    except ImportError:
+        return {"decision": "no_typed_decision", "gate_source": "none", "blockers": []}
+    finish_claim = {
+        "outcome": action.get("outcome") or action.get("status") or ("completed" if action.get("task_done") else ""),
+        "summary": action.get("summary") or action.get("message") or "",
+        "evidence_refs": action.get("evidence_refs") or action.get("typed_evidence_refs") or (),
+        "oracle_refs": action.get("oracle_refs") or (),
+        "acceptance_checks": action.get("acceptance_checks") or (),
+    }
+    decision = resolve_typed_finish(
+        finish_claim,
+        typed.get("oracle_bundle") if isinstance(typed.get("oracle_bundle"), dict) else None,
+        tuple(item for item in typed.get("evidence_events") or () if isinstance(item, dict)),
+    )
+    return decision.as_dict()
+
+
+def _typed_acceptance_session(session: object) -> dict:
+    if not isinstance(session, dict):
+        return {}
+    typed = session.get("typed_acceptance")
+    return dict(typed) if isinstance(typed, dict) else {}

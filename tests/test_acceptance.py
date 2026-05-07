@@ -14,6 +14,214 @@ from mew.acceptance import (
     runtime_component_finish_gate_decision,
 )
 from mew.acceptance_evidence import long_dependency_artifact_proven_by_call
+from mew.implement_lane.execution_evidence import (
+    DoneDecision,
+    EvidenceEvent,
+    FinishClaim,
+    OracleBundle,
+    OracleObligation,
+    resolve_typed_finish,
+)
+
+
+def test_resolve_typed_finish_returns_neutral_without_oracle_bundle():
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:artifact:frame"},)),
+        None,
+        (EvidenceEvent(id="ev:artifact:frame", kind="artifact_check", status="passed", observed={"path": "frame.bmp"}),),
+    )
+
+    assert isinstance(decision, DoneDecision)
+    assert decision.decision == "no_typed_decision"
+    assert decision.gate_source == "none"
+
+
+def test_resolve_typed_finish_blocks_completed_finish_without_refs():
+    bundle = OracleBundle(
+        id="oracle:bundle:frame",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+        ),
+    )
+
+    decision = resolve_typed_finish(FinishClaim(outcome="completed"), bundle, ())
+
+    assert decision.decision == "block_continue"
+    assert decision.gate_source == "typed_evidence"
+    assert decision.missing_obligations
+    assert "typed evidence" in decision.continuation_prompt
+
+
+def test_resolve_typed_finish_allows_cited_passing_artifact_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:frame",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.bmp", "status": "passed"},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:artifact:frame"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "allow_complete"
+    assert decision.gate_source == "typed_evidence"
+
+
+def test_resolve_typed_finish_does_not_cross_satisfy_source_grounding():
+    bundle = OracleBundle(
+        id="oracle:bundle:source",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:source:b",
+                kind="source_grounding",
+                subject={"path": "src/b.py"},
+                expected={"grounded": True},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:source:a",
+        kind="source_grounding",
+        status="passed",
+        observed={"path": "src/a.py", "grounded": True},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:source:a"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.missing_obligations
+
+
+def test_resolve_typed_finish_does_not_cross_satisfy_verifier_contracts():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:b",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:b"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:verifier:a",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:a"},
+        contract_id="contract:a",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:verifier:a"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.missing_obligations
+
+
+def test_resolve_typed_finish_rejects_visual_similarity_without_oracle_measurement():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"missing_reference": True},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:oracle:frame",
+        kind="oracle_check",
+        status="passed",
+        observed={"kind": "visual_similarity", "artifact_id": "frame", "candidate_path": "frame.bmp"},
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:oracle:frame"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.missing_obligations
+
+
+def test_resolve_typed_finish_ignores_superseding_failure_for_other_verifier_contract():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:a",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:a"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    pass_event = EvidenceEvent(
+        id="ev:verifier:a:pass",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:a"},
+        contract_id="contract:a",
+    )
+    other_failure = EvidenceEvent(
+        id="ev:verifier:b:fail",
+        kind="verifier_result",
+        status="failed",
+        observed={"verdict": "fail", "contract_id": "contract:b"},
+        contract_id="contract:b",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:verifier:a:pass"},)),
+        bundle,
+        (pass_event, other_failure),
+    )
+
+    assert decision.decision == "allow_complete"
 
 
 def test_extract_acceptance_constraints_keeps_output_and_edit_scope_rules():

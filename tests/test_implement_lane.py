@@ -914,8 +914,8 @@ def test_implement_v2_live_json_blocks_format_only_visual_finish(tmp_path) -> No
             model="gpt-5.5",
             task_contract={
                 "description": (
-                    "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
-                    "I will check that the first rendered frame is correct."
+                    "Run the VM so it saves rendered frames to /tmp/frame.bmp and check the first "
+                    "rendered frame against expected dimensions 640x400."
                 )
             },
             lane_config={
@@ -967,7 +967,7 @@ def test_implement_v2_live_json_finish_gate_can_continue_then_complete(tmp_path)
                     "name": "run_command",
                     "arguments": {
                         "command": (
-                            "printf 'expected dimensions 640x400\\nreference similarity passed\\nsaved /tmp/frame.bmp\\n'"
+                            "printf 'dimension check passed expected dimensions 640x400\\nreference similarity passed\\nsaved /tmp/frame.bmp\\n'"
                         ),
                         "cwd": ".",
                         "use_shell": True,
@@ -1025,8 +1025,8 @@ def test_implement_v2_live_json_finish_gate_can_continue_then_complete(tmp_path)
             model="gpt-5.5",
             task_contract={
                 "description": (
-                    "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
-                    "I will check that the first rendered frame is correct."
+                    "Run the VM so it saves rendered frames to /tmp/frame.bmp and check the first "
+                    "rendered frame against expected dimensions 640x400."
                 )
             },
             lane_config={
@@ -1061,7 +1061,7 @@ def test_implement_v2_finish_gate_uses_structured_final_verifier_without_model_e
                             "rm -f frame000000.bmp /tmp/mew-v2-vmout.txt; "
                             "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
                             "saved frame000000.bmp\\n"
-                            "FRAME_QUALITY_OK 640x400 reference similarity passed\\n' "
+                            "dimension check passed expected dimensions 640x400\\n' "
                             "| tee /tmp/mew-v2-vmout.txt; "
                             "python3 - <<'PY'\n"
                             "from pathlib import Path\n"
@@ -1106,8 +1106,8 @@ def test_implement_v2_finish_gate_uses_structured_final_verifier_without_model_e
             model="gpt-5.5",
             task_contract={
                 "description": (
-                    "Run the VM so it saves rendered frames. "
-                    "I will check that the first rendered frame is correct."
+                    "Run the VM so it saves rendered frames and check the first rendered frame "
+                    "against expected dimensions 640x400."
                 )
             },
             lane_config={
@@ -1182,8 +1182,8 @@ def test_implement_v2_finish_gate_rejects_structured_visual_sidecar_without_qual
             model="gpt-5.5",
             task_contract={
                 "description": (
-                    "Run the VM so it saves rendered frames. "
-                    "I will check that the first rendered frame is correct."
+                    "Run the VM so it saves rendered frames and check the first rendered frame "
+                    "against expected dimensions 640x400."
                 )
             },
             lane_config={
@@ -1217,7 +1217,7 @@ def test_implement_v2_finish_gate_prefers_structured_sidecar_over_unref_model_ch
                             "rm -f frame000000.bmp; "
                             "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
                             "saved frame000000.bmp\\n"
-                            "FRAME_QUALITY_OK 640x400 reference similarity passed\\n'; "
+                            "dimension check passed expected dimensions 640x400\\n'; "
                             "python3 - <<'PY'\n"
                             "from pathlib import Path\n"
                             "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
@@ -1266,8 +1266,8 @@ def test_implement_v2_finish_gate_prefers_structured_sidecar_over_unref_model_ch
             model="gpt-5.5",
             task_contract={
                 "description": (
-                    "Run the VM so it saves rendered frames. "
-                    "I will check that the first rendered frame is correct."
+                    "Run the VM so it saves rendered frames and check the first rendered frame "
+                    "against expected dimensions 640x400."
                 )
             },
             lane_config={
@@ -1308,7 +1308,7 @@ def test_implement_v2_finish_gate_keeps_structured_sidecar_inside_acceptance_win
                             "rm -f frame000000.bmp; "
                             "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
                             "saved frame000000.bmp\\n"
-                            "FRAME_QUALITY_OK 640x400 reference similarity passed\\n'; "
+                            "dimension check passed expected dimensions 640x400\\n'; "
                             "python3 - <<'PY'\n"
                             "from pathlib import Path\n"
                             "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
@@ -1351,8 +1351,8 @@ def test_implement_v2_finish_gate_keeps_structured_sidecar_inside_acceptance_win
             model="gpt-5.5",
             task_contract={
                 "description": (
-                    "Run the VM so it saves rendered frames. "
-                    "I will check that the first rendered frame is correct."
+                    "Run the VM so it saves rendered frames and check the first rendered frame "
+                    "against expected dimensions 640x400."
                 )
             },
             lane_config={
@@ -1400,7 +1400,7 @@ def test_implement_v2_finish_gate_keeps_uncovered_model_check_inside_acceptance_
                             "rm -f frame000000.bmp; "
                             "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
                             "saved frame000000.bmp\\n"
-                            "FRAME_QUALITY_OK 640x400 reference similarity passed\\n'; "
+                            "dimension check passed expected dimensions 640x400\\n'; "
                             "python3 - <<'PY'\n"
                             "from pathlib import Path\n"
                             "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
@@ -1657,7 +1657,7 @@ def test_implement_v2_live_json_finish_gate_does_not_link_ambiguous_alpha_call_i
                     "name": "run_command",
                     "arguments": {
                         "command": (
-                            "printf 'expected dimensions 640x400\\nreference similarity passed\\nremoved /tmp/frame.bmp\\n'"
+                            "printf 'dimension check passed expected dimensions 640x400\\nreference similarity passed\\nremoved /tmp/frame.bmp\\n'"
                         ),
                         "cwd": ".",
                         "use_shell": True,
@@ -1718,7 +1718,7 @@ def test_implement_v2_finish_evidence_refs_ignore_ambiguous_alpha_call_id() -> N
             mew_tool_call_id="attempt-1:tool:1:1",
             tool_name="run_command",
             status="completed",
-            content=({"stdout": "expected dimensions 640x400\nreference similarity passed\n"},),
+            content=({"stdout": "dimension check passed expected dimensions 640x400\nreference similarity passed\n"},),
         ),
         ToolResultEnvelope(
             lane_attempt_id="attempt-1",
@@ -1726,7 +1726,7 @@ def test_implement_v2_finish_evidence_refs_ignore_ambiguous_alpha_call_id() -> N
             mew_tool_call_id="attempt-1:tool:1:2",
             tool_name="run_command",
             status="completed",
-            content=({"stdout": "expected dimensions 640x400\nreference similarity passed\n"},),
+            content=({"stdout": "dimension check passed expected dimensions 640x400\nreference similarity passed\n"},),
         ),
         ToolResultEnvelope(
             lane_attempt_id="attempt-1",
@@ -1734,7 +1734,7 @@ def test_implement_v2_finish_evidence_refs_ignore_ambiguous_alpha_call_id() -> N
             mew_tool_call_id="attempt-1:tool:1:3",
             tool_name="run_command",
             status="completed",
-            content=({"stdout": "expected dimensions 640x400\nreference similarity passed\n"},),
+            content=({"stdout": "dimension check passed expected dimensions 640x400\nreference similarity passed\n"},),
         ),
     )
 
@@ -1762,7 +1762,7 @@ def test_implement_v2_live_json_finish_gate_does_not_link_numeric_turn_ids(tmp_p
                     "id": "1",
                     "name": "run_command",
                     "arguments": {
-                        "command": "printf 'expected dimensions 640x400\\nreference similarity passed\\n'",
+                        "command": "printf 'dimension check passed expected dimensions 640x400\\nreference similarity passed\\n'",
                         "cwd": ".",
                         "use_shell": True,
                     },
@@ -2372,7 +2372,7 @@ def test_implement_v2_live_json_extends_after_finish_gate_blocks_with_prior_term
                     "name": "run_command",
                     "arguments": {
                         "command": (
-                            "printf 'saved /tmp/frame.bmp\\nexpected dimensions 640x400\\nreference similarity passed\\n"
+                            "printf 'saved /tmp/frame.bmp\\ndimension check passed expected dimensions 640x400\\nreference similarity passed\\n"
                             "removed /tmp/frame.bmp\\n'"
                         ),
                         "cwd": ".",
