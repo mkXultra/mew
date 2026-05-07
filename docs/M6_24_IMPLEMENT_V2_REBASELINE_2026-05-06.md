@@ -122,7 +122,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
 | `make-doom-for-mips` | 1/5 | recorded/deferred after 0/1 strategy-wall-budget frontier | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217` | no same-shape rerun until a generic frontier-throttling or strategy design is selected and locally proven |
-| `make-mips-interpreter` | 3/5 | blocked after 0/1 generic stdout/stderr expected-artifact contract gap | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1341-tool-contract-repair` | review/commit/pre-speed generic stream-contract repair, then rerun one same-shape v2 speed_1 |
+| `make-mips-interpreter` | 3/5 | 10min wall gate verified; blocked on runtime frontier / `/tmp/frame.bmp` missing | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260507-2237-wall-budget` | no live speed until the `2237-wall-budget` artifact is classified into a generic runtime-frontier/step-shape repair with replay/dogfood/emulator coverage |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
 | `polyglot-c-py` | 5/5 | pending | none | run v2 speed_1 |
