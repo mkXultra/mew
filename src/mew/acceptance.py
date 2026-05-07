@@ -142,17 +142,10 @@ _RUNTIME_VISUAL_ARTIFACT_QUALITY_TASK_MARKERS = (
 _RUNTIME_VISUAL_ARTIFACT_QUALITY_EVIDENCE_MARKERS = (
     "expected dimensions",
     "expected resolution",
-    "expected size",
-    "expected text",
-    "exact stdout",
-    "framebuffer",
-    "i_initgraphics",
-    "l2",
-    "reference",
-    "resolution",
-    "screen size",
-    "similarity",
-    "ssim",
+    "frame_quality_ok",
+    "reference similarity",
+    "similarity passed",
+    "ssim passed",
 )
 _RUNTIME_COMPONENT_TASK_MARKERS = (
     "compiled extension",
@@ -1445,7 +1438,7 @@ def _runtime_visual_artifact_quality_blocker(
         return (
             "runtime visual artifact quality evidence missing: rendered frame, screenshot, "
             "or image tasks with expected/correct output must cite expected dimensions, "
-            "reference similarity, or exact stdout/boot markers before task_done=true"
+            "reference similarity, or explicit expected-output markers before task_done=true"
         )
     if any(_has_runtime_visual_artifact_quality_evidence(check, session) for check in visual_checks):
         return ""
@@ -1453,7 +1446,7 @@ def _runtime_visual_artifact_quality_blocker(
         "runtime visual artifact quality evidence ungrounded: artifact existence, "
         "nonzero pixels, valid headers, or self-consistent dimensions are not enough; "
         "cite a completed grounding tool whose output checks expected dimensions, "
-        "reference similarity, or exact stdout/boot markers"
+        "reference similarity, or explicit expected-output markers"
     )
 
 

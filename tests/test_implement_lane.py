@@ -1128,6 +1128,82 @@ def test_implement_v2_finish_gate_uses_structured_final_verifier_without_model_e
     assert result.metrics["finish_gate_decision"]["decision"] == "allow_complete"
 
 
+def test_implement_v2_finish_gate_rejects_structured_visual_sidecar_without_quality_marker(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run final verifier that only proves frame existence and boot stdout",
+            "tool_calls": [
+                {
+                    "id": "verify-frame-exists-only",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "rm -f frame000000.bmp; "
+                            "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
+                            "saved frame000000.bmp\\n'; "
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {"path": "frame000000.bmp", "checks": [{"exists": True}, {"non_empty": True}]},
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "Frame artifact exists and boot stdout was observed.",
+                "acceptance_checks": [],
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["finish_gate_block_count"] == 1
+    blockers = result.metrics["finish_gate_decision"]["blockers"]
+    assert any(blocker["code"] == "runtime_visual_artifact_quality_evidence" for blocker in blockers)
+
+
 def test_implement_v2_finish_gate_prefers_structured_sidecar_over_unref_model_check(tmp_path) -> None:
     outputs = [
         {
@@ -5141,6 +5217,201 @@ def test_implement_v2_exec_lifecycle_can_use_known_command_run_id(tmp_path) -> N
     assert "done" in poll_result.content[0]["stdout"]
     assert read_result.status == "completed"
     assert "done" in read_result.content[0]["content"]
+
+
+def test_implement_v2_live_json_auto_polls_yielded_verifier_without_extra_model_turn(tmp_path) -> None:
+    calls = {"count": 0}
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('start', flush=True); time.sleep(0.05); print('done', flush=True)",
+        ]
+    )
+
+    def fake_model(*_args, **_kwargs):
+        calls["count"] += 1
+        return {
+            "summary": "run verifier",
+            "tool_calls": [
+                {
+                    "provider_call_id": "call-1",
+                    "tool_name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 5,
+                        "foreground_budget_seconds": 0.001,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verify",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "analysis_ready", "summary": "verifier observed"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+                "active_command_auto_poll_seconds": 1,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert calls["count"] == 1
+    assert result.metrics["model_turns"] == 1
+    assert result.metrics["active_command_auto_poll_count"] == 1
+    assert result.metrics["active_command_auto_poll_terminal_count"] == 1
+    assert tool_result["status"] == "completed"
+    assert payload["status"] == "completed"
+    assert "done" in payload["stdout"]
+
+
+def test_implement_v2_live_json_auto_poll_cancels_nonterminal_verifier_without_extra_model_turn(tmp_path) -> None:
+    calls = {"count": 0}
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('start', flush=True); time.sleep(5); print('done', flush=True)",
+        ]
+    )
+
+    def fake_model(*_args, **_kwargs):
+        calls["count"] += 1
+        return {
+            "summary": "run long verifier",
+            "tool_calls": [
+                {
+                    "provider_call_id": "call-1",
+                    "tool_name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 10,
+                        "foreground_budget_seconds": 0.001,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verify",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "analysis_ready", "summary": "verifier observed"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+                "active_command_auto_poll_seconds": 0.01,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert calls["count"] == 1
+    assert result.metrics["model_turns"] == 1
+    assert result.metrics["active_command_auto_poll_count"] == 1
+    assert result.metrics["active_command_auto_poll_terminal_count"] == 1
+    assert result.metrics["orphaned_command_cleanup_count"] == 0
+    assert tool_result["status"] == "interrupted"
+    assert payload["status"] == "killed"
+    assert payload["reason"] == "implement_v2 verifier auto-poll budget exhausted before terminal evidence"
+    assert payload["command_run_id"]
+
+
+def test_implement_v2_live_json_does_not_auto_poll_plain_runtime_expected_exit(tmp_path) -> None:
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('start', flush=True); time.sleep(0.05); print('done', flush=True)",
+        ]
+    )
+
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "start runtime command",
+            "tool_calls": [
+                {
+                    "provider_call_id": "call-1",
+                    "tool_name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 5,
+                        "foreground_budget_seconds": 0.001,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "run",
+                            "purpose": "generic runtime command",
+                            "expected_exit": 0,
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "analysis_ready", "summary": "runtime started"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+                "active_command_auto_poll_seconds": 1,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.metrics["active_command_auto_poll_count"] == 0
+    assert result.metrics["command_closeout_count"] == 1
 
 
 def test_implement_v2_exec_rejects_concurrent_side_effecting_command(tmp_path) -> None:

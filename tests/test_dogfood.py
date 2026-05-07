@@ -1735,6 +1735,12 @@ class DogfoodTests(unittest.TestCase):
             self.assertTrue(all(item["passed"] for item in scenario["checks"]))
             self.assertEqual(scenario["artifacts"]["import_only_decision"]["decision"], "block_continue")
             self.assertEqual(scenario["artifacts"]["behavior_decision"]["decision"], "allow_complete")
+            self.assertEqual(scenario["artifacts"]["visual_format_only_decision"]["decision"], "block_continue")
+            self.assertEqual(scenario["artifacts"]["visual_quality_decision"]["decision"], "allow_complete")
+            self.assertEqual(
+                scenario["artifacts"]["visual_alias_false_positive_decision"]["decision"],
+                "block_continue",
+            )
 
     def test_run_dogfood_m6_24_expected_artifact_contract_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

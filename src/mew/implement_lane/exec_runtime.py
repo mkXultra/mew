@@ -165,6 +165,28 @@ class ImplementV2ManagedExecRuntime:
             finalized.append(payload)
         return tuple(finalized)
 
+    def poll_active_commands(self, *, wait_seconds: float | None = None) -> tuple[dict[str, object], ...]:
+        """Poll active commands without forcing terminal closeout.
+
+        This is intentionally weaker than ``finalize_active_commands``: it may
+        return a nonterminal ``yielded`` payload and leave the process active.
+        The live lane uses it to avoid spending model turns on obvious
+        verifier polling while preserving long-running command lifecycles.
+        """
+
+        if self.runner.active is None:
+            return ()
+        handle = self.runner.active
+        try:
+            wait = max(0.0, float(wait_seconds or 0.0))
+        except (TypeError, ValueError):
+            wait = 0.0
+        payload = self.runner.poll(wait_seconds=wait, command_run_id=handle.command_run_id)
+        if payload.get("status") == "running":
+            payload["status"] = "yielded"
+        payload.update(self.command_metadata.get(str(payload.get("command_run_id") or ""), {}))
+        return (payload,)
+
     def _run_command(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
         command, command_source = _normalize_command_argument(args)

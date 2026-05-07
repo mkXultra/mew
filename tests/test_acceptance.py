@@ -1188,6 +1188,47 @@ def test_acceptance_finish_blocker_rejects_runtime_visual_artifact_format_only_e
     assert "runtime visual artifact quality evidence ungrounded" in blocker
 
 
+def test_acceptance_finish_blocker_rejects_runtime_visual_artifact_loose_quality_aliases():
+    text = (
+        "Implement vm.js so I can run `node vm.js`. It should save rendered frames to /tmp/frame.bmp. "
+        "I will check that you booted doom correctly from the first rendered frame."
+    )
+    checks = [
+        {
+            "constraint": "first rendered frame is correct",
+            "status": "verified",
+            "evidence": (
+                "Tool #19 reported exact stdout, expected size, reference, and failed-l2 aliases for /tmp/frame.bmp."
+            ),
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 19,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "node vm.js && python3 weak_frame_claims.py"},
+                "result": {
+                    "command": "node vm.js && python3 weak_frame_claims.py",
+                    "exit_code": 0,
+                    "stdout": (
+                        "exact stdout I_InitGraphics\n"
+                        "expected size 768054\n"
+                        "reference file exists\n"
+                        "similarity failed l2=999.0\n"
+                        "saved /tmp/frame.bmp\n"
+                    ),
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "runtime visual artifact quality evidence ungrounded" in blocker
+
+
 def test_acceptance_finish_blocker_rejects_appropriate_visual_artifact_without_quality_evidence():
     text = (
         "I have provided /app/doomgeneric/, the source code to doom. "

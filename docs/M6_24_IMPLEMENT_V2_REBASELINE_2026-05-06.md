@@ -131,7 +131,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
 | `make-doom-for-mips` | 1/5 | recorded/deferred after 0/1 strategy-wall-budget frontier | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217` | no same-shape rerun until a generic frontier-throttling or strategy design is selected and locally proven |
-| `make-mips-interpreter` | 3/5 | post-hot-path-prompt 10min step-shape still blocked, but improved turn/tool shape | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260507-2318-hotpath-prompt` | no live speed until the new artifact is classified into the next generic hot-path repair with replay/dogfood/emulator coverage |
+| `make-mips-interpreter` | 3/5 | post-nonterminal-cleanup visual-quality finish-gate repair reviewed | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260508-0134-nonterminal-cleanup` | run the mandatory next 10min `selected_lane=implement_v2` step-shape diagnostic before live speed/proof or further repair |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
 | `polyglot-c-py` | 5/5 | pending | none | run v2 speed_1 |

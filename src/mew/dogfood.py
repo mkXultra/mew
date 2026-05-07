@@ -17387,6 +17387,47 @@ def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
                 "command": "python -c 'import native_module; print(native_module.run())'",
                 "output_tail": "ok\n",
             },
+            {
+                "id": 3,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "node vm.js && python3 inspect_frame.py",
+                "output_tail": (
+                    "I_InitGraphics: framebuffer: x_res: 640, y_res: 400\n"
+                    "saved /tmp/frame.bmp\n"
+                    "path=/tmp/frame.bmp exists=True size=768054\n"
+                ),
+            },
+            {
+                "id": 4,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "node vm.js && python3 check_frame_similarity.py",
+                "output_tail": (
+                    "expected dimensions 640x400\n"
+                    "reference similarity passed l2=0.01\n"
+                    "saved /tmp/frame.bmp\n"
+                ),
+            },
+            {
+                "id": 5,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "node vm.js && python3 weak_frame_claims.py",
+                "output_tail": (
+                    "exact stdout I_InitGraphics\n"
+                    "expected size 768054\n"
+                    "reference file exists\n"
+                    "similarity failed l2=999.0\n"
+                    "saved /tmp/frame.bmp\n"
+                ),
+            },
         ]
     }
     import_only_action = {
@@ -17413,8 +17454,67 @@ def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
             }
         ],
     }
+    visual_format_only_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "first rendered frame is correct",
+                "status": "verified",
+                "evidence": "Command evidence #3 proved /tmp/frame.bmp exists and boot/framebuffer stdout appeared.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 3}],
+            }
+        ],
+    }
+    visual_quality_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "first rendered frame is correct",
+                "status": "verified",
+                "evidence": "Command evidence #4 checked expected dimensions and reference similarity for /tmp/frame.bmp.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 4}],
+            }
+        ],
+    }
+    visual_alias_false_positive_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "first rendered frame is correct",
+                "status": "verified",
+                "evidence": (
+                    "Command evidence #5 reported exact stdout, expected size, reference, "
+                    "and failed-l2 aliases for /tmp/frame.bmp without an expected-dimensions "
+                    "or reference-similarity pass."
+                ),
+                "evidence_refs": [{"kind": "command_evidence", "id": 5}],
+            }
+        ],
+    }
     import_only_decision = acceptance_done_gate_decision(task_description, import_only_action, session=session)
     behavior_decision = acceptance_done_gate_decision(task_description, behavior_action, session=session)
+    visual_task_description = (
+        "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+        "I will check that the first rendered frame is correct."
+    )
+    visual_format_only_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        visual_format_only_action,
+        session=session,
+    )
+    visual_quality_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        visual_quality_action,
+        session=session,
+    )
+    visual_alias_false_positive_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        visual_alias_false_positive_action,
+        session=session,
+    )
     _scenario_check(
         checks,
         "m6_24_runtime_finish_gate_emulator_blocks_import_path_only_finish",
@@ -17434,10 +17534,44 @@ def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
         behavior_decision,
         "explicit callable behavior proof allows finish",
     )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_blocks_visual_boot_or_exists_only_finish",
+        visual_format_only_decision.get("decision") == "block_continue"
+        and any(
+            blocker.get("code") == "runtime_visual_artifact_quality_evidence"
+            for blocker in visual_format_only_decision.get("blockers") or []
+            if isinstance(blocker, dict)
+        ),
+        visual_format_only_decision,
+        "visual artifact existence and boot stdout are blocked without quality proof",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_allows_visual_similarity_finish",
+        visual_quality_decision.get("decision") == "allow_complete",
+        visual_quality_decision,
+        "expected dimensions or reference similarity proof allows visual finish",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_blocks_visual_alias_false_positive_finish",
+        visual_alias_false_positive_decision.get("decision") == "block_continue"
+        and any(
+            blocker.get("code") == "runtime_visual_artifact_quality_evidence"
+            for blocker in visual_alias_false_positive_decision.get("blockers") or []
+            if isinstance(blocker, dict)
+        ),
+        visual_alias_false_positive_decision,
+        "unqualified exact stdout, expected size, reference, and l2 aliases are blocked",
+    )
     report = _scenario_report("m6_24-runtime-finish-gate-emulator", workspace, commands, checks)
     report["artifacts"] = {
         "import_only_decision": import_only_decision,
         "behavior_decision": behavior_decision,
+        "visual_format_only_decision": visual_format_only_decision,
+        "visual_quality_decision": visual_quality_decision,
+        "visual_alias_false_positive_decision": visual_alias_false_positive_decision,
     }
     return report
 

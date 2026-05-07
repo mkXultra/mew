@@ -206,6 +206,7 @@ def run_live_json_implement_v2(
     model_error: dict[str, object] = {}
     cleanup_payloads: tuple[dict[str, object], ...] = ()
     closeout_payloads: tuple[dict[str, object], ...] = ()
+    auto_poll_payloads: tuple[dict[str, object], ...] = ()
     finish_gate_decision: dict[str, object] = {}
     finish_gate_block_count = 0
     wall_timeout: dict[str, object] = {}
@@ -600,6 +601,20 @@ def run_live_json_implement_v2(
                         break
                 current_calls = tuple(executed_calls)
                 current_results = tuple(current_results_list)
+            auto_poll_chunk = _auto_poll_yielded_verifier_commands(
+                current_results,
+                exec_runtime=exec_runtime,
+                lane_input=lane_input,
+                run_started=run_started,
+            )
+            if auto_poll_chunk:
+                auto_poll_payloads += auto_poll_chunk
+                current_results = _project_command_closeouts(
+                    current_results,
+                    closeout_payloads=auto_poll_chunk,
+                    cleanup_payloads=(),
+                    exec_runtime=exec_runtime,
+                )
             seen_provider_call_ids.update(call.provider_call_id for call in current_calls if call.provider_call_id)
             finish_gate_tool_results = tuple(tool_results) + tuple(current_results)
             if _should_closeout_for_terminal_failure_reaction(
@@ -853,6 +868,8 @@ def run_live_json_implement_v2(
             "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "command_closeout_count": len(closeout_payloads),
+            "active_command_auto_poll_count": len(auto_poll_payloads),
+            "active_command_auto_poll_terminal_count": _terminal_auto_poll_payload_count(auto_poll_payloads),
             "orphaned_command_cleanup_count": len(cleanup_payloads),
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
@@ -929,6 +946,8 @@ def run_live_json_implement_v2(
             "write_evidence_count": _write_evidence_count(tool_results),
             "terminal_evidence_count": _terminal_evidence_count(tool_results),
             "command_closeout_count": len(closeout_payloads),
+            "active_command_auto_poll_count": len(auto_poll_payloads),
+            "active_command_auto_poll_terminal_count": _terminal_auto_poll_payload_count(auto_poll_payloads),
             "orphaned_command_cleanup_count": len(cleanup_payloads),
         },
         transcript=tuple(transcript),
@@ -1480,6 +1499,90 @@ def _closeout_active_commands(
         return (), cleanup_payloads
     closeout_payloads = exec_runtime.finalize_active_commands(timeout_seconds=budget)
     return closeout_payloads, ()
+
+
+def _auto_poll_yielded_verifier_commands(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    exec_runtime: ImplementV2ManagedExecRuntime,
+    lane_input: ImplementLaneInput,
+    run_started: float,
+) -> tuple[dict[str, object], ...]:
+    if not any(_is_auto_pollable_yielded_verifier_result(result) for result in tool_results):
+        return ()
+    budget = _active_command_auto_poll_budget_seconds(lane_input, run_started=run_started)
+    if budget <= 0:
+        return ()
+    payloads = exec_runtime.poll_active_commands(wait_seconds=budget)
+    terminal_payloads = tuple(payload for payload in payloads if _is_terminal_auto_poll_payload(payload))
+    if terminal_payloads:
+        return terminal_payloads
+    if payloads:
+        return exec_runtime.cancel_active_commands(
+            reason="implement_v2 verifier auto-poll budget exhausted before terminal evidence"
+        )
+    return ()
+
+
+def _is_auto_pollable_yielded_verifier_result(result: ToolResultEnvelope) -> bool:
+    if result.tool_name not in {"run_command", "run_tests", "poll_command"} or result.status != "yielded":
+        return False
+    payload = _first_result_payload(result)
+    normalized_contract = payload.get("execution_contract_normalized")
+    raw_contract = payload.get("execution_contract")
+    contract = normalized_contract if isinstance(normalized_contract, dict) else {}
+    if not contract and isinstance(raw_contract, dict):
+        contract = raw_contract
+    if not contract:
+        return False
+    proof_role = str(contract.get("proof_role") or "").strip().lower()
+    acceptance_kind = str(contract.get("acceptance_kind") or "").strip().lower()
+    stage = str(contract.get("stage") or "").strip().lower()
+    purpose = str(contract.get("purpose") or "").strip().lower()
+    if proof_role in {"verifier", "verification"}:
+        return True
+    if acceptance_kind in {"external_verifier", "final_verifier", "verifier"}:
+        return True
+    if "verif" in stage or "verif" in purpose:
+        return True
+    return False
+
+
+def _first_result_payload(result: ToolResultEnvelope) -> dict[str, object]:
+    for item in result.content:
+        if isinstance(item, dict):
+            return item
+    return {}
+
+
+def _active_command_auto_poll_budget_seconds(lane_input: ImplementLaneInput, *, run_started: float) -> float:
+    configured = lane_input.lane_config.get("active_command_auto_poll_seconds")
+    try:
+        configured_budget = float(configured) if configured not in (None, "") else 60.0
+    except (TypeError, ValueError):
+        configured_budget = 0.0
+    budget = max(0.0, min(120.0, configured_budget))
+    wall_remaining = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    if wall_remaining is None:
+        return budget
+    return min(budget, wall_remaining)
+
+
+def _terminal_auto_poll_payload_count(payloads: tuple[dict[str, object], ...]) -> int:
+    return sum(
+        1
+        for payload in payloads
+        if _projected_command_closeout_status(payload) in {"completed", "failed", "interrupted"}
+    )
+
+
+def _is_terminal_auto_poll_payload(payload: dict[str, object]) -> bool:
+    status = str(payload.get("status") or "").strip()
+    return (
+        status in {"completed", "failed", "timed_out", "killed", "orphaned"}
+        or payload.get("exit_code") is not None
+        or bool(payload.get("timed_out"))
+    )
 
 
 def _active_command_closeout_budget_seconds(lane_input: ImplementLaneInput, *, run_started: float) -> float:
@@ -3869,11 +3972,11 @@ def _structured_finish_evidence_text(result: ToolResultEnvelope, artifact_ids: l
                 continue
             for marker in (
                 "FRAME_QUALITY_OK",
-                "I_InitGraphics",
-                "framebuffer",
                 "expected dimensions",
+                "expected resolution",
                 "reference similarity",
-                "saved frame",
+                "similarity passed",
+                "SSIM passed",
             ):
                 if marker.casefold() in value.casefold() and marker not in previews:
                     previews.append(marker)
