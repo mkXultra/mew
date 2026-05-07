@@ -539,6 +539,33 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   still do not qualify. codex-ultra review session
   `019e003c-a93d-73d1-bab0-84d74dbd1940` requested the narrower boundary and
   then approved the updated predicate, tests, and docs.
+- Same-shape speed update on 2026-05-07 JST: the post-artifact-validation
+  progress-signature rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-artifact-validation-progress-make-doom-speed1-20260507-1136`
+  scored reward `0.0` with runner errors `0` and total runtime `17m41s`.
+  Exact replay and terminal-bench replay dogfood pass with latest structured
+  failure `runtime_artifact_missing`, mismatch count `0`, and next action
+  containing `expected runtime artifact`. The run spent one terminal-reaction
+  turn and reached a verifier-like command that produced `/tmp/frame.bmp`, but
+  the frame was `320x200` and externally failed the reference `640x400`
+  visual contract. The lane then attempted to finish after a read-only source
+  grounding step; the deterministic finish gate correctly blocked completion,
+  but because the current turn was read-only it did not spend an available
+  reaction turn on the unresolved prior runtime failure. The next repair is
+  generic: when finish gate blocks completion at the turn boundary and the
+  current turn has no terminal failure, allow the existing terminal-failure
+  reaction path to consider unresolved prior terminal/runtime failures. This
+  is not a Doom/MIPS solver and does not change acceptance requirements.
+- Review follow-up on 2026-05-07 JST: the same bounded prior-failure reaction
+  must cover finish-only / no-tool-call completion attempts as well as
+  read-only-current-turn attempts. When a finish-gate block grants an extra
+  reaction turn, the runtime must append finish-gate history before continuing
+  so the next prompt sees the deterministic blocker that caused the turn.
+  Focused UT, full `tests/test_implement_lane.py`, exact replay/dogfood,
+  scoped ruff, JSONL validation, and `git diff --check` passed; codex-ultra
+  review session `019e0064-c09c-79d3-9009-aa771e495048` approved with no
+  findings. Next action is current-head pre-speed and then exactly one
+  same-shape `make-doom-for-mips selected_lane=implement_v2` speed_1.
 
 ## Repair Trigger
 

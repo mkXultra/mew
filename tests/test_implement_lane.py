@@ -1140,6 +1140,190 @@ def test_implement_v2_live_json_extends_after_final_diagnostic_of_prior_terminal
     assert (tmp_path / "repaired.txt").read_text(encoding="utf-8") == "repaired"
 
 
+def test_implement_v2_live_json_extends_after_finish_gate_blocks_with_prior_terminal_failure(tmp_path) -> None:
+    source = tmp_path / "source.txt"
+    source.write_text("provided source\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "runtime verifier still misses the visual artifact",
+            "tool_calls": [
+                {
+                    "id": "runtime-missing-frame",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'Program terminated at PC=0x0\\n' >&2; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "read source then incorrectly finish from weak evidence",
+            "tool_calls": [{"id": "ground-source", "name": "read_file", "arguments": {"path": "source.txt"}}],
+            "finish": {
+                "outcome": "completed",
+                "summary": "source was grounded",
+                "acceptance_evidence": ["ground-source read the provided source"],
+            },
+        },
+        {
+            "summary": "react to the prior runtime failure with verifier-shaped proof",
+            "tool_calls": [
+                {
+                    "id": "visual-quality-proof",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf 'saved /tmp/frame.bmp\\nexpected dimensions 640x400\\nreference similarity passed\\n"
+                            "removed /tmp/frame.bmp\\n'"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "runtime visual proof completed",
+                "acceptance_evidence": [
+                    (
+                        "visual-quality-proof confirmed expected dimensions 640x400, "
+                        "reference similarity, saved /tmp/frame.bmp, and removed /tmp/frame.bmp"
+                    )
+                ],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["base_max_turns"] == 2
+    assert result.metrics["turn_budget_limit"] == 3
+    assert result.metrics["finish_gate_block_count"] == 2
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 1
+    assert result.metrics["model_turns"] == 3
+    assert "terminal_failure_reaction_turns_used: 1/1" in prompts[2]
+    assert "finish gate blocked completion" in prompts[2]
+
+
+def test_implement_v2_live_json_extends_after_finish_only_gate_blocks_with_prior_terminal_failure(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "runtime verifier failed before any finish attempt",
+            "tool_calls": [
+                {
+                    "id": "runtime-failed",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'Program terminated at PC=0x0\\n' >&2; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "incorrectly finish without new tool evidence",
+            "tool_calls": [],
+            "finish": {
+                "outcome": "completed",
+                "summary": "I reasoned about the prior failure",
+                "acceptance_evidence": ["no new verifier evidence"],
+            },
+        },
+        {
+            "summary": "use the prior terminal failure reaction turn to verify behavior",
+            "tool_calls": [
+                {
+                    "id": "runtime-repair-proof",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf repaired > repaired.txt && test \"$(cat repaired.txt)\" = repaired",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "runtime failure repaired",
+                "acceptance_evidence": ["runtime-repair-proof confirmed repaired.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Repair the failed runtime behavior."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["base_max_turns"] == 2
+    assert result.metrics["turn_budget_limit"] == 3
+    assert result.metrics["finish_gate_block_count"] == 1
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 1
+    assert result.metrics["model_turns"] == 3
+    assert "terminal_failure_reaction_turns_used: 1/1" in prompts[2]
+    assert "finish gate blocked completion" in prompts[2]
+    assert (tmp_path / "repaired.txt").read_text(encoding="utf-8") == "repaired"
+
+
 def test_implement_v2_live_json_grants_progress_continuation_for_new_hard_runtime_frontier(tmp_path) -> None:
     runtime_contract = {
         "role": "runtime",

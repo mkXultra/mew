@@ -256,6 +256,40 @@ def run_live_json_implement_v2(
             )
         return True
 
+    def finish_gate_terminal_failure_reaction_summary(
+        current_results: tuple[ToolResultEnvelope, ...],
+    ) -> str:
+        if extend_for_terminal_failure_reaction_if_available(
+            current_results,
+            reason="finish_gate_terminal_failure",
+        ):
+            return "terminal failure reaction turn reserved after finish gate blocked completion"
+        if _has_terminal_failure_result(current_results):
+            return ""
+        if extend_for_terminal_failure_reaction_if_available(
+            tuple(tool_results),
+            reason="finish_gate_unresolved_prior_terminal_failure",
+        ):
+            return (
+                "terminal failure reaction turn reserved after finish gate blocked completion "
+                "with an unresolved prior terminal failure"
+            )
+        return ""
+
+    def append_finish_gate_history(
+        *,
+        decision: dict[str, object],
+        continuation_prompt: str,
+    ) -> None:
+        history.append(
+            _finish_gate_history(
+                turn_index=turn_index,
+                decision=decision,
+                continuation_prompt=continuation_prompt,
+            )
+        )
+        prompt_history.append(dict(history[-1]))
+
     try:
         while turn_index < turn_budget_limit:
             turn_index += 1
@@ -386,14 +420,10 @@ def run_live_json_implement_v2(
                             )
                         )
                         if turn_index < turn_budget_limit:
-                            history.append(
-                                _finish_gate_history(
-                                    turn_index=turn_index,
-                                    decision=finish_gate_decision,
-                                    continuation_prompt=continuation_prompt,
-                                )
+                            append_finish_gate_history(
+                                decision=finish_gate_decision,
+                                continuation_prompt=continuation_prompt,
                             )
-                            prompt_history.append(dict(history[-1]))
                             finish_arguments = {
                                 "outcome": "continue",
                                 "summary": continuation_prompt,
@@ -405,6 +435,18 @@ def run_live_json_implement_v2(
                             "summary": continuation_prompt,
                             "finish_gate": finish_gate_decision,
                         }
+                        reaction_summary = finish_gate_terminal_failure_reaction_summary(())
+                        if reaction_summary:
+                            append_finish_gate_history(
+                                decision=finish_gate_decision,
+                                continuation_prompt=continuation_prompt,
+                            )
+                            finish_arguments = {
+                                "outcome": "continue",
+                                "summary": reaction_summary,
+                                "finish_gate": finish_gate_decision,
+                            }
+                            continue
                     transcript.append(
                         adapter.finish_event_for_turn(
                             lane=IMPLEMENT_V2_LANE,
@@ -550,14 +592,10 @@ def run_live_json_implement_v2(
                         )
                     )
                     if turn_index < turn_budget_limit:
-                        history.append(
-                            _finish_gate_history(
-                                turn_index=turn_index,
-                                decision=finish_gate_decision,
-                                continuation_prompt=continuation_prompt,
-                            )
+                        append_finish_gate_history(
+                            decision=finish_gate_decision,
+                            continuation_prompt=continuation_prompt,
                         )
-                        prompt_history.append(dict(history[-1]))
                         finish_arguments = {
                             "outcome": "continue",
                             "summary": continuation_prompt,
@@ -579,13 +617,15 @@ def run_live_json_implement_v2(
                             "finish_gate": finish_gate_decision,
                         }
                         continue
-                    if extend_for_terminal_failure_reaction_if_available(
-                        current_results,
-                        reason="finish_gate_terminal_failure",
-                    ):
+                    reaction_summary = finish_gate_terminal_failure_reaction_summary(current_results)
+                    if reaction_summary:
+                        append_finish_gate_history(
+                            decision=finish_gate_decision,
+                            continuation_prompt=continuation_prompt,
+                        )
                         finish_arguments = {
                             "outcome": "continue",
-                            "summary": "terminal failure reaction turn reserved after finish gate blocked completion",
+                            "summary": reaction_summary,
                             "finish_gate": finish_gate_decision,
                         }
                         continue

@@ -687,3 +687,39 @@ codex-ultra review session `019e000e-15b5-71c0-b3bb-fb0861076cec` approved
 with no findings. After commit, the next live action is exactly one same-shape
 `make-doom-for-mips selected_lane=implement_v2` speed_1, preceded by the
 current-head pre-speed gate.
+
+Implement-v2 make-doom finish-gate prior-failure checkpoint 2026-05-07 JST:
+
+The post-artifact-validation progress-signature rerun
+`mew-m6-24-artifact-validation-progress-make-doom-speed1-20260507-1136`
+scored `0/1` with runner errors `0`, runtime `17m41s`, and
+`selected_lane=implement_v2`. Replay and terminal-bench replay dogfood pass
+with latest structured failure `runtime_artifact_missing` and mismatch count
+`0`. The run produced `/tmp/frame.bmp`, but the external verifier rejected it
+as the wrong visual contract (`320x200` instead of `640x400`). The finish gate
+correctly blocked completion after a later read-only source-grounding turn, but
+the runtime did not use the still-available terminal-failure reaction budget
+because the current turn itself was not terminal.
+
+Decision: repair the loop boundary, not the task. At a finish-gate block on a
+completed finish, if the current turn has no terminal failure, the existing
+terminal-failure reaction path may consider unresolved prior terminal/runtime
+failures from the attempt history. This is bounded by the same reaction budget,
+wall-budget check, and finish gate. It does not loosen acceptance, does not add
+Doom/MIPS rules, and does not globally raise max turns. Before another live
+speed, validate with focused implement-lane UT, exact replay/dogfood on the
+`1136` artifact, scoped ruff, and code review.
+
+Review follow-up: codex-ultra review session
+`019e0064-c09c-79d3-9009-aa771e495048` requested two generic tightenings. The
+same prior-terminal-failure reaction path must also work for finish-only /
+no-tool-call completion attempts, and any reaction turn granted after a finish
+gate block must carry the deterministic finish-gate history into the next
+prompt. Both are loop-boundary fixes, not task fixes.
+
+After those changes, focused finish-gate UT, full `tests/test_implement_lane.py`
+(`136 passed`), exact `1136` replay, exact `1136` terminal-bench replay
+dogfood, scoped ruff, JSONL validation, and `git diff --check` passed.
+codex-ultra approved the final diff in the same review session. After commit,
+the next live action is current-head pre-speed and then exactly one same-shape
+`make-doom-for-mips selected_lane=implement_v2` speed_1 if green.
