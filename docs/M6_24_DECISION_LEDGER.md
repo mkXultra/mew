@@ -723,3 +723,25 @@ dogfood, scoped ruff, JSONL validation, and `git diff --check` passed.
 codex-ultra approved the final diff in the same review session. After commit,
 the next live action is current-head pre-speed and then exactly one same-shape
 `make-doom-for-mips selected_lane=implement_v2` speed_1 if green.
+
+Implement-v2 make-doom strategy-wall-budget checkpoint 2026-05-07 JST:
+
+The same-shape post-repair speed run
+`mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217`
+scored `0/1` with runner errors `0` and runtime `30m46s`. Replay and
+terminal-bench replay dogfood pass; the latest structured failure is
+`artifact_validation_failure` / `missing_artifact` for `/tmp/frame.bmp` after
+`rebuild-main-wrapper-frame-verify`, and the work loop stopped at
+`max_turns_before_finish`. Metrics: `model_turns=30`, `base_max_turns=24`,
+`turn_budget_limit=30`, `terminal_failure_reaction_turns_used=6/8`, and
+`hard_runtime_progress_continuation_turns_used=0/4`.
+
+Decision: record and defer, not another local loop-boundary repair. codex-ultra
+analysis session `019e008e-81fb-7550-9f83-0773cf59f863` classified this as a
+task-strategy + wall-budget limited runtime-artifact frontier. The loop made
+distinct runtime/startup rebuild attempts and retained replayable structured
+evidence; the artifact does not prove a deterministic substrate bug. Do not
+spend another same-shape `make-doom-for-mips` speed run unless a generic
+frontier-throttling or strategy design is chosen and proven first with focused
+UT, exact `1217` replay/dogfood, and an emulator for repeated verifier-shaped
+missing-artifact rebuilds.

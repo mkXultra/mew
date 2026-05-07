@@ -566,6 +566,17 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   review session `019e0064-c09c-79d3-9009-aa771e495048` approved with no
   findings. Next action is current-head pre-speed and then exactly one
   same-shape `make-doom-for-mips selected_lane=implement_v2` speed_1.
+- Same-shape speed update on 2026-05-07 JST: the post-finish-gate-prior-failure
+  rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217`
+  scored reward `0.0` with runner errors `0` and total runtime `30m46s`.
+  Replay and dogfood reproduce the miss with latest failure
+  `artifact_validation_failure` / `missing_artifact` for `/tmp/frame.bmp`,
+  `model_turns=30`, and `max_turns_before_finish`. codex-ultra classified this
+  as `RECORD_AND_DEFER`: a task-strategy + wall-budget limited runtime-artifact
+  frontier, not a local loop-boundary bug. Do not run another same-shape
+  make-doom speed proof until a generic frontier-throttling or strategy design
+  is selected and proven with local replay/dogfood/emulator first.
 
 ## Repair Trigger
 
