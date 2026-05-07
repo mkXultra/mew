@@ -279,13 +279,19 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> implement_v2 scoped rebaseline -> next pending task is make-doom-for-mips -> selected_lane=implement_v2 speed_1 per scoped software/coding task -> if pass, record v2 evidence and continue queue -> if miss/harness-invalid/missing-replay/structural-gap, stop unrelated measurement, reproduce through replay/dogfood/emulator, repair, then rerun same shape
+M6.24 -> implement_v2 scoped rebaseline -> make-doom-for-mips is recorded_deferred as task_strategy_wall_budget_limited_runtime_artifact_frontier -> return to selected build-cython-ext gap -> replay/dogfood/emulator classification -> generic repository-test-tail frontier repair or record/defer -> exactly one build-cython-ext speed_1 only after local proof
 ```
 
-The 2026-05-05 Codex/Claude Code reference traces both pass
-`build-cython-ext` and confirm that the next repair should make same-family
-verifier/runtime failures a compact active repair frontier before another broad
-build/test/finish cycle.
+The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
+prior-failure repair is replayable and classified, but codex-ultra marked it
+`RECORD_AND_DEFER`: task strategy plus wall-budget limited runtime-artifact
+frontier, not a local loop-boundary bug. Do not spend another same-shape
+make-doom speed run without a generic frontier-throttling or strategy design.
+
+The active repair target returns to `build-cython-ext`. The 2026-05-05
+Codex/Claude Code reference traces both pass `build-cython-ext` and confirm
+that the next repair should make same-family verifier/runtime failures a
+compact active repair frontier before another broad build/test/finish cycle.
 
 Do not spend new M6.24 live proof budget on out-of-scope tasks. If the next
 action says to run a new `compile-compcert` speed proof, treat that as drift and
@@ -328,11 +334,13 @@ Useful historical files:
 ## Current Roadmap Focus
 
 1. Continue the `implement_v2` scoped rebaseline from
-   `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`; `build-cython-ext` and
-   `prove-plus-comm` already have clean v2 `speed_1` evidence.
-2. Run the next pending scoped task with `selected_lane=implement_v2` and a
-   task-correct cwd. Record artifact path, runner errors, reward, lane id, and
-   replay status.
+   `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`; `make-doom-for-mips` is
+   recorded/deferred and should not pull the session into another same-shape
+   proof loop.
+2. Work the selected `build-cython-ext` gap from
+   `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`: read the dossier and
+   latest artifact, reproduce with replay/dogfood/emulator, then implement only
+   a generic repository-test-tail/frontier repair if the evidence supports it.
 3. If any run misses, is harness-invalid, lacks replayable artifacts, or exposes
    a structural lane gap, stop measuring unrelated tasks and repair via
    replay/dogfood/emulator before rerunning the same shape.
