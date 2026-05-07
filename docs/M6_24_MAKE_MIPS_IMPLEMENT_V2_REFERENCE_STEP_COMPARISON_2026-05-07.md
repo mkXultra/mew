@@ -354,3 +354,57 @@ Current implication:
   `proof_5`.
 - The next diagnostic should distinguish a true runtime-special-instruction
   repair gap from transient backend noise.
+
+## 2026-05-08 Transient-Retry Pre-Speed Diagnostic
+
+Latest current-head mew artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-transient-retry-make-mips-step-shape-10min-20260508-0622/make-mips-interpreter__ipm3JtP`
+
+Validation:
+
+- exact replay passes with external reward `0.0`;
+- terminal-bench replay dogfood passes with structured replay mismatch count
+  `0`;
+- runtime finish-gate emulator passes.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing miss; frame existence/similarity pass |
+| mew implement_v2 `0622` | 0/1 | 9m43s Harbor | 29 history turns | 40 tool calls | turn 8 | finish gate repeats `missing_typed_obligation` after internal verifier pass |
+
+Step delta:
+
+1. The transient backend failure did not recur; the retry repair succeeded for
+   the observed transport class.
+2. mew reached the runtime repair path, produced `/tmp/frame.bmp`, and the
+   final grounded verifier command `call-verify-vm-js-frame-6-grounded` passed
+   internally with `frame written: /tmp/frame.bmp`, `source_elf`, `source_tree`,
+   dimensions, and color diversity evidence.
+3. External reward is still `0.0` because Harbor verifier did not find
+   `/tmp/frame.bmp` after mew exited; replay classifies that separately as a
+   runtime artifact latency/cwd/lifecycle gap.
+4. The immediate loop-level blocker before spending another live proof is
+   finish evidence projection: the model supplied `finish.evidence_refs`, but
+   they were incomplete/stale, so implement_v2 did not add the latest
+   obligation-covering verifier/source refs and kept blocking on
+   `missing_typed_obligation`.
+
+Repair applied after this diagnostic:
+
+- finish acceptance now merges obligation-driven typed refs into existing
+  model-provided refs instead of only filling refs when none were supplied;
+- required verifier/artifact/source refs are prioritized within the 16-ref
+  finish window;
+- existing model refs remain supplemental after required refs;
+- supplemental fallback refs are not allowed to evict model refs when the model
+  already supplied refs.
+
+Current implication:
+
+- Do not run broad measurement yet.
+- After review/commit, run one more 10min `make-mips-interpreter
+  selected_lane=implement_v2` step-shape diagnostic before `speed_1` /
+  `proof_5`.
+- If the finish-gate repeat is gone, the next generic blocker is likely the
+  external-verifier-visible runtime artifact lifecycle for `/tmp/frame.bmp`.

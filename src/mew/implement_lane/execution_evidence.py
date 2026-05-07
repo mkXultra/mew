@@ -1349,6 +1349,7 @@ def recommend_finish_evidence_refs(
     oracle_bundle: OracleBundle | Mapping[str, Any] | None,
     evidence_events: tuple[EvidenceEvent | Mapping[str, Any], ...] | list[EvidenceEvent | Mapping[str, Any]],
     *,
+    include_supplemental: bool = True,
     limit: int = 16,
 ) -> tuple[dict[str, Any], ...]:
     """Return evidence refs that directly cover required finish obligations.
@@ -1374,7 +1375,7 @@ def recommend_finish_evidence_refs(
         ref = {"kind": "evidence_event", "id": covering_event.id}
         if ref not in refs:
             refs.append(ref)
-    if len(refs) < limit:
+    if include_supplemental and len(refs) < limit:
         for event in reversed(events):
             if event.status != "passed":
                 continue

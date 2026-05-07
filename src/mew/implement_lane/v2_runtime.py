@@ -3813,16 +3813,65 @@ def _finish_acceptance_action(
     ]
     acceptance_checks = _merge_finish_acceptance_sidecar_checks(acceptance_checks, sidecar_checks)
     action["acceptance_checks"] = acceptance_checks
-    if not action.get("evidence_refs"):
-        typed_refs = _typed_finish_evidence_refs(tool_results, task_description=task_description)
-        if typed_refs:
-            action["evidence_refs"] = typed_refs
+    existing_refs = _finish_action_evidence_ref_items(action.get("evidence_refs") or action.get("evidence_ref"))
+    typed_refs = _typed_finish_evidence_refs(
+        tool_results,
+        task_description=task_description,
+        include_supplemental=not existing_refs,
+    )
+    merged_refs = _merge_finish_action_evidence_refs(existing_refs, typed_refs)
+    if merged_refs:
+        action["evidence_refs"] = merged_refs
     return action
+
+
+def _merge_finish_action_evidence_refs(
+    existing: object,
+    typed_refs: list[dict[str, object]],
+    *,
+    limit: int = 16,
+) -> list[dict[str, object]]:
+    """Merge model refs with obligation-driven refs, keeping required refs first."""
+
+    merged: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for ref in [*typed_refs, *_finish_action_evidence_ref_items(existing)]:
+        key = json.dumps(ref, sort_keys=True, default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(ref)
+        if len(merged) >= limit:
+            break
+    return merged
+
+
+def _finish_action_evidence_ref_items(value: object) -> list[dict[str, object]]:
+    if isinstance(value, list) and all(isinstance(item, dict) for item in value):
+        return [dict(item) for item in value if item]
+    if isinstance(value, dict):
+        candidates = [value]
+    elif isinstance(value, (list, tuple)):
+        candidates = list(value)
+    elif isinstance(value, str):
+        candidates = [value]
+    else:
+        candidates = []
+    refs: list[dict[str, object]] = []
+    for item in candidates:
+        if isinstance(item, dict):
+            if item:
+                refs.append(dict(item))
+            continue
+        if isinstance(item, str) and item.strip():
+            refs.append({"kind": "evidence_event", "id": item.strip()})
+    return refs
 
 
 def _typed_finish_evidence_refs(
     tool_results: tuple[ToolResultEnvelope, ...],
     *,
+    include_supplemental: bool = True,
     task_description: object = "",
 ) -> list[dict[str, object]]:
     source_refs: list[dict[str, object]] = []
@@ -3842,6 +3891,7 @@ def _typed_finish_evidence_refs(
     recommended = recommend_finish_evidence_refs(
         typed_acceptance.get("oracle_bundle") if isinstance(typed_acceptance.get("oracle_bundle"), dict) else None,
         tuple(item for item in typed_acceptance.get("evidence_events") or () if isinstance(item, dict)),
+        include_supplemental=include_supplemental,
         limit=max(0, ref_limit - len(source_refs)),
     )
     if recommended:
@@ -3850,6 +3900,8 @@ def _typed_finish_evidence_refs(
             if ref not in refs:
                 refs.append(ref)
         return refs[:ref_limit]
+    if not include_supplemental:
+        return source_refs[:ref_limit]
     refs: list[dict[str, object]] = []
     fallback_limit = max(0, ref_limit - len(source_refs))
     for index, result in enumerate(tool_results, start=1):
