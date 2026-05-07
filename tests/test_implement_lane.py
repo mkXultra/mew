@@ -419,7 +419,7 @@ def test_implement_v2_integration_observation_detail_sidecar_is_explicit_and_ref
     sidecar_path = artifact_dir / "implement_v2" / "integration-observation.json"
     sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
     sidecar_serialized = json.dumps(sidecar, ensure_ascii=False, sort_keys=True)
-    turn = sidecar["model_turns"][0]
+    turn = sidecar["turns"][0]
     projection = turn["history_projection"]
 
     assert observation["detail_policy"] == "sidecar"
@@ -427,7 +427,8 @@ def test_implement_v2_integration_observation_detail_sidecar_is_explicit_and_ref
     assert observation["summary"]["detail_written"] is True
     assert str(sidecar_path) in result.proof_artifacts
     assert sidecar["lane_attempt_id"] == manifest["lane_attempt_id"]
-    assert len(sidecar["model_turns"]) == 1
+    assert "model_turns" not in sidecar
+    assert len(sidecar["turns"]) == 1
     assert turn["prompt"]["chars"] > 0
     assert turn["prompt"]["sha256"].startswith("sha256:")
     assert projection["future_projection_mode"] == "identity"
@@ -437,6 +438,44 @@ def test_implement_v2_integration_observation_detail_sidecar_is_explicit_and_ref
     assert sidecar["totals"]["projection_savings_chars"] == 0
     assert sidecar["totals"]["projection_savings_ratio"] == 0.0
     assert secret not in sidecar_serialized
+
+
+def test_implement_v2_integration_observation_detail_false_string_does_not_write_sidecar(tmp_path) -> None:
+    artifact_dir = tmp_path / "artifacts"
+
+    def fake_model(*_args, **_kwargs):
+        return {"summary": "stop", "finish": {"outcome": "blocked", "summary": "no material change"}}
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Inspect only."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "artifact_dir": str(artifact_dir),
+                "write_integration_observation_detail": "false",
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    manifest = result.updated_lane_state["proof_manifest"]
+    observation = manifest["metrics"]["integration_observation"]
+
+    assert observation["detail_policy"] == "summary"
+    assert observation["artifact_ref"] == ""
+    assert observation["summary"]["detail_written"] is False
+    assert not (artifact_dir / "implement_v2" / "integration-observation.json").exists()
+    assert all(not path.endswith("integration-observation.json") for path in result.proof_artifacts)
 
 
 def test_implement_v2_live_json_rejects_cross_turn_duplicate_before_write(tmp_path) -> None:

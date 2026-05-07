@@ -4029,13 +4029,19 @@ def _integration_observation_detail_payload(
         "transport": str(manifest.metrics.get("transport") or ""),
         "lane_attempt_id": manifest.lane_attempt_id,
         "artifact_namespace": manifest.artifact_namespace,
-        "model_turns": [dict(observation) for observation in model_turn_observations],
+        "turns": [dict(observation) for observation in model_turn_observations],
         "totals": totals,
     }
 
 
 def _should_write_integration_observation_detail(lane_input: ImplementLaneInput) -> bool:
-    return bool(lane_input.lane_config.get("write_integration_observation_detail"))
+    value = lane_input.lane_config.get("write_integration_observation_detail")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
 
 
 def _nonnegative_int(value: object) -> int:
