@@ -772,3 +772,37 @@ session `019e0101-7b3f-7ff1-bff2-c95451f77478` approved after the repair was
 tightened to ignore empty `acceptance_checks`, require a final/verifier-shaped
 contract for structured finish synthesis, and ignore failed/non-final artifact
 evidence when comparing internal proof to external verifier expectations.
+
+Implement-v2 make-mips integration-observation checkpoint 2026-05-07 JST:
+
+The same-shape rerun
+`mew-m6-24-v2-make-mips-interpreter-speed1-20260507-2017-integration-observation`
+scored `0/1` with runner errors `0`, runtime `20m32s`, and
+`selected_lane=implement_v2`. Integration observation shows `38` model turns,
+`59` tool results, `5,433,870` total prompt chars, and no projection
+truncation. Exact replay, terminal-bench replay dogfood, and the
+runtime-artifact-latency emulator pass.
+
+Decision: fix the late projection false blocker, then continue hot-path
+alignment. The run internally produced valid `/tmp/frame.bmp` evidence, but the
+fresh verifier took about `86s`; the external verifier waits about `30s`, so
+the real remaining gap is `runtime_artifact_latency_contract`. A second issue
+was a false source-grounding blocker: the model had read/searched the provided
+source and binary, but finish synthesis only projected the latest structured
+final verifier. `src/mew/acceptance.py` and
+`src/mew/implement_lane/v2_runtime.py` now project prior completed
+`read_file`, `search_text`, `glob`, and `run_command` source/binary grounding
+into synthesized finish checks. Focused finish-gate UT and ruff passed.
+claude-ultra review session `3524c689-d446-4494-97b3-f80151efff34`
+approved the diff and independently ran the focused new test, full
+`tests/test_implement_lane.py`, full `tests/test_acceptance.py`, and scoped
+ruff successfully.
+
+Codex reference comparison is recorded in
+`docs/M6_24_MAKE_MIPS_IMPLEMENT_V2_REFERENCE_STEP_COMPARISON_2026-05-07.md`.
+Codex passed the same task in `6m56s` with `34` completed tool calls and a
+compact sequence: cheap parallel source/ELF probes, one coherent `vm.js` patch,
+one missing-instruction repair, then `/tmp/frame.bmp` proof. mew is still too
+fragmented and prompt-heavy. Do not run broad measurement from this state; next
+repair should target external-verifier-shaped runtime latency and Codex-like
+hot-path tuning, not MIPS-specific rules.

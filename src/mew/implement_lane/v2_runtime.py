@@ -9,7 +9,11 @@ import re
 import time
 from dataclasses import dataclass, replace
 
-from ..acceptance import acceptance_done_gate_decision
+from ..acceptance import (
+    acceptance_done_gate_decision,
+    implementation_contract_source_requirements,
+    implementation_source_ref_matches_text,
+)
 from ..errors import ModelBackendError
 from ..work_lanes import IMPLEMENT_V2_LANE
 from .execution_evidence import normalize_execution_contract
@@ -3395,7 +3399,7 @@ def _live_acceptance_done_gate(
         }
     return acceptance_done_gate_decision(
         _live_task_description(lane_input),
-        _finish_acceptance_action(finish_arguments, tool_results),
+        _finish_acceptance_action(finish_arguments, tool_results, task_description=_live_task_description(lane_input)),
         session=_acceptance_session_from_tool_results(tool_results),
     )
 
@@ -3414,22 +3418,73 @@ def _live_task_description(lane_input: ImplementLaneInput) -> str:
 def _finish_acceptance_action(
     finish_arguments: dict[str, object],
     tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    task_description: str = "",
 ) -> dict[str, object]:
     action = dict(finish_arguments or {})
     action["task_done"] = _finish_outcome(action) in _COMPLETED_FINISH_OUTCOMES
     checks = action.get("acceptance_checks")
+    acceptance_checks: list[object] = []
     if isinstance(checks, list):
-        enriched_checks = [
+        acceptance_checks = [
             _with_finish_evidence_refs(check, tool_results) if isinstance(check, dict) else check for check in checks
         ]
-        if enriched_checks:
-            action["acceptance_checks"] = enriched_checks
-            return action
-    synthetic_checks = _synthetic_finish_acceptance_checks(action, tool_results)
-    if not synthetic_checks:
-        synthetic_checks = _structured_finish_acceptance_checks(tool_results)
-    action["acceptance_checks"] = synthetic_checks
+    if not acceptance_checks:
+        acceptance_checks = _synthetic_finish_acceptance_checks(action, tool_results)
+    if not acceptance_checks:
+        acceptance_checks = _structured_finish_acceptance_checks(tool_results)
+    acceptance_checks.extend(_source_grounding_finish_acceptance_checks(task_description, tool_results))
+    action["acceptance_checks"] = acceptance_checks
     return action
+
+
+def _source_grounding_finish_acceptance_checks(
+    task_description: object,
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> list[dict[str, object]]:
+    checks: list[dict[str, object]] = []
+    for requirement in implementation_contract_source_requirements(task_description):
+        source_ref = str(requirement.get("path") or "").strip()
+        if not source_ref:
+            continue
+        match = _source_grounding_tool_result(source_ref, tool_results)
+        if match is None:
+            continue
+        index, result = match
+        provider_call_id = str(result.provider_call_id or "").strip()
+        checks.append(
+            {
+                "constraint": f"provided source or artifact {source_ref} is grounded",
+                "status": "verified",
+                "evidence": (
+                    f"{provider_call_id or f'Tool #{index}'} completed {result.tool_name} evidence "
+                    f"grounding {source_ref}"
+                ),
+                "evidence_refs": [{"kind": "tool_call", "id": index}],
+            }
+        )
+    return checks
+
+
+def _source_grounding_tool_result(
+    source_ref: object,
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> tuple[int, ToolResultEnvelope] | None:
+    for index, result in enumerate(tool_results, start=1):
+        if result.status != "completed" or result.tool_name not in {"glob", "read_file", "run_command", "search_text"}:
+            continue
+        evidence_text = "\n".join(
+            chunk
+            for chunk in (
+                str(result.provider_call_id or ""),
+                result.tool_name,
+                _tool_result_content_text(result),
+            )
+            if chunk
+        )
+        if implementation_source_ref_matches_text(source_ref, evidence_text):
+            return index, result
+    return None
 
 
 def _structured_finish_acceptance_checks(tool_results: tuple[ToolResultEnvelope, ...]) -> list[dict[str, object]]:

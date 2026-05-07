@@ -2099,6 +2099,11 @@ def _source_ref_matches_text(ref: object, text: object) -> bool:
     return False
 
 
+def implementation_source_ref_matches_text(ref: object, text: object) -> bool:
+    """Return whether text grounds an implementation source/binary reference."""
+    return _source_ref_matches_text(ref, text)
+
+
 def _has_implementation_source_grounding_evidence(evidence: object, session: object, source_ref: object) -> bool:
     for call in _evidence_command_calls(evidence, session):
         if not call or call.get("tool") not in _IMPLEMENTATION_SOURCE_GROUNDING_TOOLS:

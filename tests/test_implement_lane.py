@@ -3820,6 +3820,92 @@ def test_implement_v2_exec_attaches_structured_artifact_evidence(tmp_path) -> No
     } <= side_effect_kinds
 
 
+def test_implement_v2_finish_gate_projects_prior_source_grounding_into_structured_finish(tmp_path) -> None:
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    source = source_dir / "source.c"
+    source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "ground provided source before runtime proof",
+            "tool_calls": [{"id": "read-source", "name": "read_file", "arguments": {"path": "src/source.c"}}],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "final verifier proves the runtime artifact",
+            "tool_calls": [
+                {
+                    "id": "final-runtime-proof",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'FRAME_QUALITY_OK\\n' > frame.bmp",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "execution_contract": {
+                            "id": "contract:runtime-artifact",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "zero"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "freshness": "created_after_run_start",
+                                    "checks": [
+                                        {"type": "exists", "severity": "blocking"},
+                                        {"type": "text_contains", "text": "FRAME_QUALITY_OK", "severity": "blocking"},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "completed", "summary": "runtime artifact verified"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided src/source.c, the corresponding source code. "
+                    "Build the source-backed runtime artifact so it writes frame.bmp."
+                ),
+                "final_artifact": "frame.bmp",
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert (tmp_path / "frame.bmp").read_text(encoding="utf-8") == "FRAME_QUALITY_OK\n"
+
+
 def test_implement_v2_exec_missing_expected_artifact_blocks_result(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
