@@ -279,7 +279,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> implement_v2 scoped rebaseline -> make-doom-for-mips is recorded_deferred as task_strategy_wall_budget_limited_runtime_artifact_frontier -> return to selected build-cython-ext gap -> replay/dogfood/emulator classification -> generic repository-test-tail frontier repair or record/defer -> exactly one build-cython-ext speed_1 only after local proof
+M6.24 -> implement_v2 scoped rebaseline -> make-doom-for-mips is recorded_deferred as task_strategy_wall_budget_limited_runtime_artifact_frontier -> build-cython-ext pass artifact still replay/dogfood green on current head -> run next pending scoped task make-mips-interpreter with selected_lane=implement_v2 -> if miss/harness-invalid/missing-replay/structural-gap, stop unrelated measurement and repair through replay/dogfood/emulator
 ```
 
 The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
@@ -288,10 +288,11 @@ prior-failure repair is replayable and classified, but codex-ultra marked it
 frontier, not a local loop-boundary bug. Do not spend another same-shape
 make-doom speed run without a generic frontier-throttling or strategy design.
 
-The active repair target returns to `build-cython-ext`. The 2026-05-05
-Codex/Claude Code reference traces both pass `build-cython-ext` and confirm
-that the next repair should make same-family verifier/runtime failures a
-compact active repair frontier before another broad build/test/finish cycle.
+The active repair target does not stay on `build-cython-ext`: its passing v2
+artifact `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout`
+still replays and dogfoods green on current head with `mew_exit_code=0` and
+external reward `1.0`. Do not rerun the same speed_1 shape blindly; any future
+`build-cython-ext` proof spend must be an explicit close-proof decision.
 
 Do not spend new M6.24 live proof budget on out-of-scope tasks. If the next
 action says to run a new `compile-compcert` speed proof, treat that as drift and
@@ -337,10 +338,9 @@ Useful historical files:
    `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`; `make-doom-for-mips` is
    recorded/deferred and should not pull the session into another same-shape
    proof loop.
-2. Work the selected `build-cython-ext` gap from
-   `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`: read the dossier and
-   latest artifact, reproduce with replay/dogfood/emulator, then implement only
-   a generic repository-test-tail/frontier repair if the evidence supports it.
+2. Run the next pending scoped rebaseline task, `make-mips-interpreter`, with
+   `selected_lane=implement_v2`, task-correct cwd, and complete artifact
+   capture.
 3. If any run misses, is harness-invalid, lacks replayable artifacts, or exposes
    a structural lane gap, stop measuring unrelated tasks and repair via
    replay/dogfood/emulator before rerunning the same shape.

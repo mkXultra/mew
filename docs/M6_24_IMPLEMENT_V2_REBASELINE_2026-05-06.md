@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | artifact-validation progress-continuation repair pending review/rerun | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-hard-runtime-progress-continuation-make-doom-speed1-20260507-1040` | review, commit, run pre-speed, then one same-shape v2 speed_1 if green |
+| `make-doom-for-mips` | 1/5 | recorded/deferred after 0/1 strategy-wall-budget frontier | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217` | no same-shape rerun until a generic frontier-throttling or strategy design is selected and locally proven |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
