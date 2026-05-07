@@ -258,10 +258,14 @@ def _write_payload(
 
 
 def _patch_edit_arguments(args: dict[str, object]) -> dict[str, object]:
-    if args.get("path") or args.get("edits"):
-        raise ValueError("apply_patch requires patch text; path/edits structured bypass is not accepted in implement_v2")
     patch_text = str(args.get("patch") or args.get("input") or "")
-    return _parse_minimal_apply_patch(patch_text)
+    if args.get("edits") or ((args.get("path") or args.get("edits")) and not patch_text):
+        raise ValueError("apply_patch requires patch text; path/edits structured bypass is not accepted in implement_v2")
+    parsed = _parse_minimal_apply_patch(patch_text)
+    explicit_path = str(args.get("path") or "").strip()
+    if explicit_path and explicit_path != str(parsed.get("path") or "").strip():
+        raise ValueError("apply_patch path argument must match patch update file")
+    return parsed
 
 
 def _parse_minimal_apply_patch(patch_text: str) -> dict[str, object]:

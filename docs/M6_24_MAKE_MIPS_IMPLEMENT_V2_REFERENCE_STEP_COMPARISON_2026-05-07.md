@@ -408,3 +408,54 @@ Current implication:
   `proof_5`.
 - If the finish-gate repeat is gone, the next generic blocker is likely the
   external-verifier-visible runtime artifact lifecycle for `/tmp/frame.bmp`.
+
+## 2026-05-08 Finish-Ref-Merge Pre-Speed Diagnostic
+
+Latest current-head mew artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-ref-merge-make-mips-step-shape-10min-20260508-0646/make-mips-interpreter__E65uqpE`
+
+Validation:
+
+- exact replay passes with external reward `0.0`;
+- terminal-bench replay dogfood passes with structured replay mismatch count
+  `0`;
+- runtime finish-gate emulator passes.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing miss; frame existence/similarity pass |
+| mew implement_v2 `0646` | 0/1 | 10m15s Harbor | 14 model turns | 23 tool calls | turn 6 | `apply_patch` rejected valid patch text with redundant matching `path`; later model timeout |
+
+Step delta:
+
+1. The finish-gate repeat disappeared:
+   `finish_gate_block_count=0`, `typed_evidence_gate_block_count=0`, and
+   `missing_typed_evidence_count=0`.
+2. mew now reaches the same broad work class as Codex: cheap source/ELF probes,
+   a `vm.js` write, runtime verification, and targeted runtime-instruction /
+   syscall repair.
+3. The remaining step shape is still inefficient: mew used 14 turns and
+   2.17M prompt chars, while Codex used 8 messages. A yielded debug command
+   still caused a model-mediated poll/cancel cycle.
+4. The immediate local blocker is a generic write-surface issue, not a MIPS
+   solver issue: the model emitted `apply_patch` with both a full patch body
+   and `path: vm.js`. v2 rejected all `path` on `apply_patch`, even when the
+   patch body contained the authoritative `*** Update File: vm.js` header.
+
+Repair applied after this diagnostic:
+
+- `apply_patch` now accepts a redundant `path` only when patch text is present
+  and the path matches the patch update-file header;
+- mismatched redundant paths are rejected;
+- path/edits structured bypass without patch text remains rejected.
+
+Current implication:
+
+- Do not run broad measurement yet.
+- After review/commit, run one more 10min `make-mips-interpreter
+  selected_lane=implement_v2` step-shape diagnostic before `speed_1` /
+  `proof_5`.
+- If this blocker is gone, the next likely target is either model-mediated
+  poll/cancel churn for long debug commands or external-verifier-visible
+  `/tmp/frame.bmp` lifecycle alignment.

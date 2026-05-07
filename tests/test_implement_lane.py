@@ -7880,6 +7880,49 @@ def test_implement_v2_apply_patch_dry_run_and_approved_apply(tmp_path) -> None:
     assert apply.updated_lane_state["proof_manifest"]["tool_results"][0]["evidence_refs"]
 
 
+def test_implement_v2_apply_patch_accepts_redundant_matching_path(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("old\n", encoding="utf-8")
+    patch = "*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch\n"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "apply_patch",
+                "arguments": {"path": "README.md", "patch": patch},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch preview"},
+    )
+
+    assert result.status == "analysis_ready"
+    assert result.updated_lane_state["proof_manifest"]["tool_results"][0]["status"] == "completed"
+
+
+def test_implement_v2_apply_patch_rejects_mismatched_redundant_path(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("old\n", encoding="utf-8")
+    patch = "*** Begin Patch\n*** Update File: README.md\n@@\n-old\n+new\n*** End Patch\n"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "apply_patch",
+                "arguments": {"path": "OTHER.md", "patch": patch},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch preview"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "path argument must match" in tool_result["content"][0]["reason"]
+
+
 def test_implement_v2_apply_patch_denied_approval_does_not_mutate(tmp_path) -> None:
     target = tmp_path / "README.md"
     target.write_text("old\n", encoding="utf-8")
