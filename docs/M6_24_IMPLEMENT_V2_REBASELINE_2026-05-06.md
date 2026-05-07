@@ -641,6 +641,31 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   artifact suppression; after those follow-ups it approved with no findings.
   After commit, run current-head pre-speed and then exactly one same-shape
   `make-mips-interpreter selected_lane=implement_v2` speed_1 if green.
+- The post-repair same-shape rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1511-external-artifact-feedback`
+  scored reward `0.0` with runner errors `0` and total runtime `21m18s`.
+  This is valid product evidence, not a harness miss. Replay and terminal-bench
+  replay dogfood both pass. The run moved past the previous internal/external
+  artifact projection mismatch and into real runtime task-solving: v2 wrote and
+  edited `vm.js`, probed syscall behavior, tried WAD/frame-path repairs, and
+  stopped blocked on structured `runtime_artifact_missing`. The latest failed
+  verifier-shaped command required `/app/frame0.bmp`, exited nonzero, and stdout
+  shows Doom initialization followed by `-iwad not specified`, `Trying IWAD
+  file:doom2.wad`, and `vm_status=1`. The external verifier still expected
+  `/tmp/frame.bmp` and failed `3/3` tests. Measurement caveat: the Harbor run
+  omitted `--ak timeout_seconds=1800` and command-template
+  `{max_wall_seconds_option}`, so `mew_max_wall_seconds=null` and the
+  hard-runtime continuation gate was disabled. Treat the runtime-producer
+  classification as product evidence, but do not use this run to judge
+  continuation budgeting. This exposes a higher-level hard-runtime
+  repair-history gap: prior M6.24 evidence for this same task had a successful
+  MIPS `SPECIAL3` `EXT` / `INS` repair, but this v2 run had empty active memory
+  and re-explored syscall/WAD/frame-path hypotheses. Active dossier:
+  `docs/M6_24_DOSSIER_HARD_RUNTIME_ARTIFACT.md`. Do not spend another
+  same-shape speed until the latest artifact is replayed/dogfooded and the next
+  generic repair has UT/replay/dogfood/emulator proof. Any same-shape rerun must
+  use the documented `timeout_seconds` plus `{max_wall_seconds_option}` command
+  shape.
 
 ## Repair Trigger
 

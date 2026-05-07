@@ -817,6 +817,13 @@ def _implement_v2_next_action(summary, *, external_reward=None):
         tool = latest.get("tool_name") or "tool"
         return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
     missing_external = summary.get("external_expected_artifact_missing")
+    if missing_external and _implement_v2_runtime_producer_blocked(summary, latest):
+        preview = ", ".join(str(item) for item in list(missing_external)[:3])
+        return (
+            "debug implement_v2 divergence: runtime producer/resource/syscall frontier blocked before "
+            f"external verifier artifact {preview}; inspect producer stdout/stderr, runtime resources, "
+            "syscall/ABI behavior, and the producing substep before another live speed run"
+        )
     if missing_external:
         preview = ", ".join(str(item) for item in list(missing_external)[:3])
         return (
@@ -854,6 +861,43 @@ def _implement_v2_next_action(summary, *, external_reward=None):
         tool = latest.get("tool_name") or "tool"
         return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
     return "debug implement_v2 divergence before another live speed run"
+
+
+def _implement_v2_runtime_producer_blocked(summary, latest):
+    if not isinstance(summary, dict) or not isinstance(latest, dict):
+        return False
+    if latest.get("failure_class") != "runtime_artifact_missing":
+        return False
+    passed = summary.get("passed_structured_artifacts")
+    if isinstance(passed, list) and passed:
+        return False
+    phase = str(latest.get("failure_phase") or "").lower()
+    exit_code = latest.get("exit_code")
+    nonzero_exit = exit_code not in (None, 0, "0")
+    stdout_tail = str(latest.get("stdout_tail") or "").strip()
+    if phase == "runtime" and nonzero_exit and stdout_tail:
+        return True
+    text = " ".join(
+        str(latest.get(key) or "")
+        for key in (
+            "stdout_tail",
+            "stderr_tail",
+            "reason",
+            "summary",
+            "required_next_probe",
+        )
+    ).lower()
+    progress_markers = (
+        "frames will be saved",
+        "trying iwad",
+        "-iwad",
+        "vm_status=",
+        "unhandled syscall",
+        "program terminated",
+        "no_frame",
+        "bmp_missing",
+    )
+    return any(marker in text for marker in progress_markers)
 
 
 def _task_from_report(report, resume):

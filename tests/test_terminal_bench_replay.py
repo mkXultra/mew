@@ -9,6 +9,7 @@ from mew.cli import build_parser
 from mew.dogfood import (
     _write_expected_artifact_contract_emulator_fixture,
     _write_repository_test_tail_emulator_fixture,
+    _write_runtime_producer_blocked_emulator_fixture,
     _write_terminal_bench_replay_fixture,
 )
 from mew.terminal_bench_replay import (
@@ -533,6 +534,26 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertNotIn("/tmp/vmout.txt", current_v2["passed_structured_artifacts"])
             self.assertIn("/tmp/frame.bmp", next_action)
             self.assertIn("external verifier expected runtime artifact", next_action)
+
+    def test_replay_terminal_bench_job_routes_runtime_producer_blocked_before_path_alignment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = _write_runtime_producer_blocked_emulator_fixture(tmp)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["external_expected_artifact_missing"], ["/tmp/frame.bmp"])
+            self.assertEqual(current_v2["latest_failure"]["failure_class"], "runtime_artifact_missing")
+            self.assertEqual(current_v2["passed_structured_artifacts"], [])
+            self.assertIn("runtime producer/resource/syscall frontier", next_action)
+            self.assertIn("/tmp/frame.bmp", next_action)
+            self.assertNotIn("align the final runtime artifact contract", next_action)
 
     def test_replay_terminal_bench_job_prefers_raw_contract_when_stored_normalized_vocabulary_is_stale(self):
         with tempfile.TemporaryDirectory() as tmp:

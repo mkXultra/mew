@@ -111,6 +111,7 @@ DOGFOOD_SCENARIOS = (
     "m6_24-compile-compcert-emulator",
     "m6_24-expected-artifact-contract-emulator",
     "m6_24-external-artifact-mismatch-emulator",
+    "m6_24-runtime-producer-blocked-emulator",
     "m6_24-repository-test-tail-emulator",
     "m6_24-final-verifier-budget-emulator",
     "m6_24-same-family-compatibility-emulator",
@@ -15174,6 +15175,229 @@ def _write_external_artifact_mismatch_emulator_fixture(workspace, *, task="make-
     return job_dir
 
 
+def _write_runtime_producer_blocked_emulator_fixture(workspace, *, task="make-mips-interpreter"):
+    job_dir = Path(workspace) / "runtime-producer-blocked-emulator-fixture"
+    trial_name = f"{task}__runtime-producer-blocked"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    v2_dir = artifact_dir / "implement_v2"
+    verifier_dir = trial_dir / "verifier"
+    v2_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "runtime-producer-blocked-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text(
+        "E FileNotFoundError: [Errno 2] No such file or directory: '/tmp/frame.bmp'\n",
+        encoding="utf-8",
+    )
+    report = {
+        "work_exit_code": 1,
+        "resume": {},
+        "work_report": {
+            "stop_reason": "implement_v2_blocked",
+            "runtime_id": "implement_v2_model_json_tool_loop",
+            "selected_lane": "implement_v2",
+            "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+            "implement_lane_result": {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 1,
+                },
+            },
+        },
+    }
+    tool_run_record = {
+        "schema_version": 1,
+        "record_id": "tool-run-record:runtime-producer-blocked",
+        "command_run_id": "command:runtime-producer-blocked",
+        "provider_call_id": "runtime-producer-blocked",
+        "declared_tool_name": "run_command",
+        "effective_tool_name": "run_command",
+        "contract_id": "contract:runtime-producer-blocked",
+        "status": "failed",
+        "exit_code": 1,
+        "timed_out": False,
+        "interrupted": False,
+        "semantic_exit": {"ok": False, "category": "nonzero_exit", "source": "exit_code"},
+        "stdout_preview": (
+            "DoomGeneric initialized. Frames will be saved to /tmp/frame.bmp\n"
+            "Trying IWAD file:doom2.wad\n"
+            "vm_status=1\n"
+        ),
+        "stderr_preview": "Error: ENOENT: no such file or directory, open 'frame0.bmp'\n",
+    }
+    failure_classification = {
+        "schema_version": 1,
+        "classification_id": "failure:contract:runtime-producer-blocked",
+        "phase": "runtime",
+        "kind": "missing_artifact",
+        "class": "runtime_artifact_missing",
+        "secondary_classes": ["runtime_failure"],
+        "secondary_kinds": ["nonzero_exit"],
+        "confidence": "high",
+        "retryable": True,
+        "summary": "required artifact /app/frame0.bmp failed structured checks",
+        "evidence_refs": [
+            {"kind": "tool_run_record", "id": "tool-run-record:runtime-producer-blocked"},
+            {"kind": "command_run", "id": "command:runtime-producer-blocked"},
+            {"kind": "artifact_evidence", "id": "artifact-evidence:/app/frame0.bmp"},
+        ],
+        "required_next_probe": "Inspect the producing substep and artifact path before another rebuild.",
+    }
+    payload = {
+        "command": "timeout 30s node vm.js; test -s /app/frame0.bmp",
+        "cwd": "/app",
+        "exit_code": 1,
+        "status": "failed",
+        "stdout": (
+            "DoomGeneric initialized. Frames will be saved to /tmp/frame.bmp\n"
+            "-iwad not specified, trying a few iwad names\n"
+            "Trying IWAD file:doom2.wad\n"
+            "vm_status=1\n"
+        ),
+        "stdout_tail": (
+            "DoomGeneric initialized. Frames will be saved to /tmp/frame.bmp\n"
+            "-iwad not specified, trying a few iwad names\n"
+            "Trying IWAD file:doom2.wad\n"
+            "vm_status=1\n"
+        ),
+        "stderr": "Error: ENOENT: no such file or directory, open 'frame0.bmp'\n",
+        "stderr_tail": "Error: ENOENT: no such file or directory, open 'frame0.bmp'\n",
+        "execution_contract_normalized": {
+            "schema_version": 3,
+            "id": "contract:runtime-producer-blocked",
+            "role": "runtime",
+            "stage": "verification",
+            "proof_role": "verifier",
+            "acceptance_kind": "external_verifier",
+            "expected_exit": {"mode": "zero"},
+            "expected_artifacts": [
+                {
+                    "id": "/app/frame0.bmp",
+                    "kind": "file",
+                    "target": {"type": "path", "path": "/app/frame0.bmp"},
+                    "path": "/app/frame0.bmp",
+                    "required": True,
+                    "checks": [{"type": "exists"}],
+                }
+            ],
+        },
+        "tool_run_record": tool_run_record,
+        "artifact_evidence": [
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:/app/frame0.bmp",
+                "artifact_id": "/app/frame0.bmp",
+                "command_run_id": "command:runtime-producer-blocked",
+                "tool_run_record_id": "tool-run-record:runtime-producer-blocked",
+                "contract_id": "contract:runtime-producer-blocked",
+                "path": "/app/frame0.bmp",
+                "target": {"path": "/app/frame0.bmp"},
+                "kind": "file",
+                "required": True,
+                "status": "failed",
+                "blocking": True,
+                "checks": [
+                    {
+                        "id": "/app/frame0.bmp:exists:0",
+                        "type": "exists",
+                        "passed": False,
+                        "severity": "blocking",
+                        "observed": {"exists": False},
+                    }
+                ],
+            }
+        ],
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:runtime-producer-blocked",
+            "contract_id": "contract:runtime-producer-blocked",
+            "verdict": "fail",
+            "reason": "runtime exited before producing expected frame",
+        },
+        "failure_classification": failure_classification,
+        "structured_finish_gate": {"blocked": True, "reasons": ["runtime_artifact_missing"]},
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps({"command": "mew work --oneshot --instruction runtime-producer", "exit_code": 1, "timed_out": False}),
+        encoding="utf-8",
+    )
+    (v2_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "tool_calls": [
+                        {
+                            "tool_name": "run_command",
+                            "arguments": {"command": payload["command"]},
+                        }
+                    ],
+                }
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (v2_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "tool_results": [
+                    {
+                        "provider_call_id": "runtime-producer-blocked",
+                        "tool_name": "run_command",
+                        "status": "failed",
+                        "content": [payload],
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
 def _write_repository_test_tail_emulator_fixture(workspace, *, task="build-cython-ext"):
     job_dir = Path(workspace) / "repository-test-tail-emulator-fixture"
     trial_name = f"{task}__repository-tail"
@@ -16180,6 +16404,62 @@ def run_m6_24_external_artifact_mismatch_emulator_scenario(workspace, *, job_dir
         "replay_status": replay.get("status"),
         "external_expected_artifact_missing": current_v2.get("external_expected_artifact_missing") or [],
         "next_action": ((first_trial.get("current") or {}).get("next_action") or ""),
+    }
+    return report
+
+
+def run_m6_24_runtime_producer_blocked_emulator_scenario(workspace, *, job_dir=None):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_runtime_producer_blocked_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="make-mips-interpreter",
+        assertions={
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+            "next_action_contains": "runtime producer/resource/syscall frontier",
+            "structured_execution_replay_required": True,
+            "structured_failure_class": "runtime_artifact_missing",
+            "structured_replay_mismatch_count": 0,
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_v2 = ((first_trial.get("current") or {}).get("implement_v2") or {})
+    next_action = ((first_trial.get("current") or {}).get("next_action") or "")
+    structured_replay = current_v2.get("structured_execution_replay") if isinstance(current_v2, dict) else {}
+    _scenario_check(
+        checks,
+        "m6_24_runtime_producer_blocked_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_producer_blocked_keeps_runtime_class",
+        (
+            isinstance(structured_replay, dict)
+            and (structured_replay.get("latest_failure_classification") or {}).get("class")
+            == "runtime_artifact_missing"
+        ),
+        structured_replay,
+        "runtime_artifact_missing",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_producer_blocked_routes_frontier",
+        "runtime producer/resource/syscall frontier" in next_action,
+        next_action,
+        "next action routes to runtime producer frontier",
+    )
+    report = _scenario_report("m6_24-runtime-producer-blocked-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "replay_status": replay.get("status"),
+        "structured_execution_replay": structured_replay if isinstance(structured_replay, dict) else {},
+        "external_expected_artifact_missing": current_v2.get("external_expected_artifact_missing") or [],
+        "next_action": next_action,
     }
     return report
 
@@ -17905,6 +18185,13 @@ def run_dogfood_scenario(args):
         elif name == "m6_24-external-artifact-mismatch-emulator":
             reports.append(
                 run_m6_24_external_artifact_mismatch_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-runtime-producer-blocked-emulator":
+            reports.append(
+                run_m6_24_runtime_producer_blocked_emulator_scenario(
                     scenario_workspace,
                     job_dir=getattr(args, "terminal_bench_job_dir", None),
                 )

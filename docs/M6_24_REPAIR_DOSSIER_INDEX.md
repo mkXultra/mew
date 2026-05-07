@@ -13,7 +13,7 @@ task-shape cycle.
 | `verified_sibling_repair_frontier_not_exhausted` / `repository_test_tail_frontier_not_exhausted_before_wall_timeout` | `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md` | `build-cython-ext`; future related family: native-extension/package compatibility tasks | active | Read the dossier and current-head artifact `mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936` before another verifier-sibling, repository-test-tail, or near-solution compatibility repair. |
 | `compact_model_inference_contract_failure` | pending | `gpt2-codegolf` | selected repair closed; future if repeats | Create a dossier if another model/checkpoint/tokenizer task enters a repeated repair loop. |
 | `system_service_state_permission_contract` | pending | `git-multibranch` | selected repair closed | Create a dossier if another system-service task enters a repeated repair loop. |
-| `hard_task_implementation_strategy_contract_retention` / runtime artifact family | pending | `make-doom-for-mips`, `make-mips-interpreter` | selected repairs closed / historical | Create a dossier before reopening the hard-runtime profile or adding more hard-task prompt guidance. |
+| `hard_task_implementation_strategy_contract_retention` / runtime artifact family | `docs/M6_24_DOSSIER_HARD_RUNTIME_ARTIFACT.md` | `make-doom-for-mips`, `make-mips-interpreter` | active | Read the dossier before another hard-runtime profile, prompt, verifier, finish-gate, or memory-backed repair. |
 
 ## Operating Rule
 

@@ -37,18 +37,23 @@ PYTHONPATH=.harbor harbor run \
   -i terminal-bench/make-mips-interpreter \
   -n 1 \
   -y \
+  --agent-timeout-multiplier 2 \
   --job-name mew-work-oneshot-make-mips \
   --jobs-dir proof-artifacts/terminal-bench/harbor-smoke \
   --agent-import-path mew_terminal_bench_agent:MewTerminalBenchAgent \
   --ak install_command="python -m pip install -e /mew" \
   --ak command_cwd="/app" \
   --ak container_repo_root="/mew" \
-  --ak command_template="mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-write . --allow-shell --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json" \
+  --ak timeout_seconds=1800 \
+  --ak command_template="mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-read /etc/apt --allow-read /tmp --allow-write . --allow-write /usr/local/bin --allow-write /tmp --allow-shell --allow-verify --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 {max_wall_seconds_option} --max-steps 30 --work-guidance selected_lane=implement_v2 --report {report_path} --artifacts {artifact_dir} --json" \
   --mounts-json "[{\"type\":\"bind\",\"source\":\"${MEW_REPO}\",\"target\":\"/mew\"},{\"type\":\"bind\",\"source\":\"/Users/mk/.codex/auth.json\",\"target\":\"/codex-auth/auth.json\"}]"
 ```
 
 This is still a generic work-session run: Terminal-Bench only provides the
 workspace cwd, instruction, artifact path, and verifier harness.
+For M6.24 speed/proof runs, keep `timeout_seconds` plus
+`{max_wall_seconds_option}` in the command template. Without that, mew cannot
+compute an inner wall budget, and hard-runtime continuation gates are disabled.
 
 The agent class lives at `.harbor/mew_terminal_bench_agent.py` and follows Harbor's installed-agent shape:
 
