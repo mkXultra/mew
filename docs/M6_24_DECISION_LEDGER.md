@@ -831,3 +831,30 @@ one missing-instruction repair, then `/tmp/frame.bmp` proof. mew is still too
 fragmented and prompt-heavy. Do not run broad measurement from this state; next
 repair should target external-verifier-shaped runtime latency and Codex-like
 hot-path tuning, not MIPS-specific rules.
+
+Implement-v2 typed-evidence source-frontier checkpoint 2026-05-08 JST:
+
+The post-Phase-6 pre-speed diagnostic
+`mew-m6-24-source-frontier-make-mips-step-shape-10min-20260508-0535`
+scored `0/1` with runner errors `0` and runtime `9m47s`. Replay and
+terminal-bench replay dogfood pass. The source-frontier repair moved the loop in
+the intended direction: turn 1 now performs a recursive source/output-path
+frontier before writing, later runtime proof creates `/tmp/frame.bmp`, and the
+external verifier passes frame existence plus reference similarity. The saved
+Codex reference has the same external score class, but reaches the same shape in
+fewer messages.
+
+Decision: keep measurement paused and repair the generic typed-finish ref
+selection, not task code. The new blocker is that finish synthesis selected the
+first passing typed evidence refs, so late final verifier/artifact evidence
+(`call-32` / `call-33`) could be dropped from the `evidence_refs` list. The
+finish gate then repeated `missing_typed_obligation` until model timeout. The
+generic fix is obligation-driven `recommend_finish_evidence_refs(...)`: choose
+latest evidence events that cover required oracle obligations, accept string
+evidence-ref ids from model output, preserve source-grounding refs, and keep the
+ref list bounded. Validation after the repair: full `tests/test_acceptance.py`
++ `tests/test_implement_lane.py` (`346 passed`), focused dogfood replay/emulator
+slice (`7 passed`), exact `0535` replay, terminal-bench replay dogfood, scoped
+ruff, and `git diff --check` pass. Next live action before speed/proof is another
+10 minute step-shape diagnostic to verify that the finish-gate dead loop is gone
+and the remaining blocker is the true external stdout/runtime behavior gap.

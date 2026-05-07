@@ -46,6 +46,7 @@ from mew.implement_lane.v2_runtime import (
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
     _terminal_failure_reaction_turn_limit,
+    _typed_finish_evidence_refs,
     _typed_retired_legacy_blockers_for_bundle,
 )
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
@@ -4752,6 +4753,137 @@ def test_implement_v2_finish_gate_projects_prior_source_grounding_into_structure
     assert result.status == "completed"
     assert result.metrics["finish_gate_block_count"] == 0
     assert (tmp_path / "frame.bmp").read_text(encoding="utf-8") == "FRAME_QUALITY_OK\n"
+
+
+def test_implement_v2_typed_finish_refs_reserve_source_grounding_slots() -> None:
+    early_results = tuple(
+        ToolResultEnvelope(
+            lane_attempt_id="lane",
+            provider_call_id=f"early-{index}",
+            mew_tool_call_id=f"tool-early-{index}",
+            tool_name="run_command",
+            status="completed",
+            content=(
+                {
+                    "artifact_evidence": [
+                        {
+                            "evidence_id": f"artifact-evidence:early-{index}",
+                            "artifact_id": f"early-{index}",
+                            "path": f"early-{index}.txt",
+                            "status": "passed",
+                            "blocking": False,
+                        }
+                    ]
+                },
+            ),
+        )
+        for index in range(20)
+    )
+    source_result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="read-source",
+        mew_tool_call_id="tool-source",
+        tool_name="read_file",
+        status="completed",
+        content=({"path": "src/source.c", "summary": "read src/source.c", "text": "int main(void) { return 0; }\n"},),
+    )
+    final_result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="final-proof",
+        mew_tool_call_id="tool-final",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "execution_contract_normalized": {
+                    "id": "contract:runtime-artifact",
+                    "role": "runtime",
+                    "stage": "verification",
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                    "expected_artifacts": [
+                        {"id": "frame", "path": "frame.bmp", "required": True},
+                    ],
+                    "verifier_required": True,
+                },
+                "artifact_evidence": [
+                    {
+                        "evidence_id": "artifact-evidence:frame",
+                        "artifact_id": "frame",
+                        "path": "frame.bmp",
+                        "contract_id": "contract:runtime-artifact",
+                        "status": "passed",
+                        "blocking": False,
+                    }
+                ],
+                "verifier_evidence": {
+                    "verifier_id": "verifier:runtime-artifact",
+                    "contract_id": "contract:runtime-artifact",
+                    "verdict": "pass",
+                },
+            },
+        ),
+    )
+
+    refs = _typed_finish_evidence_refs(
+        (*early_results, source_result, final_result),
+        task_description=(
+            "I provided src/source.c, the corresponding source code. "
+            "Build the source-backed runtime artifact so it writes frame.bmp."
+        ),
+    )
+
+    ref_ids = {str(ref.get("id") or "") for ref in refs}
+    assert "ev:artifact:artifact-evidence:frame" in ref_ids
+    assert "ev:verifier:verifier:runtime-artifact" in ref_ids
+    assert "ev:source:src/source.c:read-source" in ref_ids
+    assert len(refs) <= 16
+
+
+def test_implement_v2_typed_finish_refs_reserve_source_grounding_slots_in_fallback() -> None:
+    early_results = tuple(
+        ToolResultEnvelope(
+            lane_attempt_id="lane",
+            provider_call_id=f"early-{index}",
+            mew_tool_call_id=f"tool-early-{index}",
+            tool_name="run_command",
+            status="completed",
+            content=(
+                {
+                    "artifact_evidence": [
+                        {
+                            "evidence_id": f"artifact-evidence:early-{index}",
+                            "artifact_id": f"early-{index}",
+                            "path": f"early-{index}.txt",
+                            "status": "passed",
+                            "blocking": False,
+                        }
+                    ]
+                },
+            ),
+        )
+        for index in range(20)
+    )
+    source_result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="read-source",
+        mew_tool_call_id="tool-source",
+        tool_name="read_file",
+        status="completed",
+        content=({"summary": "read src/source.c", "text": "int main(void) { return 0; }\n"},),
+    )
+
+    refs = _typed_finish_evidence_refs(
+        (*early_results, source_result),
+        task_description=(
+            "I provided src/source.c, the corresponding source code. "
+            "Build the source-backed runtime artifact so it writes frame.bmp."
+        ),
+    )
+
+    ref_ids = {str(ref.get("id") or "") for ref in refs}
+    assert "ev:source:src/source.c:read-source" in ref_ids
+    assert len(refs) <= 16
 
 
 def test_implement_v2_exec_missing_expected_artifact_blocks_result(tmp_path) -> None:

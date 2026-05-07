@@ -1345,6 +1345,49 @@ def resolve_typed_finish(
     return DoneDecision(decision="allow_complete", gate_source="typed_evidence")
 
 
+def recommend_finish_evidence_refs(
+    oracle_bundle: OracleBundle | Mapping[str, Any] | None,
+    evidence_events: tuple[EvidenceEvent | Mapping[str, Any], ...] | list[EvidenceEvent | Mapping[str, Any]],
+    *,
+    limit: int = 16,
+) -> tuple[dict[str, Any], ...]:
+    """Return evidence refs that directly cover required finish obligations.
+
+    This is intentionally obligation-driven. Picking the first N passing events
+    is unstable for long sessions because final verifier/artifact evidence tends
+    to arrive late in the trace.
+    """
+
+    if oracle_bundle is None:
+        return ()
+    bundle = _oracle_bundle(oracle_bundle)
+    events = tuple(_evidence_event(event) for event in evidence_events)
+    refs: list[dict[str, Any]] = []
+    for obligation in bundle.obligations:
+        if not obligation.required:
+            continue
+        covering_event = _covering_event_for_obligation(obligation, events)
+        if covering_event is None:
+            continue
+        if _superseding_failed_event(obligation, covering_event, events) is not None:
+            continue
+        ref = {"kind": "evidence_event", "id": covering_event.id}
+        if ref not in refs:
+            refs.append(ref)
+    if len(refs) < limit:
+        for event in reversed(events):
+            if event.status != "passed":
+                continue
+            if event.kind not in {"verifier_result", "artifact_check", "oracle_check", "source_grounding"}:
+                continue
+            ref = {"kind": "evidence_event", "id": event.id}
+            if ref not in refs:
+                refs.append(ref)
+            if len(refs) >= limit:
+                break
+    return tuple(refs[: max(0, limit)])
+
+
 def _normalize_contract_role(raw: Mapping[str, Any]) -> Role:
     role = _enum(raw.get("role"), ROLES, "")
     if role:
@@ -1686,7 +1729,7 @@ def _finish_claim(value: FinishClaim | Mapping[str, Any]) -> FinishClaim:
     return FinishClaim(
         outcome=str(finish.get("outcome") or finish.get("status") or ""),
         summary=str(finish.get("summary") or raw.get("summary") or ""),
-        evidence_refs=_tuple_dicts(finish.get("evidence_refs") or finish.get("evidence_ref")),
+        evidence_refs=_finish_evidence_refs(finish.get("evidence_refs") or finish.get("evidence_ref")),
         oracle_refs=tuple(str(item) for item in _list(finish.get("oracle_refs")) if str(item)),
         legacy_acceptance_checks=legacy_checks,
     )
@@ -2486,6 +2529,19 @@ def _tuple_dicts(value: object) -> tuple[dict[str, Any], ...]:
     return tuple(dict(item) for item in (_mapping(item) for item in _list(value)) if item)
 
 
+def _finish_evidence_refs(value: object) -> tuple[dict[str, Any], ...]:
+    refs: list[dict[str, Any]] = []
+    for item in _list(value):
+        if isinstance(item, Mapping):
+            mapping = dict(item)
+            if mapping:
+                refs.append(mapping)
+            continue
+        if isinstance(item, str) and item.strip():
+            refs.append({"kind": "evidence_event", "id": item.strip()})
+    return tuple(refs)
+
+
 def _mapping(value: object) -> Mapping[str, Any]:
     if isinstance(value, Mapping):
         return value
@@ -2567,5 +2623,6 @@ __all__ = [
     "classify_execution_failure",
     "derive_verifier_evidence",
     "normalize_execution_contract",
+    "recommend_finish_evidence_refs",
     "semantic_exit_from_run",
 ]

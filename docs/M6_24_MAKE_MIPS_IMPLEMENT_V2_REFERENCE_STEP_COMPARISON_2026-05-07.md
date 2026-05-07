@@ -246,3 +246,58 @@ Current implication:
   first write/edit on runtime-generated artifact tasks, do one recursive source
   pass for output paths/stdout markers and treat source-declared paths as
   authoritative execution-contract targets.
+
+## 2026-05-08 Source-Frontier Pre-Speed Diagnostic
+
+Latest current-head mew artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-source-frontier-make-mips-step-shape-10min-20260508-0535/make-mips-interpreter__u3R5nZ7`
+
+Validation:
+
+- exact replay passes with external reward `0.0`;
+- terminal-bench replay dogfood passes with structured replay mismatch count
+  `0`;
+- runtime finish-gate emulator passes after the follow-up typed ref-selection
+  repair.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing miss; frame existence/similarity pass |
+| mew implement_v2 `0535` | 0/1 | 9m47s Harbor | 27 history turns | 33 tool calls | turn 12 | finish-gate typed evidence ref loop, then model timeout |
+
+Step delta:
+
+1. The source-frontier repair worked. Turn 1 now performs a recursive
+   source/output-path pass before editing. `rg` is absent in the Harbor
+   container, but the model recovers on turn 2 with shell/source probes instead
+   of skipping the frontier entirely.
+2. mew eventually reaches the correct source-declared `/tmp/frame.bmp` path and
+   the external verifier passes frame existence plus reference similarity.
+3. The remaining external score miss is the same class as the saved Codex
+   reference: stdout does not contain the expected
+   `I_InitGraphics: DOOM screen size: w x h: 320 x 200` marker before frame
+   handoff.
+4. The new mew-only inefficiency is after internal verifier success: finish
+   synthesis auto-selected early typed evidence refs, so late final
+   verifier/artifact evidence did not cover required oracle obligations. The
+   gate repeated `missing_typed_obligation` until model timeout.
+
+Repair applied after this diagnostic:
+
+- `recommend_finish_evidence_refs(...)` now selects evidence refs by required
+  oracle obligation coverage instead of first-N passing events.
+- finish parsing accepts string evidence-ref ids as shorthand for
+  `{"kind": "evidence_event", "id": ...}`.
+- implement_v2 still preserves source-grounding refs when adding recommended
+  typed finish refs.
+- response contract now names `finish.evidence_refs` explicitly, while
+  `acceptance_evidence` is only an optional human-readable summary.
+
+Current implication:
+
+- Do not run broad measurement yet.
+- Run one more 10min step-shape diagnostic before `speed_1` / `proof_5`.
+- The next diagnostic should answer whether the finish-gate dead loop is gone.
+  If it is gone, the next generic gap is stdout/runtime behavior alignment, not
+  artifact existence or typed acceptance.

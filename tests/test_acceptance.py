@@ -20,6 +20,7 @@ from mew.implement_lane.execution_evidence import (
     FinishClaim,
     OracleBundle,
     OracleObligation,
+    recommend_finish_evidence_refs,
     resolve_typed_finish,
 )
 
@@ -446,6 +447,95 @@ def test_resolve_typed_finish_uses_latest_artifact_cover_after_same_contract_ret
         ),
         bundle,
         (first_artifact, failed_verifier, latest_artifact, latest_verifier),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_recommend_finish_evidence_refs_selects_late_covering_events():
+    bundle = OracleBundle(
+        id="oracle:bundle:late-artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+            OracleObligation(
+                id="oracle:contract:verify:verifier_pass",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    early_events = tuple(
+        EvidenceEvent(
+            id=f"ev:artifact:early:{index}",
+            kind="artifact_check",
+            status="passed",
+            observed={"artifact_id": f"early-{index}", "path": f"early-{index}.txt"},
+            contract_id=f"contract:early:{index}",
+        )
+        for index in range(20)
+    )
+    latest_artifact = EvidenceEvent(
+        id="ev:artifact:late-frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.bmp"},
+        contract_id="contract:verify",
+    )
+    latest_verifier = EvidenceEvent(
+        id="ev:verifier:late-pass",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:verify"},
+        contract_id="contract:verify",
+    )
+
+    refs = recommend_finish_evidence_refs(bundle, (*early_events, latest_artifact, latest_verifier), limit=16)
+
+    assert {"kind": "evidence_event", "id": "ev:artifact:late-frame"} in refs
+    assert {"kind": "evidence_event", "id": "ev:verifier:late-pass"} in refs
+    assert len(refs) <= 16
+    decision = resolve_typed_finish(FinishClaim(outcome="completed", evidence_refs=refs), bundle, (*early_events, latest_artifact, latest_verifier))
+    assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_accepts_string_evidence_refs():
+    bundle = OracleBundle(
+        id="oracle:bundle:artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.txt"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+
+    decision = resolve_typed_finish(
+        {"outcome": "completed", "evidence_refs": ["ev:artifact:frame"]},
+        bundle,
+        (artifact_event,),
     )
 
     assert decision.decision == "allow_complete"

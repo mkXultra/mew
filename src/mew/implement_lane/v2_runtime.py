@@ -17,7 +17,12 @@ from ..acceptance import (
 )
 from ..errors import ModelBackendError
 from ..work_lanes import IMPLEMENT_V2_LANE
-from .execution_evidence import build_oracle_bundle, evidence_events_from_tool_payload, normalize_execution_contract
+from .execution_evidence import (
+    build_oracle_bundle,
+    evidence_events_from_tool_payload,
+    normalize_execution_contract,
+    recommend_finish_evidence_refs,
+)
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from ..prompt_sections import render_prompt_sections
@@ -3194,7 +3199,8 @@ def _live_json_prompt(
         "finish": {
             "outcome": "continue | completed | blocked | failed",
             "summary": "why this attempt can stop",
-            "acceptance_evidence": ["tool result or verifier evidence refs"],
+            "evidence_refs": [{"kind": "evidence_event", "id": "ev:..."}],
+            "acceptance_evidence": ["optional human-readable evidence summary"],
         },
     }
     if hard_runtime_frontier_state:
@@ -3794,8 +3800,36 @@ def _typed_finish_evidence_refs(
     *,
     task_description: object = "",
 ) -> list[dict[str, object]]:
+    source_refs: list[dict[str, object]] = []
+    for requirement in implementation_contract_source_requirements(task_description):
+        if not isinstance(requirement, dict):
+            continue
+        source_ref = str(requirement.get("path") or "").strip()
+        match = _source_grounding_tool_result(source_ref, tool_results)
+        if match is None:
+            continue
+        tool_index, result = match
+        ref = {"kind": "evidence_event", "id": f"ev:source:{source_ref}:{result.provider_call_id or tool_index}"}
+        if ref not in source_refs:
+            source_refs.append(ref)
+    ref_limit = 16
+    typed_acceptance = _typed_acceptance_session_from_tool_results(tool_results, lane_input=None)
+    recommended = recommend_finish_evidence_refs(
+        typed_acceptance.get("oracle_bundle") if isinstance(typed_acceptance.get("oracle_bundle"), dict) else None,
+        tuple(item for item in typed_acceptance.get("evidence_events") or () if isinstance(item, dict)),
+        limit=max(0, ref_limit - len(source_refs)),
+    )
+    if recommended:
+        refs = [dict(ref) for ref in recommended]
+        for ref in source_refs:
+            if ref not in refs:
+                refs.append(ref)
+        return refs[:ref_limit]
     refs: list[dict[str, object]] = []
+    fallback_limit = max(0, ref_limit - len(source_refs))
     for index, result in enumerate(tool_results, start=1):
+        if len(refs) >= fallback_limit:
+            break
         payload = _first_result_payload(result)
         if not payload:
             continue
@@ -3813,18 +3847,12 @@ def _typed_finish_evidence_refs(
             ref = {"kind": "evidence_event", "id": event.id}
             if ref not in refs:
                 refs.append(ref)
-    for requirement in implementation_contract_source_requirements(task_description):
-        if not isinstance(requirement, dict):
-            continue
-        source_ref = str(requirement.get("path") or "").strip()
-        match = _source_grounding_tool_result(source_ref, tool_results)
-        if match is None:
-            continue
-        tool_index, result = match
-        ref = {"kind": "evidence_event", "id": f"ev:source:{source_ref}:{result.provider_call_id or tool_index}"}
+            if len(refs) >= fallback_limit:
+                break
+    for ref in source_refs:
         if ref not in refs:
             refs.append(ref)
-    return refs[:16]
+    return refs[:ref_limit]
 
 
 def _merge_finish_acceptance_sidecar_checks(
