@@ -4788,12 +4788,199 @@ def _work_oneshot_runtime_artifact_risk_from_report(task, work_report):
     )
 
 
+def _work_oneshot_implement_v2_manifest_path(args):
+    artifacts = str(getattr(args, "oneshot_artifacts", "") or "").strip()
+    if not artifacts:
+        return None
+    path = Path(artifacts) / "implement_v2" / "proof-manifest.json"
+    return path if path.is_file() else None
+
+
+def _work_oneshot_manifest_final_verifier_contract(content):
+    contract = content.get("execution_contract_normalized")
+    if not isinstance(contract, dict):
+        contract = content.get("execution_contract")
+    if not isinstance(contract, dict):
+        return False
+    proof_role = str(contract.get("proof_role") or "").casefold()
+    acceptance_kind = str(contract.get("acceptance_kind") or "").casefold()
+    stage = str(contract.get("stage") or "").casefold()
+    purpose = str(contract.get("purpose") or "").casefold()
+    if acceptance_kind not in {"external_verifier", "candidate_final_proof"}:
+        return False
+    if proof_role not in {"verifier", "final_artifact", "custom_runtime_smoke", "default_smoke"}:
+        return False
+    return stage in {"verification", "artifact_proof", "custom_runtime_smoke", "default_smoke"} or purpose in {
+        "verification",
+        "artifact_proof",
+        "smoke",
+    }
+
+
+def _work_oneshot_manifest_runtime_fresh_context(task, content):
+    task = task if isinstance(task, dict) else {}
+    text = "\n".join(
+        str(value or "")
+        for value in (
+            task.get("title"),
+            task.get("description"),
+            task.get("notes"),
+            content.get("command"),
+            content.get("stdout"),
+            content.get("stdout_tail"),
+            content.get("stderr"),
+            content.get("stderr_tail"),
+        )
+        if value
+    ).casefold()
+    runtime_markers = ("emulator", "fresh run", "interpreter", "node ", "run ", "vm")
+    artifact_markers = ("frame", "frames", "screenshot", "will write", "written", "saved", "bmp")
+    return any(marker in text for marker in runtime_markers) and any(marker in text for marker in artifact_markers)
+
+
+def _work_oneshot_task_explicitly_requires_artifact(task, artifact):
+    task = task if isinstance(task, dict) else {}
+    artifact = str(artifact or "").strip().casefold()
+    if not artifact:
+        return False
+    text = "\n".join(
+        str(value or "")
+        for value in (task.get("title"), task.get("description"), task.get("notes"))
+        if value
+    ).casefold()
+    index = text.find(artifact)
+    if index < 0:
+        return False
+    context = text[max(0, index - 120) : min(len(text), index + len(artifact) + 120)]
+    runtime_created_markers = (
+        "during a fresh",
+        "during the run",
+        "frame",
+        "fresh verifier",
+        "node",
+        "runtime",
+        "screenshot",
+        "verifier",
+        "vm.js",
+        "when run",
+        "when running",
+    )
+    if any(marker in context for marker in runtime_created_markers):
+        return False
+    deliverable_markers = (
+        "answer file",
+        "deliverable",
+        "final output",
+        "required output",
+        "save the output",
+        "submit",
+        "write the result",
+    )
+    return any(marker in context for marker in deliverable_markers)
+
+
+def _work_oneshot_manifest_tmp_artifacts_from_content(task, content):
+    if not isinstance(content, dict):
+        return []
+    verifier = content.get("verifier_evidence") if isinstance(content.get("verifier_evidence"), dict) else {}
+    if str(verifier.get("verdict") or "").casefold() != "pass":
+        return []
+    if not _work_oneshot_manifest_final_verifier_contract(content):
+        return []
+    if not _work_oneshot_manifest_runtime_fresh_context(task, content):
+        return []
+    artifacts = []
+    for item in content.get("artifact_evidence") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").casefold() != "passed":
+            continue
+        kind = str(item.get("kind") or "").casefold()
+        path = str(item.get("path") or item.get("artifact_path") or item.get("artifact_id") or "").strip()
+        if kind != "file" or not path.startswith("/tmp/"):
+            continue
+        if path.endswith((".log", ".txt", ".out", ".stdout", ".stderr")):
+            continue
+        pre_run = item.get("pre_run_stat") if isinstance(item.get("pre_run_stat"), dict) else {}
+        post_run = item.get("post_run_stat") if isinstance(item.get("post_run_stat"), dict) else {}
+        if pre_run.get("exists") is not False or post_run.get("exists") is not True:
+            continue
+        if _work_oneshot_task_explicitly_requires_artifact(task, path):
+            continue
+        if path not in artifacts:
+            artifacts.append(path)
+    return artifacts
+
+
+def _work_oneshot_manifest_cleanup_command(command, artifact):
+    lowered = str(command or "").casefold()
+    artifact = str(artifact or "").casefold()
+    if not artifact or artifact not in lowered:
+        return False
+    return any(marker in lowered for marker in ("rm -f", "unlink", "remove", "removed", "delete", "cleanup"))
+
+
+def _work_oneshot_runtime_artifact_risk_from_implement_v2_manifest(args, *, task=None):
+    manifest_path = _work_oneshot_implement_v2_manifest_path(args)
+    if manifest_path is None:
+        return {}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    tool_results = manifest.get("tool_results") if isinstance(manifest, dict) else []
+    if not isinstance(tool_results, list):
+        return {}
+    latest_created = {}
+    latest_cleaned = {}
+    for index, result in enumerate(tool_results, start=1):
+        if not isinstance(result, dict):
+            continue
+        content_list = result.get("content") if isinstance(result.get("content"), list) else []
+        content = content_list[0] if content_list and isinstance(content_list[0], dict) else {}
+        provider_call_id = result.get("provider_call_id") or index
+        command = str(content.get("command") or "")
+        for artifact in list(latest_created):
+            if _work_oneshot_manifest_cleanup_command(command, artifact):
+                latest_cleaned[artifact] = index
+        if str(result.get("status") or "").casefold() != "completed":
+            continue
+        for artifact in _work_oneshot_manifest_tmp_artifacts_from_content(task, content):
+            latest_created[artifact] = {
+                "index": index,
+                "artifact": artifact,
+                "source_tool_call_id": provider_call_id,
+                "tool": result.get("tool_name") or "",
+                "suggested_cleanup": (
+                    f"preserve proof, then remove stale {artifact} before finish if the verifier creates it"
+                ),
+            }
+    stale = []
+    for artifact, item in latest_created.items():
+        if latest_cleaned.get(artifact, -1) > item.get("index", -1):
+            continue
+        stale.append({key: value for key, value in item.items() if key != "index"})
+    if not stale:
+        return {}
+    return {
+        "kind": "stale_runtime_artifact_risk",
+        "artifacts": stale,
+        "suggested_next": (
+            "runtime self-verification created /tmp artifacts that may short-circuit a fresh external verifier; "
+            "preserve evidence in acceptance_checks, then clean stale runtime artifacts before finish unless "
+            "the task explicitly requires them to pre-exist"
+        ),
+    }
+
+
 def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume, *, task=None, work_report=None):
     if not getattr(args, "defer_verify", False):
         return {}
     risk = (resume or {}).get("stale_runtime_artifact_risk") or {}
     if not risk:
         risk = _work_oneshot_runtime_artifact_risk_from_report(task, work_report)
+    if not risk:
+        risk = _work_oneshot_runtime_artifact_risk_from_implement_v2_manifest(args, task=task)
     artifacts = []
     for item in risk.get("artifacts") or []:
         if not isinstance(item, dict):

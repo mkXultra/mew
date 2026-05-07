@@ -9983,6 +9983,144 @@ class WorkSessionTests(unittest.TestCase):
         finally:
             frame_path.unlink(missing_ok=True)
 
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_uses_implement_v2_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.NamedTemporaryFile(
+            dir="/tmp",
+            delete=False,
+            prefix="mew-frame-",
+            suffix=".bmp",
+        ) as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+            artifacts = Path(tmp) / "artifacts"
+            v2_dir = artifacts / "implement_v2"
+            v2_dir.mkdir(parents=True)
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "final-external-frame-proof",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "command": f"node /app/vm.js && test -s {frame_path}",
+                                        "cwd": "/app",
+                                        "exit_code": 0,
+                                        "stdout": f"I_InitGraphics\nBMP_OK {frame_path}\n",
+                                        "execution_contract_normalized": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "verification",
+                                            "purpose": "verification",
+                                        },
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": str(frame_path),
+                                                "path": str(frame_path),
+                                                "kind": "file",
+                                                "status": "passed",
+                                                "pre_run_stat": {"exists": False, "path": str(frame_path)},
+                                                "post_run_stat": {"exists": True, "path": str(frame_path)},
+                                                "checks": [{"type": "exists", "passed": True}],
+                                            }
+                                        ],
+                                        "verifier_evidence": {"verdict": "pass"},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(defer_verify=True, oneshot_artifacts=str(artifacts))
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(
+                args,
+                {},
+                task={
+                    "title": "runtime frame verifier",
+                    "description": f"Running vm.js writes {frame_path} during a fresh verifier run.",
+                },
+                work_report={"steps": []},
+            )
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"][0]["artifact"], str(frame_path))
+            self.assertEqual(cleanup["artifacts"][0]["source_tool_call_id"], "final-external-frame-proof")
+            self.assertEqual(cleanup["artifacts"][0]["status"], "removed")
+            self.assertFalse(frame_path.exists())
+
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_keeps_legitimate_tmp_deliverable(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.NamedTemporaryFile(
+            dir="/tmp",
+            delete=False,
+            prefix="mew-result-",
+            suffix=".bin",
+        ) as deliverable:
+            deliverable.write(b"result")
+            deliverable_path = Path(deliverable.name)
+            artifacts = Path(tmp) / "artifacts"
+            v2_dir = artifacts / "implement_v2"
+            v2_dir.mkdir(parents=True)
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "deliverable-proof",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "command": f"run renderer && python build_result.py --out {deliverable_path}",
+                                        "cwd": "/app",
+                                        "exit_code": 0,
+                                        "stdout": f"renderer saved {deliverable_path}\n",
+                                        "execution_contract_normalized": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "verification",
+                                            "purpose": "verification",
+                                        },
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": str(deliverable_path),
+                                                "path": str(deliverable_path),
+                                                "kind": "file",
+                                                "status": "passed",
+                                                "pre_run_stat": {"exists": False, "path": str(deliverable_path)},
+                                                "post_run_stat": {"exists": True, "path": str(deliverable_path)},
+                                                "checks": [{"type": "exists", "passed": True}],
+                                            }
+                                        ],
+                                        "verifier_evidence": {"verdict": "pass"},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(defer_verify=True, oneshot_artifacts=str(artifacts))
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(
+                args,
+                {},
+                task={
+                    "title": "run renderer and save result",
+                    "description": f"Run the renderer and save the required output to {deliverable_path}",
+                },
+                work_report={"steps": []},
+            )
+
+            self.assertEqual(cleanup, {})
+            self.assertTrue(deliverable_path.exists())
+        deliverable_path.unlink(missing_ok=True)
+
     def test_work_session_resume_surfaces_final_verifier_state_transfer_gap(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
 

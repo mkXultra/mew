@@ -1794,6 +1794,25 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["external_expected_artifact_missing"], ["/tmp/frame.bmp"])
             self.assertIn("runtime producer/resource/syscall frontier", scenario["artifacts"]["next_action"])
 
+    def test_run_dogfood_m6_24_runtime_artifact_latency_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-runtime-artifact-latency-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=None,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-runtime-artifact-latency-emulator")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["external_verifier_missing_artifacts"], ["/tmp/frame.bmp"])
+            self.assertIn("/tmp/frame.bmp", scenario["artifacts"]["passed_structured_artifacts"])
+            self.assertIn("runtime_artifact_latency_contract", scenario["artifacts"]["next_action"])
+
     def test_run_dogfood_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

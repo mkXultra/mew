@@ -33,6 +33,7 @@ the preflight in `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`.
 | 2026-05-07 13:41 | `mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1341-tool-contract-repair` | `0/1` | stdout/stderr artifact targets normalized incorrectly; external verifier still expected `/tmp/frame.bmp`. | verifier/proof + acceptance normalization |
 | 2026-05-07 14:09 | `mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1409-stream-contract` | `0/1` | Internal structured final verifier passed on `/app/frame000000.bmp` / `/app/frames/frame000000.bmp`, but hidden external verifier expected `/tmp/frame.bmp`; replay now extracts that feedback. | finish-gate projection + external feedback extraction |
 | 2026-05-07 15:11 | `mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1511-external-artifact-feedback` | `0/1` | v2 moved into real runtime task-solving. It attempted syscall, WAD, and frame-path repairs, but stopped with `runtime_artifact_missing`: no `/app/frame0.bmp` or `/tmp/frame.bmp`; stdout shows Doom initialization then `-iwad not specified` / `Trying IWAD file:doom2.wad` / `vm_status=1`. Measurement caveat: Harbor omitted `timeout_seconds` / `{max_wall_seconds_option}`, so continuation gates were disabled. | current repair selection evidence |
+| 2026-05-07 15:59 | `mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1559-runtime-producer-route` | `0/1` | Corrected Harbor timing moved v2 past producer-blocked runtime evidence. Internal final verifier-shaped commands repeatedly passed `/tmp/frame.bmp` and stdout, but external pytest still failed because `/tmp/frame.bmp` was absent and stdout stopped before `I_InitGraphics`. Replay now routes this to `runtime_artifact_latency_contract`: internal proof must match the external verifier's lifecycle/cwd/latency shape, and oneshot cleanup must scan implement_v2 proof manifests for stale `/tmp` runtime artifacts before verifier handoff. | external verifier lifecycle + cleanup projection |
 
 ## Recurring Patterns
 
@@ -91,3 +92,18 @@ Before another live `make-mips-interpreter selected_lane=implement_v2` speed:
 5. run the live speed only with the documented `timeout_seconds` plus
    `{max_wall_seconds_option}` command shape;
 6. only then spend one same-shape live speed.
+
+## 2026-05-07 15:59 Repair Gate
+
+Before another live `make-mips-interpreter selected_lane=implement_v2` speed
+after the runtime-artifact-latency repair:
+
+1. replay the exact `15:59` artifact and assert `external_reward=0` plus
+   `next_action_contains=runtime_artifact_latency_contract`;
+2. dogfood the same artifact through `m6_24-terminal-bench-replay` with the
+   same next-action assertion;
+3. run `m6_24-runtime-artifact-latency-emulator`;
+4. prove `mew work --oneshot --defer-verify` cleanup can derive stale `/tmp`
+   runtime artifacts from `implement_v2/proof-manifest.json`;
+5. validate focused UT plus scoped ruff;
+6. then spend at most one same-shape live speed and classify the next gap.

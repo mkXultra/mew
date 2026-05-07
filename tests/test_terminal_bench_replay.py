@@ -9,6 +9,7 @@ from mew.cli import build_parser
 from mew.dogfood import (
     _write_expected_artifact_contract_emulator_fixture,
     _write_repository_test_tail_emulator_fixture,
+    _write_runtime_artifact_latency_emulator_fixture,
     _write_runtime_producer_blocked_emulator_fixture,
     _write_terminal_bench_replay_fixture,
 )
@@ -1232,6 +1233,29 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertEqual(report["status"], "pass")
             self.assertFalse(current_v2["runtime_artifact_contract_mismatch"])
             self.assertNotIn("artifact ABI/ISA/endianness/entrypoint", next_action)
+
+    def test_replay_terminal_bench_job_routes_external_runtime_artifact_lifecycle_gap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = _write_runtime_artifact_latency_emulator_fixture(tmp)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={
+                    "mew_exit_code": 1,
+                    "external_reward": 0.0,
+                    "next_action_contains": "runtime_artifact_latency_contract",
+                    "structured_replay_mismatch_count": 0,
+                },
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["external_verifier_missing_artifacts"], ["/tmp/frame.bmp"])
+            self.assertEqual(current_v2["external_expected_artifact_missing"], [])
+            self.assertIn("/tmp/frame.bmp", current_v2["passed_structured_artifacts"])
+            self.assertIn("external-verifier-shaped lifecycle/cwd/latency proof", next_action)
 
     def test_replay_terminal_bench_job_does_not_debug_completed_implement_v2_run(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -112,6 +112,7 @@ DOGFOOD_SCENARIOS = (
     "m6_24-expected-artifact-contract-emulator",
     "m6_24-external-artifact-mismatch-emulator",
     "m6_24-runtime-producer-blocked-emulator",
+    "m6_24-runtime-artifact-latency-emulator",
     "m6_24-repository-test-tail-emulator",
     "m6_24-final-verifier-budget-emulator",
     "m6_24-same-family-compatibility-emulator",
@@ -15398,6 +15399,230 @@ def _write_runtime_producer_blocked_emulator_fixture(workspace, *, task="make-mi
     return job_dir
 
 
+def _write_runtime_artifact_latency_emulator_fixture(workspace, *, task="make-mips-interpreter"):
+    job_dir = Path(workspace) / "runtime-artifact-latency-emulator-fixture"
+    trial_name = f"{task}__runtime-artifact-latency"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    v2_dir = artifact_dir / "implement_v2"
+    verifier_dir = trial_dir / "verifier"
+    v2_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "runtime-artifact-latency-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text(
+        "FAILED ../tests/test_outputs.py::test_vm_execution - AssertionError: Expected text not found\n"
+        "FAILED ../tests/test_outputs.py::test_frame_bmp_exists - AssertionError: File /tmp/frame.bmp does not exist\n"
+        "E FileNotFoundError: [Errno 2] No such file or directory: '/tmp/frame.bmp'\n",
+        encoding="utf-8",
+    )
+    report = {
+        "work_exit_code": 1,
+        "post_run_cleanup": {},
+        "resume": {},
+        "work_report": {
+            "stop_reason": "implement_v2_blocked",
+            "runtime_id": "implement_v2_model_json_tool_loop",
+            "selected_lane": "implement_v2",
+            "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+            "implement_lane_result": {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 1,
+                },
+            },
+        },
+    }
+    contract = {
+        "schema_version": 3,
+        "id": "contract:external-frame-final",
+        "role": "runtime",
+        "stage": "verification",
+        "purpose": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "external_verifier",
+        "expected_exit": {"mode": "any"},
+        "expected_artifacts": [
+            {
+                "id": "/tmp/frame.bmp",
+                "kind": "file",
+                "target": {"type": "path", "path": "/tmp/frame.bmp"},
+                "path": "/tmp/frame.bmp",
+                "required": True,
+                "checks": [{"type": "exists"}, {"type": "non_empty"}],
+            },
+            {
+                "id": "stdout",
+                "kind": "stdout",
+                "target": {"type": "stream", "stream": "stdout"},
+                "required": True,
+                "checks": [{"type": "text_contains", "text": "I_InitGraphics"}],
+            },
+        ],
+    }
+    payload = {
+        "command": "rm -f /tmp/frame.bmp && node /app/vm.js && python3 - <<'PY'\nfrom pathlib import Path\nassert Path('/tmp/frame.bmp').exists()\nPY",
+        "cwd": "/app",
+        "exit_code": 0,
+        "status": "completed",
+        "stdout": "I_InitGraphics: DOOM screen size: w x h: 320 x 200\nBMP_OK /tmp/frame.bmp\n",
+        "stdout_tail": "I_InitGraphics: DOOM screen size: w x h: 320 x 200\nBMP_OK /tmp/frame.bmp\n",
+        "stderr": "",
+        "stderr_tail": "",
+        "execution_contract_normalized": contract,
+        "tool_run_record": {
+            "schema_version": 1,
+            "record_id": "tool-run-record:external-frame-final",
+            "command_run_id": "command:external-frame-final",
+            "provider_call_id": "external-frame-final",
+            "declared_tool_name": "run_command",
+            "effective_tool_name": "run_command",
+            "contract_id": "contract:external-frame-final",
+            "status": "completed",
+            "exit_code": 0,
+            "timed_out": False,
+            "interrupted": False,
+            "semantic_exit": {"ok": True, "category": "ok", "source": "default"},
+            "stdout_preview": "I_InitGraphics: DOOM screen size: w x h: 320 x 200\nBMP_OK /tmp/frame.bmp\n",
+            "stderr_preview": "",
+        },
+        "artifact_evidence": [
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:/tmp/frame.bmp",
+                "artifact_id": "/tmp/frame.bmp",
+                "command_run_id": "command:external-frame-final",
+                "tool_run_record_id": "tool-run-record:external-frame-final",
+                "contract_id": "contract:external-frame-final",
+                "path": "/tmp/frame.bmp",
+                "target": {"path": "/tmp/frame.bmp"},
+                "kind": "file",
+                "required": True,
+                "status": "passed",
+                "blocking": False,
+                "checks": [
+                    {"id": "/tmp/frame.bmp:exists:0", "type": "exists", "passed": True, "severity": "blocking"},
+                    {"id": "/tmp/frame.bmp:non_empty:1", "type": "non_empty", "passed": True, "severity": "blocking"},
+                ],
+            },
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:stdout",
+                "artifact_id": "stdout",
+                "command_run_id": "command:external-frame-final",
+                "tool_run_record_id": "tool-run-record:external-frame-final",
+                "contract_id": "contract:external-frame-final",
+                "target": {"stream": "stdout"},
+                "kind": "stdout",
+                "required": True,
+                "status": "passed",
+                "blocking": False,
+                "checks": [
+                    {"id": "stdout:text_contains:0", "type": "text_contains", "passed": True, "severity": "blocking"}
+                ],
+            },
+        ],
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:external-frame-final",
+            "contract_id": "contract:external-frame-final",
+            "verdict": "pass",
+            "reason": "internal final verifier-shaped evidence passed",
+        },
+        "failure_classification": {
+            "schema_version": 1,
+            "classification_id": "failure:contract:external-frame-final",
+            "phase": "unknown",
+            "kind": "unknown_failure",
+            "class": "unknown_failure",
+            "confidence": "low",
+            "retryable": False,
+            "summary": "no structured failure evidence",
+            "evidence_refs": [],
+            "required_next_probe": "",
+        },
+        "structured_finish_gate": {"blocked": False, "reasons": []},
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps({"command": "mew work --oneshot --instruction runtime-artifact-latency", "exit_code": 1, "timed_out": False}),
+        encoding="utf-8",
+    )
+    (v2_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "tool_calls": [
+                        {
+                            "tool_name": "run_command",
+                            "arguments": {"command": payload["command"], "execution_contract": contract},
+                        }
+                    ],
+                }
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (v2_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "tool_results": [
+                    {
+                        "provider_call_id": "external-frame-final",
+                        "tool_name": "run_command",
+                        "status": "completed",
+                        "content": [payload],
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
 def _write_repository_test_tail_emulator_fixture(workspace, *, task="build-cython-ext"):
     job_dir = Path(workspace) / "repository-test-tail-emulator-fixture"
     trial_name = f"{task}__repository-tail"
@@ -16459,6 +16684,63 @@ def run_m6_24_runtime_producer_blocked_emulator_scenario(workspace, *, job_dir=N
         "replay_status": replay.get("status"),
         "structured_execution_replay": structured_replay if isinstance(structured_replay, dict) else {},
         "external_expected_artifact_missing": current_v2.get("external_expected_artifact_missing") or [],
+        "next_action": next_action,
+    }
+    return report
+
+
+def run_m6_24_runtime_artifact_latency_emulator_scenario(workspace, *, job_dir=None):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_runtime_artifact_latency_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="make-mips-interpreter",
+        assertions={
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+            "next_action_contains": "runtime_artifact_latency_contract",
+            "structured_execution_replay_required": True,
+            "structured_replay_mismatch_count": 0,
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_v2 = ((first_trial.get("current") or {}).get("implement_v2") or {})
+    next_action = ((first_trial.get("current") or {}).get("next_action") or "")
+    _scenario_check(
+        checks,
+        "m6_24_runtime_artifact_latency_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_artifact_latency_detects_external_missing_artifact",
+        current_v2.get("external_verifier_missing_artifacts") == ["/tmp/frame.bmp"],
+        current_v2.get("external_verifier_missing_artifacts"),
+        ["/tmp/frame.bmp"],
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_artifact_latency_keeps_internal_pass",
+        "/tmp/frame.bmp" in (current_v2.get("passed_structured_artifacts") or []),
+        current_v2.get("passed_structured_artifacts") or [],
+        "internal structured verifier passed /tmp/frame.bmp",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_artifact_latency_routes_contract_gap",
+        "runtime_artifact_latency_contract" in next_action,
+        next_action,
+        "next action routes to external lifecycle/cwd/latency contract",
+    )
+    report = _scenario_report("m6_24-runtime-artifact-latency-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "replay_status": replay.get("status"),
+        "external_verifier_missing_artifacts": current_v2.get("external_verifier_missing_artifacts") or [],
+        "passed_structured_artifacts": current_v2.get("passed_structured_artifacts") or [],
         "next_action": next_action,
     }
     return report
@@ -18192,6 +18474,13 @@ def run_dogfood_scenario(args):
         elif name == "m6_24-runtime-producer-blocked-emulator":
             reports.append(
                 run_m6_24_runtime_producer_blocked_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-runtime-artifact-latency-emulator":
+            reports.append(
+                run_m6_24_runtime_artifact_latency_emulator_scenario(
                     scenario_workspace,
                     job_dir=getattr(args, "terminal_bench_job_dir", None),
                 )

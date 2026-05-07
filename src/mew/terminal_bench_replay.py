@@ -237,6 +237,7 @@ def _implement_v2_replay_summary(report_path, report):
     ]
     structured_replay = _implement_v2_structured_execution_replay(tool_results)
     external_expected_artifacts = _external_verifier_expected_artifacts(_find_parent_with_result(report_path))
+    external_verifier_missing_artifacts = _external_verifier_missing_artifacts(_find_parent_with_result(report_path))
     passed_structured_artifacts = _implement_v2_passed_structured_artifacts(tool_results)
     external_expected_artifact_missing = [
         path
@@ -268,8 +269,10 @@ def _implement_v2_replay_summary(report_path, report):
         "tool_contract_recovery_observed": _implement_v2_tool_contract_recovery_observed(tool_results),
         "runtime_artifact_contract_mismatch": bool(external_expected_artifact_missing),
         "external_expected_artifacts": external_expected_artifacts,
+        "external_verifier_missing_artifacts": external_verifier_missing_artifacts,
         "passed_structured_artifacts": passed_structured_artifacts,
         "external_expected_artifact_missing": external_expected_artifact_missing,
+        "post_run_cleanup_present": bool((report.get("post_run_cleanup") or _primary_resume(report).get("post_run_cleanup") or {})),
         "legacy_runtime_marker_fallback": legacy_marker_fallback,
         "hard_runtime_frontier_present": isinstance(updated_lane_state.get("lane_hard_runtime_frontier"), dict)
         and bool(updated_lane_state.get("lane_hard_runtime_frontier")),
@@ -291,6 +294,13 @@ def _external_verifier_expected_artifacts(trial_dir):
             if path not in artifacts:
                 artifacts.append(path)
     return artifacts[:12]
+
+
+def _external_verifier_missing_artifacts(trial_dir):
+    # The verifier output is the external ground truth. Keep this separate from
+    # "expected but internally missing" because an internal structured pass can
+    # still fail under the external verifier's cwd/lifecycle/latency contract.
+    return _external_verifier_expected_artifacts(trial_dir)
 
 
 def _tmp_paths_with_expected_context(text):
@@ -831,6 +841,19 @@ def _implement_v2_next_action(summary, *, external_reward=None):
             f"{preview} but internal structured final proof did not create it; "
             "align the final runtime artifact contract before another live speed run"
         )
+    if external_reward == 0.0 and _implement_v2_external_runtime_artifact_lifecycle_gap(summary):
+        missing = summary.get("external_verifier_missing_artifacts") or []
+        preview = ", ".join(str(item) for item in list(missing)[:3])
+        cleanup_note = (
+            "cleanup was recorded; "
+            if summary.get("post_run_cleanup_present")
+            else "no deferred cleanup was recorded; "
+        )
+        return (
+            "debug implement_v2 divergence: runtime_artifact_latency_contract gap for "
+            f"{preview}; {cleanup_note}require an external-verifier-shaped lifecycle/cwd/latency "
+            "proof and clean verifier-visible runtime artifacts before another live speed run"
+        )
     if latest.get("failure_class") == "runtime_artifact_missing":
         required_next_probe = str(latest.get("required_next_probe") or "inspect the producing substep and artifact path")
         return (
@@ -861,6 +884,20 @@ def _implement_v2_next_action(summary, *, external_reward=None):
         tool = latest.get("tool_name") or "tool"
         return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
     return "debug implement_v2 divergence before another live speed run"
+
+
+def _implement_v2_external_runtime_artifact_lifecycle_gap(summary):
+    if not isinstance(summary, dict):
+        return False
+    missing = [str(item or "") for item in summary.get("external_verifier_missing_artifacts") or []]
+    passed = {str(item or "").casefold() for item in summary.get("passed_structured_artifacts") or []}
+    if not missing or not passed:
+        return False
+    for artifact in missing:
+        lowered = artifact.casefold()
+        if lowered.startswith("/tmp/") and lowered in passed:
+            return True
+    return False
 
 
 def _implement_v2_runtime_producer_blocked(summary, latest):
