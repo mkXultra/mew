@@ -3960,6 +3960,305 @@ def test_implement_v2_exec_missing_expected_artifact_blocks_result(tmp_path) -> 
     assert payload["structured_finish_gate"]["blocked"] is True
 
 
+def test_implement_v2_exec_blocks_runtime_advertised_artifact_path_mismatch(tmp_path) -> None:
+    external_path = tmp_path / "external" / "frame.bmp"
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={
+                "mode": "exec",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "artifact-path-mismatch",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": (
+                        f"printf 'Frames will be saved to {external_path}\\n'; "
+                        "printf 'BMpayload' > frame_000000.bmp"
+                    ),
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:runtime-artifact",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_exit": {"mode": "zero"},
+                        "expected_artifacts": [
+                            {
+                                "id": "frame",
+                                "kind": "file",
+                                "path": "frame_000000.bmp",
+                                "freshness": "created_after_run_start",
+                                "checks": [{"type": "exists", "severity": "blocking"}],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "artifact path mismatch"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+    artifact_paths = [item["path"] for item in payload["artifact_evidence"]]
+
+    assert tool_result["status"] == "failed"
+    assert str(external_path) in artifact_paths
+    assert payload["runtime_advertised_expected_artifacts"][0]["path"] == str(external_path)
+    assert payload["artifact_evidence"][0]["path"].endswith("frame_000000.bmp")
+    assert payload["artifact_evidence"][0]["status"] == "passed"
+    assert payload["artifact_evidence"][1]["path"] == str(external_path)
+    assert payload["artifact_evidence"][1]["status"] == "failed"
+    assert payload["failure_classification"]["class"] == "runtime_artifact_missing"
+    assert payload["structured_finish_gate"]["blocked"] is True
+
+
+def test_implement_v2_exec_ignores_unrelated_advertised_artifact_suffix(tmp_path) -> None:
+    log_path = tmp_path / "logs" / "runtime.log"
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={
+                "mode": "exec",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "artifact-path-log",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": (
+                        f"printf 'debug log written to {log_path}\\n'; "
+                        "printf 'BMpayload' > frame_000000.bmp"
+                    ),
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:runtime-artifact",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_exit": {"mode": "zero"},
+                        "expected_artifacts": [
+                            {
+                                "id": "frame",
+                                "kind": "file",
+                                "path": "frame_000000.bmp",
+                                "checks": [{"type": "exists", "severity": "blocking"}],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "artifact path log ignored"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert result.updated_lane_state["proof_manifest"]["tool_results"][0]["status"] == "completed"
+    assert payload.get("runtime_advertised_expected_artifacts") is None
+    assert [item["path"] for item in payload["artifact_evidence"]] == [str(tmp_path / "frame_000000.bmp")]
+    assert payload["structured_finish_gate"]["blocked"] is False
+
+
+def test_implement_v2_exec_ignores_nonproducer_report_output_path(tmp_path) -> None:
+    report_path = tmp_path / "reports" / "result.json"
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={
+                "mode": "exec",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "nonproducer-report-path",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": (
+                        f"printf 'pytest report output: {report_path}\\n'; "
+                        "printf '{\"ok\": true}' > result.json"
+                    ),
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:runtime-report",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_exit": {"mode": "zero"},
+                        "expected_artifacts": [
+                            {
+                                "id": "result",
+                                "kind": "json",
+                                "path": "result.json",
+                                "checks": [{"type": "exists", "severity": "blocking"}],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "report output path ignored"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert result.updated_lane_state["proof_manifest"]["tool_results"][0]["status"] == "completed"
+    assert payload.get("runtime_advertised_expected_artifacts") is None
+    assert [item["path"] for item in payload["artifact_evidence"]] == [str(tmp_path / "result.json")]
+    assert payload["structured_finish_gate"]["blocked"] is False
+
+
+def test_implement_v2_exec_ignores_printf_template_advertised_artifact_path(tmp_path) -> None:
+    template_path = tmp_path / "frames" / "frame_%06d.bmp"
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={
+                "mode": "exec",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "template-artifact-path",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": (
+                        f"printf '%s\\n' 'Frames will be saved to {template_path}'; "
+                        "printf 'BMpayload' > frame_000000.bmp"
+                    ),
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:runtime-artifact-template",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_exit": {"mode": "zero"},
+                        "expected_artifacts": [
+                            {
+                                "id": "frame",
+                                "kind": "file",
+                                "path": "frame_000000.bmp",
+                                "checks": [{"type": "exists", "severity": "blocking"}],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "template path ignored"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert result.updated_lane_state["proof_manifest"]["tool_results"][0]["status"] == "completed"
+    assert payload.get("runtime_advertised_expected_artifacts") is None
+    assert [item["path"] for item in payload["artifact_evidence"]] == [str(tmp_path / "frame_000000.bmp")]
+    assert payload["structured_finish_gate"]["blocked"] is False
+
+
+def test_implement_v2_exec_blocks_stale_runtime_advertised_artifact(tmp_path) -> None:
+    external_path = tmp_path / "external" / "frame.bmp"
+    external_path.parent.mkdir()
+    external_path.write_text("stale", encoding="utf-8")
+    time.sleep(0.01)
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={
+                "mode": "exec",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "stale-advertised-artifact",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": (
+                        f"printf 'Frames will be saved to {external_path}\\n'; "
+                        "printf 'BMpayload' > frame_000000.bmp"
+                    ),
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:runtime-artifact",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_exit": {"mode": "zero"},
+                        "expected_artifacts": [
+                            {
+                                "id": "frame",
+                                "kind": "file",
+                                "path": "frame_000000.bmp",
+                                "checks": [{"type": "exists", "severity": "blocking"}],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "stale artifact path blocked"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+    advertised = payload["artifact_evidence"][1]
+    mtime_check = [check for check in advertised["checks"] if check["type"] == "mtime_after"][0]
+
+    assert result.updated_lane_state["proof_manifest"]["tool_results"][0]["status"] == "failed"
+    assert advertised["path"] == str(external_path)
+    assert advertised["status"] == "failed"
+    assert mtime_check["passed"] is False
+    assert payload["failure_classification"]["class"] == "runtime_artifact_missing"
+
+
 def test_implement_v2_provider_history_surfaces_structured_evidence_summary(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(

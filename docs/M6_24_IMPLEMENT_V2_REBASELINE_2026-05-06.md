@@ -62,6 +62,13 @@ If the 10min proof diverges from that shape, stop before live `speed_1`, record
 the artifact and divergence, and repair the loop/hot-path first. Do not treat a
 10min timeout or incomplete task as a score failure by itself.
 
+Command-shape requirement: the 10min gate must make `--max-wall-seconds 600`
+the final and only effective mew wall option. Do not place Harbor
+`{max_wall_seconds_option}` after it, because that can override the diagnostic
+window and turn the run into normal speed evidence. Either omit
+`{max_wall_seconds_option}` for this diagnostic, or place `--max-wall-seconds
+600` after it so the final CLI value wins.
+
 Use `docs/DESIGN_2026-05-07_M6_24_INTEGRATION_OBSERVABILITY.md` as the repair
 map after a step-shape miss. In particular, prefer the documented
 post-observation tuning order: reduce model-visible proof/frontier weight,

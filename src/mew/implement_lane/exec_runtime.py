@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 from pathlib import Path
 import re
@@ -14,6 +15,8 @@ from ..toolbox import ManagedCommandRunner, is_resident_mew_loop_command, split_
 from .artifact_checks import capture_pre_run_artifact_stats, check_expected_artifacts
 from .execution_evidence import (
     CommandRun,
+    ExecutionContract,
+    ExpectedArtifact,
     ToolRunRecord,
     apply_finish_gate,
     classify_execution_failure,
@@ -33,6 +36,37 @@ RESIDENT_MEW_LOOP_TEXT_RE = re.compile(
     r"(?<![A-Za-z0-9_])(?:\S*/)?mew\s+(?:attach|chat|do|run|session|work)\b"
     r"|(?<![A-Za-z0-9_])(?:\S*/)?python(?:\d+(?:\.\d+)?)?\s+-m\s+mew\s+"
     r"(?:attach|chat|do|run|session|work)\b"
+)
+ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-])(/[A-Za-z0-9_./%+@:=~-]+)")
+ADVERTISED_ARTIFACT_BEFORE_RE = re.compile(
+    r"(?:will\s+be\s+)?(?:saved|written|created|generated|produced|emitted|exported|dumped)"
+    r"\s*(?:as|at|to|in|into|under|:)?\s*$"
+    r"|(?:writes?|saves?|creates?|generates?|produces|emits|exports|dumps)"
+    r"(?:\s+[A-Za-z0-9_.-]+){0,6}\s*(?:as|at|to|in|into|under|:)\s*$",
+    re.IGNORECASE,
+)
+ADVERTISED_ARTIFACT_AFTER_RE = re.compile(
+    r"^\s*(?:was\s+)?(?:saved|written|created|generated|produced|emitted|exported|dumped)\b",
+    re.IGNORECASE,
+)
+ADVERTISED_ARTIFACT_SUFFIXES = frozenset(
+    {
+        ".bmp",
+        ".bin",
+        ".csv",
+        ".db",
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".json",
+        ".log",
+        ".out",
+        ".png",
+        ".ppm",
+        ".report",
+        ".txt",
+        ".wasm",
+    }
 )
 
 
@@ -184,6 +218,7 @@ class ImplementV2ManagedExecRuntime:
                 workspace=self.workspace,
                 allowed_roots=self.allowed_roots,
             )
+        started_epoch = time.time()
         self.runner.start(
             command,
             cwd=str(cwd),
@@ -201,6 +236,7 @@ class ImplementV2ManagedExecRuntime:
             "command_source": command_source,
             "execution_contract_normalized": normalized_contract.as_dict(),
             "pre_run_artifact_stats": pre_run_artifact_stats,
+            "started_epoch": started_epoch,
             "tool_run_record_ids": [],
             **({"execution_contract": dict(args["execution_contract"])} if isinstance(args.get("execution_contract"), dict) else {}),
             **({"tool_contract_recovery": dict(tool_contract_recovery)} if tool_contract_recovery is not None else {}),
@@ -417,12 +453,27 @@ class ImplementV2ManagedExecRuntime:
         )
         metadata["started_at"] = command_run.started_at
         artifact_evidence = ()
+        advertised_artifacts: tuple[ExpectedArtifact, ...] = ()
+        if _is_terminal_record(record):
+            advertised_artifacts = _runtime_advertised_expected_artifacts(
+                contract,
+                payload,
+                allowed_roots=self.allowed_roots,
+            )
+            if advertised_artifacts:
+                contract = replace(
+                    contract,
+                    expected_artifacts=(*contract.expected_artifacts, *advertised_artifacts),
+                )
+                payload["runtime_advertised_expected_artifacts"] = [
+                    artifact.as_dict() for artifact in advertised_artifacts
+                ]
         if _is_terminal_record(record) and contract.expected_artifacts:
             artifact_evidence = check_expected_artifacts(
                 contract,
                 command_run_id=command_run_id,
                 tool_run_record_id=record.record_id,
-                run_started_at=payload.get("started_at") or command_run.started_at,
+                run_started_at=payload.get("started_epoch") or metadata.get("started_epoch") or payload.get("started_at") or command_run.started_at,
                 workspace=self.workspace,
                 allowed_roots=self.allowed_roots,
                 pre_run_stats=metadata.get("pre_run_artifact_stats") if isinstance(metadata.get("pre_run_artifact_stats"), dict) else {},
@@ -453,6 +504,131 @@ class ImplementV2ManagedExecRuntime:
             payload["reason"] = "; ".join(finish_gate.reasons) or "structured execution evidence blocked completion"
             return tuple(effects), payload, "failed"
         return tuple(effects), payload, status
+
+
+def _runtime_advertised_expected_artifacts(
+    contract: ExecutionContract,
+    payload: dict[str, object],
+    *,
+    allowed_roots: tuple[str, ...] | list[str],
+) -> tuple[ExpectedArtifact, ...]:
+    if not _contract_should_enforce_advertised_artifacts(contract):
+        return ()
+    known_paths = {_normalize_path_identity(artifact.path or artifact.target.get("path")) for artifact in contract.expected_artifacts}
+    known_suffixes = {
+        suffix
+        for suffix in (
+            Path(str(artifact.path or artifact.target.get("path") or "")).suffix.casefold()
+            for artifact in contract.expected_artifacts
+        )
+        if suffix
+    }
+    artifacts: list[ExpectedArtifact] = []
+    for path in _advertised_artifact_paths_from_payload(payload):
+        identity = _normalize_path_identity(path)
+        if not identity or identity in known_paths:
+            continue
+        if known_suffixes and Path(path).suffix.casefold() not in known_suffixes:
+            continue
+        if not _path_allowed_by_roots(path, allowed_roots):
+            continue
+        known_paths.add(identity)
+        artifacts.append(
+            ExpectedArtifact(
+                id=path,
+                kind="file",
+                target={"type": "path", "path": path},
+                path=path,
+                required=True,
+                source="runtime_inferred",
+                confidence="medium",
+                freshness="modified_after_run_start",
+                checks=(
+                    {"type": "exists", "severity": "blocking"},
+                    {"type": "non_empty", "severity": "blocking"},
+                    {"type": "mtime_after", "severity": "blocking"},
+                ),
+            )
+        )
+    return tuple(artifacts)
+
+
+def _contract_should_enforce_advertised_artifacts(contract: ExecutionContract) -> bool:
+    if contract.acceptance_kind != "external_verifier" and contract.proof_role != "verifier":
+        return False
+    return contract.role in {"runtime", "verify", "test", "compound"}
+
+
+def _advertised_artifact_paths_from_payload(payload: dict[str, object]) -> tuple[str, ...]:
+    text = "\n".join(
+        str(payload.get(key) or "")
+        for key in ("stdout", "stdout_tail", "stderr", "stderr_tail")
+        if payload.get(key)
+    )
+    if not text:
+        return ()
+    paths: list[str] = []
+    for match in ABSOLUTE_PATH_RE.finditer(text):
+        path = _strip_path_trailing_punctuation(match.group(1))
+        if not _artifact_like_path(path):
+            continue
+        if not _has_runtime_artifact_producer_phrase(text, match.start(), match.end()):
+            continue
+        if path not in paths:
+            paths.append(path)
+    return tuple(paths)
+
+
+def _has_runtime_artifact_producer_phrase(text: str, start: int, end: int) -> bool:
+    before = text[max(0, start - 96) : start]
+    after = text[end : min(len(text), end + 48)]
+    return ADVERTISED_ARTIFACT_BEFORE_RE.search(before) is not None or ADVERTISED_ARTIFACT_AFTER_RE.search(after) is not None
+
+
+def _artifact_like_path(path: str) -> bool:
+    if not path or path.endswith("/"):
+        return False
+    if "%" in path:
+        return False
+    normalized = path.casefold()
+    if "/.mew/" in normalized or "/.git/" in normalized:
+        return False
+    suffix = Path(path).suffix.casefold()
+    return suffix in ADVERTISED_ARTIFACT_SUFFIXES
+
+
+def _strip_path_trailing_punctuation(path: str) -> str:
+    return str(path or "").rstrip("`'\".,;:)]}")
+
+
+def _normalize_path_identity(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return str(Path(text).expanduser().resolve(strict=False)).casefold()
+
+
+def _path_allowed_by_roots(path: str, allowed_roots: tuple[str, ...] | list[str]) -> bool:
+    try:
+        candidate = Path(path).expanduser().resolve(strict=False)
+    except OSError:
+        return False
+    for root in allowed_roots:
+        try:
+            root_path = Path(str(root)).expanduser().resolve(strict=False)
+        except OSError:
+            continue
+        if candidate == root_path or _is_relative_to(candidate, root_path):
+            return True
+    return False
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 def _tool_result_status(payload: dict[str, object]) -> str:
