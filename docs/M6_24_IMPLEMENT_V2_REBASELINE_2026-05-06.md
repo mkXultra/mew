@@ -28,6 +28,47 @@ For each scoped task:
 6. Spend `proof_5` only for close candidates, variance-sensitive repairs, or
    when the controller is ready to resume measurement.
 
+## Pre-Speed Gate
+
+Before spending another live `speed_1` after any repair, run this gate in
+order:
+
+1. focused UT for the repaired behavior and nearby finish/replay/projection
+   invariants;
+2. `mew replay terminal-bench` against the latest relevant saved artifact with
+   assertions matching the selected failure;
+3. `mew dogfood --scenario m6_24-terminal-bench-replay` against the same saved
+   artifact and assertion shape;
+4. any matching same-shape emulator. If no generic emulator exists, add the
+   smallest fixture that reproduces the failure class from saved artifacts;
+5. one 10min step-shape proof for the target task with
+   `selected_lane=implement_v2`, `--max-wall-seconds 600`, full artifact
+   capture, and integration observation enabled when step comparison is the
+   purpose.
+
+The 10min step-shape proof is diagnostic, not scoring evidence. It asks whether
+mew is entering the Codex-like active coding hot path before spending the full
+speed budget:
+
+- cheap source/binary/environment probes are front-loaded and preferably batched;
+- first patch/edit appears early enough for the task class;
+- the patch is coherent rather than many small whole-file rewrites;
+- verification is external-verifier-shaped for path, cwd, lifecycle, and
+  latency;
+- prompt/projection weight is not dominating model turns;
+- repeated same-frontier loops are visible and bounded.
+
+If the 10min proof diverges from that shape, stop before live `speed_1`, record
+the artifact and divergence, and repair the loop/hot-path first. Do not treat a
+10min timeout or incomplete task as a score failure by itself.
+
+Use `docs/DESIGN_2026-05-07_M6_24_INTEGRATION_OBSERVABILITY.md` as the repair
+map after a step-shape miss. In particular, prefer the documented
+post-observation tuning order: reduce model-visible proof/frontier weight,
+strengthen cheap-probe -> coherent-patch -> verifier cadence, keep proof
+objects in sidecars by default, and defer provider-native tools/cache until the
+hot path is thinner.
+
 This means `build-cython-ext` is currently a passing `speed_1` candidate, not a
 reason to immediately rerun another `speed_1`. Its `proof_5` is deferred until
 the rebaseline controller deliberately chooses close proof budget.

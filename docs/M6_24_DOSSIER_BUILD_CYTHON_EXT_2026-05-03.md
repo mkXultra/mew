@@ -160,6 +160,11 @@ artifact first:
    emulator exists, build the smallest fixture that replays a raw model action
    and resume state containing same-family verifier failures plus sibling
    search anchors.
+5. a 10min step-shape proof with `selected_lane=implement_v2` and
+   `--max-wall-seconds 600`. This is diagnostic, not scoring evidence: stop
+   before full `speed_1` if the run has not reached a Codex-like shape
+   (front-loaded cheap probes, early coherent patch, external-verifier-shaped
+   proof, bounded repeated frontier loops, and no prompt/projection blow-up).
 
 The first saved artifact for this pre-speed operation is:
 `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936`.
@@ -179,8 +184,11 @@ Current pre-speed status:
   `mew-m6-24-lifecycle-narrow-build-cython-ext-1attempt-20260505-0935`, detecting
   `finish_false_positive=true`, clean lifecycle projection, and the failed
   external `test_ccomplexity` behavior proof.
+- The 10min step-shape proof was added after this dossier was first written.
+  For any future post-repair `build-cython-ext` speed rerun, run and record
+  that diagnostic before spending a full `speed_1`.
 
-Only after all four pass, spend exactly one `build-cython-ext` `speed_1`.
+Only after all five pass, spend exactly one `build-cython-ext` `speed_1`.
 
 ## Controller Chain
 

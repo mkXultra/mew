@@ -348,11 +348,19 @@ Useful historical files:
    `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`; `make-doom-for-mips` is
    recorded/deferred and should not pull the session into another same-shape
    proof loop.
-2. Commit the reviewed generic `make-mips-interpreter` stdout/stderr
-   expected-artifact stream-contract repair, then run current-head pre-speed.
-3. If pre-speed is green, run exactly one same-shape
-   `make-mips-interpreter selected_lane=implement_v2` speed_1 with
-   task-correct cwd and complete artifact capture.
+2. For the current generic `make-mips-interpreter` repair, run current-head
+   pre-speed using the M6.24 gate in
+   `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`: focused UT, replay,
+   terminal-bench replay dogfood, matching emulator, then a 10min step-shape
+   proof with `selected_lane=implement_v2`, `--max-wall-seconds 600`, complete
+   artifact capture, and integration observation enabled when comparing to
+   Codex steps. If that diagnostic misses the Codex-like shape, use
+   `docs/DESIGN_2026-05-07_M6_24_INTEGRATION_OBSERVABILITY.md` as the repair
+   map before spending full speed budget.
+3. If the pre-speed gate is green and the 10min step-shape proof is Codex-like
+   enough, run exactly one same-shape `make-mips-interpreter
+   selected_lane=implement_v2` speed_1 with task-correct cwd and complete
+   artifact capture.
 4. If any run misses, is harness-invalid, lacks replayable artifacts, or exposes
    a structural lane gap, stop measuring unrelated tasks and repair via
    replay/dogfood/emulator before rerunning the same shape.
