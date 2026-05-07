@@ -69,6 +69,13 @@ window and turn the run into normal speed evidence. Either omit
 `{max_wall_seconds_option}` for this diagnostic, or place `--max-wall-seconds
 600` after it so the final CLI value wins.
 
+Runtime requirement: a 10min gate must also prove that `implement_v2` itself
+honors the wall budget. `--max-wall-seconds 600` must cap the v2 model-turn
+loop and per-turn model timeout; `max_steps` is not allowed to be the effective
+stop condition for this diagnostic. If an artifact runs materially past 600s,
+classify it as a lane-runtime wall-budget bug before interpreting task-solving
+quality.
+
 Use `docs/DESIGN_2026-05-07_M6_24_INTEGRATION_OBSERVABILITY.md` as the repair
 map after a step-shape miss. In particular, prefer the documented
 post-observation tuning order: reduce model-visible proof/frontier weight,

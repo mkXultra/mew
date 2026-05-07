@@ -1282,6 +1282,184 @@ def test_implement_v2_live_json_drains_active_command_at_max_turns(tmp_path) -> 
     assert result.metrics["terminal_evidence_count"] == 1
 
 
+def test_implement_v2_caps_model_timeout_by_remaining_wall_budget(tmp_path) -> None:
+    observed_timeouts = []
+
+    def fake_model(_backend, _auth, _prompt, _model, _base_url, timeout_seconds, **_kwargs):
+        observed_timeouts.append(timeout_seconds)
+        return {
+            "summary": "block after observing timeout",
+            "finish": {"outcome": "blocked", "summary": "blocked intentionally"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"max_wall_seconds": 5},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        timeout=60,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert observed_timeouts
+    assert 0 < observed_timeouts[0] <= 5
+    assert result.metrics["wall_timeout"] == {}
+    assert result.metrics["wall_elapsed_seconds"] >= 0
+
+
+def test_implement_v2_stops_before_next_model_turn_when_wall_budget_exhausted(tmp_path) -> None:
+    calls = 0
+
+    def fake_model(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        time.sleep(0.01)
+        return {
+            "summary": "continue until wall timeout",
+            "tool_calls": [
+                {
+                    "id": f"inspect-{calls}",
+                    "name": "inspect_dir",
+                    "arguments": {"path": "."},
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"max_wall_seconds": 0.001},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        timeout=60,
+        max_turns=3,
+    )
+
+    assert calls == 1
+    assert result.status == "blocked"
+    assert result.user_visible_summary == "implement_v2 wall-clock budget exhausted before finish"
+    assert result.metrics["model_turns"] == 1
+    assert result.metrics["wall_timeout"]["next_turn"] == 2
+    assert "not enough wall-clock budget" in result.metrics["wall_timeout"]["reason"]
+
+
+def test_implement_v2_default_model_callable_uses_work_timeout_guard(monkeypatch, tmp_path) -> None:
+    import mew.work_loop as work_loop
+
+    calls = []
+
+    def fake_guarded_model(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        return {
+            "summary": "blocked through guarded default path",
+            "finish": {"outcome": "blocked", "summary": "guarded default path"},
+        }
+
+    monkeypatch.setattr(work_loop, "call_model_json_with_retries", fake_guarded_model)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"max_wall_seconds": 5},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        timeout=60,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert len(calls) == 1
+    assert calls[0]["args"][5] <= 5
+
+
+def test_implement_v2_blocks_exec_tool_when_wall_budget_exhausted_after_model_turn(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        time.sleep(0.01)
+        return {
+            "summary": "try command after wall is gone",
+            "tool_calls": [
+                {
+                    "id": "too-late-command",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "sleep 0.1; printf done > should_not_exist.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "foreground_budget_seconds": 0.1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"max_wall_seconds": 0.001},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        timeout=60,
+        max_turns=3,
+    )
+
+    manifest = result.updated_lane_state["proof_manifest"]
+    tool_result = manifest["tool_results"][0]
+    assert result.status == "blocked"
+    assert result.user_visible_summary == "implement_v2 wall-clock budget exhausted before tool execution"
+    assert tool_result["status"] == "invalid"
+    assert tool_result["content"][0]["reason"] == "implement_v2_wall_budget_exhausted_before_tool_execution"
+    assert result.metrics["model_turns"] == 1
+    assert result.metrics["wall_timeout"]["reason"] == "not enough wall-clock budget remains for tool execution"
+    assert not (tmp_path / "should_not_exist.txt").exists()
+
+
 def test_implement_v2_live_json_extends_one_reaction_turn_after_final_terminal_failure(tmp_path) -> None:
     outputs = [
         {

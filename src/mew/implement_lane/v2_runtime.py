@@ -65,6 +65,7 @@ _FRONTIER_LIST_LIMIT = 8
 _FRONTIER_TEXT_LIMIT = 500
 _FRONTIER_COMMAND_TEXT_LIMIT = 1200
 _HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT = 4
+_IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS = 0.001
 
 
 @dataclass(frozen=True)
@@ -168,7 +169,7 @@ def run_live_json_implement_v2(
     """
 
     if model_json_callable is None:
-        from ..agent import call_model_json_with_retries as model_json_callable
+        from ..work_loop import call_model_json_with_retries as model_json_callable
 
     mode = str(lane_input.lane_config.get("mode") or "full").strip() or "full"
     lane_attempt_id = _lane_attempt_id(lane_input, mode=mode)
@@ -207,6 +208,7 @@ def run_live_json_implement_v2(
     closeout_payloads: tuple[dict[str, object], ...] = ()
     finish_gate_decision: dict[str, object] = {}
     finish_gate_block_count = 0
+    wall_timeout: dict[str, object] = {}
     run_started = time.monotonic()
     base_max_turns = max(1, int(max_turns))
     turn_budget_limit = base_max_turns
@@ -333,6 +335,24 @@ def run_live_json_implement_v2(
 
     try:
         while turn_index < turn_budget_limit:
+            model_timeout_seconds = _model_turn_timeout_seconds(
+                lane_input,
+                run_started=run_started,
+                requested_timeout=timeout,
+            )
+            if model_timeout_seconds <= 0:
+                wall_timeout = _implement_v2_wall_timeout(
+                    lane_input,
+                    run_started=run_started,
+                    reason="not enough wall-clock budget remains for another model turn",
+                    next_turn=turn_index + 1,
+                    requested_model_timeout=timeout,
+                )
+                finish_arguments = {
+                    "outcome": "blocked",
+                    "summary": "implement_v2 wall-clock budget exhausted before finish",
+                }
+                break
             turn_index += 1
             model_turns = turn_index
             turn_id = f"turn-{turn_index}"
@@ -363,7 +383,7 @@ def run_live_json_implement_v2(
                 current_projection_bytes=_render_prompt_history_json(prompt_history).encode("utf-8"),
                 prompt_descriptor=_prompt_descriptor(prompt),
                 projection_descriptor=_current_projection_descriptor(prompt_history),
-                timeout_seconds=timeout,
+                timeout_seconds=model_timeout_seconds,
                 log_prefix=f"implement_v2 live_json session={lane_input.work_session_id} turn={turn_index}",
             )
             model_turn_output = _call_model_turn(
@@ -523,6 +543,7 @@ def run_live_json_implement_v2(
                 expected_lane_attempt_id=lane_attempt_id,
                 seen_provider_call_ids=seen_provider_call_ids,
             ) + provider_call_id_repairs
+            wall_blocked_tool_execution = False
             if identity_errors:
                 current_results = tuple(
                     build_invalid_tool_result(call, reason=f"tool_call_identity_invalid: {'; '.join(identity_errors)}")
@@ -536,15 +557,32 @@ def run_live_json_implement_v2(
                     approved_write_calls=approved_write_calls,
                     allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
                 )
-                current_results = tuple(
-                    _execute_live_json_tool(
+                executed_calls = []
+                current_results_list = []
+                for call in current_calls:
+                    capped_call, block_result, block_timeout = _wall_budget_gate_tool_call(
                         call,
                         lane_input=lane_input,
-                        exec_runtime=exec_runtime,
-                        write_runtime=write_runtime,
+                        run_started=run_started,
                     )
-                    for call in current_calls
-                )
+                    if block_timeout:
+                        wall_timeout = dict(block_timeout)
+                    if block_result is not None:
+                        executed_calls.append(capped_call)
+                        current_results_list.append(block_result)
+                        wall_blocked_tool_execution = True
+                        break
+                    executed_calls.append(capped_call)
+                    current_results_list.append(
+                        _execute_live_json_tool(
+                            capped_call,
+                            lane_input=lane_input,
+                            exec_runtime=exec_runtime,
+                            write_runtime=write_runtime,
+                        )
+                    )
+                current_calls = tuple(executed_calls)
+                current_results = tuple(current_results_list)
             seen_provider_call_ids.update(call.provider_call_id for call in current_calls if call.provider_call_id)
             finish_gate_tool_results = tuple(tool_results) + tuple(current_results)
             if _should_closeout_for_terminal_failure_reaction(
@@ -619,6 +657,12 @@ def run_live_json_implement_v2(
                     f"implement_v2 turn #{turn_index}: "
                     f"{len(current_calls)} call(s), statuses={','.join(result.status for result in current_results)}"
                 )
+            if wall_blocked_tool_execution:
+                finish_arguments = {
+                    "outcome": "blocked",
+                    "summary": "implement_v2 wall-clock budget exhausted before tool execution",
+                }
+                break
             if _finish_outcome(finish_arguments) not in {"", "continue"}:
                 finish_gate_decision = _live_acceptance_done_gate(
                     lane_input,
@@ -795,6 +839,8 @@ def run_live_json_implement_v2(
             "orphaned_command_cleanup_count": len(cleanup_payloads),
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
+            "wall_timeout": dict(wall_timeout),
+            "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
             "integration_observation": integration_observation,
         },
     )
@@ -859,6 +905,8 @@ def run_live_json_implement_v2(
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
+            "wall_timeout": dict(wall_timeout),
+            "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
             "prompt_chars_total": prompt_chars_total,
             "prompt_sections": prompt_metrics,
             "write_evidence_count": _write_evidence_count(tool_results),
@@ -1442,6 +1490,100 @@ def _remaining_wall_budget_seconds(lane_input: ImplementLaneInput, *, run_starte
     except (TypeError, ValueError):
         return None
     return max(0.0, min(600.0, remaining))
+
+
+def _model_turn_timeout_seconds(
+    lane_input: ImplementLaneInput,
+    *,
+    run_started: float,
+    requested_timeout: float,
+) -> float:
+    try:
+        timeout = max(0.0, float(requested_timeout))
+    except (TypeError, ValueError):
+        timeout = 0.0
+    remaining_wall = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    if remaining_wall is None:
+        return timeout
+    if remaining_wall <= 0:
+        return 0.0
+    if timeout <= 0:
+        return max(_IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS, remaining_wall)
+    return min(timeout, max(_IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS, remaining_wall))
+
+
+def _wall_budget_gate_tool_call(
+    call: ToolCallEnvelope,
+    *,
+    lane_input: ImplementLaneInput,
+    run_started: float,
+) -> tuple[ToolCallEnvelope, ToolResultEnvelope | None, dict[str, object]]:
+    if call.tool_name not in {"run_command", "run_tests", "poll_command"}:
+        return call, None, {}
+    remaining_wall = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    if remaining_wall is None:
+        return call, None, {}
+    if remaining_wall <= 0:
+        wall_timeout = _implement_v2_wall_timeout(
+            lane_input,
+            run_started=run_started,
+            reason="not enough wall-clock budget remains for tool execution",
+            next_turn=call.turn_index,
+            requested_model_timeout=0.0,
+        )
+        return (
+            call,
+            build_invalid_tool_result(
+                call,
+                reason="implement_v2_wall_budget_exhausted_before_tool_execution",
+            ),
+            wall_timeout,
+        )
+    args = dict(call.arguments)
+    if call.tool_name in {"run_command", "run_tests"}:
+        args["foreground_budget_seconds"] = _cap_optional_seconds(
+            args.get("foreground_budget_seconds"),
+            default=min(15.0, max(0.0, remaining_wall)),
+            cap=remaining_wall,
+        )
+        if args.get("timeout") not in (None, ""):
+            args["timeout"] = _cap_optional_seconds(args.get("timeout"), default=remaining_wall, cap=remaining_wall)
+    elif call.tool_name == "poll_command":
+        args["wait_seconds"] = _cap_optional_seconds(args.get("wait_seconds"), default=0.0, cap=remaining_wall)
+    return replace(call, arguments=args), None, {}
+
+
+def _cap_optional_seconds(value: object, *, default: float, cap: float) -> float:
+    try:
+        seconds = float(value) if value not in (None, "") else float(default)
+    except (TypeError, ValueError):
+        seconds = float(default)
+    return max(0.0, min(max(0.0, float(cap)), seconds))
+
+
+def _implement_v2_wall_timeout(
+    lane_input: ImplementLaneInput,
+    *,
+    run_started: float,
+    reason: str,
+    next_turn: int,
+    requested_model_timeout: float,
+) -> dict[str, object]:
+    elapsed = max(0.0, time.monotonic() - run_started)
+    max_wall = lane_input.task_contract.get("max_wall_seconds")
+    try:
+        max_wall_seconds = float(max_wall) if max_wall not in (None, "") else None
+    except (TypeError, ValueError):
+        max_wall_seconds = None
+    remaining = None if max_wall_seconds is None else max(0.0, max_wall_seconds - elapsed)
+    return {
+        "elapsed_seconds": round(elapsed, 3),
+        "max_wall_seconds": max_wall_seconds,
+        "next_turn": int(next_turn),
+        "remaining_seconds": None if remaining is None else round(remaining, 3),
+        "requested_model_timeout_seconds": round(max(0.0, float(requested_model_timeout or 0.0)), 3),
+        "reason": reason,
+    }
 
 
 def _terminal_failure_reaction_turn_limit(lane_input: ImplementLaneInput, base_max_turns: int) -> int:
