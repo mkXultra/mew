@@ -301,3 +301,56 @@ Current implication:
 - The next diagnostic should answer whether the finish-gate dead loop is gone.
   If it is gone, the next generic gap is stdout/runtime behavior alignment, not
   artifact existence or typed acceptance.
+
+## 2026-05-08 Typed-Ref Selection Pre-Speed Diagnostic
+
+Latest current-head mew artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-typed-ref-selection-make-mips-step-shape-10min-20260508-0608/make-mips-interpreter__eaxj8GH`
+
+Validation:
+
+- exact replay passes with external reward `0.0`;
+- terminal-bench replay dogfood passes with structured replay mismatch count
+  `0`;
+- runtime finish-gate emulator passes.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing miss; frame existence/similarity pass |
+| mew implement_v2 `0608` | 0/1 | 5m51s Harbor | 12 history turns | 24 tool calls | turn 8 | runtime artifact missing, then transient model backend error |
+
+Step delta:
+
+1. The typed-finish `missing_typed_obligation` loop did not recur. The repair
+   succeeded for the observed failure class.
+2. mew now reaches a coherent `vm.js` write at turn 8 and follows a compact
+   runtime-repair path until `node vm.js` fails with
+   `unimplemented SPECIAL fn=52` before `/tmp/frame.bmp` exists.
+3. Replay classifies the latest concrete runtime failure as
+   `runtime_artifact_missing` with `required_next_probe=Inspect the producing
+   substep and artifact path before another rebuild.`
+4. The live run then stopped on `Codex Web API error:
+   IncompleteRead(5188 bytes read)` before the next patch. This is not a
+   make-mips acceptance blocker; it exposes a generic implement_v2 transport
+   gap where transient backend errors were converted into lane failure instead
+   of being retried inside the same model turn.
+
+Repair applied after this diagnostic:
+
+- `_call_model_turn(...)` now retries one transient `model_backend_error` such
+  as `IncompleteRead`, connection resets, rate limits, overloads, and 5xx
+  backend failures.
+- `model_timeout` and `model_json_parse_error` remain replayable lane failures
+  and are not retried by this patch.
+- retry count is recorded in the model response shape and observation when a
+  transient retry happens.
+
+Current implication:
+
+- Do not run broad measurement yet.
+- After review/commit, run one more 10min `make-mips-interpreter
+  selected_lane=implement_v2` step-shape diagnostic before `speed_1` /
+  `proof_5`.
+- The next diagnostic should distinguish a true runtime-special-instruction
+  repair gap from transient backend noise.

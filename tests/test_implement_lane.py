@@ -533,6 +533,83 @@ def test_implement_v2_model_turn_boundary_error_descriptor_omits_raw_prompt() ->
     assert output.observation["prompt"] == {"chars": len(prompt), "sha256": "sha256:prompt"}
 
 
+def test_implement_v2_model_turn_retries_transient_backend_error_once() -> None:
+    prompt = "return a small JSON action"
+    turn_input = ModelTurnInput(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id="attempt-1",
+        turn_id="turn-1",
+        turn_index=1,
+        transport="model_json",
+        model_backend="codex",
+        model="gpt-5.5",
+        rendered_prompt=prompt,
+        current_projection_bytes=b"[]",
+        prompt_descriptor={"chars": len(prompt), "sha256": "sha256:prompt"},
+        projection_descriptor={"current_projection_chars": 2, "current_projection_sha256": "sha256:projection"},
+        timeout_seconds=5,
+        log_prefix="test",
+    )
+    calls = []
+
+    def fake_model(*_args, **_kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise ModelBackendError("Codex Web API error: IncompleteRead(5188 bytes read)")
+        return {
+            "summary": "retry succeeded",
+            "tool_calls": [],
+            "finish": {"outcome": "failed", "summary": "not done"},
+        }
+
+    output = _call_model_turn(
+        turn_input,
+        model_json_callable=fake_model,
+        model_auth={"path": "auth.json"},
+        base_url="",
+    )
+
+    assert len(calls) == 2
+    assert output.model_error == {}
+    assert output.normalized_payload["summary"] == "retry succeeded"
+    assert output.response_shape["retry_count"] == 1
+    assert output.observation["model_retry_count"] == 1
+
+
+def test_implement_v2_model_turn_does_not_retry_json_parse_error() -> None:
+    prompt = "bad JSON response"
+    turn_input = ModelTurnInput(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id="attempt-1",
+        turn_id="turn-1",
+        turn_index=1,
+        transport="model_json",
+        model_backend="codex",
+        model="gpt-5.5",
+        rendered_prompt=prompt,
+        current_projection_bytes=b"[]",
+        prompt_descriptor={"chars": len(prompt), "sha256": "sha256:prompt"},
+        projection_descriptor={"current_projection_chars": 2, "current_projection_sha256": "sha256:projection"},
+        timeout_seconds=5,
+        log_prefix="test",
+    )
+    calls = []
+
+    def fake_model(*_args, **_kwargs):
+        calls.append(True)
+        raise ModelBackendError('failed to parse JSON plan: Extra data; raw={"summary":"bad"} trailing')
+
+    output = _call_model_turn(
+        turn_input,
+        model_json_callable=fake_model,
+        model_auth={"path": "auth.json"},
+        base_url="",
+    )
+
+    assert len(calls) == 1
+    assert output.model_error["failure_class"] == "model_json_parse_error"
+
+
 def test_implement_v2_prompt_history_render_helper_matches_existing_json_shape() -> None:
     history = tuple({"turn": index, "summary": f"履歴 {index}"} for index in range(1, 11))
 

@@ -72,6 +72,24 @@ _FRONTIER_TEXT_LIMIT = 500
 _FRONTIER_COMMAND_TEXT_LIMIT = 1200
 _HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT = 4
 _IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS = 0.001
+_IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS = (0.0,)
+_IMPLEMENT_V2_TRANSIENT_MODEL_ERROR_MARKERS = (
+    "incompleteread",
+    "connection reset",
+    "connection aborted",
+    "connection broken",
+    "connection",
+    "temporarily",
+    "temporary",
+    "rate limit",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "529",
+    "overload",
+)
 
 
 @dataclass(frozen=True)
@@ -3386,6 +3404,13 @@ def _live_json_model_error(exc: BaseException) -> dict[str, object]:
     }
 
 
+def _live_json_model_error_retryable(model_error: dict[str, object]) -> bool:
+    if str(model_error.get("failure_class") or "") != "model_backend_error":
+        return False
+    message = str(model_error.get("message") or "").casefold()
+    return any(marker in message for marker in _IMPLEMENT_V2_TRANSIENT_MODEL_ERROR_MARKERS)
+
+
 def _extract_raw_excerpt_from_model_error(message: str, limit: int = 500) -> str:
     marker = "raw="
     index = message.find(marker)
@@ -4598,24 +4623,66 @@ def _call_model_turn(
     if progress:
         progress(f"implement_v2 turn #{turn_input.turn_index}: model_json start")
     started = time.monotonic()
-    try:
-        payload = model_json_callable(
-            turn_input.model_backend,
-            model_auth,
-            turn_input.rendered_prompt,
-            turn_input.model,
-            base_url,
-            turn_input.timeout_seconds,
-            log_prefix=turn_input.log_prefix,
-        )
-    except ModelBackendError as exc:
-        elapsed = time.monotonic() - started
-        model_error = _live_json_model_error(exc)
-        if progress:
-            progress(
-                f"implement_v2 turn #{turn_input.turn_index}: model_json failed "
-                f"class={model_error.get('failure_class')}"
+    retry_count = 0
+    for attempt_index, delay in enumerate((0.0, *_IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS), start=1):
+        if delay:
+            time.sleep(delay)
+        try:
+            payload = model_json_callable(
+                turn_input.model_backend,
+                model_auth,
+                turn_input.rendered_prompt,
+                turn_input.model,
+                base_url,
+                turn_input.timeout_seconds,
+                log_prefix=turn_input.log_prefix,
             )
+            break
+        except ModelBackendError as exc:
+            elapsed = time.monotonic() - started
+            model_error = _live_json_model_error(exc)
+            should_retry = (
+                attempt_index <= len(_IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS)
+                and _live_json_model_error_retryable(model_error)
+            )
+            if should_retry:
+                retry_count += 1
+                if progress:
+                    progress(
+                        f"implement_v2 turn #{turn_input.turn_index}: model_json transient failure "
+                        f"class={model_error.get('failure_class')} retry={retry_count}"
+                    )
+                continue
+            if retry_count:
+                model_error["retry_count"] = retry_count
+            if progress:
+                progress(
+                    f"implement_v2 turn #{turn_input.turn_index}: model_json failed "
+                    f"class={model_error.get('failure_class')}"
+                )
+            response_shape = _model_response_shape({}, model_error=model_error)
+            if retry_count:
+                response_shape["retry_count"] = retry_count
+            observation = _model_turn_observation(turn_input, {}, elapsed_seconds=elapsed, model_error=model_error)
+            if retry_count:
+                observation["model_retry_count"] = retry_count
+            return ModelTurnOutput(
+                payload={},
+                normalized_payload={},
+                elapsed_seconds=elapsed,
+                prompt_chars=len(turn_input.rendered_prompt),
+                response_shape=response_shape,
+                model_error=model_error,
+                observation=observation,
+            )
+    else:  # pragma: no cover - defensive; the loop always returns or breaks.
+        elapsed = time.monotonic() - started
+        model_error = {
+            "failure_class": "model_backend_error",
+            "error_type": "ModelBackendError",
+            "message": "model_json call failed before producing a payload",
+            "raw_excerpt": "",
+        }
         return ModelTurnOutput(
             payload={},
             normalized_payload={},
@@ -4628,14 +4695,19 @@ def _call_model_turn(
 
     elapsed = time.monotonic() - started
     normalized = _normalize_live_json_payload(payload, turn_index=turn_input.turn_index)
+    response_shape = _model_response_shape(normalized, model_error={})
+    observation = _model_turn_observation(turn_input, normalized, elapsed_seconds=elapsed, model_error={})
+    if retry_count:
+        response_shape["retry_count"] = retry_count
+        observation["model_retry_count"] = retry_count
     return ModelTurnOutput(
         payload=payload,
         normalized_payload=normalized,
         elapsed_seconds=elapsed,
         prompt_chars=len(turn_input.rendered_prompt),
-        response_shape=_model_response_shape(normalized, model_error={}),
+        response_shape=response_shape,
         model_error={},
-        observation=_model_turn_observation(turn_input, normalized, elapsed_seconds=elapsed, model_error={}),
+        observation=observation,
     )
 
 
