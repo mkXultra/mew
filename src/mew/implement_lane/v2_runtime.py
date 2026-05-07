@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path, PurePosixPath
 import re
 import time
@@ -59,6 +60,7 @@ _HARD_RUNTIME_FRONTIER_SCHEMA_VERSION = 1
 _FRONTIER_LIST_LIMIT = 8
 _FRONTIER_TEXT_LIMIT = 500
 _FRONTIER_COMMAND_TEXT_LIMIT = 1200
+_HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT = 4
 
 
 def describe_implement_v2_runtime(*, work_session_id: object, task_id: object) -> dict[str, object]:
@@ -169,6 +171,12 @@ def run_live_json_implement_v2(
     turn_budget_limit = base_max_turns
     terminal_failure_reaction_turn_limit = _terminal_failure_reaction_turn_limit(lane_input, base_max_turns)
     terminal_failure_reaction_turns_used = 0
+    hard_runtime_progress_continuation_turn_limit = _hard_runtime_progress_continuation_turn_limit(
+        lane_input,
+        base_max_turns=base_max_turns,
+    )
+    hard_runtime_progress_continuation_turns_used = 0
+    hard_runtime_progress_signatures_seen: set[str] = set()
     tool_contract_recovery_turn_limit = _tool_contract_recovery_turn_limit(lane_input)
     tool_contract_recovery_turns_used = 0
     tool_contract_recovery_instruction = ""
@@ -180,7 +188,9 @@ def run_live_json_implement_v2(
         reason: str,
     ) -> bool:
         nonlocal terminal_failure_reaction_turns_used, turn_budget_limit
-        if not _should_extend_for_terminal_failure_reaction(
+        nonlocal terminal_failure_reaction_turn_limit, hard_runtime_progress_continuation_turns_used
+        progress_signature = _hard_runtime_frontier_progress_signature(hard_runtime_frontier_state)
+        if _should_extend_for_terminal_failure_reaction(
             lane_input,
             tool_result_slice,
             turn_index=turn_index,
@@ -189,7 +199,25 @@ def run_live_json_implement_v2(
             reaction_turn_limit=terminal_failure_reaction_turn_limit,
             run_started=run_started,
         ):
-            return False
+            if progress_signature:
+                hard_runtime_progress_signatures_seen.add(progress_signature)
+        else:
+            progress_signature = _hard_runtime_progress_continuation_signature(
+                lane_input,
+                tool_result_slice,
+                hard_runtime_frontier_state,
+                seen_signatures=hard_runtime_progress_signatures_seen,
+                reaction_turns_used=terminal_failure_reaction_turns_used,
+                reaction_turn_limit=terminal_failure_reaction_turn_limit,
+                progress_turns_used=hard_runtime_progress_continuation_turns_used,
+                progress_turn_limit=hard_runtime_progress_continuation_turn_limit,
+                run_started=run_started,
+            )
+            if not progress_signature:
+                return False
+            hard_runtime_progress_continuation_turns_used += 1
+            terminal_failure_reaction_turn_limit += 1
+            hard_runtime_progress_signatures_seen.add(progress_signature)
         terminal_failure_reaction_turns_used += 1
         turn_budget_limit += 1
         if progress:
@@ -658,6 +686,8 @@ def run_live_json_implement_v2(
             "turn_budget_limit": turn_budget_limit,
             "terminal_failure_reaction_turn_limit": terminal_failure_reaction_turn_limit,
             "terminal_failure_reaction_turns_used": terminal_failure_reaction_turns_used,
+            "hard_runtime_progress_continuation_turn_limit": hard_runtime_progress_continuation_turn_limit,
+            "hard_runtime_progress_continuation_turns_used": hard_runtime_progress_continuation_turns_used,
             "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "command_closeout_count": len(closeout_payloads),
@@ -720,6 +750,8 @@ def run_live_json_implement_v2(
             "turn_budget_limit": turn_budget_limit,
             "terminal_failure_reaction_turn_limit": terminal_failure_reaction_turn_limit,
             "terminal_failure_reaction_turns_used": terminal_failure_reaction_turns_used,
+            "hard_runtime_progress_continuation_turn_limit": hard_runtime_progress_continuation_turn_limit,
+            "hard_runtime_progress_continuation_turns_used": hard_runtime_progress_continuation_turns_used,
             "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "finish_gate_block_count": finish_gate_block_count,
@@ -1338,6 +1370,22 @@ def _uses_expanded_hard_runtime_reaction_budget(lane_input: ImplementLaneInput, 
         return False
 
 
+def _hard_runtime_progress_continuation_turn_limit(
+    lane_input: ImplementLaneInput,
+    *,
+    base_max_turns: int,
+) -> int:
+    configured = lane_input.lane_config.get("hard_runtime_progress_continuation_turns")
+    if configured not in (None, ""):
+        try:
+            return max(0, min(8, int(configured)))
+        except (TypeError, ValueError):
+            return 0
+    if not _uses_expanded_hard_runtime_reaction_budget(lane_input, base_max_turns=base_max_turns):
+        return 0
+    return _HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT
+
+
 def _tool_contract_recovery_turn_limit(lane_input: ImplementLaneInput) -> int:
     configured = lane_input.lane_config.get("tool_contract_recovery_turns")
     if configured not in (None, ""):
@@ -1384,6 +1432,81 @@ def _should_extend_for_terminal_failure_reaction(
     except (TypeError, ValueError):
         minimum_wall = 30.0
     return remaining_wall >= max(0.0, minimum_wall)
+
+
+def _hard_runtime_progress_continuation_signature(
+    lane_input: ImplementLaneInput,
+    tool_results: tuple[ToolResultEnvelope, ...],
+    frontier_state: dict[str, object],
+    *,
+    seen_signatures: set[str],
+    reaction_turns_used: int,
+    reaction_turn_limit: int,
+    progress_turns_used: int,
+    progress_turn_limit: int,
+    run_started: float,
+) -> str:
+    if reaction_turns_used < reaction_turn_limit:
+        return ""
+    if progress_turns_used >= progress_turn_limit:
+        return ""
+    if not _has_terminal_failure_result(tool_results):
+        return ""
+    remaining_wall = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    if remaining_wall is not None:
+        configured_minimum = lane_input.lane_config.get("terminal_failure_reaction_min_wall_seconds")
+        try:
+            minimum_wall = float(configured_minimum) if configured_minimum not in (None, "") else 30.0
+        except (TypeError, ValueError):
+            minimum_wall = 30.0
+        if remaining_wall < max(0.0, minimum_wall):
+            return ""
+    signature = _hard_runtime_frontier_progress_signature(frontier_state)
+    if not signature or signature in seen_signatures:
+        return ""
+    return signature
+
+
+def _hard_runtime_frontier_progress_signature(frontier_state: dict[str, object] | None) -> str:
+    """Return a stable signature only for actionable hard-runtime frontier progress."""
+
+    if not isinstance(frontier_state, dict):
+        return ""
+    runtime_failure = frontier_state.get("latest_runtime_failure")
+    if not isinstance(runtime_failure, dict):
+        return ""
+    final_artifact = frontier_state.get("final_artifact")
+    final_artifact_map = final_artifact if isinstance(final_artifact, dict) else {}
+    build_target = frontier_state.get("build_target")
+    build_target_map = build_target if isinstance(build_target, dict) else {}
+    artifact_path = str(final_artifact_map.get("path") or "").strip()
+    build_artifact_path = str(
+        build_target_map.get("artifact_path") or build_target_map.get("target") or build_target_map.get("path") or ""
+    ).strip()
+    failure_class = str(runtime_failure.get("failure_class") or "").strip()
+    failure_phase = str(runtime_failure.get("failure_phase") or "").strip()
+    if not artifact_path and not build_artifact_path:
+        return ""
+    if failure_phase and failure_phase != "runtime":
+        return ""
+    if failure_class and failure_class not in {"runtime_artifact_missing", "runtime_failure", "verification_failure"}:
+        return ""
+    stdout_tail = str(runtime_failure.get("stdout_tail") or "").strip()
+    stderr_tail = str(runtime_failure.get("stderr_tail") or "").strip()
+    if not (stdout_tail or stderr_tail or str(final_artifact_map.get("status") or "").strip()):
+        return ""
+    payload = {
+        "artifact_path": artifact_path,
+        "artifact_status": str(final_artifact_map.get("status") or "").strip(),
+        "build_artifact_path": build_artifact_path,
+        "failure_class": failure_class,
+        "failure_kind": str(runtime_failure.get("failure_kind") or "").strip(),
+        "failure_phase": failure_phase,
+        "stdout_tail": stdout_tail,
+        "stderr_tail": stderr_tail,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8", errors="replace")
+    return hashlib.sha256(encoded).hexdigest()[:24]
 
 
 def _should_closeout_for_terminal_failure_reaction(

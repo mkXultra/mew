@@ -493,6 +493,33 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   artifact, scoped ruff, and `git diff --check`. Next action is current-head
   pre-speed, then exactly one same-shape `make-doom-for-mips`
   `selected_lane=implement_v2` speed_1 if green.
+- Same-shape speed update on 2026-05-07 JST: the post-continuation-gate rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-hard-runtime-continuation-make-doom-speed1-20260507-0948`
+  scored reward `0.0` with runner errors `0` and total runtime `18m57s`.
+  This was not a regression: v2 advanced from the previous `PC=0x0` / 8
+  instruction frontier to a source-backed Doom runtime that reached
+  `PC=0x40c848` after `4,634,462` instructions, but still failed to produce
+  `/tmp/frame.bmp`. Exact replay and terminal-bench replay dogfood pass with
+  latest structured failure `runtime_artifact_missing` and mismatch count `0`.
+  The next repair is a generic progress-sensitive continuation credit: after
+  the normal hard-runtime reaction budget is exhausted, grant a small bounded
+  extra credit only when the frontier signature has demonstrably changed
+  (for example a new runtime artifact failure signature with fresh runtime
+  stdout/stderr evidence) and wall budget remains. It must not globally raise
+  max turns or add Doom/MIPS rules.
+- Progress-continuation repair on 2026-05-07 JST: `implement_v2` now tracks
+  hard-runtime frontier progress signatures and can grant up to four additional
+  configured/default continuation credits only after the base hard-runtime
+  reaction budget is exhausted and a new actionable runtime frontier signature
+  appears. Identical runtime-artifact misses are not eligible. Local validation
+  passed with focused UT, full `tests/test_implement_lane.py` +
+  `tests/test_dogfood.py`, the new
+  `m6_24-implement-v2-hard-runtime-progress-continuation-emulator`, exact
+  `0948` replay, exact `0948` terminal-bench replay dogfood, scoped ruff, and
+  `git diff --check`. codex-ultra review session
+  `019e000e-15b5-71c0-b3bb-fb0861076cec` approved with no findings. Next
+  action after commit is current-head pre-speed, then exactly one same-shape
+  `make-doom-for-mips selected_lane=implement_v2` speed_1 if green.
 
 ## Repair Trigger
 

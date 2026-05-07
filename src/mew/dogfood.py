@@ -116,6 +116,7 @@ DOGFOOD_SCENARIOS = (
     "m6_24-runtime-finish-gate-emulator",
     "m6_24-implement-v2-terminal-failure-reaction-emulator",
     "m6_24-implement-v2-hard-runtime-reaction-budget-emulator",
+    "m6_24-implement-v2-hard-runtime-progress-continuation-emulator",
     "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator",
     "m6_24-implement-v2-tool-contract-recovery-emulator",
 )
@@ -16889,6 +16890,195 @@ def run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(worksp
     return report
 
 
+def run_m6_24_implement_v2_hard_runtime_progress_continuation_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    runtime_contract = {
+        "role": "runtime",
+        "stage": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "external_verifier",
+        "expected_artifacts": [
+            {
+                "path": "frame.txt",
+                "checks": [{"exists": True}, {"non_empty": True}],
+            }
+        ],
+    }
+    outputs = [
+        {
+            "summary": "first runtime frontier misses the frame artifact",
+            "tool_calls": [
+                {
+                    "id": "runtime-miss-pc0",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'Program terminated at PC=0x0\\nExecuted 8 instructions\\n'; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "second runtime frontier shows measurable runtime progress",
+            "tool_calls": [
+                {
+                    "id": "runtime-miss-pc40",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf 'Program terminated at PC=0x40c848\\nExecuted 4634462 instructions\\n'; exit 2"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "third turn repairs the progressed runtime frontier",
+            "tool_calls": [
+                {
+                    "id": "runtime-repair-verify",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf frame > frame.txt && test -s frame.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "runtime frame artifact repaired",
+                "acceptance_evidence": ["runtime-repair-verify confirmed frame.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        if not outputs:
+            return {
+                "summary": "unexpected extra hard-runtime progress continuation turn",
+                "finish": {"outcome": "failed", "summary": "unexpected extra hard-runtime progress continuation turn"},
+            }
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-hard-runtime-progress-continuation",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and a vm.js runtime harness. Build the source-backed "
+                    "runtime artifact so node vm.js prints stdout and writes frame.txt."
+                ),
+                "final_artifact": "frame.txt",
+                "max_wall_seconds": 1800,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 1,
+                "hard_runtime_progress_continuation_turns": 1,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+                "artifact_dir": str(Path(workspace) / "artifacts"),
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    metrics = result.metrics
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_progress_continuation_emulator_completes",
+        result.status == "completed",
+        {"status": result.status, "finish": result.updated_lane_state.get("finish")},
+        "new hard-runtime frontier progress can earn one bounded continuation credit",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_progress_continuation_emulator_spends_credit",
+        int(metrics.get("terminal_failure_reaction_turn_limit") or 0) == 2
+        and int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 2
+        and int(metrics.get("hard_runtime_progress_continuation_turns_used") or 0) == 1
+        and int(metrics.get("model_turns") or 0) == 3,
+        {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "hard_runtime_progress_continuation_turn_limit": metrics.get(
+                "hard_runtime_progress_continuation_turn_limit"
+            ),
+            "hard_runtime_progress_continuation_turns_used": metrics.get(
+                "hard_runtime_progress_continuation_turns_used"
+            ),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "progress continuation increases the reaction limit only after a new runtime frontier signature",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_progress_continuation_emulator_prompts_counter",
+        len(prompts) >= 3
+        and "terminal_failure_reaction_turns_used: 2/2" in prompts[2]
+        and "Hard-runtime frontier continuation gate" in prompts[2],
+        {"prompt_count": len(prompts), "third_prompt_excerpt": (prompts[2] if len(prompts) >= 3 else "")[:300]},
+        "progress continuation prompt carries the expanded reaction counter and frontier gate",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_progress_continuation_emulator_writes_repair_artifact",
+        (Path(workspace) / "frame.txt").exists()
+        and (Path(workspace) / "frame.txt").read_text(encoding="utf-8", errors="replace") == "frame",
+        {"path": str(Path(workspace) / "frame.txt")},
+        "progress continuation turn wrote the expected repair artifact",
+    )
+    report = _scenario_report(
+        "m6_24-implement-v2-hard-runtime-progress-continuation-emulator",
+        workspace,
+        commands,
+        checks,
+    )
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "hard_runtime_progress_continuation_turn_limit": metrics.get(
+                "hard_runtime_progress_continuation_turn_limit"
+            ),
+            "hard_runtime_progress_continuation_turns_used": metrics.get(
+                "hard_runtime_progress_continuation_turns_used"
+            ),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "repair_artifact": str(Path(workspace) / "frame.txt"),
+    }
+    return report
+
+
 def run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(workspace):
     from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
     from .work_lanes import IMPLEMENT_V2_LANE
@@ -17420,6 +17610,12 @@ def run_dogfood_scenario(args):
         elif name == "m6_24-implement-v2-hard-runtime-reaction-budget-emulator":
             reports.append(
                 run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(scenario_workspace)
+            )
+        elif name == "m6_24-implement-v2-hard-runtime-progress-continuation-emulator":
+            reports.append(
+                run_m6_24_implement_v2_hard_runtime_progress_continuation_emulator_scenario(
+                    scenario_workspace
+                )
             )
         elif name == "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator":
             reports.append(

@@ -1801,6 +1801,30 @@ class DogfoodTests(unittest.TestCase):
             self.assertEqual(scenario["artifacts"]["metrics"]["model_turns"], 10)
             self.assertTrue(Path(scenario["artifacts"]["repair_artifact"]).is_file())
 
+    def test_run_dogfood_m6_24_implement_v2_hard_runtime_progress_continuation_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-implement-v2-hard-runtime-progress-continuation-emulator",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(
+                scenario["name"],
+                "m6_24-implement-v2-hard-runtime-progress-continuation-emulator",
+            )
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["status"], "completed")
+            self.assertEqual(scenario["artifacts"]["metrics"]["terminal_failure_reaction_turn_limit"], 2)
+            self.assertEqual(scenario["artifacts"]["metrics"]["terminal_failure_reaction_turns_used"], 2)
+            self.assertEqual(scenario["artifacts"]["metrics"]["hard_runtime_progress_continuation_turns_used"], 1)
+            self.assertEqual(scenario["artifacts"]["metrics"]["model_turns"], 3)
+            self.assertTrue(Path(scenario["artifacts"]["repair_artifact"]).is_file())
+
     def test_run_dogfood_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

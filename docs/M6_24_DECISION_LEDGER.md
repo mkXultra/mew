@@ -656,3 +656,33 @@ failure tail is not actionable because managed command results only wrote
 diagnostic evidence preservation: all terminal managed command outcomes must
 carry bounded stdout/stderr tails so replay/dogfood can classify the next
 frontier without spending another proof item.
+
+Implement-v2 make-doom progress-continuation checkpoint 2026-05-07 JST:
+
+The hard-runtime continuation-gate rerun
+`mew-m6-24-hard-runtime-continuation-make-doom-speed1-20260507-0948`
+scored `0/1` with runner errors `0`, runtime `18m57s`, and
+`selected_lane=implement_v2`. It used `8/8` hard-runtime reaction turns and
+stopped at `runtime_artifact_missing` for `/tmp/frame.bmp`. This is meaningful
+progress, not proof noise: the previous harness-valid frontier stopped at
+`PC=0x0` after 8 instructions, while this run preserved the source-backed
+build path and reached `PC=0x40c848` after `4,634,462` instructions. Exact
+replay and terminal-bench replay dogfood pass with structured mismatch count
+`0`.
+
+Decision: do not rerun unchanged and do not globally raise max turns. Add a
+generic progress-sensitive hard-runtime continuation credit. It is only allowed
+after the normal hard-runtime reaction budget is exhausted, when a new runtime
+frontier signature appears, and while wall budget remains. The signature must
+come from structured frontier evidence such as final artifact path/status,
+runtime failure class/phase/kind, build artifact path, and bounded runtime
+stdout/stderr tail. Repeating the same runtime-artifact miss is not progress.
+No Doom/MIPS/PC-specific solver is allowed.
+
+Validation before another live speed must include focused UT, the new
+progress-continuation emulator dogfood, exact `0948` replay, exact `0948`
+terminal-bench replay dogfood, scoped ruff, and `git diff --check`. After
+codex-ultra review session `019e000e-15b5-71c0-b3bb-fb0861076cec` approved
+with no findings. After commit, the next live action is exactly one same-shape
+`make-doom-for-mips selected_lane=implement_v2` speed_1, preceded by the
+current-head pre-speed gate.

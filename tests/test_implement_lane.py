@@ -3,6 +3,7 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 
 import mew.implement_lane.read_runtime as read_runtime
 from mew.errors import ModelBackendError
@@ -36,6 +37,9 @@ from mew.implement_lane import (
 from mew.implement_lane.v2_runtime import (
     _finish_evidence_refs,
     _frontier_failure_payload,
+    _hard_runtime_frontier_progress_signature,
+    _hard_runtime_progress_continuation_signature,
+    _hard_runtime_progress_continuation_turn_limit,
     _provider_visible_tool_result_for_history,
     _terminal_failure_reaction_turn_limit,
 )
@@ -1136,6 +1140,205 @@ def test_implement_v2_live_json_extends_after_final_diagnostic_of_prior_terminal
     assert (tmp_path / "repaired.txt").read_text(encoding="utf-8") == "repaired"
 
 
+def test_implement_v2_live_json_grants_progress_continuation_for_new_hard_runtime_frontier(tmp_path) -> None:
+    runtime_contract = {
+        "role": "runtime",
+        "stage": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "external_verifier",
+        "expected_artifacts": [{"path": "frame.txt", "checks": [{"exists": True}, {"non_empty": True}]}],
+    }
+    outputs = [
+        {
+            "summary": "first runtime frontier still misses frame",
+            "tool_calls": [
+                {
+                    "id": "runtime-miss-pc0",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'Program terminated at PC=0x0\\nExecuted 8 instructions\\n'; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "second runtime frontier made measurable progress",
+            "tool_calls": [
+                {
+                    "id": "runtime-miss-pc40",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf 'Program terminated at PC=0x40c848\\nExecuted 4634462 instructions\\n'; exit 2"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "repair after progress continuation",
+            "tool_calls": [
+                {
+                    "id": "runtime-repair",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf frame > frame.txt && test -s frame.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "frame artifact repaired",
+                "acceptance_evidence": ["runtime-repair confirmed frame.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and a vm.js runtime harness. Build the source-backed "
+                    "runtime artifact so node vm.js writes frame.txt."
+                ),
+                "final_artifact": "frame.txt",
+                "max_wall_seconds": 1800,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 1,
+                "hard_runtime_progress_continuation_turns": 1,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["base_max_turns"] == 1
+    assert result.metrics["turn_budget_limit"] == 3
+    assert result.metrics["terminal_failure_reaction_turn_limit"] == 2
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 2
+    assert result.metrics["hard_runtime_progress_continuation_turns_used"] == 1
+    assert result.metrics["model_turns"] == 3
+    assert "terminal_failure_reaction_turns_used: 2/2" in prompts[2]
+    assert (tmp_path / "frame.txt").read_text(encoding="utf-8") == "frame"
+
+
+def test_implement_v2_live_json_blocks_progress_continuation_for_identical_hard_runtime_frontier(
+    tmp_path,
+) -> None:
+    runtime_contract = {
+        "role": "runtime",
+        "stage": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "external_verifier",
+        "expected_artifacts": [{"path": "frame.txt", "checks": [{"exists": True}, {"non_empty": True}]}],
+    }
+    outputs = [
+        {
+            "summary": "first runtime frontier misses frame",
+            "tool_calls": [
+                {
+                    "id": "runtime-miss-1",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'Program terminated at PC=0x0\\nExecuted 8 instructions\\n'; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "same runtime frontier repeats",
+            "tool_calls": [
+                {
+                    "id": "runtime-miss-2",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'Program terminated at PC=0x0\\nExecuted 8 instructions\\n'; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and a vm.js runtime harness. Build the source-backed "
+                    "runtime artifact so node vm.js writes frame.txt."
+                ),
+                "final_artifact": "frame.txt",
+                "max_wall_seconds": 1800,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 1,
+                "hard_runtime_progress_continuation_turns": 1,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["turn_budget_limit"] == 2
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 1
+    assert result.metrics["hard_runtime_progress_continuation_turns_used"] == 0
+    assert result.metrics["model_turns"] == 2
+    assert not (tmp_path / "frame.txt").exists()
+
+
 def test_implement_v2_live_json_extends_after_final_failed_tool_claims_completed(tmp_path) -> None:
     outputs = [
         {
@@ -2193,6 +2396,101 @@ def test_implement_v2_hard_runtime_profile_expands_terminal_reaction_budget() ->
     assert _terminal_failure_reaction_turn_limit(missing_wall_input, 24) == 3
     assert _terminal_failure_reaction_turn_limit(invalid_wall_input, 24) == 3
     assert _terminal_failure_reaction_turn_limit(configured_input, 24) == 2
+    assert _hard_runtime_progress_continuation_turn_limit(hard_runtime_input, base_max_turns=24) == 4
+    assert _hard_runtime_progress_continuation_turn_limit(simple_input, base_max_turns=24) == 0
+    assert _hard_runtime_progress_continuation_turn_limit(missing_wall_input, base_max_turns=24) == 0
+
+
+def test_implement_v2_hard_runtime_progress_signature_requires_runtime_artifact_progress() -> None:
+    frontier = {
+        "build_target": {"artifact_path": "/app/game_mips"},
+        "final_artifact": {"path": "/tmp/frame.bmp", "status": "failed", "blocking": True},
+        "latest_runtime_failure": {
+            "failure_class": "runtime_artifact_missing",
+            "failure_phase": "runtime",
+            "failure_kind": "missing_artifact",
+            "stdout_tail": "Program terminated at PC=0x40c848\nExecuted 4634462 instructions",
+        },
+    }
+    same_frontier = json.loads(json.dumps(frontier))
+    moved_frontier = json.loads(json.dumps(frontier))
+    moved_frontier["latest_runtime_failure"]["stdout_tail"] = "Program terminated at PC=0x40d000\nExecuted 5000000"
+    build_only_frontier = {
+        "build_target": {"artifact_path": "/app/game_mips"},
+        "latest_build_failure": {"failure_class": "build_failure", "stderr_tail": "undefined reference"},
+    }
+
+    signature = _hard_runtime_frontier_progress_signature(frontier)
+
+    assert signature
+    assert _hard_runtime_frontier_progress_signature(same_frontier) == signature
+    assert _hard_runtime_frontier_progress_signature(moved_frontier) != signature
+    assert _hard_runtime_frontier_progress_signature(build_only_frontier) == ""
+
+
+def test_implement_v2_hard_runtime_progress_continuation_rejects_seen_signature() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={
+            "description": "Build provided VM source so node vm.js writes /tmp/frame.bmp.",
+            "max_wall_seconds": 1800,
+        },
+        lane_config={"mode": "full", "terminal_failure_reaction_min_wall_seconds": 0},
+    )
+    tool_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="failed",
+        content=({"failure_class": "runtime_failure"},),
+    )
+    frontier = {
+        "build_target": {"artifact_path": "/app/game_mips"},
+        "final_artifact": {"path": "/tmp/frame.bmp", "status": "failed", "blocking": True},
+        "latest_runtime_failure": {
+            "failure_class": "runtime_artifact_missing",
+            "failure_phase": "runtime",
+            "failure_kind": "missing_artifact",
+            "stdout_tail": "Program terminated at PC=0x40c848\nExecuted 4634462 instructions",
+        },
+    }
+    seen = {_hard_runtime_frontier_progress_signature(frontier)}
+
+    assert (
+        _hard_runtime_progress_continuation_signature(
+            lane_input,
+            (tool_result,),
+            frontier,
+            seen_signatures=seen,
+            reaction_turns_used=8,
+            reaction_turn_limit=8,
+            progress_turns_used=0,
+            progress_turn_limit=4,
+            run_started=time.monotonic(),
+        )
+        == ""
+    )
+    assert _hard_runtime_progress_continuation_signature(
+        lane_input,
+        (tool_result,),
+        {
+            **frontier,
+            "latest_runtime_failure": {
+                **frontier["latest_runtime_failure"],
+                "stdout_tail": "Program terminated at PC=0x40d000\nExecuted 5000000",
+            },
+        },
+        seen_signatures=seen,
+        reaction_turns_used=8,
+        reaction_turn_limit=8,
+        progress_turns_used=0,
+        progress_turn_limit=4,
+        run_started=time.monotonic(),
+    )
 
 
 def test_implement_v2_prompt_adds_dynamic_frontier_state_when_persisted() -> None:
