@@ -342,6 +342,103 @@ def test_implement_v2_prompt_history_render_helper_matches_existing_json_shape()
     assert '"summary": "履歴 3"' in rendered
 
 
+def test_implement_v2_integration_observation_summary_is_state_safe_by_default(tmp_path) -> None:
+    artifact_dir = tmp_path / "artifacts"
+    secret = "SECRET_TASK_CONTEXT_SHOULD_NOT_BE_SERIALIZED"
+
+    def fake_model(*_args, **_kwargs):
+        return {"summary": "stop", "finish": {"outcome": "blocked", "summary": "no material change"}}
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": secret},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "artifact_dir": str(artifact_dir),
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    manifest = result.updated_lane_state["proof_manifest"]
+    observation = manifest["metrics"]["integration_observation"]
+    serialized = json.dumps(observation, ensure_ascii=False, sort_keys=True)
+
+    assert observation["detail_policy"] == "summary"
+    assert observation["artifact_ref"] == ""
+    assert observation["summary"]["model_turns"] == 1
+    assert observation["summary"]["detail_written"] is False
+    assert "model_turns" not in observation
+    assert secret not in serialized
+    assert len(serialized.encode("utf-8")) < 8192
+    assert not (artifact_dir / "implement_v2" / "integration-observation.json").exists()
+    assert all(not path.endswith("integration-observation.json") for path in result.proof_artifacts)
+
+
+def test_implement_v2_integration_observation_detail_sidecar_is_explicit_and_ref_backed(tmp_path) -> None:
+    artifact_dir = tmp_path / "artifacts"
+    secret = "SECRET_PROMPT_BODY_SHOULD_STAY_HASHED"
+
+    def fake_model(*_args, **_kwargs):
+        return {"summary": "stop", "finish": {"outcome": "blocked", "summary": "no material change"}}
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": secret},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "artifact_dir": str(artifact_dir),
+                "write_integration_observation_detail": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    manifest = result.updated_lane_state["proof_manifest"]
+    observation = manifest["metrics"]["integration_observation"]
+    sidecar_path = artifact_dir / "implement_v2" / "integration-observation.json"
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    sidecar_serialized = json.dumps(sidecar, ensure_ascii=False, sort_keys=True)
+    turn = sidecar["model_turns"][0]
+    projection = turn["history_projection"]
+
+    assert observation["detail_policy"] == "sidecar"
+    assert observation["artifact_ref"] == "integration-observation.json"
+    assert observation["summary"]["detail_written"] is True
+    assert str(sidecar_path) in result.proof_artifacts
+    assert sidecar["lane_attempt_id"] == manifest["lane_attempt_id"]
+    assert len(sidecar["model_turns"]) == 1
+    assert turn["prompt"]["chars"] > 0
+    assert turn["prompt"]["sha256"].startswith("sha256:")
+    assert projection["future_projection_mode"] == "identity"
+    assert projection["future_projection_sha256"] == projection["current_projection_sha256"]
+    assert projection["future_projection_chars"] == projection["current_projection_chars"]
+    assert projection["diff_summary"]["changed"] is False
+    assert sidecar["totals"]["projection_savings_chars"] == 0
+    assert sidecar["totals"]["projection_savings_ratio"] == 0.0
+    assert secret not in sidecar_serialized
+
+
 def test_implement_v2_live_json_rejects_cross_turn_duplicate_before_write(tmp_path) -> None:
     target = tmp_path / "sample.txt"
     target.write_text("before\n", encoding="utf-8")

@@ -192,6 +192,7 @@ def run_live_json_implement_v2(
     tool_results: list[ToolResultEnvelope] = []
     history: list[dict[str, object]] = []
     prompt_history: list[dict[str, object]] = []
+    model_turn_observations: list[dict[str, object]] = []
     finish_arguments: dict[str, object] = {}
     seen_provider_call_ids: set[str] = set()
     model_elapsed_seconds = 0.0
@@ -370,6 +371,7 @@ def run_live_json_implement_v2(
             )
             prompt_chars_total += model_turn_output.prompt_chars
             model_elapsed_seconds += model_turn_output.elapsed_seconds
+            model_turn_observations.append(dict(model_turn_output.observation))
             if model_turn_output.model_error:
                 model_error = dict(model_turn_output.model_error)
                 finish_arguments = {
@@ -750,6 +752,20 @@ def run_live_json_implement_v2(
         )
         exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
 
+    integration_observation = _integration_observation_summary(
+        lane_input,
+        lane_attempt_id=lane_attempt_id,
+        artifact_namespace=artifact_namespace,
+        transport=adapter.provider,
+        model_turn_observations=tuple(model_turn_observations),
+        model_elapsed_seconds=model_elapsed_seconds,
+        artifact_ref=(
+            "integration-observation.json"
+            if _should_write_integration_observation_detail(lane_input)
+            and str(lane_input.lane_config.get("artifact_dir") or "").strip()
+            else ""
+        ),
+    )
     manifest = ImplementLaneProofManifest(
         lane=IMPLEMENT_V2_LANE,
         lane_attempt_id=lane_attempt_id,
@@ -775,6 +791,7 @@ def run_live_json_implement_v2(
             "orphaned_command_cleanup_count": len(cleanup_payloads),
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
+            "integration_observation": integration_observation,
         },
     )
     validation = _validate_write_proof_manifest(manifest)
@@ -791,6 +808,7 @@ def run_live_json_implement_v2(
         manifest=manifest,
         transcript=tuple(transcript),
         history=tuple(history),
+        integration_observation_detail=tuple(model_turn_observations),
     )
     summary = str(finish_arguments.get("summary") or "").strip() or _live_status_summary(status)
     return ImplementLaneResult(
@@ -3908,10 +3926,22 @@ def _prompt_descriptor(prompt: str) -> dict[str, object]:
 
 def _current_projection_descriptor(prompt_history: tuple[dict[str, object], ...] | list[dict[str, object]]) -> dict[str, object]:
     projection = _render_prompt_history_json(prompt_history)
+    projection_sha256 = _sha256_text(projection)
+    projection_chars = len(projection)
     return {
         "current_projection_schema": "provider_history_projection_v0",
-        "current_projection_sha256": _sha256_text(projection),
-        "current_projection_chars": len(projection),
+        "current_projection_sha256": projection_sha256,
+        "current_projection_chars": projection_chars,
+        "future_projection_schema": "provider_history_projection_candidate_v0",
+        "future_projection_sha256": projection_sha256,
+        "future_projection_chars": projection_chars,
+        "future_projection_mode": "identity",
+        "diff_summary": {
+            "changed": False,
+            "omitted_large_outputs": 0,
+            "truncated_fields": [],
+            "preserved_refs": [],
+        },
         "history_turns_included": len(list(prompt_history)[-8:]),
     }
 
@@ -3926,12 +3956,103 @@ def _sha256_text(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _integration_observation_summary(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    artifact_namespace: str,
+    transport: str,
+    model_turn_observations: tuple[dict[str, object], ...],
+    model_elapsed_seconds: float,
+    artifact_ref: str = "",
+) -> dict[str, object]:
+    prompt_chars = 0
+    tool_call_count = 0
+    turns_with_model_error = 0
+    current_projection_chars_total = 0
+    future_projection_chars_total = 0
+    for observation in model_turn_observations:
+        prompt = observation.get("prompt") if isinstance(observation.get("prompt"), dict) else {}
+        response = observation.get("response") if isinstance(observation.get("response"), dict) else {}
+        projection = (
+            observation.get("history_projection") if isinstance(observation.get("history_projection"), dict) else {}
+        )
+        prompt_chars += _nonnegative_int(prompt.get("chars"))
+        tool_call_count += _nonnegative_int(response.get("tool_call_count"))
+        if response.get("model_error_class"):
+            turns_with_model_error += 1
+        current_projection_chars_total += _nonnegative_int(projection.get("current_projection_chars"))
+        future_projection_chars_total += _nonnegative_int(projection.get("future_projection_chars"))
+    projection_savings_chars = current_projection_chars_total - future_projection_chars_total
+    projection_savings_ratio = (
+        round(projection_savings_chars / current_projection_chars_total, 6) if current_projection_chars_total > 0 else 0.0
+    )
+    return {
+        "schema_version": 1,
+        "runtime_id": "implement_v2_model_json_tool_loop",
+        "transport": transport,
+        "lane_attempt_id": lane_attempt_id,
+        "artifact_namespace": artifact_namespace,
+        "detail_policy": "sidecar" if artifact_ref else "summary",
+        "artifact_ref": artifact_ref,
+        "summary": {
+            "model_turns": len(model_turn_observations),
+            "prompt_chars": prompt_chars,
+            "model_elapsed_seconds": round(model_elapsed_seconds, 3),
+            "tool_call_count": tool_call_count,
+            "turns_with_projection_truncation": 0,
+            "turns_with_model_error": turns_with_model_error,
+            "current_projection_chars_total": current_projection_chars_total,
+            "future_projection_chars_total": future_projection_chars_total,
+            "projection_savings_chars": projection_savings_chars,
+            "projection_savings_ratio": projection_savings_ratio,
+            "detail_written": bool(artifact_ref),
+            "state_safe": True,
+        },
+        "state_note": "summary_only; full per-turn detail is never persisted in updated_lane_state",
+        "debug_detail_enabled": _should_write_integration_observation_detail(lane_input),
+    }
+
+
+def _integration_observation_detail_payload(
+    manifest: ImplementLaneProofManifest,
+    model_turn_observations: tuple[dict[str, object], ...],
+) -> dict[str, object]:
+    summary = manifest.metrics.get("integration_observation")
+    if isinstance(summary, dict):
+        totals = dict(summary.get("summary") if isinstance(summary.get("summary"), dict) else {})
+    else:
+        totals = {}
+    return {
+        "schema_version": 1,
+        "runtime_id": "implement_v2_model_json_tool_loop",
+        "transport": str(manifest.metrics.get("transport") or ""),
+        "lane_attempt_id": manifest.lane_attempt_id,
+        "artifact_namespace": manifest.artifact_namespace,
+        "model_turns": [dict(observation) for observation in model_turn_observations],
+        "totals": totals,
+    }
+
+
+def _should_write_integration_observation_detail(lane_input: ImplementLaneInput) -> bool:
+    return bool(lane_input.lane_config.get("write_integration_observation_detail"))
+
+
+def _nonnegative_int(value: object) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
+
+
 def _write_live_json_artifacts(
     lane_input: ImplementLaneInput,
     *,
     manifest: ImplementLaneProofManifest,
     transcript: tuple[ImplementLaneTranscriptEvent, ...],
     history: tuple[dict[str, object], ...],
+    integration_observation_detail: tuple[dict[str, object], ...] = (),
 ) -> tuple[str, ...]:
     artifact_dir = str(lane_input.lane_config.get("artifact_dir") or "").strip()
     if not artifact_dir:
@@ -3941,13 +4062,26 @@ def _write_live_json_artifacts(
     manifest_path = root / "proof-manifest.json"
     transcript_path = root / "transcript.json"
     history_path = root / "history.json"
+    integration_observation_path = root / "integration-observation.json"
     manifest_path.write_text(json.dumps(manifest.as_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     transcript_path.write_text(
         json.dumps([event.as_dict() for event in transcript], ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     history_path.write_text(json.dumps(list(history), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return (str(manifest_path), str(transcript_path), str(history_path))
+    paths = [str(manifest_path), str(transcript_path), str(history_path)]
+    if _should_write_integration_observation_detail(lane_input):
+        integration_observation_path.write_text(
+            json.dumps(
+                _integration_observation_detail_payload(manifest, integration_observation_detail),
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        paths.append(str(integration_observation_path))
+    return tuple(paths)
 
 
 __all__ = [
