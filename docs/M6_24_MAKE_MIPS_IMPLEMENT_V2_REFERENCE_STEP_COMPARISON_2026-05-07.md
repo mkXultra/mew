@@ -509,3 +509,56 @@ Current implication:
 - If this blocker is gone, compare whether v2 can continue from
   `my_stdlib.c` evidence into the next runtime patch without restarting broad
   exploration.
+
+## 2026-05-08 JSON-Parse-Retry Pre-Speed Diagnostic
+
+Latest current-head mew artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-json-parse-retry-make-mips-step-shape-10min-20260508-0720/mew-m6-24-json-parse-retry-make-mips-step-shape-10min-20260508-0720/make-mips-interpreter__t4UwS6e`
+
+Validation:
+
+- exact replay passes with external reward `0.0`;
+- terminal-bench replay dogfood passes with structured replay mismatch count
+  `0`;
+- runtime finish-gate emulator passes.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing miss; frame existence/similarity pass |
+| mew implement_v2 `0720` | 0/1 | 10m15s Harbor | 23 history turns | 38 tool calls | turn 4 | diagnostic stdout marker miss polluted hard-runtime frontier |
+
+Step delta:
+
+1. The recoverable JSON parse retry repair worked; the prior transport blocker
+   did not recur.
+2. mew continued through source/ELF probes, `vm.js` generation, runtime
+   verifier failure, and syscall/runtime diagnostics.
+3. The hard failure before the diagnostic was a real runtime verifier
+   obligation: `/tmp/frame.bmp` was missing after the VM verifier command.
+4. A later diagnostic stdout probe expected `TRACE syscall` and missed that
+   stream marker. That diagnostic was useful evidence, but it is not an
+   acceptance/verifier contract.
+5. v2 incorrectly let that observational diagnostic failure replace the
+   hard-runtime frontier/final artifact with `stdout` /
+   `artifact_validation_failure`, hiding the actionable `/tmp/frame.bmp`
+   runtime failure.
+
+Repair applied after this diagnostic:
+
+- observational diagnostic contracts can still record failed
+  `artifact_evidence` and a blocked structured finish gate;
+- those contracts no longer turn a completed diagnostic command into a failed
+  tool result;
+- those contracts no longer update the hard runtime frontier, final artifact,
+  or latest runtime/build failure projection.
+
+Current implication:
+
+- Do not run broad measurement yet.
+- After review/commit, run one more 10min `make-mips-interpreter
+  selected_lane=implement_v2` step-shape diagnostic before `speed_1` /
+  `proof_5`.
+- The next diagnostic should show whether v2 now preserves the real latest
+  runtime failure and converts it into the next patch, instead of chasing
+  non-acceptance diagnostic stream markers.

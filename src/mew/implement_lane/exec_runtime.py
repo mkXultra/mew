@@ -522,7 +522,7 @@ class ImplementV2ManagedExecRuntime:
         )
         if status in {"failed", "interrupted"} and bool(record.semantic_exit.get("ok")) and not finish_gate.blocked:
             return tuple(effects), payload, "completed"
-        if status == "completed" and finish_gate.blocked:
+        if status == "completed" and finish_gate.blocked and _contract_failure_blocks_tool_status(contract):
             payload["reason"] = "; ".join(finish_gate.reasons) or "structured execution evidence blocked completion"
             return tuple(effects), payload, "failed"
         return tuple(effects), payload, status
@@ -579,6 +579,18 @@ def _contract_should_enforce_advertised_artifacts(contract: ExecutionContract) -
     if contract.acceptance_kind != "external_verifier" and contract.proof_role != "verifier":
         return False
     return contract.role in {"runtime", "verify", "test", "compound"}
+
+
+def _contract_failure_blocks_tool_status(contract: ExecutionContract) -> bool:
+    """Return whether structured evidence failure should make the tool fail."""
+
+    if (
+        contract.role == "diagnostic"
+        and contract.acceptance_kind in {"not_acceptance", "progress_only"}
+        and contract.proof_role in {"none", "progress", "negative_diagnostic"}
+    ):
+        return False
+    return True
 
 
 def _advertised_artifact_paths_from_payload(payload: dict[str, object]) -> tuple[str, ...]:

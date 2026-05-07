@@ -2715,6 +2715,8 @@ def _frontier_state_from_execution_contracts(
         contract = _payload_execution_contract(payload)
         if not contract:
             continue
+        if not _execution_contract_updates_hard_runtime_frontier(contract):
+            continue
         refs = _frontier_result_refs(result, registry)
         expected_artifact = _frontier_expected_artifact_from_contract(contract, payload=payload)
         if expected_artifact and "final_artifact" not in derived:
@@ -2860,6 +2862,19 @@ def _execution_contract_is_verifier_like(contract: dict[str, object]) -> bool:
     )
 
 
+def _execution_contract_updates_hard_runtime_frontier(contract: dict[str, object]) -> bool:
+    role = _execution_contract_enum(contract, "role")
+    acceptance_kind = _execution_contract_enum(contract, "acceptance_kind")
+    proof_role = _execution_contract_enum(contract, "proof_role")
+    if (
+        role == "diagnostic"
+        and acceptance_kind in {"not_acceptance", "progress_only"}
+        and proof_role in {"none", "progress", "negative_diagnostic"}
+    ):
+        return False
+    return True
+
+
 def _legacy_frontier_marker_fallback_allowed(payload: dict[str, object]) -> bool:
     return not bool(_payload_execution_contract(payload))
 
@@ -2918,6 +2933,9 @@ def _latest_runtime_frontier_failure(
             continue
         payload = next((item for item in result.content if isinstance(item, dict)), {})
         if not payload:
+            continue
+        contract = _payload_execution_contract(payload)
+        if contract and not _execution_contract_updates_hard_runtime_frontier(contract):
             continue
         key = _frontier_failure_key_from_payload(payload)
         return key, _frontier_failure_payload(payload)

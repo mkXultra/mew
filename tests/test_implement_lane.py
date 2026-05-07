@@ -4596,6 +4596,166 @@ def test_implement_v2_exec_accepts_stdout_expected_artifact_contract(tmp_path) -
     assert artifact["path"] == ""
 
 
+def test_implement_v2_exec_diagnostic_stdout_miss_stays_observational(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('different diagnostic output')"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "stdout-diagnostic",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:stdout-diagnostic",
+                        "role": "diagnostic",
+                        "stage": "diagnostic",
+                        "purpose": "diagnostic",
+                        "acceptance_kind": "not_acceptance",
+                        "expected_artifacts": [
+                            {
+                                "target": "stdout",
+                                "checks": [
+                                    {"kind": "non_empty"},
+                                    {"kind": "text_contains", "value": "TRACE syscall"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "stdout diagnostic evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert tool_result["is_error"] is False
+    assert payload["artifact_evidence"][0]["status"] == "failed"
+    assert payload["structured_finish_gate"]["blocked"] is True
+    assert payload["failure_classification"]["class"] == "artifact_validation_failure"
+
+
+def test_implement_v2_exec_progress_diagnostic_stdout_miss_stays_observational(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('progress diagnostic output')"])
+
+    cases = (
+        {"acceptance_kind": "progress_only", "proof_role": "progress"},
+        {"acceptance_kind": "progress_only", "proof_role": "negative_diagnostic"},
+    )
+    for index, contract_case in enumerate(cases, start=1):
+        result = run_fake_exec_implement_v2(
+            ImplementLaneInput(
+                work_session_id=f"ws-{index}",
+                task_id="task-1",
+                workspace=str(tmp_path),
+                lane=IMPLEMENT_V2_LANE,
+                lane_config={"mode": "exec"},
+            ),
+            provider_calls=(
+                {
+                    "provider_call_id": f"stdout-progress-diagnostic-{index}",
+                    "tool_name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "execution_contract": {
+                            "id": f"contract:stdout-progress-diagnostic:{index}",
+                            "role": "diagnostic",
+                            "stage": "diagnostic",
+                            "purpose": "diagnostic",
+                            "acceptance_kind": contract_case["acceptance_kind"],
+                            "proof_role": contract_case["proof_role"],
+                            "expected_artifacts": [
+                                {
+                                    "target": "stdout",
+                                    "checks": [
+                                        {"kind": "non_empty"},
+                                        {"kind": "text_contains", "value": "TRACE syscall"},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                },
+            ),
+            finish_arguments={"outcome": "analysis_ready", "summary": "progress diagnostic evidence ready"},
+        )
+        tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+        payload = tool_result["content"][0]
+
+        assert tool_result["status"] == "completed"
+        assert tool_result["is_error"] is False
+        assert payload["artifact_evidence"][0]["status"] == "failed"
+        assert payload["structured_finish_gate"]["blocked"] is True
+        assert payload["failure_classification"]["class"] == "artifact_validation_failure"
+
+
+def test_implement_v2_exec_diagnostic_external_verifier_stdout_miss_still_blocks(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('different verifier output')"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "stdout-diagnostic-verifier",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:stdout-diagnostic-verifier",
+                        "role": "diagnostic",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "acceptance_kind": "external_verifier",
+                        "proof_role": "verifier",
+                        "expected_artifacts": [
+                            {
+                                "target": "stdout",
+                                "checks": [
+                                    {"kind": "non_empty"},
+                                    {"kind": "text_contains", "value": "VERIFIER PASS"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "stdout verifier evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert tool_result["is_error"] is True
+    assert payload["artifact_evidence"][0]["status"] == "failed"
+    assert payload["structured_finish_gate"]["blocked"] is True
+    assert payload["failure_classification"]["class"] == "artifact_validation_failure"
+
+
 def test_implement_v2_exec_accepts_argv_argument(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
@@ -6932,6 +7092,97 @@ def test_implement_v2_frontier_prefers_structured_missing_runtime_artifact(tmp_p
     assert runtime_failure["failure_kind"] == "missing_artifact"
     assert "NO_FRAME" not in runtime_failure["stdout_tail"]
     assert "producing substep" in runtime_failure["required_next_probe"]
+
+
+def test_implement_v2_frontier_diagnostic_stream_miss_does_not_replace_runtime_failure(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "runtime verifier failed, then a diagnostic stream probe missed its marker",
+            "tool_calls": [
+                {
+                    "id": "runtime-frame-missing",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'vm failed before frame\\n'; exit 1",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:runtime-frame-missing",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                },
+                {
+                    "id": "diagnostic-marker-missing",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'diagnostic output without marker\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:diagnostic-marker-missing",
+                            "role": "diagnostic",
+                            "stage": "diagnostic",
+                            "purpose": "diagnostic",
+                            "acceptance_kind": "not_acceptance",
+                            "expected_artifacts": [
+                                {
+                                    "target": "stdout",
+                                    "checks": [
+                                        {"kind": "non_empty"},
+                                        {"kind": "text_contains", "value": "TRACE syscall"},
+                                    ],
+                                }
+                            ],
+                        },
+                    },
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "runtime artifact missing"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Run verifier so it writes frame.bmp."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert frontier["final_artifact"]["path"].endswith("frame.bmp")
+    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_artifact_missing"
+    assert "latest_build_failure" not in frontier
 
 
 def test_implement_v2_frontier_final_artifact_uses_blocking_runtime_artifact(tmp_path) -> None:
