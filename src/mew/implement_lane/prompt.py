@@ -57,6 +57,26 @@ def build_implement_v2_prompt_sections(
             profile="implement_v2",
         ),
         PromptSection(
+            id="implement_v2_active_coding_rhythm",
+            version="v0",
+            title="Implement V2 Active Coding Rhythm",
+            content=(
+                "Keep the normal coding hot path small and transcript-driven: cheap probe -> coherent "
+                "patch/edit -> verifier -> latest-failure repair. Use read/search/inspect/run_command "
+                "for cheap source, environment, ABI, or verifier probes; then move to write_file, "
+                "edit_file, or apply_patch once the compatibility surface is known. After a concrete "
+                "runtime, verifier, or artifact failure yields an actionable hypothesis, spend at most "
+                "one focused diagnostic/read turn before a patch/edit plus verifier, or finish blocked "
+                "with the exact missing information. Do not keep re-reading generated source or full "
+                "proof objects when the latest command exit, bounded stdout/stderr tail, artifact miss, "
+                "and blocker class are enough to act. Keep source mutation on write/edit/apply_patch "
+                "paths; use run_command for probes, builds, runtime execution, and verification."
+            ),
+            stability=STABILITY_STATIC,
+            cache_policy=CACHE_POLICY_CACHEABLE,
+            profile="implement_v2",
+        ),
+        PromptSection(
             id="implement_v2_execution_artifact_contract",
             version="v0",
             title="Implement V2 Execution Artifact Contract",

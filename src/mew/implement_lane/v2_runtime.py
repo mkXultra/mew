@@ -3057,27 +3057,8 @@ def _live_json_prompt(
     sections = render_prompt_sections(
         build_implement_v2_prompt_sections(_lane_input_with_hard_runtime_frontier(lane_input, hard_runtime_frontier_state))
     )
-    response_contract = {
+    response_contract: dict[str, object] = {
         "summary": "short natural-language summary of this turn",
-        "frontier_state_update": {
-            "status": "active | blocked | resolved",
-            "objective": "short hard-runtime objective when relevant",
-            "source_roles": [
-                {
-                    "path": "relative/source/path",
-                    "role": "primary_source | runtime_harness | build_file | generated_artifact | test_harness | toolchain_probe",
-                    "state": "hypothesis | grounded",
-                    "evidence_refs": [{"kind": "provider_call", "id": "stable-provider-call-id"}],
-                }
-            ],
-            "next_verifier_shaped_command": {
-                "tool": "run_command",
-                "cwd": ".",
-                "command": "short command",
-                "use_shell": True,
-                "execution_contract": {"purpose": "verification", "stage": "verification"},
-            },
-        },
         "tool_calls": [
             {
                 "id": "stable-provider-call-id",
@@ -3091,6 +3072,23 @@ def _live_json_prompt(
             "acceptance_evidence": ["tool result or verifier evidence refs"],
         },
     }
+    if hard_runtime_frontier_state:
+        response_contract["frontier_state_update"] = {
+            "optional": True,
+            "use_only_when": "a hard-runtime or compatibility frontier genuinely changed",
+            "derived_failure_note": (
+                "Do not author latest_runtime_failure/latest_build_failure; "
+                "mew derives the latest failure from paired tool results."
+            ),
+            "status": "active | blocked | resolved",
+            "objective": "short objective when it prevents rediscovery or false completion",
+            "next_verifier_shaped_command": {
+                "tool": "run_command",
+                "cwd": ".",
+                "command": "short verifier command",
+                "use_shell": True,
+            },
+        }
     recovery_instruction_section = ""
     if tool_contract_recovery_instruction:
         recovery_instruction_section = f"tool_contract_recovery_instruction:\n{tool_contract_recovery_instruction}"

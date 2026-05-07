@@ -83,6 +83,15 @@ strengthen cheap-probe -> coherent-patch -> verifier cadence, keep proof
 objects in sidecars by default, and defer provider-native tools/cache until the
 hot path is thinner.
 
+After every improvement implementation in this sequence, run and record a
+step-shape analysis before any further live `speed_1` or `proof_5`. The
+analysis must compare the latest mew artifact with the relevant Codex/Claude
+Code reference trace and state whether the repair moved the loop toward:
+cheap probe -> coherent patch -> verifier -> latest-failure repair. If it did
+not, stay in improvement phase and select the next generic hot-path repair
+from the saved artifact. Do not drift into broad measurement or task-specific
+MIPS/VM fixes.
+
 This means `build-cython-ext` is currently a passing `speed_1` candidate, not a
 reason to immediately rerun another `speed_1`. Its `proof_5` is deferred until
 the rebaseline controller deliberately chooses close proof budget.

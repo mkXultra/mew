@@ -342,6 +342,79 @@ def test_implement_v2_prompt_history_render_helper_matches_existing_json_shape()
     assert '"summary": "履歴 3"' in rendered
 
 
+def test_implement_v2_prompt_sections_include_active_coding_rhythm() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    section = next(item for item in sections if item.id == "implement_v2_active_coding_rhythm")
+
+    assert section.cache_policy == "cacheable"
+    assert section.stability == "static"
+    assert "cheap probe -> coherent patch/edit -> verifier -> latest-failure repair" in section.content
+    assert "at most one focused diagnostic/read turn" in section.content
+    assert "write_file, edit_file, or apply_patch" in section.content
+    assert "run_command for probes, builds, runtime execution, and verification" in section.content
+
+
+def test_implement_v2_live_json_prompt_omits_frontier_update_contract_without_frontier(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Fix a focused Python bug and run the relevant test."},
+        lane_config={"mode": "full"},
+    )
+
+    prompt = _live_json_prompt(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        turn_index=1,
+        max_turns=8,
+        base_max_turns=8,
+        history=(),
+    )
+
+    assert '"frontier_state_update"' not in prompt
+    assert "implement_v2_hard_runtime_frontier_state" not in prompt
+
+
+def test_implement_v2_live_json_prompt_adds_compact_frontier_update_contract_with_frontier(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Continue a runtime artifact repair."},
+        lane_config={"mode": "full"},
+    )
+
+    prompt = _live_json_prompt(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        hard_runtime_frontier_state={"schema_version": 1, "status": "active"},
+        turn_index=2,
+        max_turns=8,
+        base_max_turns=8,
+        history=(),
+    )
+
+    assert '"frontier_state_update"' in prompt
+    assert '"use_only_when": "a hard-runtime or compatibility frontier genuinely changed"' in prompt
+    assert "mew derives the latest failure from paired tool results" in prompt
+    assert '"latest_failure"' not in prompt
+    assert '"latest_runtime_failure"' not in prompt
+    assert '"latest_build_failure"' not in prompt
+    assert '"next_verifier_shaped_command"' in prompt
+    assert '"source_roles"' not in prompt
+
+
 def test_implement_v2_integration_observation_summary_is_state_safe_by_default(tmp_path) -> None:
     artifact_dir = tmp_path / "artifacts"
     secret = "SECRET_TASK_CONTEXT_SHOULD_NOT_BE_SERIALIZED"
