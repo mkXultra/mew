@@ -257,6 +257,157 @@ class TerminalBenchReplayTests(unittest.TestCase):
         )
         return trial_dir.parent
 
+    def _write_implement_v2_external_artifact_mismatch_fixture(self, root):
+        trial_dir = Path(root) / "job" / "make-mips-interpreter__v2externalartifact"
+        agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+        v2_dir = agent_dir / "implement_v2"
+        verifier_dir = trial_dir / "verifier"
+        v2_dir.mkdir(parents=True)
+        verifier_dir.mkdir(parents=True)
+        (trial_dir / "result.json").write_text(
+            json.dumps(
+                {
+                    "trial_name": "make-mips-interpreter__v2externalartifact",
+                    "verifier_result": {"reward": 0.0},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (verifier_dir / "test-stdout.txt").write_text(
+            "E FileNotFoundError: [Errno 2] No such file or directory: '/tmp/frame.bmp'\n",
+            encoding="utf-8",
+        )
+        (agent_dir / "command-transcript.json").write_text(
+            json.dumps({"exit_code": 1, "timed_out": False}),
+            encoding="utf-8",
+        )
+        (agent_dir / "mew-report.json").write_text(
+            json.dumps(
+                {
+                    "work_exit_code": 1,
+                    "resume": {},
+                    "work_report": {
+                        "stop_reason": "implement_v2_blocked",
+                        "runtime_id": "implement_v2_model_json_tool_loop",
+                        "selected_lane": "implement_v2",
+                        "steps": [
+                            {
+                                "status": "blocked",
+                                "action": {
+                                    "type": "implement_lane",
+                                    "lane": "implement_v2",
+                                    "runtime_id": "implement_v2_model_json_tool_loop",
+                                },
+                            }
+                        ],
+                        "implement_lane_result": {
+                            "lane": "implement_v2",
+                            "status": "blocked",
+                            "metrics": {
+                                "runtime_id": "implement_v2_model_json_tool_loop",
+                                "replay_valid": True,
+                                "terminal_evidence_count": 1,
+                                "write_evidence_count": 0,
+                            },
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        (v2_dir / "history.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "turn": 1,
+                        "tool_calls": [
+                            {
+                                "tool_name": "run_command",
+                                "arguments": {"command": "node vm.js && test -s /app/frame000000.bmp"},
+                            }
+                        ],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        (v2_dir / "proof-manifest.json").write_text(
+            json.dumps(
+                {
+                    "tool_results": [
+                        {
+                            "provider_call_id": "failed-hidden-path-probe",
+                            "tool_name": "run_command",
+                            "status": "failed",
+                            "content": [
+                                {
+                                    "exit_code": 1,
+                                    "stdout": "attempted /tmp/frame.bmp but failed before final verification\n",
+                                    "execution_contract_normalized": {
+                                        "role": "runtime",
+                                        "stage": "verification",
+                                        "purpose": "verification",
+                                        "proof_role": "verifier",
+                                        "acceptance_kind": "external_verifier",
+                                    },
+                                    "artifact_evidence": [
+                                        {
+                                            "evidence_id": "artifact-evidence:/tmp/frame.bmp",
+                                            "artifact_id": "/tmp/frame.bmp",
+                                            "path": "/tmp/frame.bmp",
+                                            "status": "passed",
+                                        }
+                                    ],
+                                    "verifier_evidence": {
+                                        "verifier_id": "verifier:failed-hidden-path-probe",
+                                        "verdict": "pass",
+                                    },
+                                }
+                            ],
+                        },
+                        {
+                            "provider_call_id": "verify-final-frame",
+                            "tool_name": "run_command",
+                            "status": "completed",
+                            "content": [
+                                {
+                                    "exit_code": 0,
+                                    "stdout": "FRAME_QUALITY_OK 640x400 saved frame000000.bmp\n",
+                                    "execution_contract_normalized": {
+                                        "role": "runtime",
+                                        "stage": "verification",
+                                        "purpose": "verification",
+                                        "proof_role": "verifier",
+                                        "acceptance_kind": "external_verifier",
+                                    },
+                                    "artifact_evidence": [
+                                        {
+                                            "evidence_id": "artifact-evidence:/tmp/vmout.txt",
+                                            "artifact_id": "/tmp/vmout.txt",
+                                            "path": "/tmp/vmout.txt",
+                                            "status": "passed",
+                                        },
+                                        {
+                                            "evidence_id": "artifact-evidence:/app/frame000000.bmp",
+                                            "artifact_id": "/app/frame000000.bmp",
+                                            "path": "/app/frame000000.bmp",
+                                            "status": "passed",
+                                        }
+                                    ],
+                                    "verifier_evidence": {
+                                        "verifier_id": "verifier:verify-final-frame",
+                                        "verdict": "pass",
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return trial_dir.parent
+
     def test_replay_terminal_bench_job_recomputes_current_resume_from_fixture(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = _write_terminal_bench_replay_fixture(tmp)
@@ -363,6 +514,25 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertEqual(current_v2["latest_failure"]["source"], "recomputed_structured_execution_evidence")
             self.assertIn("expected runtime artifact", trial["current"]["next_action"])
             self.assertIn("runtime_artifact_missing", text)
+
+    def test_replay_terminal_bench_job_extracts_external_expected_artifact_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_external_artifact_mismatch_fixture(tmp)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(current_v2["runtime_artifact_contract_mismatch"])
+            self.assertEqual(current_v2["external_expected_artifact_missing"], ["/tmp/frame.bmp"])
+            self.assertNotIn("/tmp/vmout.txt", current_v2["passed_structured_artifacts"])
+            self.assertIn("/tmp/frame.bmp", next_action)
+            self.assertIn("external verifier expected runtime artifact", next_action)
 
     def test_replay_terminal_bench_job_prefers_raw_contract_when_stored_normalized_vocabulary_is_stale(self):
         with tempfile.TemporaryDirectory() as tmp:

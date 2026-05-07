@@ -1299,6 +1299,49 @@ def test_acceptance_finish_blocker_accepts_runtime_visual_artifact_quality_evide
     assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session) == ""
 
 
+def test_acceptance_finish_blocker_does_not_promote_verifier_scratch_transcript_to_runtime_artifact():
+    text = (
+        "Implement vm.js so I can run `node vm.js`. It should save rendered frames. "
+        "I will check that you booted doom correctly from the first rendered frame."
+    )
+    checks = [
+        {
+            "constraint": "first rendered frame is correct",
+            "status": "verified",
+            "evidence": (
+                "Tool #19 confirmed exact stdout I_InitGraphics, expected dimensions 640x400, "
+                "reference similarity, and saved frame000000.bmp."
+            ),
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 19,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": "rm -f /tmp/vmout.txt frame000000.bmp; node vm.js | tee /tmp/vmout.txt"
+                },
+                "result": {
+                    "command": "rm -f /tmp/vmout.txt frame000000.bmp; node vm.js | tee /tmp/vmout.txt",
+                    "exit_code": 0,
+                    "stdout": (
+                        "I_InitGraphics: framebuffer: x_res: 640, y_res: 400\n"
+                        "saved frame000000.bmp\n"
+                        "FRAME_QUALITY_OK 640x400 reference similarity passed\n"
+                        "grep saved frame000000.bmp /tmp/vmout.txt succeeded\n"
+                    ),
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert blocker == ""
+
+
 def test_runtime_visual_artifact_task_classifier_requires_quality_language():
     assert is_runtime_visual_artifact_task(
         "Run node vm.js; it should save rendered frames and I will check the first frame is correct."

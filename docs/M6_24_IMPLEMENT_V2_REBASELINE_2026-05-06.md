@@ -618,6 +618,29 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   the non-blocking `stream: "stdout"` checker suggestion was added. After
   commit, run current-head pre-speed and then exactly one same-shape
   `make-mips-interpreter selected_lane=implement_v2` speed_1 if green.
+- The next same-shape rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1409-stream-contract`
+  scored reward `0.0` with runner errors `0` and total runtime `17m40s`.
+  It moved past the stdout stream-contract friction and reached a fresh final
+  structured verifier that passed internally, but the model then repeated
+  finish attempts without explicit `acceptance_evidence`. The external
+  verifier still failed because hidden tests expected `/tmp/frame.bmp` while
+  internal proof had produced `/app/frame000000.bmp` and
+  `/app/frames/frame000000.bmp`. The repair is generic: preserve structured
+  `artifact_evidence` / `verifier_evidence` in the finish-gate projection,
+  synthesize a finish acceptance check from the latest passed structured final
+  verifier when the model omits evidence, do not promote verifier scratch
+  transcripts such as `/tmp/vmout.txt` to runtime output obligations, and make
+  replay extract `/tmp/...` expected artifact paths from external verifier
+  stdout/CTRf. Exact `1409` replay and terminal-bench replay dogfood now pass
+  with `next_action` containing `/tmp/frame.bmp`; the new
+  `m6_24-external-artifact-mismatch-emulator` dogfood scenario covers the
+  hidden-path feedback shape. codex-ultra review session
+  `019e0101-7b3f-7ff1-bff2-c95451f77478` requested tightening empty
+  `acceptance_checks`, final-verifier contract shape, and failed-result
+  artifact suppression; after those follow-ups it approved with no findings.
+  After commit, run current-head pre-speed and then exactly one same-shape
+  `make-mips-interpreter selected_lane=implement_v2` speed_1 if green.
 
 ## Repair Trigger
 

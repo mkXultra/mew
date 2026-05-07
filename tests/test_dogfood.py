@@ -1758,6 +1758,24 @@ class DogfoodTests(unittest.TestCase):
             )
             self.assertEqual(structured_replay["mismatch_count"], 0)
 
+    def test_run_dogfood_m6_24_external_artifact_mismatch_emulator_scenario(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-external-artifact-mismatch-emulator",
+                cleanup=False,
+                terminal_bench_job_dir=None,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-external-artifact-mismatch-emulator")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["external_expected_artifact_missing"], ["/tmp/frame.bmp"])
+            self.assertIn("/tmp/frame.bmp", scenario["artifacts"]["next_action"])
+
     def test_run_dogfood_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

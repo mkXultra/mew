@@ -3362,12 +3362,133 @@ def _finish_acceptance_action(
     action["task_done"] = _finish_outcome(action) in _COMPLETED_FINISH_OUTCOMES
     checks = action.get("acceptance_checks")
     if isinstance(checks, list):
-        action["acceptance_checks"] = [
+        enriched_checks = [
             _with_finish_evidence_refs(check, tool_results) if isinstance(check, dict) else check for check in checks
         ]
-        return action
-    action["acceptance_checks"] = _synthetic_finish_acceptance_checks(action, tool_results)
+        if enriched_checks:
+            action["acceptance_checks"] = enriched_checks
+            return action
+    synthetic_checks = _synthetic_finish_acceptance_checks(action, tool_results)
+    if not synthetic_checks:
+        synthetic_checks = _structured_finish_acceptance_checks(tool_results)
+    action["acceptance_checks"] = synthetic_checks
     return action
+
+
+def _structured_finish_acceptance_checks(tool_results: tuple[ToolResultEnvelope, ...]) -> list[dict[str, object]]:
+    for index, result in reversed(tuple(enumerate(tool_results, start=1))):
+        check = _structured_finish_acceptance_check(index, result)
+        if check:
+            return [check]
+    return []
+
+
+def _structured_finish_acceptance_check(index: int, result: ToolResultEnvelope) -> dict[str, object]:
+    if result.status != "completed" or result.tool_name not in EXEC_TOOL_NAMES:
+        return {}
+    payload = next((item for item in result.content if isinstance(item, dict)), {})
+    if not isinstance(payload, dict):
+        return {}
+    verifier = payload.get("verifier_evidence")
+    if not isinstance(verifier, dict) or str(verifier.get("verdict") or "").casefold() != "pass":
+        return {}
+    contract = payload.get("execution_contract_normalized")
+    if not isinstance(contract, dict):
+        contract = payload.get("execution_contract")
+    if not _structured_finish_contract_is_final_verifier(contract):
+        return {}
+    artifacts = payload.get("artifact_evidence")
+    if not isinstance(artifacts, list):
+        return {}
+    artifact_ids: list[str] = []
+    for item in artifacts:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").casefold() != "passed":
+            continue
+        artifact_id = str(item.get("artifact_id") or item.get("path") or "").strip()
+        if not artifact_id or _is_verifier_scratch_artifact_id(artifact_id):
+            continue
+        if artifact_id not in artifact_ids:
+            artifact_ids.append(artifact_id)
+    if not artifact_ids:
+        return {}
+    evidence_text = _structured_finish_evidence_text(result, artifact_ids)
+    return {
+        "constraint": _structured_finish_constraint(artifact_ids),
+        "status": "verified",
+        "evidence": evidence_text,
+        "evidence_refs": [{"kind": "tool_call", "id": index}],
+    }
+
+
+def _structured_finish_contract_is_final_verifier(contract: object) -> bool:
+    if not isinstance(contract, dict):
+        return False
+    proof_role = str(contract.get("proof_role") or "").casefold()
+    acceptance_kind = str(contract.get("acceptance_kind") or "").casefold()
+    stage = str(contract.get("stage") or "").casefold()
+    purpose = str(contract.get("purpose") or "").casefold()
+    role = str(contract.get("role") or "").casefold()
+    if acceptance_kind not in {"external_verifier", "candidate_final_proof"}:
+        return False
+    if proof_role not in {"verifier", "final_artifact", "custom_runtime_smoke", "default_smoke"}:
+        return False
+    return (
+        stage in {"verification", "artifact_proof", "custom_runtime_smoke", "default_smoke"}
+        or purpose in {"verification", "artifact_proof", "smoke"}
+        or role in {"verify", "runtime", "test"}
+    )
+
+
+def _is_verifier_scratch_artifact_id(value: str) -> bool:
+    lowered = value.casefold()
+    if not lowered.startswith("/tmp/"):
+        return False
+    if not lowered.endswith((".log", ".txt", ".out", ".stdout", ".stderr")):
+        return False
+    name = lowered.rsplit("/", 1)[-1]
+    return any(token in name for token in ("log", "out", "stdout", "stderr", "trace", "transcript"))
+
+
+def _structured_finish_constraint(artifact_ids: list[str]) -> str:
+    if any(_artifact_id_is_visual_runtime_output(artifact) for artifact in artifact_ids):
+        return "runtime visual artifact is correct"
+    return "final verifier structured evidence passed"
+
+
+def _artifact_id_is_visual_runtime_output(value: str) -> bool:
+    lowered = value.casefold()
+    return any(marker in lowered for marker in ("frame", "image", "screenshot", ".bmp", ".png", ".jpg", ".jpeg"))
+
+
+def _structured_finish_evidence_text(result: ToolResultEnvelope, artifact_ids: list[str]) -> str:
+    payload = next((item for item in result.content if isinstance(item, dict)), {})
+    previews: list[str] = []
+    if isinstance(payload, dict):
+        for key in ("stdout_tail", "stdout", "stderr_tail", "stderr"):
+            value = str(payload.get(key) or "")
+            if not value:
+                continue
+            for marker in (
+                "FRAME_QUALITY_OK",
+                "I_InitGraphics",
+                "framebuffer",
+                "expected dimensions",
+                "reference similarity",
+                "saved frame",
+            ):
+                if marker.casefold() in value.casefold() and marker not in previews:
+                    previews.append(marker)
+    artifacts = ", ".join(artifact_ids[:4])
+    provider_call_id = str(result.provider_call_id or "").strip()
+    pieces = [
+        f"{provider_call_id or 'structured-final-verifier'} passed structured final verifier evidence",
+        f"artifacts: {artifacts}",
+    ]
+    if previews:
+        pieces.append("quality markers: " + ", ".join(previews[:4]))
+    return "; ".join(pieces)
 
 
 def _synthetic_finish_acceptance_checks(
@@ -3505,6 +3626,17 @@ def _acceptance_tool_call_from_result(index: int, result: ToolResultEnvelope) ->
         result_payload["timed_out"] = bool(primary.get("timed_out"))
     elif result.tool_name in EXEC_TOOL_NAMES:
         result_payload["timed_out"] = False
+    for key in (
+        "execution_contract",
+        "execution_contract_normalized",
+        "artifact_evidence",
+        "verifier_evidence",
+        "command_run",
+        "tool_run_record",
+    ):
+        value = primary.get(key)
+        if value:
+            result_payload[key] = value
     parameters: dict[str, object] = {}
     if command:
         parameters["command"] = command

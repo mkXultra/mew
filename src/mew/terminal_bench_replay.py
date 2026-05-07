@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from .implement_lane.execution_evidence import (
@@ -39,6 +40,16 @@ _FAILURE_CLASSIFICATION_DEFAULTS = {
     "evidence_refs": [],
     "required_next_probe": "",
 }
+_TMP_PATH_RE = re.compile(r"(/tmp/[A-Za-z0-9_./@+-]+)")
+_EXTERNAL_EXPECTED_PATH_MARKERS = (
+    "filenotfounderror",
+    "no such file",
+    "does not exist",
+    "not found",
+    "expected",
+    "assertionerror",
+    "failed",
+)
 
 
 def _read_json(path, default=None):
@@ -225,6 +236,13 @@ def _implement_v2_replay_summary(report_path, report):
         if isinstance(result, dict) and str(result.get("tool_name") or "") in {"run_command", "run_tests", "poll_command"}
     ]
     structured_replay = _implement_v2_structured_execution_replay(tool_results)
+    external_expected_artifacts = _external_verifier_expected_artifacts(_find_parent_with_result(report_path))
+    passed_structured_artifacts = _implement_v2_passed_structured_artifacts(tool_results)
+    external_expected_artifact_missing = [
+        path
+        for path in external_expected_artifacts
+        if not _external_artifact_satisfied_by_structured_evidence(path, passed_structured_artifacts)
+    ]
     legacy_marker_fallback = _implement_v2_legacy_runtime_marker_fallback(
         failed_results,
         structured_replay=structured_replay,
@@ -248,13 +266,117 @@ def _implement_v2_replay_summary(report_path, report):
         "tool_contract_shell_surface_misuse": _implement_v2_tool_contract_shell_surface_misuse(failed_results),
         "tool_contract_shell_surface_misuse_seen": _implement_v2_any_tool_contract_shell_surface_misuse(failed_results),
         "tool_contract_recovery_observed": _implement_v2_tool_contract_recovery_observed(tool_results),
-        "runtime_artifact_contract_mismatch": False,
+        "runtime_artifact_contract_mismatch": bool(external_expected_artifact_missing),
+        "external_expected_artifacts": external_expected_artifacts,
+        "passed_structured_artifacts": passed_structured_artifacts,
+        "external_expected_artifact_missing": external_expected_artifact_missing,
         "legacy_runtime_marker_fallback": legacy_marker_fallback,
         "hard_runtime_frontier_present": isinstance(updated_lane_state.get("lane_hard_runtime_frontier"), dict)
         and bool(updated_lane_state.get("lane_hard_runtime_frontier")),
         "compiled_source_frontier_observed": _implement_v2_history_mentions_compiled_source_frontier(history),
         "artifact_dir": str(artifact_dir) if artifact_dir else "",
     }
+
+
+def _external_verifier_expected_artifacts(trial_dir):
+    trial_dir = Path(trial_dir)
+    texts = [
+        _read_text(trial_dir / "verifier" / "test-stdout.txt"),
+        _read_text(trial_dir / "verifier" / "test-stderr.txt"),
+        _read_text(trial_dir / "verifier" / "ctrf.json"),
+    ]
+    artifacts = []
+    for text in texts:
+        for path in _tmp_paths_with_expected_context(text):
+            if path not in artifacts:
+                artifacts.append(path)
+    return artifacts[:12]
+
+
+def _tmp_paths_with_expected_context(text):
+    value = str(text or "")
+    if not value:
+        return []
+    lowered = value.casefold()
+    paths = []
+    for match in _TMP_PATH_RE.finditer(value):
+        path = str(match.group(1) or "").rstrip("`'\".,;:)]}")
+        if not path or path.endswith("/"):
+            continue
+        context = lowered[max(0, match.start() - 160) : min(len(lowered), match.end() + 160)]
+        if not any(marker in context for marker in _EXTERNAL_EXPECTED_PATH_MARKERS):
+            continue
+        if path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _implement_v2_passed_structured_artifacts(tool_results):
+    artifacts = []
+    for result in tool_results:
+        if not isinstance(result, dict):
+            continue
+        if str(result.get("status") or "").casefold() != "completed":
+            continue
+        content = result.get("content")
+        first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+        verifier = first_content.get("verifier_evidence") if isinstance(first_content, dict) else {}
+        if not isinstance(verifier, dict) or str(verifier.get("verdict") or "").casefold() != "pass":
+            continue
+        contract = first_content.get("execution_contract_normalized")
+        if not isinstance(contract, dict):
+            contract = first_content.get("execution_contract")
+        if not _implement_v2_contract_is_final_verifier(contract):
+            continue
+        artifact_evidence = first_content.get("artifact_evidence") if isinstance(first_content, dict) else []
+        if not isinstance(artifact_evidence, list):
+            continue
+        for artifact in artifact_evidence:
+            if not isinstance(artifact, dict):
+                continue
+            if str(artifact.get("status") or "").casefold() != "passed":
+                continue
+            for key in ("artifact_id", "path", "artifact_path"):
+                value = str(artifact.get(key) or "").strip()
+                if _verifier_scratch_tmp_artifact(value):
+                    continue
+                if value and value not in artifacts:
+                    artifacts.append(value)
+    return artifacts[:24]
+
+
+def _implement_v2_contract_is_final_verifier(contract):
+    if not isinstance(contract, dict):
+        return False
+    proof_role = str(contract.get("proof_role") or "").casefold()
+    acceptance_kind = str(contract.get("acceptance_kind") or "").casefold()
+    stage = str(contract.get("stage") or "").casefold()
+    purpose = str(contract.get("purpose") or "").casefold()
+    role = str(contract.get("role") or "").casefold()
+    if acceptance_kind not in {"external_verifier", "candidate_final_proof"}:
+        return False
+    if proof_role not in {"verifier", "final_artifact", "custom_runtime_smoke", "default_smoke"}:
+        return False
+    return (
+        stage in {"verification", "artifact_proof", "custom_runtime_smoke", "default_smoke"}
+        or purpose in {"verification", "artifact_proof", "smoke"}
+        or role in {"verify", "runtime", "test"}
+    )
+
+
+def _verifier_scratch_tmp_artifact(value):
+    lowered = str(value or "").casefold()
+    if not lowered.startswith("/tmp/") or not lowered.endswith((".log", ".txt", ".out", ".stdout", ".stderr")):
+        return False
+    name = lowered.rsplit("/", 1)[-1]
+    return any(token in name for token in ("log", "out", "stdout", "stderr", "trace", "transcript"))
+
+
+def _external_artifact_satisfied_by_structured_evidence(path, artifacts):
+    expected = str(path or "").casefold()
+    if not expected:
+        return False
+    return any(str(artifact or "").casefold() == expected for artifact in artifacts)
 
 
 def _implement_v2_step_status(work_report):
@@ -694,6 +816,14 @@ def _implement_v2_next_action(summary, *, external_reward=None):
     if summary.get("tool_contract_shell_surface_misuse_seen") and latest:
         tool = latest.get("tool_name") or "tool"
         return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
+    missing_external = summary.get("external_expected_artifact_missing")
+    if missing_external:
+        preview = ", ".join(str(item) for item in list(missing_external)[:3])
+        return (
+            "debug implement_v2 divergence: external verifier expected runtime artifact "
+            f"{preview} but internal structured final proof did not create it; "
+            "align the final runtime artifact contract before another live speed run"
+        )
     if latest.get("failure_class") == "runtime_artifact_missing":
         required_next_probe = str(latest.get("required_next_probe") or "inspect the producing substep and artifact path")
         return (

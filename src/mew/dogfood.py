@@ -110,6 +110,7 @@ DOGFOOD_SCENARIOS = (
     "m6_24-terminal-bench-replay",
     "m6_24-compile-compcert-emulator",
     "m6_24-expected-artifact-contract-emulator",
+    "m6_24-external-artifact-mismatch-emulator",
     "m6_24-repository-test-tail-emulator",
     "m6_24-final-verifier-budget-emulator",
     "m6_24-same-family-compatibility-emulator",
@@ -15027,6 +15028,152 @@ def _write_expected_artifact_contract_emulator_fixture(workspace, *, task="make-
     return job_dir
 
 
+def _write_external_artifact_mismatch_emulator_fixture(workspace, *, task="make-mips-interpreter"):
+    job_dir = Path(workspace) / "external-artifact-mismatch-emulator-fixture"
+    trial_name = f"{task}__external-artifact-mismatch"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    v2_dir = artifact_dir / "implement_v2"
+    verifier_dir = trial_dir / "verifier"
+    v2_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "external-artifact-mismatch-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text(
+        "E FileNotFoundError: [Errno 2] No such file or directory: '/tmp/frame.bmp'\n",
+        encoding="utf-8",
+    )
+    report = {
+        "work_exit_code": 1,
+        "resume": {},
+        "work_report": {
+            "stop_reason": "implement_v2_blocked",
+            "runtime_id": "implement_v2_model_json_tool_loop",
+            "selected_lane": "implement_v2",
+            "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+            "implement_lane_result": {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 0,
+                },
+            },
+        },
+    }
+    payload = {
+        "command": "node vm.js && test -s /app/frame000000.bmp",
+        "cwd": "/app",
+        "exit_code": 0,
+        "stdout": "FRAME_QUALITY_OK 640x400 saved frame000000.bmp\n",
+        "stdout_tail": "FRAME_QUALITY_OK 640x400 saved frame000000.bmp\n",
+        "stderr": "",
+        "stderr_tail": "",
+        "artifact_evidence": [
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:/tmp/vmout.txt",
+                "artifact_id": "/tmp/vmout.txt",
+                "path": "/tmp/vmout.txt",
+                "status": "passed",
+                "blocking": False,
+                "checks": [{"type": "exists", "passed": True, "severity": "blocking"}],
+            },
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:/app/frame000000.bmp",
+                "artifact_id": "/app/frame000000.bmp",
+                "path": "/app/frame000000.bmp",
+                "status": "passed",
+                "blocking": False,
+                "checks": [{"type": "exists", "passed": True, "severity": "blocking"}],
+            }
+        ],
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:verify-final-frame",
+            "verdict": "pass",
+            "reason": "all required internal artifact evidence present",
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps({"command": "mew work --oneshot --instruction external-artifact", "exit_code": 1, "timed_out": False}),
+        encoding="utf-8",
+    )
+    (v2_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "tool_calls": [
+                        {
+                            "tool_name": "run_command",
+                            "arguments": {"command": payload["command"]},
+                        }
+                    ],
+                }
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (v2_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "tool_results": [
+                    {
+                        "provider_call_id": "verify-final-frame",
+                        "tool_name": "run_command",
+                        "status": "completed",
+                        "content": [payload],
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
 def _write_repository_test_tail_emulator_fixture(workspace, *, task="build-cython-ext"):
     job_dir = Path(workspace) / "repository-test-tail-emulator-fixture"
     trial_name = f"{task}__repository-tail"
@@ -15986,6 +16133,52 @@ def run_m6_24_expected_artifact_contract_emulator_scenario(workspace, *, job_dir
         "job_dir": str(source),
         "replay_status": replay.get("status"),
         "structured_execution_replay": structured_replay if isinstance(structured_replay, dict) else {},
+        "next_action": ((first_trial.get("current") or {}).get("next_action") or ""),
+    }
+    return report
+
+
+def run_m6_24_external_artifact_mismatch_emulator_scenario(workspace, *, job_dir=None):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_external_artifact_mismatch_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="make-mips-interpreter",
+        assertions={
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+            "next_action_contains": "/tmp/frame.bmp",
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_v2 = ((first_trial.get("current") or {}).get("implement_v2") or {})
+    _scenario_check(
+        checks,
+        "m6_24_external_artifact_mismatch_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_external_artifact_mismatch_extracts_expected_path",
+        current_v2.get("external_expected_artifact_missing") == ["/tmp/frame.bmp"],
+        current_v2.get("external_expected_artifact_missing"),
+        ["/tmp/frame.bmp"],
+    )
+    _scenario_check(
+        checks,
+        "m6_24_external_artifact_mismatch_routes_next_action",
+        "/tmp/frame.bmp" in (((first_trial.get("current") or {}).get("next_action") or "")),
+        ((first_trial.get("current") or {}).get("next_action") or ""),
+        "next action mentions external expected artifact path",
+    )
+    report = _scenario_report("m6_24-external-artifact-mismatch-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "replay_status": replay.get("status"),
+        "external_expected_artifact_missing": current_v2.get("external_expected_artifact_missing") or [],
         "next_action": ((first_trial.get("current") or {}).get("next_action") or ""),
     }
     return report
@@ -17705,6 +17898,13 @@ def run_dogfood_scenario(args):
         elif name == "m6_24-expected-artifact-contract-emulator":
             reports.append(
                 run_m6_24_expected_artifact_contract_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-external-artifact-mismatch-emulator":
+            reports.append(
+                run_m6_24_external_artifact_mismatch_emulator_scenario(
                     scenario_workspace,
                     job_dir=getattr(args, "terminal_bench_job_dir", None),
                 )

@@ -1170,6 +1170,32 @@ def _runtime_tmp_artifacts_in_text(text: object, limit: int = 6) -> list[str]:
     return artifacts
 
 
+def _runtime_tmp_artifact_has_generation_context(text: object, artifact: str) -> bool:
+    value = str(text or "")
+    if not artifact:
+        return False
+    lowered_artifact = artifact.casefold()
+    for match in _RUNTIME_TMP_ARTIFACT_RE.finditer(value):
+        candidate = str(match.group(1) or "").rstrip("`'\".,;:)")
+        if candidate.casefold() != lowered_artifact:
+            continue
+        context = _path_context(value, match.start(), match.end()).casefold()
+        if any(
+            marker in context
+            for marker in (*_RUNTIME_ARTIFACT_CREATED_MARKERS, *_RUNTIME_ARTIFACT_EXPECTED_PATH_MARKERS)
+        ):
+            return True
+    return False
+
+
+def _runtime_tmp_artifact_is_verifier_scratch_path(artifact: str) -> bool:
+    lowered = str(artifact or "").casefold()
+    if not lowered.startswith("/tmp/") or not lowered.endswith((".log", ".txt", ".out", ".stdout", ".stderr")):
+        return False
+    name = lowered.rsplit("/", 1)[-1]
+    return any(token in name for token in ("log", "out", "stdout", "stderr", "trace", "transcript"))
+
+
 def _runtime_fresh_run_artifacts(task_description: object) -> list[str]:
     text = str(task_description or "")
     if "/tmp/" not in text.casefold():
@@ -1202,6 +1228,10 @@ def _runtime_fresh_run_artifacts_for_finish(
             ):
                 continue
             for artifact in _runtime_tmp_artifacts_in_text(text):
+                if _runtime_tmp_artifact_is_verifier_scratch_path(artifact):
+                    continue
+                if not _runtime_tmp_artifact_has_generation_context(text, artifact):
+                    continue
                 if artifact not in artifacts:
                     artifacts.append(artifact)
     return artifacts[:6]
@@ -1210,6 +1240,8 @@ def _runtime_fresh_run_artifacts_for_finish(
 def _runtime_artifact_created_by_call(call: object, artifact: str) -> bool:
     if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
         return False
+    if _runtime_artifact_created_by_structured_evidence(call, artifact):
+        return True
     text = _tool_call_text(call)
     lowered = text.casefold()
     if artifact.casefold() not in lowered:
@@ -1217,6 +1249,36 @@ def _runtime_artifact_created_by_call(call: object, artifact: str) -> bool:
     if "exists=false" in lowered and not any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS):
         return False
     return any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS)
+
+
+def _runtime_artifact_created_by_structured_evidence(call: object, artifact: str) -> bool:
+    if not isinstance(call, dict):
+        return False
+    result = call.get("result")
+    if not isinstance(result, dict):
+        return False
+    verifier = result.get("verifier_evidence")
+    if isinstance(verifier, dict) and str(verifier.get("verdict") or "").casefold() not in {"pass", "partial"}:
+        return False
+    artifact_lower = str(artifact or "").casefold()
+    if not artifact_lower:
+        return False
+    artifact_evidence = result.get("artifact_evidence")
+    if not isinstance(artifact_evidence, list):
+        return False
+    for item in artifact_evidence:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").casefold() != "passed":
+            continue
+        candidates = [
+            str(item.get("artifact_id") or ""),
+            str(item.get("path") or ""),
+            str(item.get("artifact_path") or ""),
+        ]
+        if any(candidate and candidate.casefold() == artifact_lower for candidate in candidates):
+            return True
+    return False
 
 
 def _runtime_artifact_cleanup_by_call(call: object, artifact: str) -> bool:

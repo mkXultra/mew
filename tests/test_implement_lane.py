@@ -438,8 +438,8 @@ def test_implement_v2_live_json_blocks_format_only_visual_finish(tmp_path) -> No
             },
             lane_config={
                 "mode": "full",
-                "allowed_read_roots": [str(tmp_path)],
-                "allowed_write_roots": [str(tmp_path)],
+                "allowed_read_roots": [str(tmp_path), "/tmp"],
+                "allowed_write_roots": [str(tmp_path), "/tmp"],
                 "allow_shell": True,
             },
         ),
@@ -549,8 +549,8 @@ def test_implement_v2_live_json_finish_gate_can_continue_then_complete(tmp_path)
             },
             lane_config={
                 "mode": "full",
-                "allowed_read_roots": [str(tmp_path)],
-                "allowed_write_roots": [str(tmp_path)],
+                "allowed_read_roots": [str(tmp_path), "/tmp"],
+                "allowed_write_roots": [str(tmp_path), "/tmp"],
                 "allow_shell": True,
             },
         ),
@@ -564,6 +564,148 @@ def test_implement_v2_live_json_finish_gate_can_continue_then_complete(tmp_path)
     assert result.metrics["finish_gate_block_count"] == 2
     assert result.metrics["finish_gate_decision"]["decision"] == "allow_complete"
     assert any(event.payload.get("type") == "deterministic_finish_gate" for event in result.transcript)
+
+
+def test_implement_v2_finish_gate_uses_structured_final_verifier_without_model_evidence(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run fresh final verifier with a scratch transcript",
+            "tool_calls": [
+                {
+                    "id": "verify-final-runtime",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "rm -f frame000000.bmp /tmp/mew-v2-vmout.txt; "
+                            "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
+                            "saved frame000000.bmp\\n"
+                            "FRAME_QUALITY_OK 640x400 reference similarity passed\\n' "
+                            "| tee /tmp/mew-v2-vmout.txt; "
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {"stream": "stdout", "checks": [{"non_empty": True}]},
+                                {"path": "/tmp/mew-v2-vmout.txt", "checks": [{"exists": True}, {"non_empty": True}]},
+                                {"path": "frame000000.bmp", "checks": [{"exists": True}, {"non_empty": True}]},
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "Final verifier evidence is already present from the fresh runtime run.",
+                "acceptance_checks": [],
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path), "/tmp"],
+                "allowed_write_roots": [str(tmp_path), "/tmp"],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["completion_credit"] is True
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert result.metrics["finish_gate_decision"]["decision"] == "allow_complete"
+
+
+def test_implement_v2_finish_gate_rejects_intermediate_structured_artifact_without_finish_evidence(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "build an intermediate artifact",
+            "tool_calls": [
+                {
+                    "id": "build-intermediate",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "mkdir -p build && printf intermediate > build/intermediate.bin",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": {
+                            "role": "build",
+                            "stage": "build",
+                            "purpose": "build",
+                            "proof_role": "target_build",
+                            "acceptance_kind": "progress_only",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {"path": "build/intermediate.bin", "checks": [{"exists": True}, {"non_empty": True}]},
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "The intermediate artifact exists.",
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create the final runtime artifact and prove it works."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["completion_credit"] is False
+    assert result.metrics["finish_gate_decision"]["decision"] == "block_continue"
 
 
 def test_implement_v2_live_json_finish_only_turn_uses_finish_gate(tmp_path) -> None:

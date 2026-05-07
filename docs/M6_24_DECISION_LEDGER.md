@@ -747,3 +747,27 @@ spend another same-shape `make-doom-for-mips` speed run unless a generic
 frontier-throttling or strategy design is chosen and proven first with focused
 UT, exact `1217` replay/dogfood, and an emulator for repeated verifier-shaped
 missing-artifact rebuilds.
+
+Implement-v2 make-mips final-verifier projection checkpoint 2026-05-07 JST:
+
+The same-shape rerun
+`mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1409-stream-contract`
+scored `0/1` with runner errors `0` and runtime `17m40s`. The internal final
+verifier had passed with structured artifact evidence for `/app/frame000000.bmp`
+and `/app/frames/frame000000.bmp`, but finish attempts omitted explicit
+`acceptance_evidence` and the external verifier failed with
+`FileNotFoundError` for `/tmp/frame.bmp`.
+
+Decision: repair the projection and feedback loop, not the task. Structured
+`artifact_evidence` / `verifier_evidence` must survive the acceptance-session
+projection, and the finish gate may synthesize a verified acceptance check from
+the latest passed structured final verifier when the model omits evidence.
+Verifier scratch transcripts such as `/tmp/vmout.txt` must not become runtime
+output obligations. Replay must extract external verifier expected artifact
+paths from stdout/CTRf and route the next action to align the internal final
+artifact contract with paths such as `/tmp/frame.bmp`. This is not a
+make-mips-specific solver and does not loosen acceptance. codex-ultra review
+session `019e0101-7b3f-7ff1-bff2-c95451f77478` approved after the repair was
+tightened to ignore empty `acceptance_checks`, require a final/verifier-shaped
+contract for structured finish synthesis, and ignore failed/non-final artifact
+evidence when comparing internal proof to external verifier expectations.
