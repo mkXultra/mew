@@ -3633,11 +3633,92 @@ def _finish_acceptance_action(
         ]
     if not acceptance_checks:
         acceptance_checks = _synthetic_finish_acceptance_checks(action, tool_results)
-    if not acceptance_checks:
-        acceptance_checks = _structured_finish_acceptance_checks(tool_results)
-    acceptance_checks.extend(_source_grounding_finish_acceptance_checks(task_description, tool_results))
+    sidecar_checks = [
+        *_structured_finish_acceptance_checks(tool_results),
+        *_source_grounding_finish_acceptance_checks(task_description, tool_results),
+    ]
+    acceptance_checks = _merge_finish_acceptance_sidecar_checks(acceptance_checks, sidecar_checks)
     action["acceptance_checks"] = acceptance_checks
     return action
+
+
+def _merge_finish_acceptance_sidecar_checks(
+    acceptance_checks: list[object],
+    sidecar_checks: list[dict[str, object]],
+) -> list[object]:
+    if not sidecar_checks:
+        return acceptance_checks
+    for check in sidecar_checks:
+        check.setdefault("source", "finish_sidecar")
+    merged: list[object] = []
+    for check in sidecar_checks:
+        if not _acceptance_check_equivalent_exists(merged, check):
+            merged.append(check)
+    terminal_sidecars = [check for check in sidecar_checks if _acceptance_check_has_terminal_ref(check)]
+    demoted_covered_checks: list[object] = []
+    for check in acceptance_checks:
+        demoted = _demote_unreferenced_model_check_when_sidecar_covers(check, terminal_sidecars)
+        if demoted is not check:
+            demoted_covered_checks.append(demoted)
+            continue
+        if not isinstance(check, dict) or not _acceptance_check_equivalent_exists(merged, check):
+            merged.append(check)
+    for check in demoted_covered_checks:
+        if not isinstance(check, dict) or not _acceptance_check_equivalent_exists(merged, check):
+            merged.append(check)
+    return merged
+
+
+def _acceptance_check_equivalent_exists(checks: list[object], candidate: dict[str, object]) -> bool:
+    candidate_constraint = str(candidate.get("constraint") or "").casefold().strip()
+    candidate_evidence = str(candidate.get("evidence") or "").casefold().strip()
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        if str(check.get("constraint") or "").casefold().strip() != candidate_constraint:
+            continue
+        if str(check.get("evidence") or "").casefold().strip() == candidate_evidence:
+            return True
+    return False
+
+
+def _acceptance_check_has_terminal_ref(check: object) -> bool:
+    if not isinstance(check, dict):
+        return False
+    refs = check.get("evidence_refs")
+    if not isinstance(refs, list):
+        return False
+    return any(isinstance(ref, dict) and str(ref.get("kind") or "tool_call") == "tool_call" for ref in refs)
+
+
+def _demote_unreferenced_model_check_when_sidecar_covers(
+    check: object,
+    terminal_sidecars: list[dict[str, object]],
+) -> object:
+    if not isinstance(check, dict):
+        return check
+    if str(check.get("source") or "").endswith("_sidecar"):
+        return check
+    if str(check.get("status") or "").casefold() not in {"pass", "passed", "satisfied", "verified", "ok"}:
+        return check
+    if _acceptance_check_has_terminal_ref(check):
+        return check
+    if not any(_sidecar_constraint_covers_check(sidecar, check) for sidecar in terminal_sidecars):
+        return check
+    demoted = dict(check)
+    demoted["status"] = "unknown"
+    demoted["mew_demoted_reason"] = "unreferenced_model_acceptance_check_replaced_by_structured_sidecar"
+    return demoted
+
+
+def _sidecar_constraint_covers_check(sidecar: dict[str, object], check: dict[str, object]) -> bool:
+    sidecar_constraint = _normalized_acceptance_constraint(sidecar.get("constraint"))
+    check_constraint = _normalized_acceptance_constraint(check.get("constraint"))
+    return bool(sidecar_constraint and check_constraint and sidecar_constraint == check_constraint)
+
+
+def _normalized_acceptance_constraint(value: object) -> str:
+    return " ".join(str(value or "").casefold().strip().split())
 
 
 def _source_grounding_finish_acceptance_checks(
@@ -3658,6 +3739,7 @@ def _source_grounding_finish_acceptance_checks(
             {
                 "constraint": f"provided source or artifact {source_ref} is grounded",
                 "status": "verified",
+                "source": "source_grounding_sidecar",
                 "evidence": (
                     f"{provider_call_id or f'Tool #{index}'} completed {result.tool_name} evidence "
                     f"grounding {source_ref}"
@@ -3731,6 +3813,7 @@ def _structured_finish_acceptance_check(index: int, result: ToolResultEnvelope) 
     return {
         "constraint": _structured_finish_constraint(artifact_ids),
         "status": "verified",
+        "source": "structured_finish_sidecar",
         "evidence": evidence_text,
         "evidence_refs": [{"kind": "tool_call", "id": index}],
     }

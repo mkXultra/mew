@@ -1128,6 +1128,324 @@ def test_implement_v2_finish_gate_uses_structured_final_verifier_without_model_e
     assert result.metrics["finish_gate_decision"]["decision"] == "allow_complete"
 
 
+def test_implement_v2_finish_gate_prefers_structured_sidecar_over_unref_model_check(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run final verifier with structured artifact evidence",
+            "tool_calls": [
+                {
+                    "id": "verify-final-runtime",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "rm -f frame000000.bmp; "
+                            "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
+                            "saved frame000000.bmp\\n"
+                            "FRAME_QUALITY_OK 640x400 reference similarity passed\\n'; "
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {"stream": "stdout", "checks": [{"non_empty": True}]},
+                                {"path": "frame000000.bmp", "checks": [{"exists": True}, {"non_empty": True}]},
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "Runtime artifact verified.",
+                "acceptance_checks": [
+                    {
+                        "constraint": "runtime visual artifact is correct",
+                        "status": "verified",
+                        "evidence": "The final runtime verifier generated and checked the rendered frame.",
+                    }
+                ],
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    assert result.status == "completed"
+    assert result.metrics["completion_credit"] is True
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert result.metrics["finish_gate_decision"]["decision"] == "allow_complete"
+
+
+def test_implement_v2_finish_gate_keeps_structured_sidecar_inside_acceptance_window(tmp_path) -> None:
+    weak_checks = [
+        {
+            "constraint": "runtime visual artifact is correct",
+            "status": "verified",
+            "evidence": f"unreferenced model claim {index}",
+        }
+        for index in range(8)
+    ]
+    outputs = [
+        {
+            "summary": "run final verifier with structured artifact evidence",
+            "tool_calls": [
+                {
+                    "id": "verify-final-runtime",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "rm -f frame000000.bmp; "
+                            "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
+                            "saved frame000000.bmp\\n"
+                            "FRAME_QUALITY_OK 640x400 reference similarity passed\\n'; "
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {"stream": "stdout", "checks": [{"non_empty": True}]},
+                                {"path": "frame000000.bmp", "checks": [{"exists": True}, {"non_empty": True}]},
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "Runtime artifact verified.",
+                "acceptance_checks": weak_checks,
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames. "
+                    "I will check that the first rendered frame is correct."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert result.metrics["finish_gate_decision"]["decision"] == "allow_complete"
+
+
+def test_implement_v2_finish_gate_keeps_uncovered_model_check_inside_acceptance_window(tmp_path) -> None:
+    weak_checks = [
+        {
+            "constraint": "runtime visual artifact is correct",
+            "status": "verified",
+            "evidence": f"unreferenced duplicate model claim {index}",
+        }
+        for index in range(7)
+    ]
+    weak_checks.append(
+        {
+            "constraint": "program output is hello",
+            "status": "verified",
+            "evidence": "The program output is hello.",
+        }
+    )
+    outputs = [
+        {
+            "summary": "run final verifier with structured visual artifact evidence",
+            "tool_calls": [
+                {
+                    "id": "verify-final-runtime",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "rm -f frame000000.bmp; "
+                            "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
+                            "saved frame000000.bmp\\n"
+                            "FRAME_QUALITY_OK 640x400 reference similarity passed\\n'; "
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {"stream": "stdout", "checks": [{"non_empty": True}]},
+                                {"path": "frame000000.bmp", "checks": [{"exists": True}, {"non_empty": True}]},
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "Runtime artifact verified, unrelated behavior claimed.",
+                "acceptance_checks": weak_checks,
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames. "
+                    "Also make the program output hello."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["finish_gate_block_count"] == 1
+    blockers = result.metrics["finish_gate_decision"]["blockers"]
+    assert any(blocker["code"] == "acceptance_evidence_refs_missing" for blocker in blockers)
+
+
+def test_implement_v2_finish_gate_source_sidecar_does_not_cover_unrelated_model_check(tmp_path) -> None:
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    (source_dir / "source.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "read source but do not verify behavior",
+            "tool_calls": [{"id": "read-source", "name": "read_file", "arguments": {"path": "src/source.c"}}],
+            "finish": {
+                "outcome": "completed",
+                "summary": "Claim behavior without proof.",
+                "acceptance_checks": [
+                    {
+                        "constraint": "program output is hello",
+                        "status": "verified",
+                        "evidence": "The program output is hello.",
+                    }
+                ],
+            },
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided src/source.c, the corresponding source code. "
+                    "Make the program output hello."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["finish_gate_block_count"] == 1
+    blockers = result.metrics["finish_gate_decision"]["blockers"]
+    assert any(blocker["code"] == "acceptance_evidence_refs_missing" for blocker in blockers)
+
+
 def test_implement_v2_finish_gate_rejects_intermediate_structured_artifact_without_finish_evidence(tmp_path) -> None:
     outputs = [
         {

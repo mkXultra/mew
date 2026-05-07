@@ -775,6 +775,30 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `blocked_by_prior_failed_write_in_same_turn`. This keeps proof pairing intact
   while forcing the model to observe the write failure before spending verifier
   budget. Do not count this as a task-specific MIPS fix.
+- Post-same-turn-block diagnostic
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260508-0008-same-turn-block`
+  scored reward `0.0` with runner errors `0`, total runtime `10m47s`, inner
+  `implement_v2` wall `600.045s`, `model_turns=29`, `tool_calls=27`,
+  `prompt_chars_total=3,274,058`, and `write_evidence_count=2`. Replay and
+  terminal-bench replay dogfood pass. The same-turn dependency repair reduced
+  wasted tool work (`43 -> 27` tool calls) and the implementation reached a
+  working runtime by `turn 9`: the verifier created `/tmp/frame.bmp`, printed
+  Doom boot markers, showed `I_InitGraphics`/framebuffer output, and carried
+  structured artifact evidence for a `640x400` BMP. The remaining miss is
+  deterministic finish-gate closeout, not implementation behavior. From
+  `turn 10` onward, repeated `finish_gate` blocks asked for runtime artifact,
+  source grounding, and visual-quality evidence that was already present in
+  structured `artifact_evidence` sidecars, while weak model-authored
+  `acceptance_checks` without refs kept producing missing/ungrounded evidence
+  blockers. The selected generic repair is to always merge structured
+  final-verifier/source-grounding sidecar checks into live v2 finish actions,
+  keep those sidecars inside the first eight acceptance checks, and demote
+  unreferenced model-supplied verified checks only when same-constraint
+  terminal-referenced sidecar evidence covers the proof. Uncovered model claims
+  stay ahead of covered/demoted duplicates so missing-ref blockers remain
+  visible within the bounded validation window. Source-grounding sidecars do not
+  cover unrelated behavior claims. This is the M6.24 "proof/evidence behind
+  deterministic sidecars" backlog item.
 
 ## Repair Trigger
 
