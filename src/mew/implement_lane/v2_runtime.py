@@ -538,6 +538,7 @@ def run_live_json_implement_v2(
                 current_calls,
                 seen_provider_call_ids=seen_provider_call_ids,
             )
+            current_calls = _normalize_accept_edits_write_calls(lane_input, current_calls)
             identity_errors = _tool_call_identity_errors(
                 current_calls,
                 expected_lane_attempt_id=lane_attempt_id,
@@ -3105,8 +3106,10 @@ def _live_json_prompt(
         "Return exactly one JSON object. Use tool_calls for observations, edits, and commands. "
         "Use finish only when the task is completed, blocked, or failed. If more work is needed, "
         "set finish.outcome to continue or omit finish. For edits, prefer exact edit_file old/new "
-        "(old_string/new_string aliases are accepted) or apply_patch. If the CLI grants accept-edits, you may request apply=true; mew supplies "
-        "independent approval outside the model output. If tests or an external verifier matter, "
+        "(old_string/new_string aliases are accepted) or apply_patch. If the CLI grants accept-edits, "
+        "write/edit/apply_patch calls without dry_run=true or apply=false are intended to mutate; "
+        "mew defaults omitted apply to true and supplies independent approval outside the model output. "
+        "For a missing write_file target, mew also defaults omitted create to true. If tests or an external verifier matter, "
         "run a concrete run_command or run_tests before claiming completed.\n"
         f"{terminal_reaction_guidance}"
         f"lane_attempt_id: {lane_attempt_id}\n"
@@ -3278,6 +3281,43 @@ def _auto_approval_records(lane_input: ImplementLaneInput, tool_calls) -> tuple[
             }
         )
     return tuple(approvals)
+
+
+def _normalize_accept_edits_write_calls(
+    lane_input: ImplementLaneInput,
+    tool_calls: tuple[ToolCallEnvelope, ...],
+) -> tuple[ToolCallEnvelope, ...]:
+    if not bool(lane_input.lane_config.get("auto_approve_writes")):
+        return tool_calls
+    if not _allowed_write_roots(lane_input):
+        return tool_calls
+    return tuple(_normalize_accept_edits_write_call(lane_input, call) for call in tool_calls)
+
+
+def _normalize_accept_edits_write_call(lane_input: ImplementLaneInput, call: ToolCallEnvelope) -> ToolCallEnvelope:
+    if call.tool_name not in WRITE_TOOL_NAMES:
+        return call
+    args = dict(call.arguments)
+    changed = False
+    if "apply" not in args and "dry_run" not in args:
+        args["apply"] = True
+        changed = True
+    if call.tool_name == "write_file" and "create" not in args and _write_file_target_is_missing(lane_input, args):
+        args["create"] = True
+        changed = True
+    if not changed:
+        return call
+    return replace(call, arguments=args)
+
+
+def _write_file_target_is_missing(lane_input: ImplementLaneInput, args: dict[str, object]) -> bool:
+    raw_path = str(args.get("path") or "").strip()
+    if not raw_path:
+        return False
+    target = Path(raw_path).expanduser()
+    if not target.is_absolute():
+        target = Path(str(lane_input.workspace or ".")).expanduser().resolve(strict=False) / target
+    return not target.exists()
 
 
 def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:

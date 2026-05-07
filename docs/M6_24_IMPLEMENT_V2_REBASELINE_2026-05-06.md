@@ -131,7 +131,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
 | `make-doom-for-mips` | 1/5 | recorded/deferred after 0/1 strategy-wall-budget frontier | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217` | no same-shape rerun until a generic frontier-throttling or strategy design is selected and locally proven |
-| `make-mips-interpreter` | 3/5 | 10min wall gate verified; blocked on runtime frontier / `/tmp/frame.bmp` missing | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260507-2237-wall-budget` | no live speed until the `2237-wall-budget` artifact is classified into a generic runtime-frontier/step-shape repair with replay/dogfood/emulator coverage |
+| `make-mips-interpreter` | 3/5 | post-hot-path-prompt 10min step-shape still blocked, but improved turn/tool shape | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260507-2318-hotpath-prompt` | no live speed until the new artifact is classified into the next generic hot-path repair with replay/dogfood/emulator coverage |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
 | `polyglot-c-py` | 5/5 | pending | none | run v2 speed_1 |
@@ -730,6 +730,35 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   generic repair has UT/replay/dogfood/emulator proof. Any same-shape rerun must
   use the documented `timeout_seconds` plus `{max_wall_seconds_option}` command
   shape.
+- The post-hot-path-prompt 10min diagnostic
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260507-2318-hotpath-prompt`
+  scored reward `0.0` with runner errors `0`, total runtime `11m17s`, and
+  inner `implement_v2` wall `600.043s`. Replay and terminal-bench replay
+  dogfood pass. Compared with `2237-wall-budget`, the prompt-weight repair
+  improved the shape but did not close the gap: `model_turns` fell `22 -> 14`,
+  `tool_calls` fell `45 -> 30`, and `prompt_chars_total` fell
+  `4,237,262 -> 1,827,272`. The loop also converted the latest runtime opcode
+  evidence into a patch/verifier in one turn (`turn 12` focused probe, `turn 13`
+  `edit_file` + verifier). It is still behind Codex's reference shape
+  (`message_count=8`, `tool_call_completed_count=34`, `total_seconds=416.42`):
+  v2 spent `8` turns before the first write, lost one turn because
+  `write_file` omitted `create=true`, and lost another because the first
+  successful create was dry-run before `apply=true`. The next generic repair is
+  write/apply friction in the v2 tool contract and/or deterministic write policy
+  for `accept-edits`, not task-specific MIPS/VM logic. Do not run live
+  `speed_1`/`proof_5` before that repair has focused UT plus replay/dogfood or
+  emulator coverage.
+- Write/apply friction repair selected from that analysis is now implemented as
+  a generic `implement_v2` live-loop policy: under `auto_approve_writes` with
+  allowed write roots, write tools that omit both `dry_run` and `apply` default
+  to `apply=true`, and missing `write_file` targets default omitted `create` to
+  true. Explicit preview intent (`dry_run=true` or `apply=false`) is preserved.
+  Focused UT covers both the defaulted mutation and the preserved dry-run path;
+  full `tests/test_implement_lane.py` passed (`164 passed`). Exact replay and
+  terminal-bench replay dogfood on the `2318-hotpath-prompt` artifact pass, and
+  codex-ultra review session `019e02e1-1ff5-7650-afc5-b4c263e3ec00` approved.
+  Before any `speed_1`/`proof_5`, this repair still requires commit and a fresh
+  10min step-shape analysis.
 
 ## Repair Trigger
 

@@ -242,6 +242,111 @@ def test_implement_v2_live_json_runtime_can_edit_verify_and_finish(tmp_path) -> 
     assert target.read_text(encoding="utf-8") == "after\n"
 
 
+def test_implement_v2_live_json_accept_edits_defaults_new_write_to_create_and_apply(tmp_path) -> None:
+    target = tmp_path / "generated.txt"
+    outputs = [
+        {
+            "summary": "write the implementation artifact",
+            "tool_calls": [
+                {
+                    "id": "write-1",
+                    "name": "write_file",
+                    "arguments": {"path": "generated.txt", "content": "ok\n"},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after write for inspection"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    tool_call = manifest["tool_calls"][0]
+    tool_result = manifest["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert result.metrics["write_evidence_count"] == 1
+    assert target.read_text(encoding="utf-8") == "ok\n"
+    assert tool_call["arguments"]["apply"] is True
+    assert tool_call["arguments"]["create"] is True
+    assert tool_result["status"] == "completed"
+    assert tool_result["content"][0]["dry_run"] is False
+    assert tool_result["content"][0]["written"] is True
+    assert tool_result["content"][0]["approval_source"] == "cli_accept_edits"
+
+
+def test_implement_v2_live_json_accept_edits_preserves_explicit_dry_run(tmp_path) -> None:
+    target = tmp_path / "preview.txt"
+    outputs = [
+        {
+            "summary": "preview the implementation artifact",
+            "tool_calls": [
+                {
+                    "id": "write-1",
+                    "name": "write_file",
+                    "arguments": {"path": "preview.txt", "content": "ok\n", "create": True, "dry_run": True},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "preview only"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    tool_call = manifest["tool_calls"][0]
+    tool_result = manifest["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert result.metrics["write_evidence_count"] == 0
+    assert not target.exists()
+    assert "apply" not in tool_call["arguments"]
+    assert tool_call["arguments"]["dry_run"] is True
+    assert tool_result["status"] == "completed"
+    assert tool_result["content"][0]["dry_run"] is True
+    assert tool_result["content"][0]["written"] is False
+
+
 def test_implement_v2_model_turn_boundary_preserves_rendered_prompt_and_call_args(tmp_path) -> None:
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
     lane_input = ImplementLaneInput(
