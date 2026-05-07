@@ -562,3 +562,56 @@ Current implication:
 - The next diagnostic should show whether v2 now preserves the real latest
   runtime failure and converts it into the next patch, instead of chasing
   non-acceptance diagnostic stream markers.
+
+## 2026-05-08 Diagnostic-Stream-Frontier Pre-Speed Diagnostic
+
+Latest current-head mew artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-diagnostic-stream-frontier-make-mips-step-shape-10min-20260508-0748/make-mips-interpreter__E8upwvp`
+
+Validation:
+
+- exact replay passes with external reward `0.0`;
+- terminal-bench replay dogfood passes with structured replay mismatch count
+  `0`;
+- runtime finish-gate emulator passes.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing miss; frame existence/similarity pass |
+| mew implement_v2 `0748` | 0/1 | 10m16s Harbor | 18 model turns | 37 tool calls | turn 8 | `runtime_artifact_missing` for required `/tmp/frame.bmp`; model timeout after several runtime-instruction patch clusters |
+
+Step delta:
+
+1. The observational diagnostic-stream repair worked: diagnostic stdout marker
+   misses no longer replace the hard runtime frontier.
+2. The latest structured failure is again the actionable runtime artifact
+   failure: required `/tmp/frame.bmp` is missing after the fresh VM verifier.
+3. mew now preserves typed runtime failure evidence, but still consumes too
+   much model context while moving from latest runtime failure to the next
+   focused patch.
+4. The run used 18 turns and 3.02M prompt chars. Codex reached a comparable
+   work shape with 8 messages and a more coherent patch/repair sequence.
+5. codex-ultra classified the next gap as
+   `implement_v2_hot_path_projection_weight /
+   runtime_failure_to_next_patch_frontier_gap`, not as another MIPS-specific
+   VM rule.
+
+Repair selected after this diagnostic:
+
+- keep full tool-call arguments in `history.json` and proof artifacts;
+- compact next-turn provider history for large source mutation arguments on
+  `write_file`, `edit_file`, and `apply_patch` into hash, size, and bounded
+  excerpt projections;
+- keep command strings visible but bounded;
+- do not loosen acceptance, add MIPS/DOOM logic, or increase the turn budget.
+
+Current implication:
+
+- Do not run broad measurement yet.
+- After review/commit, run one more 10min `make-mips-interpreter
+  selected_lane=implement_v2` step-shape diagnostic before `speed_1` /
+  `proof_5`.
+- The next diagnostic should show whether smaller prompt/history projection
+  improves latest-failure-to-next-patch focus without hiding the information
+  needed for repair.

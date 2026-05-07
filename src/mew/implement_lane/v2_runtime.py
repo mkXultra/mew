@@ -43,7 +43,22 @@ _PROVIDER_ID_TOKEN_RE = re.compile(r"[A-Za-z0-9_.:-]+")
 _PROVIDER_HISTORY_TEXT_LIMIT = 2400
 _PROVIDER_HISTORY_TEXT_HEAD = 1200
 _PROVIDER_HISTORY_TEXT_TAIL = 900
+_PROVIDER_HISTORY_TOOL_ARG_TEXT_LIMIT = 1200
+_PROVIDER_HISTORY_SOURCE_MUTATION_TEXT_LIMIT = 900
 _PROVIDER_HISTORY_LIST_LIMIT = 24
+_PROVIDER_HISTORY_SOURCE_MUTATION_KEYS = frozenset(
+    {
+        "content",
+        "old",
+        "new",
+        "old_string",
+        "new_string",
+        "old_text",
+        "new_text",
+        "patch",
+        "input",
+    }
+)
 _PROVIDER_HISTORY_CLIP_KEYS = {
     "command",
     "content",
@@ -703,7 +718,7 @@ def run_live_json_implement_v2(
             prompt_history_entry = {
                 "turn": history_entry["turn"],
                 "summary": history_entry["summary"],
-                "tool_calls": history_entry["tool_calls"],
+                "tool_calls": [_provider_visible_tool_call_for_history(call) for call in current_calls],
                 "tool_results": [_provider_visible_tool_result_for_history(result) for result in current_results],
             }
             history.append(history_entry)
@@ -3525,6 +3540,99 @@ def _same_turn_write_failure_blocks_remaining_calls(result: ToolResultEnvelope) 
     return result.status in {"failed", "denied", "invalid", "interrupted"} or bool(result.is_error)
 
 
+def _provider_visible_tool_call_for_history(call: ToolCallEnvelope) -> dict[str, object]:
+    """Return a next-turn tool-call projection without bulky source text."""
+
+    projected = call.as_dict()
+    arguments = projected.get("arguments")
+    if isinstance(arguments, dict):
+        projected["arguments"] = _project_provider_history_tool_arguments(call.tool_name, arguments)
+    return projected
+
+
+def _project_provider_history_tool_arguments(tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
+    projected: dict[str, object] = {}
+    projected_any = False
+    for key, value in arguments.items():
+        projected_value, projected_key = _project_provider_history_tool_argument(tool_name, str(key), value)
+        projected[str(key)] = projected_value
+        projected_any = projected_any or projected_key
+    if projected_any:
+        projected["arguments_projected_for_history"] = True
+        projected["projection_note"] = (
+            "large source-mutation arguments are stored in full history/proof artifacts; "
+            "next-turn history keeps hashes, sizes, and bounded excerpts"
+        )
+    return projected
+
+
+def _project_provider_history_tool_argument(tool_name: str, key: str, value: object) -> tuple[object, bool]:
+    if key == "execution_contract" and isinstance(value, dict):
+        return _frontier_compact_mapping(value), False
+    if isinstance(value, str):
+        if tool_name in WRITE_TOOL_NAMES and key in _PROVIDER_HISTORY_SOURCE_MUTATION_KEYS:
+            projected = _project_source_mutation_text_argument(value, key=key)
+            return projected, isinstance(projected, dict)
+        if key == "command":
+            return _clip_provider_history_text(value, limit=_FRONTIER_COMMAND_TEXT_LIMIT)[0], False
+        compacted, clipped = _clip_provider_history_text(value, limit=_PROVIDER_HISTORY_TOOL_ARG_TEXT_LIMIT)
+        if clipped:
+            return _project_clipped_argument(value, key=key, limit=_PROVIDER_HISTORY_TOOL_ARG_TEXT_LIMIT), True
+        return compacted, False
+    if isinstance(value, list):
+        compacted_items = []
+        projected = len(value) > _PROVIDER_HISTORY_LIST_LIMIT
+        for item in value[:_PROVIDER_HISTORY_LIST_LIMIT]:
+            compacted_item, item_projected = _project_provider_history_tool_argument(tool_name, key, item)
+            compacted_items.append(compacted_item)
+            projected = projected or item_projected
+        if len(value) > _PROVIDER_HISTORY_LIST_LIMIT:
+            compacted_items.append(
+                {
+                    "history_list_truncated": True,
+                    "omitted_items": len(value) - _PROVIDER_HISTORY_LIST_LIMIT,
+                }
+            )
+        return compacted_items, projected
+    if isinstance(value, dict):
+        compacted_mapping: dict[str, object] = {}
+        projected = False
+        for item_key, item in value.items():
+            compacted_item, item_projected = _project_provider_history_tool_argument(
+                tool_name,
+                str(item_key),
+                item,
+            )
+            compacted_mapping[str(item_key)] = compacted_item
+            projected = projected or item_projected
+        return compacted_mapping, projected
+    return value, False
+
+
+def _project_source_mutation_text_argument(value: str, *, key: str) -> str | dict[str, object]:
+    if len(value) <= _PROVIDER_HISTORY_SOURCE_MUTATION_TEXT_LIMIT:
+        return value
+    excerpt, _ = _clip_provider_history_text(value, limit=_PROVIDER_HISTORY_SOURCE_MUTATION_TEXT_LIMIT)
+    return {
+        "history_text_omitted": True,
+        "field": key,
+        "chars": len(value),
+        "sha256": _sha256_text(value),
+        "excerpt": excerpt,
+    }
+
+
+def _project_clipped_argument(value: str, *, key: str, limit: int) -> dict[str, object]:
+    excerpt, _ = _clip_provider_history_text(value, limit=limit)
+    return {
+        "history_text_omitted": True,
+        "field": key,
+        "chars": len(value),
+        "sha256": _sha256_text(value),
+        "excerpt": excerpt,
+    }
+
+
 def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:
     visible = result.provider_visible_content()
     if result.tool_name in _PROVIDER_HISTORY_TERMINAL_TOOL_NAMES:
@@ -3788,9 +3896,20 @@ def _compact_provider_history_value(value: object, *, key: str = "", depth: int 
 def _clip_provider_history_text(text: str, *, limit: int) -> tuple[str, bool]:
     if len(text) <= limit:
         return text, False
-    head = text[:_PROVIDER_HISTORY_TEXT_HEAD]
-    tail = text[-_PROVIDER_HISTORY_TEXT_TAIL:]
-    omitted = len(text) - len(head) - len(tail)
+    marker_template = "\n...[history clipped {omitted} chars; full content remains in artifact refs]...\n"
+    if limit <= len(marker_template.format(omitted=len(text))):
+        return f"...[history clipped {len(text)} chars; full content remains in artifact refs]...", True
+    omitted = len(text)
+    head_len = 0
+    tail_len = 0
+    for _ in range(3):
+        marker = marker_template.format(omitted=omitted)
+        body_budget = max(0, limit - len(marker))
+        head_len = max(1, min(len(text), body_budget * 2 // 3))
+        tail_len = max(0, min(len(text) - head_len, body_budget - head_len))
+        omitted = max(0, len(text) - head_len - tail_len)
+    head = text[:head_len]
+    tail = text[-tail_len:] if tail_len else ""
     return (
         f"{head}\n"
         f"...[history clipped {omitted} chars; full content remains in artifact refs]...\n"

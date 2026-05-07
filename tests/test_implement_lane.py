@@ -44,6 +44,7 @@ from mew.implement_lane.v2_runtime import (
     _hard_runtime_progress_continuation_signature,
     _hard_runtime_progress_continuation_turn_limit,
     _live_json_prompt,
+    _provider_visible_tool_call_for_history,
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
     _terminal_failure_reaction_turn_limit,
@@ -3710,6 +3711,112 @@ def test_implement_v2_history_projection_preserves_terminal_diagnostics_without_
     assert "stderr" not in item
 
 
+def test_implement_v2_projects_large_source_mutation_tool_call_arguments_for_history() -> None:
+    large_old = "old head\n" + ("old middle\n" * 400) + "old tail\n"
+    large_new = "new head\n" + ("new middle\n" * 400) + "new tail\n"
+    call = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-1",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-edit",
+                "tool_name": "edit_file",
+                "arguments": {"path": "vm.js", "old_string": large_old, "new_string": large_new},
+            },
+        ),
+    )[0]
+
+    projected = _provider_visible_tool_call_for_history(call)
+    args = projected["arguments"]
+
+    assert args["arguments_projected_for_history"] is True
+    assert args["old_string"]["history_text_omitted"] is True
+    assert args["new_string"]["history_text_omitted"] is True
+    assert args["old_string"]["sha256"] == "sha256:" + hashlib.sha256(large_old.encode()).hexdigest()
+    assert args["new_string"]["sha256"] == "sha256:" + hashlib.sha256(large_new.encode()).hexdigest()
+    assert large_old not in json.dumps(projected)
+    assert large_new not in json.dumps(projected)
+
+
+def test_implement_v2_projects_source_mutation_alias_arguments_for_history() -> None:
+    large_old = "old head\n" + ("old alias middle\n" * 300) + "old tail\n"
+    large_new = "new head\n" + ("new alias middle\n" * 300) + "new tail\n"
+    large_patch = "*** Begin Patch\n*** Update File: vm.js\n" + ("-a\n+b\n" * 300) + "*** End Patch\n"
+    calls = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-1",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-edit-alias",
+                "tool_name": "edit_file",
+                "arguments": {"path": "vm.js", "old": large_old, "new": large_new},
+            },
+            {
+                "provider_call_id": "call-patch-input",
+                "tool_name": "apply_patch",
+                "arguments": {"input": large_patch},
+            },
+        ),
+    )
+
+    edit_args = _provider_visible_tool_call_for_history(calls[0])["arguments"]
+    patch_args = _provider_visible_tool_call_for_history(calls[1])["arguments"]
+
+    assert edit_args["arguments_projected_for_history"] is True
+    assert edit_args["old"]["history_text_omitted"] is True
+    assert edit_args["new"]["history_text_omitted"] is True
+    assert patch_args["arguments_projected_for_history"] is True
+    assert patch_args["input"]["history_text_omitted"] is True
+    projected_text = json.dumps({"edit": edit_args, "patch": patch_args})
+    assert large_old not in projected_text
+    assert large_new not in projected_text
+    assert large_patch not in projected_text
+
+
+def test_implement_v2_source_mutation_projection_respects_small_clip_limit() -> None:
+    content = "A" * 950
+    call = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-1",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-write",
+                "tool_name": "write_file",
+                "arguments": {"path": "generated.py", "content": content},
+            },
+        ),
+    )[0]
+
+    args = _provider_visible_tool_call_for_history(call)["arguments"]
+    excerpt = args["content"]["excerpt"]
+
+    assert args["content"]["history_text_omitted"] is True
+    assert len(excerpt) <= 900
+    assert "history clipped -" not in excerpt
+    assert args["content"]["sha256"] == "sha256:" + hashlib.sha256(content.encode()).hexdigest()
+
+
+def test_implement_v2_keeps_small_source_mutation_tool_call_arguments_visible() -> None:
+    call = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-1",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-edit",
+                "tool_name": "edit_file",
+                "arguments": {"path": "vm.js", "old_string": "old();", "new_string": "new();"},
+            },
+        ),
+    )[0]
+
+    projected = _provider_visible_tool_call_for_history(call)
+    args = projected["arguments"]
+
+    assert args["old_string"] == "old();"
+    assert args["new_string"] == "new();"
+    assert "arguments_projected_for_history" not in args
+
+
 def test_implement_v2_compacts_prompt_history_without_clipping_history_artifact(tmp_path) -> None:
     prompts: list[str] = []
     artifact_dir = tmp_path / "artifacts"
@@ -3778,6 +3885,69 @@ def test_implement_v2_compacts_prompt_history_without_clipping_history_artifact(
     assert "history_projected" not in persisted_output
     assert "final linker error" in persisted_output
     assert "final linker error" in prompts[1]
+
+
+def test_implement_v2_compacts_large_write_call_for_prompt_history_only(tmp_path) -> None:
+    prompts: list[str] = []
+    artifact_dir = tmp_path / "artifacts"
+    middle_marker = "UNIQUE_MIDDLE_MARKER_SHOULD_NOT_REACH_NEXT_PROMPT"
+    large_content = "module head\n" + ("x = 1\n" * 300) + middle_marker + "\n" + ("y = 2\n" * 300) + "module tail\n"
+    outputs = [
+        {
+            "summary": "write a large generated source file",
+            "tool_calls": [
+                {
+                    "id": "call-write-large",
+                    "name": "write_file",
+                    "arguments": {
+                        "path": "generated.py",
+                        "content": large_content,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "blocked after reading compacted write call",
+            "finish": {"outcome": "blocked", "summary": "enough evidence"},
+        },
+    ]
+
+    def fake_model(_backend, _auth, prompt, *_args, **_kwargs):
+        prompts.append(prompt)
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "artifact_dir": str(artifact_dir),
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    history_path = next(path for path in result.proof_artifacts if path.endswith("history.json"))
+    history = json.loads(open(history_path, encoding="utf-8").read())
+    persisted_content = history[0]["tool_calls"][0]["arguments"]["content"]
+
+    assert result.status == "blocked"
+    assert persisted_content == large_content
+    assert "arguments_projected_for_history" in prompts[1]
+    assert "history_text_omitted" in prompts[1]
+    assert "sha256:" + hashlib.sha256(large_content.encode()).hexdigest() in prompts[1]
+    assert middle_marker not in prompts[1]
 
 
 def test_proof_manifest_serializes_lane_attempt_calls_results_and_metrics() -> None:
