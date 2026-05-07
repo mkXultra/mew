@@ -14721,6 +14721,99 @@ def _write_expected_artifact_contract_emulator_fixture(workspace, *, task="make-
     )
     (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
     (verifier_dir / "test-stdout.txt").write_text("missing runtime frame artifact\n", encoding="utf-8")
+    stdout_contract = {
+        "schema_version": 3,
+        "id": "contract:stdout-probe",
+        "role": "diagnostic",
+        "stage": "diagnostic",
+        "purpose": "diagnostic",
+        "proof_role": "progress",
+        "acceptance_kind": "progress_only",
+        "expected_exit": {"mode": "zero"},
+        "expected_artifacts": [
+            {
+                "id": "stdout",
+                "kind": "stdout",
+                "target": {"type": "stream", "stream": "stdout"},
+                "path": "",
+                "required": True,
+                "source": "model_declared",
+                "confidence": "high",
+                "freshness": "exists_before_or_after",
+                "checks": [
+                    {"kind": "non_empty", "type": "non_empty"},
+                    {"kind": "text_contains", "value": "ELF", "type": "text_contains", "text": "ELF"},
+                ],
+            }
+        ],
+    }
+    stdout_tool_run_record = {
+        "schema_version": 1,
+        "record_id": "tool-run:stdout-probe",
+        "command_run_id": "command:stdout-probe",
+        "provider_call_id": "stdout-probe",
+        "declared_tool_name": "run_command",
+        "effective_tool_name": "run_command",
+        "contract_id": "contract:stdout-probe",
+        "status": "completed",
+        "exit_code": 0,
+        "timed_out": False,
+        "interrupted": False,
+        "semantic_exit": {"ok": True, "category": "ok", "source": "default", "message": "exit code 0 accepted"},
+        "stdout_preview": "ELF 32-bit MSB executable, MIPS",
+        "stderr_preview": "",
+    }
+    stdout_artifact_evidence = [
+        {
+            "schema_version": 1,
+            "evidence_id": "artifact-evidence:stdout:tool-run:stdout-probe",
+            "artifact_id": "stdout",
+            "command_run_id": "command:stdout-probe",
+            "tool_run_record_id": "tool-run:stdout-probe",
+            "contract_id": "contract:stdout-probe",
+            "target": {"type": "stream", "stream": "stdout"},
+            "path": "",
+            "kind": "stdout",
+            "required": True,
+            "source": "model_declared",
+            "confidence": "high",
+            "freshness": "exists_before_or_after",
+            "pre_run_stat": {},
+            "post_run_stat": {"exists": True, "size": 31, "mtime": None, "path": ""},
+            "checks": [
+                {
+                    "id": "stdout:non_empty:0",
+                    "type": "non_empty",
+                    "passed": True,
+                    "severity": "blocking",
+                    "observed": {"exists": True, "size": 31},
+                    "message": "",
+                },
+                {
+                    "id": "stdout:text_contains:1",
+                    "type": "text_contains",
+                    "passed": True,
+                    "severity": "blocking",
+                    "observed": {"text_present": True, "needle": "ELF"},
+                    "message": "",
+                },
+            ],
+            "status": "passed",
+            "blocking": False,
+        }
+    ]
+    stdout_classification = {
+        "schema_version": 1,
+        "classification_id": "failure:contract:stdout-probe",
+        "phase": "unknown",
+        "kind": "unknown_failure",
+        "class": "unknown_failure",
+        "confidence": "low",
+        "retryable": False,
+        "summary": "no structured failure evidence",
+        "evidence_refs": [],
+        "required_next_probe": "",
+    }
     contract = {
         "schema_version": 3,
         "id": "contract:runtime-frame",
@@ -14841,6 +14934,27 @@ def _write_expected_artifact_contract_emulator_fixture(workspace, *, task="make-
         "failure_classification": expected_classification,
         "structured_finish_gate": {"blocked": True, "reasons": ["runtime_artifact_missing"]},
     }
+    stdout_payload = {
+        "command": "file /tmp/doom/doomgeneric_mips",
+        "cwd": "/tmp/doom",
+        "exit_code": 0,
+        "stdout": "ELF 32-bit MSB executable, MIPS",
+        "stdout_tail": "ELF 32-bit MSB executable, MIPS",
+        "stderr": "",
+        "stderr_tail": "",
+        "execution_contract_normalized": stdout_contract,
+        "tool_run_record": stdout_tool_run_record,
+        "artifact_evidence": stdout_artifact_evidence,
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:contract:stdout-probe",
+            "contract_id": "contract:stdout-probe",
+            "verdict": "pass",
+            "reason": "all required evidence present",
+        },
+        "failure_classification": stdout_classification,
+        "structured_finish_gate": {"blocked": False, "reasons": []},
+    }
     report = {
         "work_exit_code": 1,
         "resume": {},
@@ -14873,8 +14987,12 @@ def _write_expected_artifact_contract_emulator_fixture(workspace, *, task="make-
                     "tool_calls": [
                         {
                             "tool_name": "run_command",
+                            "arguments": {"command": stdout_payload["command"], "execution_contract": stdout_contract},
+                        },
+                        {
+                            "tool_name": "run_command",
                             "arguments": {"command": payload["command"], "execution_contract": contract},
-                        }
+                        },
                     ],
                 }
             ],
@@ -14887,6 +15005,12 @@ def _write_expected_artifact_contract_emulator_fixture(workspace, *, task="make-
         json.dumps(
             {
                 "tool_results": [
+                    {
+                        "provider_call_id": "stdout-probe",
+                        "tool_name": "run_command",
+                        "status": "completed",
+                        "content": [stdout_payload],
+                    },
                     {
                         "provider_call_id": "runtime-frame",
                         "tool_name": "run_command",
@@ -15852,7 +15976,7 @@ def run_m6_24_expected_artifact_contract_emulator_scenario(workspace, *, job_dir
         checks,
         "m6_24_expected_artifact_contract_compares_stored_classification",
         isinstance(structured_replay, dict)
-        and structured_replay.get("stored_classification_count") == 1
+        and structured_replay.get("stored_classification_count") == 2
         and structured_replay.get("mismatch_count") == 0,
         structured_replay,
         "stored classification matches recomputed classification",

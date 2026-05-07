@@ -225,6 +225,47 @@ def test_stream_text_contains_is_explicit_stream_target_only(tmp_path) -> None:
     assert evidence.post_run_stat["size"] == 3
 
 
+def test_normalized_stdout_artifact_checks_current_tool_stream(tmp_path) -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:stdout",
+            "expected_artifacts": [
+                {
+                    "target": "stdout",
+                    "checks": [
+                        {"kind": "non_empty"},
+                        {"kind": "text_contains", "value": "ELF"},
+                    ],
+                },
+                {
+                    "id": "stdout-stream-field",
+                    "stream": "stdout",
+                    "checks": [{"kind": "text_contains", "value": "MIPS"}],
+                }
+            ],
+        }
+    )
+
+    evidence = check_expected_artifacts(
+        contract,
+        command_run_id="command-run:1",
+        tool_run_record_id="tool-run-record:1",
+        run_started_at=0,
+        workspace=tmp_path,
+        allowed_roots=[str(tmp_path)],
+        stream_outputs={"stdout": "ELF 32-bit MSB executable, MIPS\n"},
+    )
+
+    assert [item.status for item in evidence] == ["passed", "passed"]
+    assert [item.kind for item in evidence] == ["stdout", "stdout"]
+    assert [item.target for item in evidence] == [
+        {"type": "stream", "stream": "stdout"},
+        {"type": "stream", "stream": "stdout"},
+    ]
+    assert [check["type"] for check in evidence[0].checks] == ["non_empty", "text_contains"]
+    assert evidence[1].checks[0]["type"] == "text_contains"
+
+
 def test_stream_target_cannot_pass_against_another_tool_record_output(tmp_path) -> None:
     artifact = ExpectedArtifact(
         id="stdout-proof",

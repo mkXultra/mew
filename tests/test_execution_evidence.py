@@ -62,6 +62,55 @@ def test_normalize_execution_contract_preserves_v2_fields_and_enums() -> None:
     assert contract.substeps[0].requires_artifacts == ("binary",)
 
 
+def test_normalize_execution_contract_accepts_stdout_target_and_check_aliases() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:stdout",
+            "expected_artifacts": [
+                {
+                    "target": "stdout",
+                    "checks": [
+                        {"kind": "non_empty"},
+                        {"kind": "text_contains", "value": "ELF"},
+                    ],
+                }
+            ],
+        }
+    )
+
+    artifact = contract.expected_artifacts[0]
+
+    assert artifact.id == "stdout"
+    assert artifact.kind == "stdout"
+    assert artifact.target == {"type": "stream", "stream": "stdout"}
+    assert artifact.path == ""
+    assert artifact.checks[0]["type"] == "non_empty"
+    assert artifact.checks[1]["type"] == "text_contains"
+    assert artifact.checks[1]["text"] == "ELF"
+
+
+def test_normalize_execution_contract_accepts_stream_field_artifact() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:stream",
+            "expected_artifacts": [
+                {
+                    "stream": "stderr",
+                    "checks": [{"kind": "regex", "value": "error|warning"}],
+                }
+            ],
+        }
+    )
+
+    artifact = contract.expected_artifacts[0]
+
+    assert artifact.id == "stderr"
+    assert artifact.kind == "stderr"
+    assert artifact.target == {"type": "stream", "stream": "stderr"}
+    assert artifact.checks[0]["type"] == "regex"
+    assert artifact.checks[0]["pattern"] == "error|warning"
+
+
 def test_semantic_exit_code_set_accepts_declared_nonzero_exit() -> None:
     contract = normalize_execution_contract(
         {

@@ -985,16 +985,18 @@ def _normalize_substep(value: object) -> ExecutionSubstep:
 
 def _normalize_expected_artifact(value: object) -> ExpectedArtifact:
     raw = _mapping(value)
-    artifact_id = str(raw.get("id") or raw.get("path") or raw.get("stream") or "artifact")
+    target = _normalize_artifact_target(raw)
+    path = str(raw.get("path") or target.get("path") or "")
+    stream = str(raw.get("stream") or target.get("stream") or "")
+    artifact_id = str(raw.get("id") or path or stream or "artifact")
     source = _enum(raw.get("source"), ARTIFACT_SOURCES, "model_declared")
     confidence = _enum(raw.get("confidence"), {"high", "medium", "low"}, "high")
     if source == "runtime_inferred" and confidence == "high":
         confidence = "medium"
-    target = dict(_mapping(raw.get("target")))
-    path = str(raw.get("path") or target.get("path") or "")
+    kind_default = stream if stream in {"stdout", "stderr"} else "file"
     return ExpectedArtifact(
         id=artifact_id,
-        kind=_enum(raw.get("kind"), ARTIFACT_KINDS, "file"),
+        kind=_enum(raw.get("kind"), ARTIFACT_KINDS, kind_default),
         target=target,
         path=path,
         required=bool(raw.get("required", True)),
@@ -1002,8 +1004,78 @@ def _normalize_expected_artifact(value: object) -> ExpectedArtifact:
         confidence=confidence,
         producer_substep_id=str(raw.get("producer_substep_id") or ""),
         freshness=_enum(raw.get("freshness"), ARTIFACT_FRESHNESS, "exists_before_or_after"),
-        checks=_tuple_dicts(raw.get("checks")),
+        checks=_normalize_artifact_checks(raw.get("checks")),
     )
+
+
+def _normalize_artifact_target(raw: Mapping[str, Any]) -> dict[str, Any]:
+    target_value = raw.get("target")
+    raw_stream = str(raw.get("stream") or "")
+    raw_path = str(raw.get("path") or "")
+    if isinstance(target_value, str):
+        stream = _normalize_stream_name(target_value)
+        if stream:
+            return {"type": "stream", "stream": stream}
+        return {"type": "path", "path": target_value}
+    target = dict(_mapping(target_value))
+    stream = _normalize_stream_name(raw_stream or target.get("stream") or target.get("type"))
+    if stream:
+        normalized = {key: value for key, value in target.items() if key != "path"}
+        normalized["type"] = "stream"
+        normalized["stream"] = stream
+        return normalized
+    path = str(raw_path or target.get("path") or "")
+    if path:
+        normalized = dict(target)
+        normalized.setdefault("type", "path")
+        normalized["path"] = path
+        return normalized
+    return target
+
+
+def _normalize_stream_name(value: object) -> str:
+    text = _enum_text(value).removeprefix("stream:")
+    return text if text in {"stdout", "stderr"} else ""
+
+
+def _normalize_artifact_checks(value: object) -> tuple[dict[str, Any], ...]:
+    checks: list[dict[str, Any]] = []
+    for item in (_mapping(item) for item in _list(value)):
+        if not item:
+            continue
+        check = dict(item)
+        check_type = _normalize_artifact_check_type(check)
+        check["type"] = check_type
+        if check_type == "text_contains" and "text" not in check:
+            if "value" in check:
+                check["text"] = check["value"]
+            elif "expected" in check:
+                check["text"] = check["expected"]
+        elif check_type == "regex" and "pattern" not in check:
+            if "value" in check:
+                check["pattern"] = check["value"]
+            elif "expected" in check:
+                check["pattern"] = check["expected"]
+        checks.append(check)
+    return tuple(checks)
+
+
+def _normalize_artifact_check_type(check: Mapping[str, Any]) -> str:
+    explicit = _enum_text(check.get("type") or check.get("kind") or check.get("check"))
+    aliases = {
+        "contains": "text_contains",
+        "text": "text_contains",
+        "not_empty": "non_empty",
+        "nonempty": "non_empty",
+        "matches": "regex",
+        "regexp": "regex",
+    }
+    if explicit:
+        return aliases.get(explicit, explicit)
+    for shorthand in ("non_empty", "text_contains", "regex", "json_schema", "kind", "size_between", "mtime_after", "exists"):
+        if shorthand in check:
+            return shorthand
+    return "exists"
 
 
 def _infer_expected_artifacts(

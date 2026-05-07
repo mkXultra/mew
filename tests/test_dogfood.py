@@ -1315,7 +1315,7 @@ class DogfoodTests(unittest.TestCase):
             )
             manifest_path = v2_dir / "proof-manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["tool_results"][0]["content"][0]["failure_classification"]["class"] = "build_failure"
+            manifest["tool_results"][-1]["content"][0]["failure_classification"]["class"] = "build_failure"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             args = SimpleNamespace(
                 workspace=str(Path(tmp) / "dog"),

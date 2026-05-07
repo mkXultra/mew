@@ -67,7 +67,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
 | `make-doom-for-mips` | 1/5 | recorded/deferred after 0/1 strategy-wall-budget frontier | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217` | no same-shape rerun until a generic frontier-throttling or strategy design is selected and locally proven |
-| `make-mips-interpreter` | 3/5 | blocked after 0/1 generic tool-contract friction | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1306` | commit/review/pre-speed generic repair, then rerun one same-shape v2 speed_1 |
+| `make-mips-interpreter` | 3/5 | blocked after 0/1 generic stdout/stderr expected-artifact contract gap | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1341-tool-contract-repair` | review/commit/pre-speed generic stream-contract repair, then rerun one same-shape v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
 | `polyglot-c-py` | 5/5 | pending | none | run v2 speed_1 |
@@ -598,6 +598,25 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   scoped ruff, and codex-ultra review session
   `019e00ae-d36c-7ff1-b485-3e79f875a0da` passed. After commit, run
   current-head pre-speed and then exactly one same-shape
+  `make-mips-interpreter selected_lane=implement_v2` speed_1 if green.
+- The post-repair same-shape rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1341-tool-contract-repair`
+  scored reward `0.0` with runner errors `0` and total runtime `4m41s`.
+  This run moved past the prior no-contract diagnostic inheritance bug, but
+  exposed another generic expected-artifact contract normalization gap:
+  explicit `target: "stdout"` / `stream: "stdout"` model-declared artifacts
+  were previously treated as path artifacts with no path, and check aliases
+  such as `{"kind": "text_contains", "value": "ELF"}` were projected as
+  default `exists` checks. The repair normalizes stdout/stderr artifact targets
+  to stream targets, preserves path artifacts, and maps `kind`/`value` check
+  aliases to the `artifact_checks` schema. Focused UT, full related
+  implement-lane/execution-evidence/artifact-check/replay tests, exact 1341
+  replay, exact 1341 terminal-bench replay dogfood, the updated
+  expected-artifact emulator with a stdout stream proof, scoped ruff, and JSONL
+  validation passed. codex-ultra review session
+  `019e00cb-238f-74f0-ad24-df9053cadac4` approved with no blocking findings;
+  the non-blocking `stream: "stdout"` checker suggestion was added. After
+  commit, run current-head pre-speed and then exactly one same-shape
   `make-mips-interpreter selected_lane=implement_v2` speed_1 if green.
 
 ## Repair Trigger

@@ -357,7 +357,7 @@ class TerminalBenchReplayTests(unittest.TestCase):
             latest = structured_replay["latest_failure_classification"]
 
             self.assertEqual(report["status"], "pass")
-            self.assertEqual(structured_replay["classification_count"], 1)
+            self.assertEqual(structured_replay["classification_count"], 2)
             self.assertEqual(structured_replay["mismatch_count"], 0)
             self.assertEqual(latest["class"], "runtime_artifact_missing")
             self.assertEqual(current_v2["latest_failure"]["source"], "recomputed_structured_execution_evidence")
@@ -377,7 +377,7 @@ class TerminalBenchReplayTests(unittest.TestCase):
             )
             manifest_path = v2_dir / "proof-manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            payload = manifest["tool_results"][0]["content"][0]
+            payload = manifest["tool_results"][-1]["content"][0]
             artifact = payload["execution_contract_normalized"]["expected_artifacts"][0]
             stale_normalized = dict(payload["execution_contract_normalized"])
             stale_normalized.update(
@@ -436,7 +436,7 @@ class TerminalBenchReplayTests(unittest.TestCase):
             )
             manifest_path = v2_dir / "proof-manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["tool_results"][0]["content"][0]["failure_classification"]["class"] = "build_failure"
+            manifest["tool_results"][-1]["content"][0]["failure_classification"]["class"] = "build_failure"
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
             report = replay_terminal_bench_job(
@@ -473,7 +473,7 @@ class TerminalBenchReplayTests(unittest.TestCase):
             )
             manifest_path = v2_dir / "proof-manifest.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["tool_results"][0]["content"][0]["failure_classification"]["evidence_refs"] = [
+            manifest["tool_results"][-1]["content"][0]["failure_classification"]["evidence_refs"] = [
                 {"kind": "artifact_evidence", "id": "stale-artifact-evidence"}
             ]
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")

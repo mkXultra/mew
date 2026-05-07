@@ -279,7 +279,7 @@ Controller docs:
 Next action:
 
 ```text
-M6.24 -> implement_v2 scoped rebaseline -> make-mips-interpreter 0/1 exposed generic tool-contract friction -> commit/review/pre-speed generic repair -> rerun make-mips-interpreter with selected_lane=implement_v2 exactly once if green
+M6.24 -> implement_v2 scoped rebaseline -> make-mips-interpreter 0/1 exposed generic stdout/stderr expected-artifact contract gap -> review/commit/pre-speed generic repair -> rerun make-mips-interpreter with selected_lane=implement_v2 exactly once if green
 ```
 
 The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
@@ -288,11 +288,15 @@ prior-failure repair is replayable and classified, but codex-ultra marked it
 frontier, not a local loop-boundary bug. Do not spend another same-shape
 make-doom speed run without a generic frontier-throttling or strategy design.
 
-The active repair target is now `make-mips-interpreter`: the first v2 speed run
-is replayable and showed generic tool-contract friction before a model backend
-error. No unrelated scoped measurement should run until that repair is
-committed, current-head pre-speed is green, and one same-shape rerun is
-recorded.
+The active repair target is still `make-mips-interpreter`: the first v2 speed
+run exposed generic tool-contract friction and that repair was committed. The
+same-shape rerun at `20260507-1341-tool-contract-repair` moved past that bug
+but exposed a second generic expected-artifact contract normalization gap:
+stdout/stderr artifacts declared as `target: "stdout"` or `stream: "stdout"`
+were treated as path artifacts with no path, and model-facing check aliases
+were projected as default `exists` checks. No unrelated scoped measurement
+should run until that reviewed stream-contract repair is committed, current-head
+pre-speed is green, and one same-shape rerun is recorded.
 
 The active repair target does not stay on `build-cython-ext`: its passing v2
 artifact `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout`
@@ -344,8 +348,8 @@ Useful historical files:
    `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`; `make-doom-for-mips` is
    recorded/deferred and should not pull the session into another same-shape
    proof loop.
-2. Commit the reviewed generic `make-mips-interpreter` tool-contract friction
-   repair, then run current-head pre-speed.
+2. Commit the reviewed generic `make-mips-interpreter` stdout/stderr
+   expected-artifact stream-contract repair, then run current-head pre-speed.
 3. If pre-speed is green, run exactly one same-shape
    `make-mips-interpreter selected_lane=implement_v2` speed_1 with
    task-correct cwd and complete artifact capture.

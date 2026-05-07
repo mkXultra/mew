@@ -3142,6 +3142,57 @@ def test_implement_v2_exec_no_contract_does_not_inherit_task_artifact_checks(tmp
     assert "diagnostic-ok" in payload["stdout"]
 
 
+def test_implement_v2_exec_accepts_stdout_expected_artifact_contract(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('ELF 32-bit MSB executable')"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "stdout-contract",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:stdout",
+                        "role": "diagnostic",
+                        "stage": "diagnostic",
+                        "purpose": "diagnostic",
+                        "expected_artifacts": [
+                            {
+                                "target": "stdout",
+                                "checks": [
+                                    {"kind": "non_empty"},
+                                    {"kind": "text_contains", "value": "ELF"},
+                                ],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "stdout evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+    artifact = payload["execution_contract_normalized"]["expected_artifacts"][0]
+
+    assert tool_result["status"] == "completed"
+    assert payload["artifact_evidence"][0]["status"] == "passed"
+    assert artifact["kind"] == "stdout"
+    assert artifact["target"] == {"type": "stream", "stream": "stdout"}
+    assert artifact["path"] == ""
+
+
 def test_implement_v2_exec_accepts_argv_argument(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
