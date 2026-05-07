@@ -560,7 +560,7 @@ def run_live_json_implement_v2(
                 )
                 executed_calls = []
                 current_results_list = []
-                for call in current_calls:
+                for call_index, call in enumerate(current_calls):
                     capped_call, block_result, block_timeout = _wall_budget_gate_tool_call(
                         call,
                         lane_input=lane_input,
@@ -582,6 +582,22 @@ def run_live_json_implement_v2(
                             write_runtime=write_runtime,
                         )
                     )
+                    blocking_result = current_results_list[-1]
+                    if _same_turn_write_failure_blocks_remaining_calls(blocking_result):
+                        for skipped_call in current_calls[call_index + 1 :]:
+                            executed_calls.append(skipped_call)
+                            current_results_list.append(
+                                build_invalid_tool_result(
+                                    skipped_call,
+                                    reason=(
+                                        "blocked_by_prior_failed_write_in_same_turn: "
+                                        f"{capped_call.tool_name}#{capped_call.provider_call_id} "
+                                        f"ended with status={blocking_result.status}; "
+                                        "retry after observing the write failure"
+                                    ),
+                                )
+                            )
+                        break
                 current_calls = tuple(executed_calls)
                 current_results = tuple(current_results_list)
             seen_provider_call_ids.update(call.provider_call_id for call in current_calls if call.provider_call_id)
@@ -3318,6 +3334,12 @@ def _write_file_target_is_missing(lane_input: ImplementLaneInput, args: dict[str
     if not target.is_absolute():
         target = Path(str(lane_input.workspace or ".")).expanduser().resolve(strict=False) / target
     return not target.exists()
+
+
+def _same_turn_write_failure_blocks_remaining_calls(result: ToolResultEnvelope) -> bool:
+    if result.tool_name not in WRITE_TOOL_NAMES:
+        return False
+    return result.status in {"failed", "denied", "invalid", "interrupted"} or bool(result.is_error)
 
 
 def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:

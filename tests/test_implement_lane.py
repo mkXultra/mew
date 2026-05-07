@@ -347,6 +347,70 @@ def test_implement_v2_live_json_accept_edits_preserves_explicit_dry_run(tmp_path
     assert tool_result["content"][0]["written"] is False
 
 
+def test_implement_v2_live_json_blocks_same_turn_calls_after_failed_write(tmp_path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+    side_effect = tmp_path / "verifier_ran.txt"
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('verifier_ran.txt').write_text('bad', encoding='utf-8')",
+        ]
+    )
+    outputs = [
+        {
+            "summary": "patch and verify in one turn",
+            "tool_calls": [
+                {
+                    "id": "edit-1",
+                    "name": "edit_file",
+                    "arguments": {"path": "sample.txt", "old": "missing\n", "new": "after\n"},
+                },
+                {
+                    "id": "verify-1",
+                    "name": "run_command",
+                    "arguments": {"command": command, "cwd": ".", "use_shell": True, "timeout": 5},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "write failed"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    edit_result = manifest["tool_results"][0]
+    skipped_result = manifest["tool_results"][1]
+
+    assert result.status == "blocked"
+    assert edit_result["status"] == "failed"
+    assert skipped_result["status"] == "invalid"
+    assert "blocked_by_prior_failed_write_in_same_turn" in skipped_result["content"][0]["reason"]
+    assert not side_effect.exists()
+
+
 def test_implement_v2_model_turn_boundary_preserves_rendered_prompt_and_call_args(tmp_path) -> None:
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
     lane_input = ImplementLaneInput(

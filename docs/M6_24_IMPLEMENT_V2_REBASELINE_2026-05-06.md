@@ -759,6 +759,22 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   codex-ultra review session `019e02e1-1ff5-7650-afc5-b4c263e3ec00` approved.
   Before any `speed_1`/`proof_5`, this repair still requires commit and a fresh
   10min step-shape analysis.
+- Post-write/apply diagnostic
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260507-2348-write-apply`
+  scored reward `0.0` with runner errors `0`, total runtime `11m16s`, inner
+  `implement_v2` wall `600.059s`, `model_turns=29`, `tool_calls=43`, and
+  `write_evidence_count=5`. Replay and terminal-bench replay dogfood pass.
+  This confirms the write/apply repair did what it was supposed to do: first
+  `write_file /app/vm.js` moved to `turn 6` and applied immediately with
+  defaulted `create=true` / `apply=true`. The remaining gap shifted to
+  dependent-call sequencing: after failed write operations in `turn 19`,
+  `turn 21`, and `turn 23`, the same turn still ran dependent verifier commands
+  or continued as if the patch had applied. The selected generic repair is to
+  stop executing remaining same-turn calls after a failed/denied/invalid/interrupted write
+  and return paired invalid results with
+  `blocked_by_prior_failed_write_in_same_turn`. This keeps proof pairing intact
+  while forcing the model to observe the write failure before spending verifier
+  budget. Do not count this as a task-specific MIPS fix.
 
 ## Repair Trigger
 
