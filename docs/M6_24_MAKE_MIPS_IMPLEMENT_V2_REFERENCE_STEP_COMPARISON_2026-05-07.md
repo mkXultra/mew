@@ -615,3 +615,51 @@ Current implication:
 - The next diagnostic should show whether smaller prompt/history projection
   improves latest-failure-to-next-patch focus without hiding the information
   needed for repair.
+
+## 2026-05-08 Provider-History-Projection Pre-Speed Diagnostic
+
+Latest current-head mew artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-provider-history-projection-make-mips-step-shape-10min-20260508-0819/make-mips-interpreter__tZdU9w7`
+
+Validation:
+
+- exact replay passes with external reward `0.0`;
+- terminal-bench replay dogfood passes with structured replay mismatch count
+  `0`;
+- runtime finish-gate emulator passes.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing/marker miss; frame existence/similarity pass |
+| mew implement_v2 `0819` | 0/1 | 9m47s Harbor | 20 model turns | 32 tool calls | turn 6 | external stdout marker miss; frame existence/similarity pass; final model turn timed out before finish |
+
+Step delta:
+
+1. This is a material improvement from `0748`: `/tmp/frame.bmp` is now
+   produced, external frame existence passes, and external frame similarity
+   passes.
+2. The external verifier failure shape now matches the Codex reference: reward
+   `0.0`, frame checks pass, stdout/timing marker fails.
+3. v2 is still slower and chattier than Codex. Prompt volume dropped from
+   `3,021,650` to `2,831,856` chars, but the loop still used `20` turns and
+   timed out before the final model could emit `finish`.
+4. The latest internal structured failure before the final successful verifier
+   came from a model-declared `stdout` text_contains contract whose needles
+   were projected as empty, producing `runtime_artifact_missing` for stdout
+   even though the terminal output contained the markers. The next turn worked
+   around it with command-internal `grep` checks and a simpler stdout contract.
+5. codex-ultra classified the remaining external blocker as
+   `external_verifier_artifact_stdout_timing_race`, and explicitly recommended
+   no immediate local code repair because the external shape is now
+   Codex-equivalent.
+
+Current implication:
+
+- Do not add MIPS/DOOM-specific stdout ordering hacks.
+- Do not resume broad measurement from this artifact alone.
+- It is acceptable to run the next controlled same-shape speed/proof step for
+  `make-mips-interpreter`, then replay/dogfood and compare step shape again.
+- If the next controlled run regresses to a mew-only structural miss, return to
+  improvement mode. If it stays Codex-equivalent, this gap can stop blocking the
+  broader M6.24 scoped queue.
