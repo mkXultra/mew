@@ -381,6 +381,8 @@ def run_live_json_implement_v2(
                     tool_results=tuple(tool_results),
                     artifact_namespace=artifact_namespace,
                 )
+                if hard_runtime_frontier_state.get("final_artifact") and _single_no_contract_exec_call(raw_tool_calls):
+                    hard_runtime_frontier_state["_same_turn_model_declared_final_artifact"] = True
                 exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
             if not raw_tool_calls:
                 if hard_runtime_frontier_enabled or frontier_state_update:
@@ -3013,6 +3015,24 @@ def _normalize_live_json_payload(payload: object, *, turn_index: int) -> dict[st
         "tool_calls": tuple(calls),
         "finish": finish,
     }
+
+
+def _single_no_contract_exec_call(tool_calls: object) -> bool:
+    if not isinstance(tool_calls, (list, tuple)):
+        return False
+    exec_calls = [
+        call
+        for call in tool_calls
+        if isinstance(call, dict)
+        and str(call.get("tool_name") or "").strip() in {"run_command", "run_tests", "poll_command"}
+    ]
+    if len(exec_calls) != 1:
+        return False
+    arguments = exec_calls[0].get("arguments")
+    if not isinstance(arguments, dict):
+        return True
+    contract = arguments.get("execution_contract")
+    return not (isinstance(contract, dict) and bool(contract))
 
 
 def _live_json_model_error(exc: BaseException) -> dict[str, object]:

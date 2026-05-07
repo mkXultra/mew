@@ -477,12 +477,23 @@ def _normalize_runtime_contract(
     frontier_state: dict[str, object],
     fallback_id: str,
 ):
-    contract = normalize_execution_contract(value, task_contract=task_contract, frontier_state=frontier_state)
+    raw_value = value if isinstance(value, dict) else {}
+    has_explicit_contract = bool(raw_value)
+    frontier_for_inference = (
+        frontier_state
+        if has_explicit_contract or bool(frontier_state.get("_same_turn_model_declared_final_artifact"))
+        else None
+    )
+    contract = normalize_execution_contract(
+        value,
+        task_contract=task_contract if has_explicit_contract else None,
+        frontier_state=frontier_for_inference,
+    )
     if contract.id == "contract:unknown":
         contract = normalize_execution_contract(
             {**contract.as_dict(), "id": fallback_id},
-            task_contract=task_contract,
-            frontier_state=frontier_state,
+            task_contract=task_contract if has_explicit_contract else None,
+            frontier_state=frontier_for_inference,
         )
     return contract
 
@@ -503,7 +514,12 @@ def _contract_from_payload(
     if isinstance(raw, dict):
         contract_input.update(raw)
     if contract_input:
-        return normalize_execution_contract(contract_input, task_contract=task_contract, frontier_state=frontier_state)
+        has_raw_contract = isinstance(raw, dict) and bool(raw)
+        return normalize_execution_contract(
+            contract_input,
+            task_contract=task_contract if has_raw_contract else None,
+            frontier_state=frontier_state if has_raw_contract else None,
+        )
     return _normalize_runtime_contract(
         {},
         task_contract=task_contract,

@@ -2830,6 +2830,34 @@ def test_implement_v2_read_only_fake_runtime_can_inspect_workspace_and_finish_an
     assert len(manifest["tool_results"]) == 4
 
 
+def test_implement_v2_search_text_treats_lone_pattern_as_query_alias(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.c").write_text("void DG_DrawFrame(void) {}\n", encoding="utf-8")
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "search_text",
+                "arguments": {"path": ".", "pattern": "DG_DrawFrame"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "search evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert tool_result["is_error"] is False
+    assert any("DG_DrawFrame" in match for match in tool_result["content"][0]["matches"])
+
+
 def test_implement_v2_read_only_finish_cannot_claim_completed(tmp_path) -> None:
     (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
 
@@ -3081,6 +3109,37 @@ def test_implement_v2_exec_accepts_cmd_alias(tmp_path) -> None:
     assert tool_result["status"] == "completed"
     assert tool_result["content"][0]["command_source"] == "cmd"
     assert "cmd-ok" in tool_result["content"][0]["stdout"]
+
+
+def test_implement_v2_exec_no_contract_does_not_inherit_task_artifact_checks(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('diagnostic-ok')"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            task_contract={"expected_artifacts": [{"id": "artifact"}]},
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "diagnostic",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "diagnostic evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert tool_result["is_error"] is False
+    assert payload["execution_contract_normalized"]["expected_artifacts"] == []
+    assert payload["artifact_evidence"] == []
+    assert "diagnostic-ok" in payload["stdout"]
 
 
 def test_implement_v2_exec_accepts_argv_argument(tmp_path) -> None:
@@ -4832,6 +4891,106 @@ def test_implement_v2_frontier_update_can_infer_same_turn_expected_artifact(tmp_
         "artifact_validation_failure"
     )
     assert "latest_build_failure" not in result.updated_lane_state["lane_hard_runtime_frontier"]
+
+
+def test_implement_v2_frontier_update_can_infer_with_read_only_evidence_plus_single_no_contract_exec(tmp_path) -> None:
+    (tmp_path / "README.md").write_text("frame target\n", encoding="utf-8")
+
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "declare final artifact and read context before verifier",
+            "frontier_state_update": {
+                "final_artifact": {"path": "frame.bmp", "kind": "file"},
+            },
+            "tool_calls": [
+                {"id": "read-context", "name": "read_file", "arguments": {"path": "README.md"}},
+                {
+                    "id": "runtime-from-frontier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {},
+                    },
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "frontier artifact missing"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    exec_payload = result.updated_lane_state["proof_manifest"]["tool_results"][1]["content"][0]
+
+    assert exec_payload["artifact_evidence"][0]["artifact_id"] == "frame.bmp"
+    assert exec_payload["execution_contract_normalized"]["expected_artifacts"][0]["path"] == "frame.bmp"
+
+
+def test_implement_v2_frontier_update_does_not_infer_artifact_for_mixed_no_contract_exec_turn(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "declare final artifact but run mixed diagnostics",
+            "frontier_state_update": {
+                "final_artifact": {"path": "frame.bmp", "kind": "file"},
+            },
+            "tool_calls": [
+                {
+                    "id": "diagnostic-one",
+                    "name": "run_command",
+                    "arguments": {"command": "true", "cwd": ".", "use_shell": True, "timeout": 5},
+                },
+                {
+                    "id": "diagnostic-two",
+                    "name": "run_command",
+                    "arguments": {"command": "true", "cwd": ".", "use_shell": True, "timeout": 5},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "need more evidence"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    payloads = [item["content"][0] for item in result.updated_lane_state["proof_manifest"]["tool_results"]]
+
+    assert [payload["artifact_evidence"] for payload in payloads] == [[], []]
+    assert all(payload["execution_contract_normalized"]["expected_artifacts"] == [] for payload in payloads)
 
 
 def test_implement_v2_frontier_does_not_classify_build_artifact_missing_as_runtime(tmp_path) -> None:

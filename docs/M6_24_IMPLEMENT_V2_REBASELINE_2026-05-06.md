@@ -67,7 +67,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
 | `make-doom-for-mips` | 1/5 | recorded/deferred after 0/1 strategy-wall-budget frontier | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217` | no same-shape rerun until a generic frontier-throttling or strategy design is selected and locally proven |
-| `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
+| `make-mips-interpreter` | 3/5 | blocked after 0/1 generic tool-contract friction | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1306` | commit/review/pre-speed generic repair, then rerun one same-shape v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
 | `polyglot-c-py` | 5/5 | pending | none | run v2 speed_1 |
@@ -577,6 +577,28 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   frontier, not a local loop-boundary bug. Do not run another same-shape
   make-doom speed proof until a generic frontier-throttling or strategy design
   is selected and proven with local replay/dogfood/emulator first.
+- `make-mips-interpreter` true-v2 scoped rebaseline attempt on 2026-05-07 JST:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1306`
+  scored reward `0.0` with runner errors `0`, total runtime `9m06s`,
+  `work_exit_code=1`, `stop_reason=implement_v2_blocked`,
+  `lane=implement_v2`, and `runtime_id=implement_v2_model_json_tool_loop`.
+  The external verifier failed all three checks because `/tmp/frame.bmp` was
+  missing. Replay and terminal-bench replay dogfood reproduce the artifact and
+  show the generic blocker before the backend error:
+  `search_text` used a lone `pattern` argument as the search term and failed,
+  then no-contract diagnostic `run_command` calls inherited final-artifact
+  checks and failed with `artifact artifact has no path target`; the run later
+  stopped on `Codex Web API error: IncompleteRead(756949 bytes read)`.
+  The repair is generic to the implement_v2 tool loop: read-only search treats
+  a lone `pattern` as the query, no-contract diagnostic exec calls no longer
+  inherit task final-artifact checks, and same-turn final-artifact inference is
+  still preserved when one no-contract exec/verifier is accompanied by
+  read-only evidence. Focused UT, full `tests/test_implement_lane.py`, exact
+  replay, terminal-bench replay dogfood, both matching dogfood emulators,
+  scoped ruff, and codex-ultra review session
+  `019e00ae-d36c-7ff1-b485-3e79f875a0da` passed. After commit, run
+  current-head pre-speed and then exactly one same-shape
+  `make-mips-interpreter selected_lane=implement_v2` speed_1 if green.
 
 ## Repair Trigger
 

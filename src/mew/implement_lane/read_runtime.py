@@ -119,13 +119,21 @@ def _execute_read_only_payload(
         payload["summary"] = summarize_read_result("read_file", payload)
         return payload
     if tool == "search_text":
+        query = args.get("query")
+        include_pattern = args.get("pattern")
+        if (query is None or not str(query).strip()) and include_pattern is not None:
+            # Some provider turns use ``pattern`` as the search term because the
+            # prompt surface names glob and search arguments similarly. Treat a
+            # lone pattern as the query instead of spending a recovery turn.
+            query = include_pattern
+            include_pattern = None
         payload = search_text(
-            args.get("query") or "",
+            query or "",
             _workspace_path(args.get("path") or ".", workspace),
             allowed_roots,
             max_matches=_bounded_int(args.get("max_matches"), 50, 1, 200),
             context_lines=_bounded_int(args.get("context_lines"), 3, 0, 5),
-            pattern=args.get("pattern"),
+            pattern=include_pattern,
         )
         payload["summary"] = summarize_read_result("search_text", payload)
         return payload
