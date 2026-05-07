@@ -7,7 +7,7 @@ import hashlib
 from pathlib import Path, PurePosixPath
 import re
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from ..acceptance import acceptance_done_gate_decision
 from ..errors import ModelBackendError
@@ -61,6 +61,42 @@ _FRONTIER_LIST_LIMIT = 8
 _FRONTIER_TEXT_LIMIT = 500
 _FRONTIER_COMMAND_TEXT_LIMIT = 1200
 _HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT = 4
+
+
+@dataclass(frozen=True)
+class ModelTurnInput:
+    """In-memory-only model turn call boundary for implement_v2.
+
+    Raw prompts and payloads may pass through this object but must not be
+    serialized into proof manifests, lane state, or observations by default.
+    """
+
+    lane: str
+    lane_attempt_id: str
+    turn_id: str
+    turn_index: int
+    transport: str
+    model_backend: str
+    model: str
+    rendered_prompt: str
+    current_projection_bytes: bytes
+    prompt_descriptor: dict[str, object]
+    projection_descriptor: dict[str, object]
+    timeout_seconds: float
+    log_prefix: str
+
+
+@dataclass(frozen=True)
+class ModelTurnOutput:
+    """In-memory-only model turn result boundary for implement_v2."""
+
+    payload: object
+    normalized_payload: dict[str, object]
+    elapsed_seconds: float
+    prompt_chars: int
+    response_shape: dict[str, object]
+    model_error: dict[str, object]
+    observation: dict[str, object]
 
 
 def describe_implement_v2_runtime(*, work_session_id: object, task_id: object) -> dict[str, object]:
@@ -310,23 +346,32 @@ def run_live_json_implement_v2(
                 history=tuple(prompt_history),
             )
             tool_contract_recovery_instruction = ""
-            prompt_chars_total += len(prompt)
-            if progress:
-                progress(f"implement_v2 turn #{turn_index}: model_json start")
-            started = time.monotonic()
-            try:
-                payload = model_json_callable(
-                    lane_input.model_backend,
-                    model_auth,
-                    prompt,
-                    lane_input.model,
-                    base_url,
-                    timeout,
-                    log_prefix=f"implement_v2 live_json session={lane_input.work_session_id} turn={turn_index}",
-                )
-            except ModelBackendError as exc:
-                model_elapsed_seconds += time.monotonic() - started
-                model_error = _live_json_model_error(exc)
+            model_turn_input = ModelTurnInput(
+                lane=IMPLEMENT_V2_LANE,
+                lane_attempt_id=lane_attempt_id,
+                turn_id=turn_id,
+                turn_index=turn_index,
+                transport=adapter.provider,
+                model_backend=lane_input.model_backend,
+                model=lane_input.model,
+                rendered_prompt=prompt,
+                current_projection_bytes=_render_prompt_history_json(prompt_history).encode("utf-8"),
+                prompt_descriptor=_prompt_descriptor(prompt),
+                projection_descriptor=_current_projection_descriptor(prompt_history),
+                timeout_seconds=timeout,
+                log_prefix=f"implement_v2 live_json session={lane_input.work_session_id} turn={turn_index}",
+            )
+            model_turn_output = _call_model_turn(
+                model_turn_input,
+                model_json_callable=model_json_callable,
+                model_auth=model_auth,
+                base_url=base_url,
+                progress=progress,
+            )
+            prompt_chars_total += model_turn_output.prompt_chars
+            model_elapsed_seconds += model_turn_output.elapsed_seconds
+            if model_turn_output.model_error:
+                model_error = dict(model_turn_output.model_error)
                 finish_arguments = {
                     "outcome": "failed",
                     "summary": str(model_error.get("message") or "model_json call failed"),
@@ -359,14 +404,8 @@ def run_live_json_implement_v2(
                     }
                 )
                 prompt_history.append(dict(history[-1]))
-                if progress:
-                    progress(
-                        f"implement_v2 turn #{turn_index}: model_json failed "
-                        f"class={model_error.get('failure_class')}"
-                    )
                 break
-            model_elapsed_seconds += time.monotonic() - started
-            normalized = _normalize_live_json_payload(payload, turn_index=turn_index)
+            normalized = dict(model_turn_output.normalized_payload)
             finish_arguments = normalized.get("finish") or {}
             frontier_state_update = (
                 normalized.get("frontier_state_update") if isinstance(normalized.get("frontier_state_update"), dict) else {}
@@ -2917,7 +2956,7 @@ def _live_json_prompt(
         f"{tool_contract_recovery_turn_limit}\n"
         f"{recovery_instruction_section}"
         f"response_contract_json:\n{json.dumps(response_contract, ensure_ascii=False, indent=2)}\n"
-        f"history_json:\n{json.dumps(list(history)[-8:], ensure_ascii=False, indent=2)}\n"
+        f"history_json:\n{_render_prompt_history_json(history)}\n"
         "[/section:implement_v2_live_json_transport]"
     )
 
@@ -3765,6 +3804,126 @@ def _live_status_summary(status: str) -> str:
     if status == "completed":
         return "implement_v2 completed with paired tool evidence."
     return f"implement_v2 live_json attempt ended with status={status}."
+
+
+def _call_model_turn(
+    turn_input: ModelTurnInput,
+    *,
+    model_json_callable,
+    model_auth: dict[str, object],
+    base_url: str,
+    progress=None,
+) -> ModelTurnOutput:
+    """Call the existing model_json transport behind a behavior-preserving boundary."""
+
+    if progress:
+        progress(f"implement_v2 turn #{turn_input.turn_index}: model_json start")
+    started = time.monotonic()
+    try:
+        payload = model_json_callable(
+            turn_input.model_backend,
+            model_auth,
+            turn_input.rendered_prompt,
+            turn_input.model,
+            base_url,
+            turn_input.timeout_seconds,
+            log_prefix=turn_input.log_prefix,
+        )
+    except ModelBackendError as exc:
+        elapsed = time.monotonic() - started
+        model_error = _live_json_model_error(exc)
+        if progress:
+            progress(
+                f"implement_v2 turn #{turn_input.turn_index}: model_json failed "
+                f"class={model_error.get('failure_class')}"
+            )
+        return ModelTurnOutput(
+            payload={},
+            normalized_payload={},
+            elapsed_seconds=elapsed,
+            prompt_chars=len(turn_input.rendered_prompt),
+            response_shape=_model_response_shape({}, model_error=model_error),
+            model_error=model_error,
+            observation=_model_turn_observation(turn_input, {}, elapsed_seconds=elapsed, model_error=model_error),
+        )
+
+    elapsed = time.monotonic() - started
+    normalized = _normalize_live_json_payload(payload, turn_index=turn_input.turn_index)
+    return ModelTurnOutput(
+        payload=payload,
+        normalized_payload=normalized,
+        elapsed_seconds=elapsed,
+        prompt_chars=len(turn_input.rendered_prompt),
+        response_shape=_model_response_shape(normalized, model_error={}),
+        model_error={},
+        observation=_model_turn_observation(turn_input, normalized, elapsed_seconds=elapsed, model_error={}),
+    )
+
+
+def _model_turn_observation(
+    turn_input: ModelTurnInput,
+    normalized_payload: dict[str, object],
+    *,
+    elapsed_seconds: float,
+    model_error: dict[str, object],
+) -> dict[str, object]:
+    """Build a serializable descriptor without raw prompt, history, or payload."""
+
+    return {
+        "schema_version": 1,
+        "turn_id": turn_input.turn_id,
+        "turn_index": turn_input.turn_index,
+        "transport": turn_input.transport,
+        "prompt": dict(turn_input.prompt_descriptor),
+        "history_projection": dict(turn_input.projection_descriptor),
+        "response": _model_response_shape(normalized_payload, model_error=model_error),
+        "elapsed_seconds": round(elapsed_seconds, 3),
+    }
+
+
+def _model_response_shape(normalized_payload: dict[str, object], *, model_error: dict[str, object]) -> dict[str, object]:
+    tool_calls = normalized_payload.get("tool_calls") if isinstance(normalized_payload, dict) else ()
+    if not isinstance(tool_calls, (list, tuple)):
+        tool_calls = ()
+    finish = normalized_payload.get("finish") if isinstance(normalized_payload, dict) else {}
+    frontier_update = normalized_payload.get("frontier_state_update") if isinstance(normalized_payload, dict) else {}
+    return {
+        "payload_kind": "model_error" if model_error else "object",
+        "tool_call_count": len(tool_calls),
+        "tool_names": [
+            str(call.get("tool_name") or call.get("name") or "")
+            for call in tool_calls
+            if isinstance(call, dict) and str(call.get("tool_name") or call.get("name") or "")
+        ],
+        "has_finish": bool(finish),
+        "finish_outcome": str(finish.get("outcome") or "") if isinstance(finish, dict) else "",
+        "frontier_update_keys": sorted(str(key) for key in frontier_update) if isinstance(frontier_update, dict) else [],
+        "model_error_class": str(model_error.get("failure_class") or "") if model_error else "",
+    }
+
+
+def _prompt_descriptor(prompt: str) -> dict[str, object]:
+    return {"chars": len(prompt), "sha256": _sha256_text(prompt)}
+
+
+def _current_projection_descriptor(prompt_history: tuple[dict[str, object], ...] | list[dict[str, object]]) -> dict[str, object]:
+    projection = _render_prompt_history_json(prompt_history)
+    return {
+        "current_projection_schema": "provider_history_projection_v0",
+        "current_projection_sha256": _sha256_text(projection),
+        "current_projection_chars": len(projection),
+        "history_turns_included": len(list(prompt_history)[-8:]),
+    }
+
+
+def _render_prompt_history_json(prompt_history: tuple[dict[str, object], ...] | list[dict[str, object]]) -> str:
+    """Render the exact history_json bytes used by _live_json_prompt."""
+
+    return json.dumps(list(prompt_history)[-8:], ensure_ascii=False, indent=2)
+
+
+def _sha256_text(value: str) -> str:
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _write_live_json_artifacts(

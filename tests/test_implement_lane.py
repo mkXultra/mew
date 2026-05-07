@@ -35,12 +35,16 @@ from mew.implement_lane import (
     validate_tool_result_pairing,
 )
 from mew.implement_lane.v2_runtime import (
+    ModelTurnInput,
+    _call_model_turn,
     _finish_evidence_refs,
     _frontier_failure_payload,
     _hard_runtime_frontier_progress_signature,
     _hard_runtime_progress_continuation_signature,
     _hard_runtime_progress_continuation_turn_limit,
+    _live_json_prompt,
     _provider_visible_tool_result_for_history,
+    _render_prompt_history_json,
     _terminal_failure_reaction_turn_limit,
 )
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
@@ -236,6 +240,106 @@ def test_implement_v2_live_json_runtime_can_edit_verify_and_finish(tmp_path) -> 
     assert result.metrics["terminal_evidence_count"] == 1
     assert result.metrics["replay_valid"] is True
     assert target.read_text(encoding="utf-8") == "after\n"
+
+
+def test_implement_v2_model_turn_boundary_preserves_rendered_prompt_and_call_args(tmp_path) -> None:
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        lane_config={
+            "mode": "full",
+            "allowed_read_roots": [str(tmp_path)],
+            "allowed_write_roots": [str(tmp_path)],
+        },
+    )
+    expected_prompt = _live_json_prompt(
+        lane_input,
+        lane_attempt_id="implement_v2:ws-1:task-1:full",
+        turn_index=1,
+        max_turns=1,
+        base_max_turns=1,
+        terminal_failure_reaction_turn_limit=1,
+        tool_contract_recovery_turn_limit=1,
+        history=(),
+    )
+
+    def fake_model(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"summary": "stop", "finish": {"outcome": "blocked", "summary": "no change"}}
+
+    result = run_live_json_implement_v2(
+        lane_input,
+        model_auth={"path": "auth.json"},
+        base_url="https://example.invalid",
+        timeout=12.5,
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args == (
+        "codex",
+        {"path": "auth.json"},
+        expected_prompt,
+        "gpt-5.5",
+        "https://example.invalid",
+        12.5,
+    )
+    assert kwargs == {"log_prefix": "implement_v2 live_json session=ws-1 turn=1"}
+    assert result.metrics["prompt_chars_total"] == len(expected_prompt)
+
+
+def test_implement_v2_model_turn_boundary_error_descriptor_omits_raw_prompt() -> None:
+    prompt = "secret prompt body should not be serialized"
+    turn_input = ModelTurnInput(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id="attempt-1",
+        turn_id="turn-1",
+        turn_index=1,
+        transport="model_json",
+        model_backend="codex",
+        model="gpt-5.5",
+        rendered_prompt=prompt,
+        current_projection_bytes=b"[]",
+        prompt_descriptor={"chars": len(prompt), "sha256": "sha256:prompt"},
+        projection_descriptor={"current_projection_chars": 2, "current_projection_sha256": "sha256:projection"},
+        timeout_seconds=5,
+        log_prefix="test",
+    )
+
+    def fake_model(*_args, **_kwargs):
+        raise ModelBackendError("request timed out after 5s")
+
+    output = _call_model_turn(
+        turn_input,
+        model_json_callable=fake_model,
+        model_auth={"path": "auth.json"},
+        base_url="",
+    )
+
+    serialized = json.dumps(output.observation, ensure_ascii=False, sort_keys=True)
+    assert output.model_error["failure_class"] == "model_timeout"
+    assert output.normalized_payload == {}
+    assert "secret prompt body" not in serialized
+    assert output.observation["prompt"] == {"chars": len(prompt), "sha256": "sha256:prompt"}
+
+
+def test_implement_v2_prompt_history_render_helper_matches_existing_json_shape() -> None:
+    history = tuple({"turn": index, "summary": f"履歴 {index}"} for index in range(1, 11))
+
+    rendered = _render_prompt_history_json(history)
+
+    assert rendered == json.dumps(list(history)[-8:], ensure_ascii=False, indent=2)
+    assert '"summary": "履歴 1"' not in rendered
+    assert '"summary": "履歴 2"' not in rendered
+    assert '"summary": "履歴 3"' in rendered
 
 
 def test_implement_v2_live_json_rejects_cross_turn_duplicate_before_write(tmp_path) -> None:
