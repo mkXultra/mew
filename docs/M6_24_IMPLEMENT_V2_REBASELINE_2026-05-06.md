@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | hard-runtime continuation-gate repair pending rerun | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-frontier-make-doom-speed1-20260507-0838` | run pre-speed, then one same-shape v2 speed_1 if green |
+| `make-doom-for-mips` | 1/5 | artifact-validation progress-continuation repair pending review/rerun | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-hard-runtime-progress-continuation-make-doom-speed1-20260507-1040` | review, commit, run pre-speed, then one same-shape v2 speed_1 if green |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -520,6 +520,25 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `019e000e-15b5-71c0-b3bb-fb0861076cec` approved with no findings. Next
   action after commit is current-head pre-speed, then exactly one same-shape
   `make-doom-for-mips selected_lane=implement_v2` speed_1 if green.
+- Same-shape speed update on 2026-05-07 JST: the post-progress-continuation
+  run
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-hard-runtime-progress-continuation-make-doom-speed1-20260507-1040`
+  scored reward `0.0` with runner errors `0` and total runtime `30m09s`.
+  This remains valid product evidence: v2 preserved the source-backed MIPS
+  path, built `/app/doomgeneric_mips`, reached repeated runtime/artifact
+  failures, and made source repairs. It then stopped at `model_turns=32` with
+  `terminal_failure_reaction_turns_used=8/8` and
+  `hard_runtime_progress_continuation_turns_used=0/4`. Replay and dogfood
+  reproduce the artifact with latest failure `artifact_validation_failure` /
+  `missing_artifact` / `phase=unknown`: a structured verifier-like command
+  declared blocking final artifacts, but the progress signature gate only
+  accepted runtime-named failure classes. The repair is generic: structured
+  artifact-validation failures for blocking failed hard-runtime final artifacts
+  now count as actionable frontier progress. It does not add a Doom/MIPS rule,
+  and build-phase, partial, stale, or nonblocking artifact-validation failures
+  still do not qualify. codex-ultra review session
+  `019e003c-a93d-73d1-bab0-84d74dbd1940` requested the narrower boundary and
+  then approved the updated predicate, tests, and docs.
 
 ## Repair Trigger
 

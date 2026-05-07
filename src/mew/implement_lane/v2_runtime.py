@@ -1484,23 +1484,34 @@ def _hard_runtime_frontier_progress_signature(frontier_state: dict[str, object] 
         build_target_map.get("artifact_path") or build_target_map.get("target") or build_target_map.get("path") or ""
     ).strip()
     failure_class = str(runtime_failure.get("failure_class") or "").strip()
+    failure_kind = str(runtime_failure.get("failure_kind") or "").strip()
     failure_phase = str(runtime_failure.get("failure_phase") or "").strip()
     if not artifact_path and not build_artifact_path:
         return ""
-    if failure_phase and failure_phase != "runtime":
+    artifact_status = str(final_artifact_map.get("status") or "").strip()
+    artifact_blocking = bool(final_artifact_map.get("blocking"))
+    runtime_failure_classes = {"runtime_artifact_missing", "runtime_failure", "verification_failure"}
+    artifact_progress_failure = (
+        failure_class == "artifact_validation_failure"
+        and failure_kind == "missing_artifact"
+        and artifact_blocking
+        and artifact_status == "failed"
+        and failure_phase in {"", "unknown", "runtime", "verification"}
+    )
+    if failure_phase and failure_phase != "runtime" and not artifact_progress_failure:
         return ""
-    if failure_class and failure_class not in {"runtime_artifact_missing", "runtime_failure", "verification_failure"}:
+    if failure_class and failure_class not in runtime_failure_classes and not artifact_progress_failure:
         return ""
     stdout_tail = str(runtime_failure.get("stdout_tail") or "").strip()
     stderr_tail = str(runtime_failure.get("stderr_tail") or "").strip()
-    if not (stdout_tail or stderr_tail or str(final_artifact_map.get("status") or "").strip()):
+    if not (stdout_tail or stderr_tail or artifact_status):
         return ""
     payload = {
         "artifact_path": artifact_path,
-        "artifact_status": str(final_artifact_map.get("status") or "").strip(),
+        "artifact_status": artifact_status,
         "build_artifact_path": build_artifact_path,
         "failure_class": failure_class,
-        "failure_kind": str(runtime_failure.get("failure_kind") or "").strip(),
+        "failure_kind": failure_kind,
         "failure_phase": failure_phase,
         "stdout_tail": stdout_tail,
         "stderr_tail": stderr_tail,

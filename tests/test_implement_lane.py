@@ -2415,6 +2415,20 @@ def test_implement_v2_hard_runtime_progress_signature_requires_runtime_artifact_
     same_frontier = json.loads(json.dumps(frontier))
     moved_frontier = json.loads(json.dumps(frontier))
     moved_frontier["latest_runtime_failure"]["stdout_tail"] = "Program terminated at PC=0x40d000\nExecuted 5000000"
+    artifact_validation_frontier = json.loads(json.dumps(frontier))
+    artifact_validation_frontier["latest_runtime_failure"] = {
+        "failure_class": "artifact_validation_failure",
+        "failure_phase": "unknown",
+        "failure_kind": "missing_artifact",
+        "stdout_tail": "Program terminated at PC=0x40c848\nExecuted 4634462 instructions",
+        "required_next_probe": "Inspect the producing substep and artifact path before another rebuild.",
+    }
+    artifact_validation_build_phase = json.loads(json.dumps(artifact_validation_frontier))
+    artifact_validation_build_phase["latest_runtime_failure"]["failure_phase"] = "build"
+    nonblocking_artifact_validation = json.loads(json.dumps(artifact_validation_frontier))
+    nonblocking_artifact_validation["final_artifact"] = {"path": "/tmp/frame.bmp", "status": "failed"}
+    partial_artifact_validation = json.loads(json.dumps(artifact_validation_frontier))
+    partial_artifact_validation["final_artifact"] = {"path": "/tmp/frame.bmp", "status": "partial", "blocking": True}
     build_only_frontier = {
         "build_target": {"artifact_path": "/app/game_mips"},
         "latest_build_failure": {"failure_class": "build_failure", "stderr_tail": "undefined reference"},
@@ -2425,6 +2439,10 @@ def test_implement_v2_hard_runtime_progress_signature_requires_runtime_artifact_
     assert signature
     assert _hard_runtime_frontier_progress_signature(same_frontier) == signature
     assert _hard_runtime_frontier_progress_signature(moved_frontier) != signature
+    assert _hard_runtime_frontier_progress_signature(artifact_validation_frontier)
+    assert _hard_runtime_frontier_progress_signature(artifact_validation_build_phase) == ""
+    assert _hard_runtime_frontier_progress_signature(nonblocking_artifact_validation) == ""
+    assert _hard_runtime_frontier_progress_signature(partial_artifact_validation) == ""
     assert _hard_runtime_frontier_progress_signature(build_only_frontier) == ""
 
 
