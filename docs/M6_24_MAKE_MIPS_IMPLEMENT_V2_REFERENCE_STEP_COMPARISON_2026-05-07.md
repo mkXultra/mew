@@ -459,3 +459,53 @@ Current implication:
 - If this blocker is gone, the next likely target is either model-mediated
   poll/cancel churn for long debug commands or external-verifier-visible
   `/tmp/frame.bmp` lifecycle alignment.
+
+## 2026-05-08 Apply-Patch-Path Pre-Speed Diagnostic
+
+Latest current-head mew artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-apply-patch-path-make-mips-step-shape-10min-20260508-0705/make-mips-interpreter__oM2KQTL`
+
+Validation:
+
+- exact replay passes with external reward `0.0`;
+- terminal-bench replay dogfood passes with structured replay mismatch count
+  `0`;
+- runtime finish-gate emulator passes.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing miss; frame existence/similarity pass |
+| mew implement_v2 `0705` | 0/1 | 3m56s Harbor | 6 model turns | 12 tool calls | turn 4 | recoverable `model_json_parse_error` while emitting the next `apply_patch` repair |
+
+Step delta:
+
+1. The redundant `apply_patch.path` blocker disappeared.
+2. mew now gets to a useful runtime-repair loop quickly: source/ELF probes,
+   `vm.js` write, verifier-shaped execution, runtime failure classification,
+   and one focused source read of `my_stdlib.c`.
+3. The live lane stopped on transport shape rather than task reasoning:
+   the model attempted the next patch as a JSON tool call, but the response was
+   not one complete parseable JSON object.
+4. This is generic to the current provider-neutral JSON transport. Large or
+   partially streamed tool-call patches can fail before the write runtime sees
+   them.
+
+Repair applied after this diagnostic:
+
+- recoverable `model_json_parse_error` now gets exactly one retry when the raw
+  excerpt starts like a JSON object with `tool_calls` or `finish`;
+- the retry prompt preserves the same immediate repair intent, demands one
+  complete JSON object, and tells the model to avoid half-written large patch
+  strings;
+- arbitrary malformed prose is still not retried.
+
+Current implication:
+
+- Do not run broad measurement yet.
+- After review/commit, run one more 10min `make-mips-interpreter
+  selected_lane=implement_v2` step-shape diagnostic before `speed_1` /
+  `proof_5`.
+- If this blocker is gone, compare whether v2 can continue from
+  `my_stdlib.c` evidence into the next runtime patch without restarting broad
+  exploration.

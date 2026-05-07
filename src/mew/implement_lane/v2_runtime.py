@@ -3411,6 +3411,32 @@ def _live_json_model_error_retryable(model_error: dict[str, object]) -> bool:
     return any(marker in message for marker in _IMPLEMENT_V2_TRANSIENT_MODEL_ERROR_MARKERS)
 
 
+def _live_json_parse_error_retryable(model_error: dict[str, object]) -> bool:
+    if str(model_error.get("failure_class") or "") != "model_json_parse_error":
+        return False
+    raw = str(model_error.get("raw_excerpt") or "").strip().casefold()
+    return raw.startswith("{") and ('"tool_calls"' in raw or '"finish"' in raw)
+
+
+def _append_live_json_parse_retry_instruction(prompt: str, model_error: dict[str, object]) -> str:
+    raw_excerpt = str(model_error.get("raw_excerpt") or "").strip()
+    if len(raw_excerpt) > 700:
+        raw_excerpt = raw_excerpt[:700] + "...[truncated]"
+    return (
+        f"{prompt}\n\n"
+        "[section:implement_v2_json_repair_retry version=v0 stability=dynamic cache_policy=dynamic]\n"
+        "Your previous response was not parseable as one complete JSON object, but it appeared to contain "
+        "an implement_v2 action. Retry the same turn now.\n"
+        "- Return exactly one complete JSON object, no markdown and no trailing prose.\n"
+        "- Escape every newline inside string values as \\n.\n"
+        "- For large source changes, prefer a smaller exact edit_file old/new or a compact apply_patch hunk; "
+        "do not stream a half-written patch string.\n"
+        "- Preserve the same immediate repair intent; do not restart broad exploration.\n"
+        f"previous_raw_excerpt: {json.dumps(raw_excerpt, ensure_ascii=False)}\n"
+        "[/section:implement_v2_json_repair_retry]"
+    )
+
+
 def _extract_raw_excerpt_from_model_error(message: str, limit: int = 500) -> str:
     marker = "raw="
     index = message.find(marker)
@@ -4675,88 +4701,111 @@ def _call_model_turn(
     if progress:
         progress(f"implement_v2 turn #{turn_input.turn_index}: model_json start")
     started = time.monotonic()
-    retry_count = 0
-    for attempt_index, delay in enumerate((0.0, *_IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS), start=1):
+    total_retry_count = 0
+    transient_retry_count = 0
+    parse_retry_count = 0
+    current_turn_input = turn_input
+    pending_delay = 0.0
+    while True:
+        delay = pending_delay
+        pending_delay = 0.0
         if delay:
             time.sleep(delay)
         try:
             payload = model_json_callable(
-                turn_input.model_backend,
+                current_turn_input.model_backend,
                 model_auth,
-                turn_input.rendered_prompt,
-                turn_input.model,
+                current_turn_input.rendered_prompt,
+                current_turn_input.model,
                 base_url,
-                turn_input.timeout_seconds,
-                log_prefix=turn_input.log_prefix,
+                current_turn_input.timeout_seconds,
+                log_prefix=current_turn_input.log_prefix,
             )
             break
         except ModelBackendError as exc:
             elapsed = time.monotonic() - started
             model_error = _live_json_model_error(exc)
-            should_retry = (
-                attempt_index <= len(_IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS)
-                and _live_json_model_error_retryable(model_error)
+            if parse_retry_count == 0 and _live_json_parse_error_retryable(model_error):
+                parse_retry_count += 1
+                total_retry_count += 1
+                retry_prompt = _append_live_json_parse_retry_instruction(turn_input.rendered_prompt, model_error)
+                current_turn_input = replace(
+                    turn_input,
+                    rendered_prompt=retry_prompt,
+                    prompt_descriptor=_prompt_descriptor(retry_prompt),
+                )
+                if progress:
+                    progress(
+                        f"implement_v2 turn #{turn_input.turn_index}: model_json parse failure "
+                        f"retry={parse_retry_count}"
+                    )
+                continue
+            should_retry = _live_json_model_error_retryable(model_error) and transient_retry_count < len(
+                _IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS
             )
             if should_retry:
-                retry_count += 1
+                pending_delay = _IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS[transient_retry_count]
+                transient_retry_count += 1
+                total_retry_count += 1
                 if progress:
                     progress(
                         f"implement_v2 turn #{turn_input.turn_index}: model_json transient failure "
-                        f"class={model_error.get('failure_class')} retry={retry_count}"
+                        f"class={model_error.get('failure_class')} retry={transient_retry_count}"
                     )
                 continue
-            if retry_count:
-                model_error["retry_count"] = retry_count
+            if total_retry_count:
+                model_error["retry_count"] = total_retry_count
+            if transient_retry_count:
+                model_error["transient_retry_count"] = transient_retry_count
+            if parse_retry_count:
+                model_error["parse_retry_count"] = parse_retry_count
             if progress:
                 progress(
                     f"implement_v2 turn #{turn_input.turn_index}: model_json failed "
                     f"class={model_error.get('failure_class')}"
-                )
+            )
             response_shape = _model_response_shape({}, model_error=model_error)
-            if retry_count:
-                response_shape["retry_count"] = retry_count
-            observation = _model_turn_observation(turn_input, {}, elapsed_seconds=elapsed, model_error=model_error)
-            if retry_count:
-                observation["model_retry_count"] = retry_count
+            if total_retry_count:
+                response_shape["retry_count"] = total_retry_count
+            if transient_retry_count:
+                response_shape["transient_retry_count"] = transient_retry_count
+            if parse_retry_count:
+                response_shape["parse_retry_count"] = parse_retry_count
+            observation = _model_turn_observation(current_turn_input, {}, elapsed_seconds=elapsed, model_error=model_error)
+            if total_retry_count:
+                observation["model_retry_count"] = total_retry_count
+            if transient_retry_count:
+                observation["model_transient_retry_count"] = transient_retry_count
+            if parse_retry_count:
+                observation["model_parse_retry_count"] = parse_retry_count
             return ModelTurnOutput(
                 payload={},
                 normalized_payload={},
                 elapsed_seconds=elapsed,
-                prompt_chars=len(turn_input.rendered_prompt),
+                prompt_chars=len(current_turn_input.rendered_prompt),
                 response_shape=response_shape,
                 model_error=model_error,
                 observation=observation,
             )
-    else:  # pragma: no cover - defensive; the loop always returns or breaks.
-        elapsed = time.monotonic() - started
-        model_error = {
-            "failure_class": "model_backend_error",
-            "error_type": "ModelBackendError",
-            "message": "model_json call failed before producing a payload",
-            "raw_excerpt": "",
-        }
-        return ModelTurnOutput(
-            payload={},
-            normalized_payload={},
-            elapsed_seconds=elapsed,
-            prompt_chars=len(turn_input.rendered_prompt),
-            response_shape=_model_response_shape({}, model_error=model_error),
-            model_error=model_error,
-            observation=_model_turn_observation(turn_input, {}, elapsed_seconds=elapsed, model_error=model_error),
-        )
 
     elapsed = time.monotonic() - started
-    normalized = _normalize_live_json_payload(payload, turn_index=turn_input.turn_index)
+    normalized = _normalize_live_json_payload(payload, turn_index=current_turn_input.turn_index)
     response_shape = _model_response_shape(normalized, model_error={})
-    observation = _model_turn_observation(turn_input, normalized, elapsed_seconds=elapsed, model_error={})
-    if retry_count:
-        response_shape["retry_count"] = retry_count
-        observation["model_retry_count"] = retry_count
+    observation = _model_turn_observation(current_turn_input, normalized, elapsed_seconds=elapsed, model_error={})
+    if total_retry_count:
+        response_shape["retry_count"] = total_retry_count
+        observation["model_retry_count"] = total_retry_count
+    if transient_retry_count:
+        response_shape["transient_retry_count"] = transient_retry_count
+        observation["model_transient_retry_count"] = transient_retry_count
+    if parse_retry_count:
+        response_shape["parse_retry_count"] = parse_retry_count
+        observation["model_parse_retry_count"] = parse_retry_count
     return ModelTurnOutput(
         payload=payload,
         normalized_payload=normalized,
         elapsed_seconds=elapsed,
-        prompt_chars=len(turn_input.rendered_prompt),
+        prompt_chars=len(current_turn_input.rendered_prompt),
         response_shape=response_shape,
         model_error={},
         observation=observation,

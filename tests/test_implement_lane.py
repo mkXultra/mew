@@ -611,6 +611,100 @@ def test_implement_v2_model_turn_does_not_retry_json_parse_error() -> None:
     assert output.model_error["failure_class"] == "model_json_parse_error"
 
 
+def test_implement_v2_model_turn_retries_recoverable_tool_call_json_parse_error() -> None:
+    prompt = "tool call JSON response"
+    turn_input = ModelTurnInput(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id="attempt-1",
+        turn_id="turn-1",
+        turn_index=1,
+        transport="model_json",
+        model_backend="codex",
+        model="gpt-5.5",
+        rendered_prompt=prompt,
+        current_projection_bytes=b"[]",
+        prompt_descriptor={"chars": len(prompt), "sha256": "sha256:prompt"},
+        projection_descriptor={"current_projection_chars": 2, "current_projection_sha256": "sha256:projection"},
+        timeout_seconds=5,
+        log_prefix="test",
+    )
+    prompts = []
+
+    def fake_model(_backend, _auth, model_prompt, *_args, **_kwargs):
+        prompts.append(model_prompt)
+        if len(prompts) == 1:
+            raise ModelBackendError(
+                'failed to parse JSON plan: response did not contain valid JSON object; '
+                'raw={"summary":"patch","tool_calls":[{"id":"call-1","name":"apply_patch","arguments":{"patch":"*** Begin Patch'
+            )
+        return {
+            "summary": "retry ok",
+            "tool_calls": [{"id": "call-1", "name": "inspect_dir", "arguments": {"path": "."}}],
+        }
+
+    output = _call_model_turn(
+        turn_input,
+        model_json_callable=fake_model,
+        model_auth={"path": "auth.json"},
+        base_url="",
+    )
+
+    assert len(prompts) == 2
+    assert "implement_v2_json_repair_retry" in prompts[1]
+    assert output.model_error == {}
+    assert output.response_shape["parse_retry_count"] == 1
+    assert output.observation["model_parse_retry_count"] == 1
+    assert output.prompt_chars == output.observation["prompt"]["chars"]
+    assert output.normalized_payload["summary"] == "retry ok"
+
+
+def test_implement_v2_model_turn_parse_retry_does_not_consume_transient_retry_budget() -> None:
+    prompt = "tool call JSON response"
+    turn_input = ModelTurnInput(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id="attempt-1",
+        turn_id="turn-1",
+        turn_index=1,
+        transport="model_json",
+        model_backend="codex",
+        model="gpt-5.5",
+        rendered_prompt=prompt,
+        current_projection_bytes=b"[]",
+        prompt_descriptor={"chars": len(prompt), "sha256": "sha256:prompt"},
+        projection_descriptor={"current_projection_chars": 2, "current_projection_sha256": "sha256:projection"},
+        timeout_seconds=5,
+        log_prefix="test",
+    )
+    calls = []
+
+    def fake_model(*_args, **_kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise ModelBackendError(
+                'failed to parse JSON plan: response did not contain valid JSON object; '
+                'raw={"summary":"patch","tool_calls":[{"id":"call-1","name":"apply_patch","arguments":{"patch":"*** Begin Patch'
+            )
+        if len(calls) == 2:
+            raise ModelBackendError("Codex Web API error: IncompleteRead(42 bytes read)")
+        return {
+            "summary": "retry ok",
+            "tool_calls": [{"id": "call-1", "name": "inspect_dir", "arguments": {"path": "."}}],
+        }
+
+    output = _call_model_turn(
+        turn_input,
+        model_json_callable=fake_model,
+        model_auth={"path": "auth.json"},
+        base_url="",
+    )
+
+    assert len(calls) == 3
+    assert output.model_error == {}
+    assert output.response_shape["retry_count"] == 2
+    assert output.response_shape["parse_retry_count"] == 1
+    assert output.response_shape["transient_retry_count"] == 1
+
+
 def test_implement_v2_prompt_history_render_helper_matches_existing_json_shape() -> None:
     history = tuple({"turn": index, "summary": f"履歴 {index}"} for index in range(1, 11))
 
