@@ -46,6 +46,7 @@ from mew.implement_lane.v2_runtime import (
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
     _terminal_failure_reaction_turn_limit,
+    _typed_retired_legacy_blockers_for_bundle,
 )
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
@@ -67,6 +68,37 @@ def test_implementation_runtime_registry_keeps_v1_default_and_v2_explicit() -> N
 def test_legacy_tiny_and_unknown_lanes_resolve_to_implement_v1_runtime() -> None:
     for lane in (None, "", TINY_LANE, "unknown-lane"):
         assert get_implement_lane_runtime_view(lane).lane == IMPLEMENT_V1_LANE
+
+
+def test_implement_v2_typed_retirement_is_family_specific() -> None:
+    blockers = _typed_retired_legacy_blockers_for_bundle(
+        {
+            "obligations": [
+                {"kind": "artifact_exists"},
+                {"kind": "visual_similarity"},
+            ]
+        },
+        task_description="Run the VM and compare the rendered frame to the reference image.",
+    )
+
+    assert "runtime_final_verifier_artifact_evidence" in blockers
+    assert "runtime_visual_artifact_quality_evidence" in blockers
+    assert "acceptance_constraints_unchecked" not in blockers
+
+
+def test_implement_v2_typed_retirement_does_not_treat_dimensions_as_visual_quality() -> None:
+    blockers = _typed_retired_legacy_blockers_for_bundle(
+        {
+            "obligations": [
+                {"kind": "artifact_exists"},
+                {"kind": "visual_dimension"},
+            ]
+        },
+        task_description="Run the VM and compare the rendered frame to the reference image.",
+    )
+
+    assert "runtime_final_verifier_artifact_evidence" not in blockers
+    assert "runtime_visual_artifact_quality_evidence" not in blockers
 
 
 def test_explicit_implement_v2_selection_returns_v2_runtime() -> None:

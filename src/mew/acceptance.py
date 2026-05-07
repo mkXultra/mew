@@ -3341,6 +3341,19 @@ def acceptance_done_gate_decision(
     typed_gate = _typed_acceptance_done_gate_decision(action, session)
     typed_decision = str(typed_gate.get("decision") or "")
     typed_blockers = [dict(item) for item in typed_gate.get("blockers") or [] if isinstance(item, dict)]
+    retired_legacy_blocker_codes = _typed_retired_legacy_blocker_codes(typed_gate, session)
+    legacy_warnings: list[dict[str, str]] = []
+
+    def append_legacy_blocker(blocker: object) -> None:
+        message = str(blocker or "")
+        if not message:
+            return
+        code = finish_blocker_code(message)
+        if code in retired_legacy_blocker_codes:
+            legacy_warnings.append({"code": code, "message": message})
+            return
+        blockers.append(message)
+
     if typed_decision == "block_continue":
         blockers.extend(
             blocker.get("message")
@@ -3349,11 +3362,9 @@ def acceptance_done_gate_decision(
         )
     runtime_component_gate = runtime_component_finish_gate_decision(task_description, action, session=session)
     if runtime_component_gate.get("decision") != "allow_complete":
-        blockers.extend(
-            blocker.get("message")
-            for blocker in runtime_component_gate.get("blockers") or []
-            if isinstance(blocker, dict) and blocker.get("message")
-        )
+        for blocker in runtime_component_gate.get("blockers") or []:
+            if isinstance(blocker, dict) and blocker.get("message"):
+                append_legacy_blocker(blocker.get("message"))
     acceptance_blocker = acceptance_finish_blocker(
         task_description,
         action,
@@ -3361,12 +3372,12 @@ def acceptance_done_gate_decision(
         include_runtime_component_gate=False,
     )
     if acceptance_blocker:
-        blockers.append(acceptance_blocker)
+        append_legacy_blocker(acceptance_blocker)
     checks = coerce_acceptance_checks(action.get("acceptance_checks"))
     evidence_ref_findings = _evidence_ref_findings_for_checks(checks, session)
     evidence_ref_blocker = str(evidence_ref_findings.get("blocker") or "")
     if evidence_ref_blocker:
-        blockers.append(evidence_ref_blocker)
+        append_legacy_blocker(evidence_ref_blocker)
     if not blockers:
         return {
             "decision": "allow_complete",
@@ -3377,6 +3388,7 @@ def acceptance_done_gate_decision(
             "continuation_prompt": "",
             "missing_obligations": [],
             "failed_evidence_refs": [],
+            "legacy_warnings": legacy_warnings,
         }
     return {
         "decision": "block_continue",
@@ -3397,6 +3409,7 @@ def acceptance_done_gate_decision(
         "missing_obligations": [dict(item) for item in typed_gate.get("missing_obligations") or []],
         "failed_evidence_refs": [dict(item) for item in typed_gate.get("failed_evidence_refs") or []],
         "continuation_prompt": str(typed_gate.get("continuation_prompt") or "") or finish_continuation_prompt(blockers),
+        "legacy_warnings": legacy_warnings,
     }
 
 
@@ -3428,3 +3441,19 @@ def _typed_acceptance_session(session: object) -> dict:
         return {}
     typed = session.get("typed_acceptance")
     return dict(typed) if isinstance(typed, dict) else {}
+
+
+def _typed_retired_legacy_blocker_codes(typed_gate: dict, session: object) -> set[str]:
+    if str(typed_gate.get("decision") or "") != "allow_complete":
+        return set()
+    typed = _typed_acceptance_session(session)
+    raw_codes = typed.get("retired_legacy_blockers") or typed.get("retired_legacy_families") or ()
+    codes: set[str] = set()
+    if isinstance(raw_codes, str):
+        raw_codes = (raw_codes,)
+    if isinstance(raw_codes, (list, tuple, set)):
+        for raw in raw_codes:
+            code = str(raw or "").strip()
+            if code:
+                codes.add(code)
+    return codes

@@ -1213,8 +1213,16 @@ def build_oracle_bundle(
         item if isinstance(item, ExecutionContract) else normalize_execution_contract(item, task_contract=task_contract)
         for item in execution_contracts
     )
+    non_completion_contract_ids: set[str] = set()
+    completion_contracts_by_key: dict[tuple[str, ...], ExecutionContract] = {}
     for contract in normalized_contracts:
         provenance_refs.append({"kind": "execution_contract", "id": contract.id})
+        contract_can_complete = contract.acceptance_kind not in {"not_acceptance", "progress_only"}
+        if not contract_can_complete:
+            non_completion_contract_ids.add(contract.id)
+        else:
+            completion_contracts_by_key[_oracle_completion_contract_key(contract)] = contract
+    for contract in completion_contracts_by_key.values():
         for artifact in contract.expected_artifacts:
             obligations.extend(_obligations_from_expected_artifact(contract, artifact))
         if contract.verifier_required or contract.acceptance_kind == "external_verifier":
@@ -1229,8 +1237,10 @@ def build_oracle_bundle(
                 )
             )
     for verifier in (_verifier_evidence(item) for item in verifier_evidence):
+        if verifier.contract_id and verifier.contract_id in non_completion_contract_ids:
+            continue
         provenance_refs.append({"kind": "verifier_evidence", "id": verifier.verifier_id})
-        if verifier.verdict in {"pass", "fail", "partial"}:
+        if verifier.verdict == "pass":
             obligations.append(
                 OracleObligation(
                     id=f"oracle:{verifier.verifier_id}:verifier_pass",
@@ -1255,12 +1265,6 @@ def build_oracle_bundle(
                 provenance_refs=(dict(ref),),
             )
         )
-    artifacts = tuple(_artifact_evidence(item) for item in artifact_evidence)
-    if not obligations and artifacts:
-        for artifact in artifacts:
-            if artifact.required:
-                obligations.append(_artifact_exists_obligation("artifact_evidence", artifact.contract_id, artifact))
-                provenance_refs.append({"kind": "artifact_evidence", "id": artifact.evidence_id})
     if not obligations:
         return None
     bundle_id_source = "|".join(obligation.id for obligation in obligations[:16])
@@ -1270,6 +1274,16 @@ def build_oracle_bundle(
         obligations=tuple(_dedupe_obligations(obligations)),
         provenance_refs=_unique_refs(provenance_refs),
     )
+
+
+def _oracle_completion_contract_key(contract: ExecutionContract) -> tuple[str, ...]:
+    artifact_targets = []
+    for artifact in contract.expected_artifacts:
+        target_path = str(artifact.path or artifact.target.get("path") or "").strip()
+        artifact_targets.append(target_path or artifact.id)
+    if artifact_targets:
+        return ("artifacts", *sorted(str(item) for item in artifact_targets if str(item)))
+    return ("contract", contract.id)
 
 
 def resolve_typed_finish(
@@ -1956,52 +1970,54 @@ def _covering_event_for_obligation(
     obligation: OracleObligation,
     cited_events: tuple[EvidenceEvent, ...],
 ) -> EvidenceEvent | None:
+    covering: EvidenceEvent | None = None
     for event in cited_events:
         if event.status != "passed":
             continue
         if event.obligation_id == obligation.id:
             if obligation.kind == "verifier_pass":
                 if _event_matches_verifier_obligation(event, obligation):
-                    return event
+                    covering = event
                 continue
             if obligation.kind == "source_grounding":
                 if _event_matches_source_grounding_obligation(event, obligation):
-                    return event
+                    covering = event
                 continue
             if obligation.kind in {"artifact_exists", "artifact_fresh"}:
                 if _event_matches_artifact_obligation(event, obligation):
-                    return event
+                    covering = event
                 continue
             if obligation.kind == "visual_dimension":
                 if _event_matches_visual_dimension_obligation(event, obligation):
-                    return event
+                    covering = event
                 continue
             if obligation.kind == "visual_similarity":
                 if _event_matches_visual_similarity_obligation(event, obligation):
-                    return event
+                    covering = event
                 continue
-            return event
+            covering = event
+            continue
         if obligation.kind == "verifier_pass" and event.kind == "verifier_result":
             if str(event.observed.get("verdict") or "") == "pass" and _event_matches_verifier_obligation(
                 event,
                 obligation,
             ):
-                return event
+                covering = event
         if obligation.kind in {"artifact_exists", "artifact_fresh"} and event.kind == "artifact_check":
             if _event_matches_artifact_obligation(event, obligation):
-                return event
+                covering = event
         if obligation.kind == "source_grounding" and event.kind == "source_grounding":
             if _event_matches_source_grounding_obligation(event, obligation):
-                return event
+                covering = event
         if obligation.kind in {"visual_dimension", "visual_similarity"} and event.kind == "oracle_check":
             if obligation.kind == "visual_dimension" and _event_matches_visual_dimension_obligation(event, obligation):
-                return event
+                covering = event
             if obligation.kind == "visual_similarity" and _event_matches_visual_similarity_obligation(
                 event,
                 obligation,
             ):
-                return event
-    return None
+                covering = event
+    return covering
 
 
 def _event_matches_verifier_obligation(event: EvidenceEvent, obligation: OracleObligation) -> bool:
@@ -2075,6 +2091,12 @@ def _event_matches_visual_similarity_obligation(event: EvidenceEvent, obligation
         return False
     if obligation.expected.get("missing_reference"):
         return False
+    provenance_source = str(event.provenance.get("source") or event.observed.get("source") or "").casefold()
+    if (
+        provenance_source in {"candidate_derived", "model_authored", "model_declared"}
+        or bool(event.observed.get("candidate_derived"))
+    ) and not obligation.candidate_derived_allowed:
+        return False
     if event.oracle_id and event.oracle_id != obligation.id:
         return False
     if not _event_matches_artifact_obligation(
@@ -2119,32 +2141,59 @@ def _superseding_failed_event(
     events: tuple[EvidenceEvent, ...],
 ) -> EvidenceEvent | None:
     seen_covering = False
+    superseding_failure: EvidenceEvent | None = None
     for event in events:
         if event.id == covering_event.id:
             seen_covering = True
             continue
         if not seen_covering:
             continue
-        if event.status not in {"failed", "partial"}:
+        if event.status not in {"failed", "partial", "passed"}:
             continue
-        if event.obligation_id == obligation.id:
-            return event
+        relevant = False
+        if event.obligation_id == obligation.id and not (
+            event.status == "passed" and obligation.kind in {"visual_dimension", "visual_similarity"}
+        ):
+            relevant = True
         if obligation.kind in {"artifact_exists", "artifact_fresh"} and event.kind == "artifact_check":
-            if _event_matches_artifact_obligation(event, obligation):
-                return event
+            relevant = relevant or _event_matches_artifact_obligation(event, obligation)
+        if obligation.kind in {"artifact_exists", "artifact_fresh"} and event.kind == "verifier_result":
+            relevant = relevant or _event_matches_verifier_for_artifact_obligation(event, obligation)
         if obligation.kind == "verifier_pass" and event.kind == "verifier_result":
-            if _event_matches_verifier_obligation(event, obligation):
-                return event
+            relevant = relevant or _event_matches_verifier_obligation(event, obligation)
         if obligation.kind == "source_grounding" and event.kind == "source_grounding":
-            if _event_matches_source_grounding_obligation(event, obligation):
-                return event
+            relevant = relevant or _event_matches_source_grounding_obligation(event, obligation)
         if obligation.kind == "visual_dimension" and event.kind == "oracle_check":
-            if _event_matches_visual_dimension_obligation(event, obligation):
-                return event
+            if event.status == "passed":
+                relevant = relevant or _event_matches_visual_dimension_obligation(event, obligation)
+            else:
+                relevant = relevant or event.obligation_id == obligation.id
         if obligation.kind == "visual_similarity" and event.kind == "oracle_check":
-            if _event_matches_visual_similarity_obligation(event, obligation):
-                return event
-    return None
+            if event.status == "passed":
+                relevant = relevant or _event_matches_visual_similarity_obligation(event, obligation)
+            else:
+                relevant = relevant or event.obligation_id == obligation.id
+        if not relevant:
+            continue
+        if event.status in {"failed", "partial"}:
+            superseding_failure = event
+        elif event.status == "passed":
+            superseding_failure = None
+    return superseding_failure
+
+
+def _event_matches_verifier_for_artifact_obligation(event: EvidenceEvent, obligation: OracleObligation) -> bool:
+    contract_ids = _obligation_contract_ids(obligation)
+    event_contract_id = str(event.contract_id or event.observed.get("contract_id") or "")
+    return bool(event_contract_id and event_contract_id in contract_ids)
+
+
+def _obligation_contract_ids(obligation: OracleObligation) -> set[str]:
+    contract_ids = {str(obligation.subject.get("contract_id") or "")}
+    for ref in obligation.provenance_refs:
+        if str(ref.get("kind") or "") == "execution_contract":
+            contract_ids.add(str(ref.get("id") or ""))
+    return {item for item in contract_ids if item}
 
 
 def _typed_continuation_prompt(

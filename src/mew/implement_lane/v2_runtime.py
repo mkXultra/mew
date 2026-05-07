@@ -13,6 +13,7 @@ from ..acceptance import (
     acceptance_done_gate_decision,
     implementation_contract_source_requirements,
     implementation_source_ref_matches_text,
+    is_runtime_visual_artifact_task,
 )
 from ..errors import ModelBackendError
 from ..work_lanes import IMPLEMENT_V2_LANE
@@ -4280,7 +4281,36 @@ def _typed_acceptance_session_from_tool_results(
     }
     if oracle_bundle is not None:
         typed["oracle_bundle"] = oracle_bundle.as_dict()
+        typed["retired_legacy_blockers"] = _typed_retired_legacy_blockers_for_bundle(
+            oracle_bundle.as_dict(),
+            task_description=_live_task_description(lane_input) if lane_input is not None else "",
+        )
     return typed
+
+
+def _typed_retired_legacy_blockers_for_bundle(
+    oracle_bundle: dict[str, object],
+    *,
+    task_description: object = "",
+) -> list[str]:
+    obligations = oracle_bundle.get("obligations") if isinstance(oracle_bundle, dict) else []
+    if not isinstance(obligations, list) or not obligations:
+        return []
+    kinds = {
+        str(obligation.get("kind") or "")
+        for obligation in obligations
+        if isinstance(obligation, dict)
+    }
+    retired: set[str] = set()
+    visual_quality_covered = "visual_similarity" in kinds
+    artifact_covered = bool(kinds.intersection({"artifact_exists", "artifact_fresh"}))
+    if visual_quality_covered:
+        retired.add("runtime_visual_artifact_quality_evidence")
+    if artifact_covered and (visual_quality_covered or not is_runtime_visual_artifact_task(task_description)):
+        retired.add("runtime_final_verifier_artifact_evidence")
+    if "artifact_fresh" in kinds and (visual_quality_covered or not is_runtime_visual_artifact_task(task_description)):
+        retired.add("runtime_artifact_freshness_unchecked")
+    return sorted(retired)
 
 
 def _typed_acceptance_digest(events: list[dict[str, object]], oracle_bundle: dict[str, object]) -> dict[str, object]:

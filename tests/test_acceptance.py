@@ -159,6 +159,13 @@ def test_resolve_typed_finish_rejects_visual_similarity_without_oracle_measureme
         source="test",
         obligations=(
             OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+            OracleObligation(
                 id="oracle:frame:visual_similarity",
                 kind="visual_similarity",
                 subject={"artifact_id": "frame", "path": "frame.bmp"},
@@ -184,6 +191,126 @@ def test_resolve_typed_finish_rejects_visual_similarity_without_oracle_measureme
 
     assert decision.decision == "block_continue"
     assert decision.missing_obligations
+
+
+def test_resolve_typed_finish_rejects_candidate_derived_visual_similarity():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:oracle:frame",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "model_authored"},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:oracle:frame"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.missing_obligations
+
+
+def test_resolve_typed_finish_rejects_candidate_visual_pass_after_visual_failure():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+                source="test",
+            ),
+        ),
+    )
+    trusted_pass = EvidenceEvent(
+        id="ev:oracle:trusted",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    failed_oracle = EvidenceEvent(
+        id="ev:oracle:failed",
+        kind="oracle_check",
+        status="failed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.5,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    candidate_pass = EvidenceEvent(
+        id="ev:oracle:candidate",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "model_authored"},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {"kind": "evidence_event", "id": "ev:oracle:trusted"},
+                {"kind": "evidence_event", "id": "ev:oracle:candidate"},
+            ),
+        ),
+        bundle,
+        (trusted_pass, failed_oracle, candidate_pass),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.failed_evidence_refs
 
 
 def test_resolve_typed_finish_ignores_superseding_failure_for_other_verifier_contract():
@@ -222,6 +349,300 @@ def test_resolve_typed_finish_ignores_superseding_failure_for_other_verifier_con
     )
 
     assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_rejects_artifact_pass_superseded_by_same_contract_verifier_failure():
+    bundle = OracleBundle(
+        id="oracle:bundle:artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.txt"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+    failed_verifier = EvidenceEvent(
+        id="ev:verifier:verify",
+        kind="verifier_result",
+        status="failed",
+        observed={"verdict": "fail"},
+        contract_id="contract:verify",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:artifact:frame"},)),
+        bundle,
+        (artifact_event, failed_verifier),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.failed_evidence_refs
+
+
+def test_resolve_typed_finish_uses_latest_artifact_cover_after_same_contract_retry():
+    bundle = OracleBundle(
+        id="oracle:bundle:artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.txt"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    first_artifact = EvidenceEvent(
+        id="ev:artifact:first",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+    failed_verifier = EvidenceEvent(
+        id="ev:verifier:first",
+        kind="verifier_result",
+        status="failed",
+        observed={"verdict": "fail"},
+        contract_id="contract:verify",
+    )
+    latest_artifact = EvidenceEvent(
+        id="ev:artifact:latest",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+    latest_verifier = EvidenceEvent(
+        id="ev:verifier:latest",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        contract_id="contract:verify",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {"kind": "evidence_event", "id": "ev:artifact:first"},
+                {"kind": "evidence_event", "id": "ev:artifact:latest"},
+                {"kind": "evidence_event", "id": "ev:verifier:latest"},
+            ),
+        ),
+        bundle,
+        (first_artifact, failed_verifier, latest_artifact, latest_verifier),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_allows_latest_same_contract_verifier_pass_after_failure():
+    bundle = OracleBundle(
+        id="oracle:bundle:artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.txt"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+    failed_verifier = EvidenceEvent(
+        id="ev:verifier:first",
+        kind="verifier_result",
+        status="failed",
+        observed={"verdict": "fail"},
+        contract_id="contract:verify",
+    )
+    latest_verifier = EvidenceEvent(
+        id="ev:verifier:latest",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        contract_id="contract:verify",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {"kind": "evidence_event", "id": "ev:artifact:frame"},
+                {"kind": "evidence_event", "id": "ev:verifier:latest"},
+            ),
+        ),
+        bundle,
+        (artifact_event, failed_verifier, latest_verifier),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_acceptance_done_gate_allows_typed_retired_runtime_visual_family():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:oracle:frame",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "/tmp/frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        obligation_id="oracle:frame:exists",
+        refs=({"kind": "tool_call", "id": "verify-frame"},),
+        provenance={"source": "verifier_evidence"},
+    )
+    decision = acceptance_done_gate_decision(
+        (
+            "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+            "I will check that the first rendered frame is correct."
+        ),
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [
+                {"kind": "evidence_event", "id": "ev:artifact:frame"},
+                {"kind": "evidence_event", "id": "ev:oracle:frame"},
+            ],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": bundle.as_dict(),
+                "evidence_events": [artifact_event.as_dict(), event.as_dict()],
+                "retired_legacy_blockers": [
+                    "runtime_final_verifier_artifact_evidence",
+                    "runtime_visual_artifact_quality_evidence",
+                ],
+            }
+        },
+    )
+
+    assert decision["decision"] == "allow_complete"
+    assert decision["gate_source"] == "typed_evidence"
+    assert decision["legacy_warnings"]
+
+
+def test_acceptance_done_gate_keeps_legacy_block_when_typed_family_not_retired():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:oracle:frame",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "/tmp/frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        obligation_id="oracle:frame:exists",
+        refs=({"kind": "tool_call", "id": "verify-frame"},),
+        provenance={"source": "verifier_evidence"},
+    )
+
+    decision = acceptance_done_gate_decision(
+        (
+            "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+            "I will check that the first rendered frame is correct."
+        ),
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [
+                {"kind": "evidence_event", "id": "ev:artifact:frame"},
+                {"kind": "evidence_event", "id": "ev:oracle:frame"},
+            ],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": bundle.as_dict(),
+                "evidence_events": [artifact_event.as_dict(), event.as_dict()],
+            }
+        },
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["gate_source"] == "legacy_string_safety"
+    assert decision["blockers"][0]["code"] == "runtime_final_verifier_artifact_evidence"
 
 
 def test_extract_acceptance_constraints_keeps_output_and_edit_scope_rules():

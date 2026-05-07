@@ -1741,6 +1741,12 @@ class DogfoodTests(unittest.TestCase):
                 scenario["artifacts"]["visual_alias_false_positive_decision"]["decision"],
                 "block_continue",
             )
+            self.assertEqual(scenario["artifacts"]["typed_format_only_decision"]["decision"], "block_continue")
+            self.assertEqual(scenario["artifacts"]["typed_format_only_decision"]["gate_source"], "typed_evidence")
+            self.assertEqual(scenario["artifacts"]["typed_visual_quality_decision"]["decision"], "allow_complete")
+            self.assertTrue(scenario["artifacts"]["typed_visual_quality_decision"]["legacy_warnings"])
+            self.assertEqual(scenario["artifacts"]["typed_visual_self_proxy_decision"]["decision"], "block_continue")
+            self.assertEqual(scenario["artifacts"]["typed_visual_self_proxy_decision"]["gate_source"], "typed_evidence")
 
     def test_run_dogfood_m6_24_expected_artifact_contract_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:

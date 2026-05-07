@@ -2,6 +2,7 @@ from mew.implement_lane.execution_evidence import (
     ArtifactEvidence,
     ToolRunRecord,
     apply_finish_gate,
+    build_oracle_bundle,
     classify_execution_failure,
     derive_verifier_evidence,
     normalize_execution_contract,
@@ -87,6 +88,29 @@ def test_normalize_execution_contract_accepts_stdout_target_and_check_aliases() 
     assert artifact.checks[0]["type"] == "non_empty"
     assert artifact.checks[1]["type"] == "text_contains"
     assert artifact.checks[1]["text"] == "ELF"
+
+
+def test_build_oracle_bundle_keeps_latest_completion_contract_for_same_artifact_target() -> None:
+    bundle = build_oracle_bundle(
+        task_contract={},
+        execution_contracts=[
+            {
+                "id": "contract:first",
+                "acceptance_kind": "external_verifier",
+                "expected_artifacts": [{"id": "frame", "path": "frame.txt"}],
+            },
+            {
+                "id": "contract:latest",
+                "acceptance_kind": "external_verifier",
+                "expected_artifacts": [{"id": "frame", "path": "frame.txt"}],
+            },
+        ],
+    )
+
+    assert bundle is not None
+    ids = {obligation.id for obligation in bundle.obligations}
+    assert "oracle:contract:latest:verifier_pass" in ids
+    assert "oracle:contract:first:verifier_pass" not in ids
 
 
 def test_normalize_execution_contract_accepts_stream_field_artifact() -> None:

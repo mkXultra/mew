@@ -17363,6 +17363,7 @@ def run_m6_24_same_family_compatibility_emulator_scenario(workspace):
 
 def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
     from .acceptance import acceptance_done_gate_decision
+    from .implement_lane.execution_evidence import EvidenceEvent, OracleBundle, OracleObligation
 
     checks = []
     commands = []
@@ -17515,6 +17516,138 @@ def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
         visual_alias_false_positive_action,
         session=session,
     )
+    typed_visual_obligation = OracleObligation(
+        id="oracle:frame:visual_similarity",
+        kind="visual_similarity",
+        subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+        source="dogfood",
+    )
+    typed_artifact_obligation = OracleObligation(
+        id="oracle:frame:exists",
+        kind="artifact_exists",
+        subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        expected={"exists": True},
+        source="dogfood",
+    )
+    typed_missing_obligation = OracleObligation(
+        id="oracle:frame:visual_similarity",
+        kind="visual_similarity",
+        subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        expected={"missing_reference": True},
+        source="dogfood",
+    )
+    typed_visual_bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="dogfood",
+        obligations=(typed_artifact_obligation, typed_visual_obligation),
+    )
+    typed_missing_bundle = OracleBundle(
+        id="oracle:bundle:visual-missing",
+        source="dogfood",
+        obligations=(typed_missing_obligation,),
+    )
+    typed_visual_pass = EvidenceEvent(
+        id="ev:oracle:frame:visual-pass",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "/tmp/frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    typed_artifact_pass = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        obligation_id="oracle:frame:exists",
+        refs=({"kind": "tool_call", "id": "verify-frame"},),
+        provenance={"source": "verifier_evidence"},
+    )
+    typed_visual_self_proxy = EvidenceEvent(
+        id="ev:oracle:frame:self-proxy",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "/tmp/frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "model_authored"},
+    )
+    typed_visual_retired_blockers = [
+        "runtime_final_verifier_artifact_evidence",
+        "runtime_visual_artifact_quality_evidence",
+    ]
+    typed_format_only_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [{"kind": "evidence_event", "id": "ev:artifact:frame-only"}],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": typed_missing_bundle.as_dict(),
+                "evidence_events": [
+                    EvidenceEvent(
+                        id="ev:artifact:frame-only",
+                        kind="artifact_check",
+                        status="passed",
+                        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                    ).as_dict()
+                ],
+            }
+        },
+    )
+    typed_visual_quality_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [
+                {"kind": "evidence_event", "id": typed_artifact_pass.id},
+                {"kind": "evidence_event", "id": typed_visual_pass.id},
+            ],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": typed_visual_bundle.as_dict(),
+                "evidence_events": [typed_artifact_pass.as_dict(), typed_visual_pass.as_dict()],
+                "retired_legacy_blockers": typed_visual_retired_blockers,
+            }
+        },
+    )
+    typed_visual_self_proxy_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [
+                {"kind": "evidence_event", "id": typed_artifact_pass.id},
+                {"kind": "evidence_event", "id": typed_visual_self_proxy.id},
+            ],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": typed_visual_bundle.as_dict(),
+                "evidence_events": [typed_artifact_pass.as_dict(), typed_visual_self_proxy.as_dict()],
+            }
+        },
+    )
     _scenario_check(
         checks,
         "m6_24_runtime_finish_gate_emulator_blocks_import_path_only_finish",
@@ -17565,6 +17698,31 @@ def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
         visual_alias_false_positive_decision,
         "unqualified exact stdout, expected size, reference, and l2 aliases are blocked",
     )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_typed_blocks_format_only_finish",
+        typed_format_only_decision.get("decision") == "block_continue"
+        and typed_format_only_decision.get("gate_source") == "typed_evidence",
+        typed_format_only_decision,
+        "typed visual finish blocks format-only evidence on missing visual oracle obligation",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_typed_allows_grounded_visual_finish",
+        typed_visual_quality_decision.get("decision") == "allow_complete"
+        and typed_visual_quality_decision.get("gate_source") == "typed_evidence"
+        and typed_visual_quality_decision.get("legacy_warnings"),
+        typed_visual_quality_decision,
+        "typed visual finish allows trusted visual similarity evidence and retires covered legacy blockers",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_typed_blocks_self_proxy_finish",
+        typed_visual_self_proxy_decision.get("decision") == "block_continue"
+        and typed_visual_self_proxy_decision.get("gate_source") == "typed_evidence",
+        typed_visual_self_proxy_decision,
+        "typed visual finish blocks model-authored self-proxy visual quality evidence",
+    )
     report = _scenario_report("m6_24-runtime-finish-gate-emulator", workspace, commands, checks)
     report["artifacts"] = {
         "import_only_decision": import_only_decision,
@@ -17572,6 +17730,9 @@ def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
         "visual_format_only_decision": visual_format_only_decision,
         "visual_quality_decision": visual_quality_decision,
         "visual_alias_false_positive_decision": visual_alias_false_positive_decision,
+        "typed_format_only_decision": typed_format_only_decision,
+        "typed_visual_quality_decision": typed_visual_quality_decision,
+        "typed_visual_self_proxy_decision": typed_visual_self_proxy_decision,
     }
     return report
 
