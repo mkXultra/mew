@@ -66,7 +66,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | expected-artifact contract green; live speed still 0/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-expected-artifact-contract-make-doom-speed1-20260507-013823` | classify next gap from replay before another live speed; latest is task-solving/runtime artifact production plus contract role normalization follow-up |
+| `make-doom-for-mips` | 1/5 | runtime-frontier repair rerun still 0/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-frontier-make-doom-speed1-20260507-0838` | classify next generic runtime/task-solving frontier repair from replay/dogfood before another live speed |
 | `make-mips-interpreter` | 3/5 | pending | none | run v2 speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -465,6 +465,21 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   normalizer upgrades without requiring old stored classifications to match the
   current recomputation exactly. On the Phase 7 artifact, the dogfood command
   passes with `runtime_artifact_missing` and `structured_replay_mismatch_count=7`.
+- The runtime-frontier blocking-artifact repair rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-frontier-make-doom-speed1-20260507-0838`
+  is harness-valid and scored reward `0.0` with runner errors `0`, total
+  runtime `15m22s`, `work_exit_code=1`, `stop_reason=implement_v2_blocked`,
+  `selected_lane=implement_v2`, `runtime_id=implement_v2_model_json_tool_loop`,
+  `model_turns=27`, `tool_calls=53`, `tool_results=53`, and
+  `terminal_failure_reaction_turns_used=3`. It is progress but still not a
+  pass: v2 preserved the source-backed build path, produced
+  `/app/doomgeneric_mips`, then the final VM verifier stopped at `PC=0x0`,
+  executed 8 instructions, and did not produce `/tmp/frame.bmp`. Exact replay
+  and matching terminal-bench dogfood pass after fixing a host Python 3.9 replay
+  compatibility bug in `normalize_execution_contract`. The latest structured
+  failure is `runtime_artifact_missing` with mismatch count `0`; no another
+  live speed should be spent until the next generic repair has local
+  UT/replay/dogfood/emulator coverage.
 
 ## Repair Trigger
 

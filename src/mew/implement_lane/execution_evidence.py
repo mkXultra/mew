@@ -1013,7 +1013,7 @@ def _infer_expected_artifacts(
 ) -> tuple[ExpectedArtifact, ...]:
     for source in (task_contract, frontier_state):
         raw = _mapping(source)
-        if isinstance(raw.get("expected_artifacts"), list | tuple):
+        if isinstance(raw.get("expected_artifacts"), (list, tuple)):
             return tuple(
                 _normalize_expected_artifact({**_mapping(item), "source": _mapping(item).get("source") or "runtime_inferred"})
                 for item in _list(raw.get("expected_artifacts"))

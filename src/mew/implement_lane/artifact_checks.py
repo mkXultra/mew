@@ -168,13 +168,13 @@ def _run_check(
     elif check_type == "non_empty":
         exists = bool(post_stat.get("exists"))
         size = post_stat.get("size")
-        passed = exists and isinstance(size, int | float) and size > 0
+        passed = exists and isinstance(size, (int, float)) and size > 0
         observed = {"exists": exists, "size": size}
     elif check_type == "size_between":
         size = post_stat.get("size")
         minimum = int(check.get("min", 0))
         maximum = int(check.get("max", 2**63 - 1))
-        passed = isinstance(size, int | float) and minimum <= size <= maximum
+        passed = isinstance(size, (int, float)) and minimum <= size <= maximum
         observed = {"size": size, "min": minimum, "max": maximum}
     elif check_type == "mtime_after":
         passed, observed = _mtime_after_result(
@@ -368,7 +368,7 @@ def _latest_previous_mtime(
 
 
 def _timestamp(value: object) -> float | None:
-    if isinstance(value, int | float):
+    if isinstance(value, (int, float)):
         return float(value)
     text = str(value or "")
     if not text:
