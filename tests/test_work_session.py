@@ -11055,8 +11055,16 @@ class WorkSessionTests(unittest.TestCase):
                     user_visible_summary="model turn failed: request timed out",
                     metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
                 )
+
+                def fake_v2_run(*args, progress=None, **kwargs):
+                    if progress:
+                        progress("implement_v2 turn #1: prompt_render start")
+                        progress("implement_v2 turn #1: prompt_render done prompt_chars=123")
+                        progress("implement_v2 turn #1: model_json start timeout_seconds=123.000")
+                    return v2_result
+
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.commands.run_live_json_implement_v2", return_value=v2_result):
+                    with patch("mew.commands.run_live_json_implement_v2", side_effect=fake_v2_run):
                         with redirect_stdout(StringIO()) as stdout:
                             self.assertEqual(
                                 main(
@@ -11102,6 +11110,9 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(metrics["model_timeout_seconds"], 123.0)
                 self.assertEqual(metrics["timeout_guard"], "work_loop_process_guard")
                 self.assertEqual(metrics["status"], "failed")
+                self.assertEqual(metrics["runtime_phase"], "model_json_call")
+                self.assertIn("model_json start", metrics["last_runtime_progress"])
+                self.assertEqual(metrics["active_model_timeout_seconds"], 123.0)
             finally:
                 os.chdir(old_cwd)
 

@@ -398,6 +398,8 @@ def run_live_json_implement_v2(
             turn_index += 1
             model_turns = turn_index
             turn_id = f"turn-{turn_index}"
+            if progress:
+                progress(f"implement_v2 turn #{turn_index}: prompt_render start")
             prompt = _live_json_prompt(
                 lane_input,
                 lane_attempt_id=lane_attempt_id,
@@ -412,6 +414,8 @@ def run_live_json_implement_v2(
                 tool_contract_recovery_instruction=tool_contract_recovery_instruction,
                 history=tuple(prompt_history),
             )
+            if progress:
+                progress(f"implement_v2 turn #{turn_index}: prompt_render done prompt_chars={len(prompt)}")
             tool_contract_recovery_instruction = ""
             model_turn_input = ModelTurnInput(
                 lane=IMPLEMENT_V2_LANE,
@@ -4900,7 +4904,10 @@ def _call_model_turn(
     """Call the existing model_json transport behind a behavior-preserving boundary."""
 
     if progress:
-        progress(f"implement_v2 turn #{turn_input.turn_index}: model_json start")
+        progress(
+            f"implement_v2 turn #{turn_input.turn_index}: model_json start "
+            f"timeout_seconds={turn_input.timeout_seconds:.3f}"
+        )
     started = time.monotonic()
     total_retry_count = 0
     transient_retry_count = 0

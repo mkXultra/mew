@@ -273,6 +273,7 @@ from .work_session import (
     create_work_session,
     execute_work_tool,
     find_work_session,
+    find_work_model_turn,
     find_work_tool_call,
     finish_work_model_turn,
     finish_work_tool_call,
@@ -7235,6 +7236,46 @@ def _run_work_ai_implement_v2(
         planning_turn["model_metrics"] = {**implement_v2_runtime_metrics, "status": "running"}
         planning_turn_id = planning_turn.get("id")
         save_state(state)
+
+    def record_implement_v2_progress(line):
+        if progress:
+            progress(line)
+        text = str(line or "")
+        metrics_update = {
+            "last_runtime_progress": text,
+            "last_runtime_progress_at": now_iso(),
+        }
+        if "prompt_render start" in text:
+            metrics_update["runtime_phase"] = "prompt_render"
+            metrics_update["prompt_render_started_at"] = metrics_update["last_runtime_progress_at"]
+        elif "prompt_render done" in text:
+            metrics_update["runtime_phase"] = "model_turn_ready"
+            metrics_update["prompt_render_finished_at"] = metrics_update["last_runtime_progress_at"]
+        elif "model_json start" in text:
+            metrics_update["runtime_phase"] = "model_json_call"
+            metrics_update["model_json_started_at"] = metrics_update["last_runtime_progress_at"]
+            timeout_match = re.search(r"timeout_seconds=([0-9.]+)", text)
+            if timeout_match:
+                try:
+                    metrics_update["active_model_timeout_seconds"] = float(timeout_match.group(1))
+                except ValueError:
+                    pass
+        elif "model_json failed" in text:
+            metrics_update["runtime_phase"] = "model_json_failed"
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            turn = find_work_model_turn(session, planning_turn_id)
+            if turn is None:
+                return
+            metrics = dict(turn.get("model_metrics") or {})
+            metrics.update(metrics_update)
+            turn["model_metrics"] = metrics
+            turn["updated_at"] = metrics_update["last_runtime_progress_at"]
+            if session is not None:
+                session["updated_at"] = metrics_update["last_runtime_progress_at"]
+            save_state(state)
+
     lane_input = ImplementLaneInput(
         work_session_id=str(session_id),
         task_id=str(task_id),
@@ -7276,7 +7317,7 @@ def _run_work_ai_implement_v2(
             base_url=base_url,
             timeout=model_timeout_seconds,
             max_turns=max_steps,
-            progress=progress,
+            progress=record_implement_v2_progress,
         )
     except Exception as exc:
         result = None
@@ -7294,6 +7335,13 @@ def _run_work_ai_implement_v2(
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
+        existing_turn = find_work_model_turn(session, planning_turn_id)
+        if existing_turn:
+            persisted_model_metrics = {
+                **dict(existing_turn.get("model_metrics") or {}),
+                **persisted_model_metrics,
+            }
+            persisted_model_metrics["status"] = status
         turn = update_work_model_turn_plan(
             state,
             session_id,
