@@ -716,3 +716,54 @@ Current implication:
 - After review/commit, rerun the same controlled `speed_1` shape. A material
   improvement is either reward pass or movement back to the Codex-equivalent
   stdout timing class with frame existence/similarity passing.
+
+## 2026-05-08 Runtime-Heartbeat Controlled Speed1
+
+Latest controlled speed artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-heartbeat-make-mips-speed1-20260508-1423/make-mips-interpreter__jNFUALC`
+
+Validation:
+
+- exact replay passes with `work_exit_code=1` and external reward `0.0`;
+- terminal-bench replay dogfood passes with external reward `0.0`;
+- structured replay mismatch count is `0`;
+- codex-ultra read-only classifier session
+  `019e0626-2849-7922-8380-16b22c92a4c8` classified the run as a normal
+  hard-runtime task-solving miss, not a transport, stale-cleanup, or close-out
+  regression.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing/marker miss; frame existence/similarity pass |
+| mew implement_v2 `1423` | 0/1 | 26m57s Harbor | 35 model turns | 49 tool calls | turn 8 | no `/tmp/frame.bmp`; fragmented runtime patch loop exhausted before frame production |
+
+Step delta:
+
+1. Timeout containment and heartbeat instrumentation worked. This was not the
+   previous no-tool-call transport stall: the run completed with replayable
+   implement_v2 artifacts, no model error, and paired tool calls/results.
+2. The cleanup/close-out repairs are not the blocker here. There was no
+   internally passing final verifier handoff; the verifier timed out waiting
+   for `/tmp/frame.bmp`, and the artifact was missing.
+3. The early shape remains directionally correct: source/output-path probes
+   happen before editing, and the first `vm.js` write occurs at turn 8.
+4. The runtime repair path is still too fragmented. The model iteratively
+   patched syscall returns, COP1 fallback, file positioning, and unaligned
+   memory transfers, then ended with a verifier-shaped `runtime_artifact_missing`
+   / `artifact_validation_failure` for `/tmp/frame.bmp`.
+5. Compared to the previous `1109` external pass, this artifact confirms that
+   the lane can still regress stochastically on the same task family when it
+   does not reuse same-task repair history or converge to one coherent runtime
+   patch sequence.
+
+Current implication:
+
+- Do not run broad measurement or another unchanged same-shape speed from this
+  artifact.
+- Do not add MIPS/DOOM-specific VM rules.
+- The next generic repair should target runtime-frontier hot-path conversion:
+  latest structured runtime failure and prior same-task repair evidence should
+  become a compact next-patch frontier, so v2 moves from failure evidence to a
+  focused patch without broad rediscovery or many small model-mediated runtime
+  edits.

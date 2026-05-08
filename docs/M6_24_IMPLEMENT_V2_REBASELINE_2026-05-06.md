@@ -830,6 +830,20 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `work_loop` timeout-guard child crashes must fail closed instead of falling
   back to an unguarded model call. After this repair, rerun the same controlled
   speed_1 before classifying task behavior.
+- Post-runtime-heartbeat controlled speed:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-runtime-heartbeat-make-mips-speed1-20260508-1423`
+  is valid benchmark evidence. It scored reward `0.0`, runner errors `0`,
+  Harbor runtime `26m57s`, `work_exit_code=1`, and `stop_reason=implement_v2_blocked`.
+  Exact replay and terminal-bench replay dogfood pass with external reward
+  `0.0` and structured mismatch count `0`. The timeout guard and heartbeat
+  repairs worked, so this is not another model-transport miss. It is also not
+  a stale-cleanup/closeout regression because no internal final verifier pass
+  was handed off; `/tmp/frame.bmp` was missing. Step shape: source/output-path
+  probes before first write at turn `8`, then a long fragmented runtime repair
+  path using `35` model turns, `49` tool calls, and `5,576,901` prompt chars.
+  The next action is repair selection only: do not rerun unchanged and do not
+  add task-specific VM rules. Use the hard-runtime dossier and the step
+  comparison doc to select a generic runtime-frontier hot-path repair.
 
 ## Repair Trigger
 

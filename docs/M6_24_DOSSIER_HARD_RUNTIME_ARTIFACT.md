@@ -35,6 +35,7 @@ the preflight in `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`.
 | 2026-05-07 15:11 | `mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1511-external-artifact-feedback` | `0/1` | v2 moved into real runtime task-solving. It attempted syscall, WAD, and frame-path repairs, but stopped with `runtime_artifact_missing`: no `/app/frame0.bmp` or `/tmp/frame.bmp`; stdout shows Doom initialization then `-iwad not specified` / `Trying IWAD file:doom2.wad` / `vm_status=1`. Measurement caveat: Harbor omitted `timeout_seconds` / `{max_wall_seconds_option}`, so continuation gates were disabled. | current repair selection evidence |
 | 2026-05-07 15:59 | `mew-m6-24-v2-rebaseline-make-mips-interpreter-speed1-20260507-1559-runtime-producer-route` | `0/1` | Corrected Harbor timing moved v2 past producer-blocked runtime evidence. Internal final verifier-shaped commands repeatedly passed `/tmp/frame.bmp` and stdout, but external pytest still failed because `/tmp/frame.bmp` was absent and stdout stopped before `I_InitGraphics`. Replay now routes this to `runtime_artifact_latency_contract`: internal proof must match the external verifier's lifecycle/cwd/latency shape, and oneshot cleanup must scan implement_v2 proof manifests for stale `/tmp` runtime artifacts before verifier handoff. | external verifier lifecycle + cleanup projection |
 | 2026-05-07 21:11 | `mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260507-2111` | `0/1` | Harness-shape invalid for the 10min gate because Harbor `{max_wall_seconds_option}` overrode `--max-wall-seconds 600` to `840s`. Product evidence is still useful: v2 reached real source-backed VM behavior and produced a valid `640x400` BMP, but the final structured proof accepted `/app/frame_000000.bmp` while runtime stdout advertised `/tmp/frame.bmp` and the external verifier expected `/tmp/frame.bmp`. | runtime-advertised artifact contract gate |
+| 2026-05-08 14:23 | `mew-m6-24-runtime-heartbeat-make-mips-speed1-20260508-1423` | `0/1` | Timeout/heartbeat repairs worked and replay/dogfood are valid, but the same task family regressed from the `1109` external pass into a long fragmented runtime patch loop. v2 performed source/output probes before first write, then spent 35 turns on syscall/file-position/COP1/unaligned-memory repairs and still did not produce `/tmp/frame.bmp`. | runtime-frontier hot-path / prior-repair recall gap |
 
 ## Recurring Patterns
 
@@ -83,6 +84,12 @@ the preflight in `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`.
 4. If the same shape repeats after a corrected timed Harbor command, the likely
    next durable layer is bounded task/gap repair-history input to
    `implement_v2`, exposed as a cited prompt section or read-only provider.
+5. The 2026-05-08 14:23 controlled rerun repeats that conclusion after timeout
+   containment: the lane did not fail because of model transport, cleanup, or
+   finish closeout. It failed because it re-solved a hard-runtime interpreter
+   frontier from scratch and fragmented the runtime patch sequence instead of
+   using same-task repair history or a compact latest-failure-to-next-patch
+   frontier.
 
 ## Next Same-Shape Rerun Condition
 
