@@ -6,6 +6,7 @@ import sys
 import time
 
 import mew.implement_lane.read_runtime as read_runtime
+import pytest
 from mew.errors import ModelBackendError
 from mew.implement_lane import (
     FakeProviderAdapter,
@@ -5557,6 +5558,127 @@ def test_implement_v2_live_json_tool_contract_recovery_extends_exactly_one_narro
     assert (tmp_path / "recovered.txt").read_text(encoding="utf-8") == "recovered"
 
 
+def test_implement_v2_live_json_run_tests_source_mutation_prompt_requires_split_action(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "tries to patch through verifier",
+            "tool_calls": [
+                {
+                    "id": "patch-and-verify-in-run-tests",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": (
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('vm.js').write_text('console.log(1)')\n"
+                            "PY\n"
+                            "node -c vm.js"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {"summary": "saw split-action instruction", "finish": {"outcome": "blocked", "summary": "needs split action"}},
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create and verify vm.js"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    first_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = first_result["content"][0]
+
+    assert first_result["status"] == "failed"
+    assert payload["failure_subclass"] == "run_tests_source_mutation"
+    assert result.metrics["tool_contract_recovery_turns_used"] == 0
+    assert len(prompts) == 2
+    assert "run_tests must not mutate source-like files" in prompts[1]
+    assert "write_file/edit_file/apply_patch" in prompts[1]
+    assert "then run a separate verifier" in prompts[1]
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_implement_v2_live_json_run_tests_source_mutation_does_not_spend_reaction_turn(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "tries to patch through verifier at final turn",
+            "tool_calls": [
+                {
+                    "id": "patch-and-verify-in-run-tests",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": (
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('vm.js').write_text('console.log(1)')\n"
+                            "PY\n"
+                            "node -c vm.js"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create and verify vm.js"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.metrics["model_turns"] == 1
+    assert result.metrics["tool_contract_recovery_turns_used"] == 0
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 0
+    assert not (tmp_path / "vm.js").exists()
+
+
 def test_implement_v2_live_json_tool_contract_recovery_does_not_extend_after_later_success(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {
@@ -9599,6 +9721,371 @@ def test_implement_v2_run_tests_shell_orchestration_routes_to_run_command_when_s
     assert payload["tool_contract_recovery"]["kind"] == "run_tests_shell_surface_routed_to_run_command"
     assert payload["tool_contract_recovery"]["preserved_command_hash"].startswith("sha256:")
     assert (tmp_path / "routed.txt").read_text(encoding="utf-8") == "routed"
+
+
+def test_implement_v2_run_tests_source_mutation_is_not_routed_to_verifier_shell(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": (
+                        "python3 - <<'PY'\n"
+                        "from pathlib import Path\n"
+                        "Path('vm.js').write_text('console.log(1)')\n"
+                        "PY\n"
+                        "node -c vm.js"
+                    ),
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "source mutation rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert payload["kind"] == "run_tests_source_mutation"
+    assert payload["failure_class"] == "tool_contract_misuse"
+    assert payload["failure_subclass"] == "run_tests_source_mutation"
+    assert payload["tool_contract_recovery_eligible"] is False
+    assert payload["terminal_failure_reaction_eligible"] is False
+    assert "write_file/edit_file/apply_patch" in payload["reason"]
+    assert "vm.js" in payload["mutation_paths"]
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_implement_v2_run_tests_source_mutation_wins_when_shell_routing_disabled(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True, "route_run_tests_shell_surface": False},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": (
+                        "python3 - <<'PY'\n"
+                        "from pathlib import Path\n"
+                        "Path('vm.js').write_text('console.log(1)')\n"
+                        "PY"
+                    ),
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "source mutation rejected first"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_tests_source_mutation"
+    assert payload["tool_contract_recovery_eligible"] is False
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_implement_v2_run_tests_plain_argv_source_mutation_is_rejected(tmp_path) -> None:
+    (tmp_path / "fixture.py").write_text("print('fixture')\n", encoding="utf-8")
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "cp fixture.py vm.js",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "plain argv mutation rejected"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_tests_source_mutation"
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_implement_v2_run_tests_named_source_file_mutation_is_rejected(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "touch Makefile",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "named source mutation rejected"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_tests_source_mutation"
+    assert "Makefile" in payload["mutation_paths"]
+    assert not (tmp_path / "Makefile").exists()
+
+
+@pytest.mark.parametrize(
+    "command,target",
+    (
+        ("printf 'console.log(1)' >> vm.js", "vm.js"),
+        ("printf 'console.log(1)' 1>vm.js", "vm.js"),
+        ("printf 'console.log(1)' >| vm.js", "vm.js"),
+        ("printf 'console.log(1)' > 'vm.js'", "vm.js"),
+        ("printf 'all:' | tee -a Makefile", "Makefile"),
+        ("printf 'all:' | tee results.json Makefile", "Makefile"),
+        ("printf 'all:' | tee -a results.json Makefile", "Makefile"),
+        ("printf 'all:' | command tee Makefile", "Makefile"),
+        ("printf 'all:' | LC_ALL=C tee Makefile", "Makefile"),
+        ("printf 'all:' | env LC_ALL=C tee Makefile", "Makefile"),
+    ),
+)
+def test_implement_v2_run_tests_source_redirection_mutation_is_rejected(tmp_path, command: str, target: str) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "redirection source mutation rejected"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_tests_source_mutation"
+    assert target in payload["mutation_paths"]
+    assert not (tmp_path / target).exists()
+
+
+def test_implement_v2_run_tests_quoted_tee_text_is_not_source_mutation(tmp_path) -> None:
+    quoted_tee_command = shlex.join([sys.executable, "-c", 'print("| tee Makefile")'])
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": quoted_tee_command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "quoted tee text allowed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert "| tee Makefile" in tool_result["content"][0]["stdout"]
+    assert not (tmp_path / "Makefile").exists()
+
+
+def test_implement_v2_run_tests_readonly_open_source_file_is_allowed(tmp_path) -> None:
+    (tmp_path / "package.json").write_text('{"scripts": {}}\n', encoding="utf-8")
+    read_package_command = shlex.join([sys.executable, "-c", "open('package.json').read()"])
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": f"{read_package_command} && echo ok",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "read-only verifier allowed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert payload["effective_tool_name"] == "run_command"
+    assert payload["tool_contract_recovery"]["kind"] == "run_tests_shell_surface_routed_to_run_command"
+
+
+def test_implement_v2_run_tests_readonly_path_and_json_artifact_write_is_allowed(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.log(1)\n", encoding="utf-8")
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": (
+                        "python3 - <<'PY'\n"
+                        "from pathlib import Path\n"
+                        "assert Path('vm.js').exists()\n"
+                        "Path('results.json').write_text('{}')\n"
+                        "PY\n"
+                        "test -s results.json"
+                    ),
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "path read plus artifact write allowed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert (tmp_path / "results.json").read_text(encoding="utf-8") == "{}"
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log(1)\n"
+
+
+def test_implement_v2_run_tests_json_artifact_redirect_is_allowed(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "printf '{}' > results.json && test -s results.json",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "json artifact verifier allowed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert (tmp_path / "results.json").read_text(encoding="utf-8") == "{}"
+
+
+def test_implement_v2_routed_run_tests_tracks_effective_run_command_source_mutation(tmp_path) -> None:
+    hidden_source_write = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import pathlib; "
+                "name=chr(118)+chr(109)+chr(46)+chr(106)+chr(115); "
+                "pathlib.Path(name).write_text('console.log(1)')"
+            ),
+        ]
+    )
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": f"{hidden_source_write} && test -f vm.js",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "hidden source mutation tracked"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert payload["effective_tool_name"] == "run_command"
+    assert payload["source_tree_mutations"][0]["changed_count"] == 1
+    assert payload["source_tree_mutations"][0]["changes"][0]["path"].endswith("/vm.js")
+    assert any(effect["kind"] == "source_tree_mutation" for effect in tool_result["side_effects"])
 
 
 def test_implement_v2_routed_run_tests_shell_failure_preserves_terminal_failure(tmp_path) -> None:

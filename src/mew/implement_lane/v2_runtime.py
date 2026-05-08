@@ -2188,7 +2188,7 @@ def _should_extend_for_tool_contract_recovery(
     if recovery_turns_used >= recovery_turn_limit:
         return False
     result = _latest_terminal_exec_result(tool_results)
-    if result is None or not _is_tool_contract_misuse_result(result):
+    if result is None or not _is_tool_contract_recovery_result(result):
         return False
     if _has_real_terminal_failure_result(tool_results):
         return False
@@ -2209,7 +2209,7 @@ def _should_extend_for_tool_contract_recovery(
 
 def _latest_tool_contract_misuse_result(tool_results: tuple[ToolResultEnvelope, ...]) -> ToolResultEnvelope | None:
     result = _latest_terminal_exec_result(tool_results)
-    if result is not None and _is_tool_contract_misuse_result(result):
+    if result is not None and _is_tool_contract_recovery_result(result):
         return result
     return None
 
@@ -2235,6 +2235,21 @@ def _latest_terminal_exec_result(tool_results: tuple[ToolResultEnvelope, ...]) -
 
 
 def _is_tool_contract_misuse_result(result: ToolResultEnvelope) -> bool:
+    if result.tool_name != "run_tests" or result.status not in {"failed", "interrupted"}:
+        return False
+    for item in result.content:
+        if not isinstance(item, dict):
+            continue
+        if (
+            item.get("failure_class") == "tool_contract_misuse"
+            and item.get("recoverable_tool_contract_misuse") is True
+            and item.get("terminal_failure_reaction_eligible") is False
+        ):
+            return True
+    return False
+
+
+def _is_tool_contract_recovery_result(result: ToolResultEnvelope) -> bool:
     if result.tool_name != "run_tests" or result.status not in {"failed", "interrupted"}:
         return False
     for item in result.content:
@@ -4407,7 +4422,7 @@ def _latest_tool_contract_verifier_command(tool_results: tuple[ToolResultEnvelop
         if not payload:
             continue
         recovery = payload.get("tool_contract_recovery") if isinstance(payload.get("tool_contract_recovery"), dict) else {}
-        if not recovery and not _is_tool_contract_misuse_result(result):
+        if not recovery and not _is_tool_contract_recovery_result(result):
             continue
         command = str(payload.get("preserved_command") or payload.get("command") or "").strip()
         if not command:

@@ -110,6 +110,47 @@ SOURCE_MUTATION_TRACKED_SUFFIXES = frozenset(
     }
 )
 SOURCE_MUTATION_TRACKED_NAMES = frozenset({"makefile", "dockerfile", "cmakelists.txt", "configure"})
+RUN_TESTS_SOURCE_MUTATION_NAMES = frozenset(
+    {
+        "makefile",
+        "dockerfile",
+        "cmakelists.txt",
+        "configure",
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "tsconfig.json",
+    }
+)
+RUN_TESTS_SOURCE_MUTATION_SUFFIXES = frozenset(
+    {
+        ".c",
+        ".cc",
+        ".cfg",
+        ".conf",
+        ".cpp",
+        ".css",
+        ".go",
+        ".h",
+        ".hpp",
+        ".html",
+        ".java",
+        ".js",
+        ".jsx",
+        ".lock",
+        ".lua",
+        ".mjs",
+        ".py",
+        ".rs",
+        ".sh",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".yaml",
+        ".yml",
+    }
+)
 SOURCE_MUTATION_IGNORED_DIRS = frozenset(
     {".git", ".hg", ".mew", "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules", "target", "dist", "build"}
 )
@@ -121,9 +162,10 @@ SOURCE_MUTATION_CHANGED_PATH_LIMIT = 40
 class RunTestsShellSurfaceMisuse(ValueError):
     """Structured run_tests tool-contract misuse.
 
-    `run_tests` remains argv-only. This exception makes shell-shaped verifier
-    attempts machine-readable so v2 can later route or recover them without
-    widening the run_tests contract.
+    `run_tests` remains a verifier path, not a source mutation path. This
+    exception makes shell-shaped or mutation-shaped verifier attempts
+    machine-readable so v2 can route/recover safe shell verifiers without
+    widening the verifier contract into patch execution.
     """
 
     def __init__(self, payload: dict[str, object]):
@@ -247,6 +289,9 @@ class ImplementV2ManagedExecRuntime:
         effective_tool_name = call.tool_name
         tool_contract_recovery: dict[str, object] | None = None
         if call.tool_name == "run_tests":
+            mutation_misuse = _run_tests_source_mutation_misuse(command, use_shell=use_shell)
+            if mutation_misuse is not None:
+                raise RunTestsShellSurfaceMisuse(mutation_misuse)
             misuse = _run_tests_shell_surface_misuse(command, use_shell=use_shell)
             if misuse is not None:
                 misuse["cwd"] = str(args.get("cwd") or ".")
@@ -294,7 +339,7 @@ class ImplementV2ManagedExecRuntime:
                 allowed_roots=self.allowed_roots,
             )
         pre_run_source_tree_snapshot = {}
-        if call.tool_name == "run_command":
+        if effective_tool_name == "run_command":
             pre_run_source_tree_snapshot = _capture_source_tree_snapshot(
                 self.source_mutation_roots,
                 workspace=self.workspace,
@@ -571,7 +616,9 @@ class ImplementV2ManagedExecRuntime:
                 stream_outputs=_stream_outputs_from_payload(payload, tool_run_record_id=record.record_id),
             )
         source_tree_mutations = ()
-        if _is_terminal_record(record) and str(payload.get("tool_name") or tool_name) == "run_command":
+        if _is_terminal_record(record) and str(
+            payload.get("effective_tool_name") or payload.get("tool_name") or tool_name
+        ) == "run_command":
             source_tree_mutations = _source_tree_mutation_records(
                 metadata.get("pre_run_source_tree_snapshot"),
                 _capture_source_tree_snapshot(self.source_mutation_roots, workspace=self.workspace),
@@ -1320,6 +1367,36 @@ def _run_tests_shell_surface_misuse(command: object, *, use_shell: bool) -> dict
     }
 
 
+def _run_tests_source_mutation_misuse(command: object, *, use_shell: bool) -> dict[str, object] | None:
+    paths = _source_like_mutation_paths(command)
+    if not paths:
+        return None
+    features: list[str] = ["source_tree_mutation"]
+    if use_shell:
+        features.append("use_shell")
+    features.extend(_unquoted_run_tests_shell_surface_features(command))
+    unique_features = list(dict.fromkeys(features))
+    return {
+        "reason": (
+            "run_tests must not mutate source-like files; apply the source change with "
+            "write_file/edit_file/apply_patch, or use an explicit bounded run_command writer for "
+            "large generated files, then run a separate verifier"
+        ),
+        "kind": "run_tests_source_mutation",
+        "failure_class": "tool_contract_misuse",
+        "failure_subclass": "run_tests_source_mutation",
+        "recoverable": True,
+        "recoverable_tool_contract_misuse": True,
+        "tool_contract_recovery_eligible": False,
+        "terminal_failure_reaction_eligible": False,
+        "features": unique_features,
+        "preserved_command": str(command or ""),
+        "suggested_tool": "write_file/edit_file/apply_patch",
+        "suggested_use_shell": False,
+        "mutation_paths": list(paths[:8]),
+    }
+
+
 def _unquoted_run_tests_shell_surface_features(command: object) -> list[str]:
     text = str(command or "")
     in_single = False
@@ -1372,6 +1449,203 @@ def _unquoted_run_tests_shell_surface_features(command: object) -> list[str]:
             add("redirect")
         index += 1
     return features
+
+
+def _source_like_mutation_paths(command: object) -> tuple[str, ...]:
+    text = str(command or "")
+    if not text.strip():
+        return ()
+    paths: list[str] = []
+    paths.extend(_shell_redirection_write_paths(text))
+    if _text_matches_any(
+        text,
+        (
+            r"\b(?:writefilesync|writeFileSync|write_text|write_bytes)\b",
+            r"\bopen\s*\([^)]*,\s*['\"][^'\"]*[wax+]",
+        ),
+    ):
+        paths.extend(_shell_write_api_paths(text))
+    if _text_matches_any(text, (r"(?:^|[;&|()]\s*)(?:sed\s+-i|perl\s+-pi|cp|mv|install|touch)\b",)):
+        paths.extend(_shell_token_paths(text))
+    seen: set[str] = set()
+    source_like: list[str] = []
+    for path in paths:
+        normalized = _normalize_shell_path_token(path)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        if _shell_path_is_source_like(normalized):
+            source_like.append(normalized)
+    return tuple(source_like)
+
+
+def _shell_redirection_write_paths(command: str) -> tuple[str, ...]:
+    paths: list[str] = []
+    index = 0
+    while index < len(command):
+        operator_index = _next_unquoted_redirection_index(command, start=index)
+        if operator_index < 0:
+            break
+        next_index = operator_index + 1
+        if next_index < len(command) and command[next_index] in {">", "|"}:
+            next_index += 1
+        while next_index < len(command) and command[next_index].isspace():
+            next_index += 1
+        word, end_index = _read_shell_word(command, next_index)
+        if word:
+            paths.append(word)
+        index = max(end_index, operator_index + 1)
+    for segment in split_unquoted_shell_command_segments(command):
+        try:
+            tee_tokens = shlex.split(segment)
+        except ValueError:
+            tee_tokens = re.split(r"\s+", segment)
+        tee_index = _tee_command_index(tee_tokens)
+        if tee_index < 0:
+            continue
+        paths.extend(token for token in tee_tokens[tee_index + 1 :] if token and not token.startswith("-"))
+    return tuple(paths)
+
+
+def _tee_command_index(tokens: list[str]) -> int:
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if "=" in token and not token.startswith("-") and token.split("=", 1)[0].replace("_", "A").isalnum():
+            index += 1
+            continue
+        if token == "env":
+            index += 1
+            continue
+        if token == "command":
+            index += 1
+            continue
+        return index if token == "tee" else -1
+    return -1
+
+
+def _next_unquoted_redirection_index(text: str, *, start: int = 0) -> int:
+    in_single = False
+    in_double = False
+    escaped = False
+    index = max(0, int(start))
+    while index < len(text):
+        char = text[index]
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and not in_single:
+            escaped = True
+            index += 1
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if not in_single and not in_double and char == ">":
+            return index
+        index += 1
+    return -1
+
+
+def _read_shell_word(text: str, start: int) -> tuple[str, int]:
+    chars: list[str] = []
+    in_single = False
+    in_double = False
+    escaped = False
+    index = max(0, int(start))
+    while index < len(text):
+        char = text[index]
+        if escaped:
+            chars.append(char)
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and not in_single:
+            escaped = True
+            index += 1
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            index += 1
+            continue
+        if not in_single and not in_double and (char.isspace() or char in {";", "&", "|", "(", ")"}):
+            break
+        chars.append(char)
+        index += 1
+    return "".join(chars), index
+
+
+def _shell_write_api_paths(command: str) -> tuple[str, ...]:
+    paths: list[str] = [
+        match.group(1)
+        for match in re.finditer(
+            r"(?:pathlib\.)?Path\s*\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\.\s*write_(?:text|bytes)\s*\(",
+            command,
+            re.IGNORECASE,
+        )
+    ]
+    for match in re.finditer(
+        r"\b(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:pathlib\.)?Path\s*\(\s*['\"](?P<path>[^'\"]+)['\"]\s*\)",
+        command,
+        re.IGNORECASE,
+    ):
+        variable = re.escape(match.group("var"))
+        if re.search(rf"\b{variable}\s*\.\s*write_(?:text|bytes)\s*\(", command, re.IGNORECASE):
+            paths.append(match.group("path"))
+    paths.extend(
+        match.group(1)
+        for match in re.finditer(
+            r"(?:writefilesync|writeFileSync)\s*\(\s*['\"]([^'\"]+)['\"]",
+            command,
+            re.IGNORECASE,
+        )
+    )
+    paths.extend(
+        match.group(1)
+        for match in re.finditer(
+            r"\bopen\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"][^'\"]*[wax+]",
+            command,
+            re.IGNORECASE,
+        )
+    )
+    return tuple(paths)
+
+
+def _shell_token_paths(command: str) -> tuple[str, ...]:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = re.split(r"\s+", command)
+    return tuple(token for token in tokens if token and not token.startswith("-"))
+
+
+def _normalize_shell_path_token(path: object) -> str:
+    return str(path or "").strip().strip("'\"")
+
+
+def _shell_path_is_source_like(path: object) -> bool:
+    raw = _normalize_shell_path_token(path)
+    if not raw or raw.startswith(("-", "$")) or raw.startswith(("/tmp/", "tmp/", "/var/tmp/")):
+        return False
+    name = Path(raw).name.casefold()
+    if name in RUN_TESTS_SOURCE_MUTATION_NAMES:
+        return True
+    suffix = Path(name).suffix.casefold()
+    return suffix in RUN_TESTS_SOURCE_MUTATION_SUFFIXES
+
+
+def _text_matches_any(text: str, patterns: tuple[str, ...]) -> bool:
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
 
 
 def _has_explicit_shell_interpreter(command: object) -> bool:
