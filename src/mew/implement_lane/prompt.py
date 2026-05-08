@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from ..prompt_sections import (
     CACHE_POLICY_CACHEABLE,
@@ -197,8 +198,8 @@ def build_implement_v2_prompt_sections(
                 title="Implement V2 Hard Runtime Profile",
                 content=_clip_text(
                     "Hard-runtime compact rule: no handcrafted stub; preserve provided source/runtime artifacts. "
-                    "Cheaply inspect source/output paths, patch real source, run one verifier. Finish only with "
-                    "fresh runtime/verifier evidence.",
+                    "Before first write, probe ABI/symbols/syscalls/outputs. Then patch, run one verifier, "
+                    "finish with fresh runtime/verifier evidence.",
                     _HARD_RUNTIME_PROFILE_BYTE_CAP,
                 ),
                 stability=STABILITY_STATIC,
@@ -728,6 +729,52 @@ def is_hard_runtime_artifact_task(task_contract: object) -> bool:
     )
 
 
+def is_deep_probe_hard_runtime_task(task_contract: object) -> bool:
+    text = _contract_text(task_contract)
+    if not text:
+        return False
+    strong_runtime_markers = (
+        "vm",
+        "emulator",
+        "interpreter",
+        "elf",
+        "binary",
+        "cross-compile",
+        "cross compile",
+        "mips",
+        "qemu",
+    )
+    artifact_markers = (
+        "/tmp/",
+        "frame",
+        "screenshot",
+        "image",
+        "bmp",
+        "boot",
+    )
+    source_markers = (
+        "provided",
+        "source",
+        "source code",
+        "build",
+        "compile",
+        "make",
+    )
+    return (
+        any(_contract_has_marker(text, marker) for marker in strong_runtime_markers)
+        and any(_contract_has_marker(text, marker) for marker in artifact_markers)
+        and any(_contract_has_marker(text, marker) for marker in source_markers)
+    )
+
+
+def _contract_has_marker(text: str, marker: str) -> bool:
+    if not marker:
+        return False
+    if re.fullmatch(r"[a-z0-9_-]+", marker):
+        return re.search(rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])", text) is not None
+    return marker in text
+
+
 def _contract_text(task_contract: object) -> str:
     if task_contract is None:
         return ""
@@ -856,5 +903,6 @@ __all__ = [
     "implement_v2_prompt_section_metrics",
     "ORDINARY_RESIDENT_SUMMARY_SURFACE",
     "RESIDENT_SIDECAR_STATE_SURFACE",
+    "is_deep_probe_hard_runtime_task",
     "is_hard_runtime_artifact_task",
 ]

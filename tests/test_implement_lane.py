@@ -43,6 +43,7 @@ from mew.implement_lane.v2_runtime import (
     _finish_acceptance_action,
     _finish_evidence_refs,
     _finish_gate_history,
+    _first_write_probe_threshold,
     _first_write_readiness_from_trace,
     _frontier_failure_payload,
     _hard_runtime_frontier_progress_signature,
@@ -964,6 +965,77 @@ def test_implement_v2_records_active_work_todo_first_write_due_after_probe_thres
     assert "bounded run_command writer" in readiness["required_next_action"]
     assert result.metrics["first_write_due"] is True
     assert result.metrics["first_write_probe_count"] == 3
+
+
+def test_implement_v2_first_write_threshold_defaults_to_deeper_hard_runtime_probe_budget(tmp_path) -> None:
+    hard_runtime_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+    )
+    normal_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-2",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={"goal": "Patch a Python bug and run tests."},
+    )
+    normal_node_runtime_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-node",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Fix a runtime bug in the provided Node project so stdout logs show the correct result."
+        },
+    )
+    self_contained_source_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-self",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={"goal": "Build the provided self-contained source project and write a screenshot image."},
+    )
+    jvm_project_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-jvm",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={"goal": "Fix JVM image build in provided source project."},
+    )
+    configured_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-3",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+        lane_config={"first_write_probe_threshold": 4},
+    )
+
+    assert _first_write_probe_threshold(hard_runtime_input) == 8
+    assert _first_write_probe_threshold(normal_input) == 3
+    assert _first_write_probe_threshold(normal_node_runtime_input) == 3
+    assert _first_write_probe_threshold(self_contained_source_input) == 3
+    assert _first_write_probe_threshold(jvm_project_input) == 3
+    assert _first_write_probe_threshold(configured_input) == 4
 
 
 def test_implement_v2_counts_shell_source_mutation_as_first_write(tmp_path) -> None:

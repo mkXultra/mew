@@ -26,7 +26,12 @@ from .execution_evidence import (
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from ..prompt_sections import render_prompt_sections
-from .prompt import build_implement_v2_prompt_sections, implement_v2_prompt_section_metrics, is_hard_runtime_artifact_task
+from .prompt import (
+    build_implement_v2_prompt_sections,
+    implement_v2_prompt_section_metrics,
+    is_deep_probe_hard_runtime_task,
+    is_hard_runtime_artifact_task,
+)
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .registry import get_implement_lane_runtime_view
 from .replay import build_invalid_tool_result, validate_proof_manifest_pairing, validate_proof_manifest_write_safety
@@ -2960,9 +2965,13 @@ def _prior_observation_count(
 def _first_write_probe_threshold(lane_input: ImplementLaneInput) -> int:
     configured = lane_input.lane_config.get("first_write_probe_threshold")
     try:
-        return max(1, min(12, int(configured))) if configured not in (None, "") else 3
+        if configured not in (None, ""):
+            return max(1, min(12, int(configured)))
     except (TypeError, ValueError):
         return 3
+    if is_deep_probe_hard_runtime_task(lane_input.task_contract):
+        return 8
+    return 3
 
 
 def _write_repair_from_trace(
