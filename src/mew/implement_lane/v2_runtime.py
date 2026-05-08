@@ -24,6 +24,7 @@ from .execution_evidence import (
     normalize_execution_contract,
     recommend_finish_evidence_refs,
 )
+from .artifact_checks import _resolve_artifact_path, _stat_path
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from ..prompt_sections import render_prompt_sections
@@ -1779,6 +1780,18 @@ def _auto_poll_yielded_verifier_commands(
     budget = _active_command_auto_poll_budget_seconds(lane_input, run_started=run_started)
     if budget <= 0:
         return ()
+    if _should_fast_cancel_no_progress_hard_runtime_verifier(tool_results, lane_input=lane_input):
+        immediate_payloads = exec_runtime.poll_active_commands(wait_seconds=0)
+        terminal_payloads = tuple(payload for payload in immediate_payloads if _is_terminal_auto_poll_payload(payload))
+        if terminal_payloads:
+            return terminal_payloads
+        if any(_hard_runtime_verifier_payload_has_no_progress(payload, lane_input=lane_input) for payload in immediate_payloads):
+            return exec_runtime.cancel_active_commands(
+                reason=(
+                    "implement_v2 hard-runtime verifier had no observable output "
+                    "or expected-artifact progress after foreground budget"
+                )
+            )
     payloads = exec_runtime.poll_active_commands(wait_seconds=budget)
     terminal_payloads = tuple(payload for payload in payloads if _is_terminal_auto_poll_payload(payload))
     if terminal_payloads:
@@ -1819,6 +1832,147 @@ def _first_result_payload(result: ToolResultEnvelope) -> dict[str, object]:
         if isinstance(item, dict):
             return item
     return {}
+
+
+def _should_fast_cancel_no_progress_hard_runtime_verifier(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    lane_input: ImplementLaneInput,
+) -> bool:
+    if not is_hard_runtime_artifact_task(lane_input.task_contract):
+        return False
+    return any(
+        _is_auto_pollable_yielded_verifier_result(result)
+        and _hard_runtime_verifier_payload_is_no_progress_candidate(_first_result_payload(result), lane_input=lane_input)
+        for result in tool_results
+    )
+
+
+def _hard_runtime_verifier_payload_is_no_progress_candidate(
+    payload: dict[str, object],
+    *,
+    lane_input: ImplementLaneInput,
+) -> bool:
+    if not _hard_runtime_verifier_payload_is_silent_after_threshold(payload, lane_input=lane_input):
+        return False
+    return bool(_expected_artifacts_from_payload(payload))
+
+
+def _hard_runtime_verifier_payload_has_no_progress(
+    payload: dict[str, object],
+    *,
+    lane_input: ImplementLaneInput,
+) -> bool:
+    if not _hard_runtime_verifier_payload_is_silent_after_threshold(payload, lane_input=lane_input):
+        return False
+    artifacts = _expected_artifacts_from_payload(payload)
+    if not artifacts:
+        return False
+    return not any(_artifact_has_progress(artifact, payload=payload, lane_input=lane_input) for artifact in artifacts)
+
+
+def _hard_runtime_verifier_payload_is_silent_after_threshold(
+    payload: dict[str, object],
+    *,
+    lane_input: ImplementLaneInput,
+) -> bool:
+    status = str(payload.get("status") or "").strip().lower()
+    if status not in {"yielded", "running", "backgrounded"}:
+        return False
+    if _payload_duration_seconds(payload) < _hard_runtime_verifier_no_progress_seconds(lane_input):
+        return False
+    if _payload_has_observable_command_output(payload):
+        return False
+    return True
+
+
+def _payload_duration_seconds(payload: dict[str, object]) -> float:
+    try:
+        return max(0.0, float(payload.get("duration_seconds") or 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _hard_runtime_verifier_no_progress_seconds(lane_input: ImplementLaneInput) -> float:
+    configured = lane_input.lane_config.get("hard_runtime_verifier_no_progress_seconds")
+    try:
+        return max(0.0, min(120.0, float(configured) if configured not in (None, "") else 10.0))
+    except (TypeError, ValueError):
+        return 10.0
+
+
+def _payload_has_observable_command_output(payload: dict[str, object]) -> bool:
+    for key in ("stdout", "stdout_tail", "stderr", "stderr_tail"):
+        if str(payload.get(key) or "").strip():
+            return True
+    try:
+        return int(payload.get("output_bytes") or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _expected_artifacts_from_payload(payload: dict[str, object]) -> tuple[object, ...]:
+    contract = payload.get("execution_contract_normalized")
+    if not isinstance(contract, dict):
+        contract = payload.get("execution_contract") if isinstance(payload.get("execution_contract"), dict) else {}
+    if not isinstance(contract, dict):
+        return ()
+    try:
+        normalized = normalize_execution_contract(contract)
+    except (TypeError, ValueError):
+        return ()
+    if any(_artifact_path_has_glob(artifact) for artifact in normalized.expected_artifacts):
+        return ()
+    return tuple(artifact for artifact in normalized.expected_artifacts if _artifact_is_exact_path_target(artifact))
+
+
+def _artifact_is_exact_path_target(artifact: object) -> bool:
+    path = str(getattr(artifact, "path", "") or getattr(artifact, "target", {}).get("path", "") or "")
+    if not path or path in {"-", "stdout", "stderr"}:
+        return False
+    return not _path_has_glob(path)
+
+
+def _artifact_path_has_glob(artifact: object) -> bool:
+    path = str(getattr(artifact, "path", "") or getattr(artifact, "target", {}).get("path", "") or "")
+    return _path_has_glob(path)
+
+
+def _path_has_glob(path: str) -> bool:
+    return any(char in path for char in "*?[")
+
+
+def _artifact_has_progress(artifact: object, *, payload: dict[str, object], lane_input: ImplementLaneInput) -> bool:
+    try:
+        resolved = _resolve_artifact_path(
+            artifact,
+            workspace=lane_input.workspace,
+            allowed_roots=_allowed_read_roots(lane_input),
+        )
+    except (OSError, ValueError):
+        return False
+    post_stat = _stat_path(resolved)
+    if not bool(post_stat.get("exists")):
+        return False
+    pre_stats = payload.get("pre_run_artifact_stats")
+    raw_pre_stat = pre_stats.get(str(getattr(artifact, "id", "") or "")) if isinstance(pre_stats, dict) else {}
+    pre_stat = dict(raw_pre_stat) if isinstance(raw_pre_stat, dict) else {}
+    if not bool(pre_stat.get("exists")):
+        return True
+    return _artifact_stat_changed(pre_stat, post_stat)
+
+
+def _artifact_stat_changed(before: dict[str, object], after: dict[str, object]) -> bool:
+    if before.get("kind") != after.get("kind"):
+        return True
+    if before.get("size") != after.get("size"):
+        return True
+    try:
+        before_mtime = float(before.get("mtime") or 0.0)
+        after_mtime = float(after.get("mtime") or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return after_mtime > before_mtime
 
 
 def _active_command_auto_poll_budget_seconds(lane_input: ImplementLaneInput, *, run_started: float) -> float:

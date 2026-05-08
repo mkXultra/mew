@@ -972,3 +972,56 @@ fixes, the same session returned `STATUS: APPROVE`. After commit, run one more
 10 minute same-shape diagnostic for `make-mips-interpreter`; compare whether
 the stale edit failure becomes a fast, recoverable exact-text retry. Do not run
 `speed_1` / `proof_5` first.
+
+Implement-v2 no-progress verifier checkpoint 2026-05-09 JST:
+
+The same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260509-073023` scored `0/1` with
+runner errors `0`. The exact-edit repair worked: first edit moved to `147s`,
+first verifier to `152s`, broad cycles stayed `0`, and a stale exact edit was
+recovered into a later successful patch. The new dominant gap is verifier wall
+time: two runtime verifier commands were interrupted after about `90s` each,
+raising observed command duration to `182.28s`. Codex's reference total runtime
+for this task is `416.42s` with about `8.993s` of observed command duration, so
+the next speed gap is not first-write latency; it is no-progress runtime
+verification.
+
+Decision: keep broad measurement paused and repair generic no-progress verifier
+behavior. The problem is not a task-specific missing opcode rule. For generated
+runtimes/interpreters, a verifier that produces no stdout/stderr and no expected
+artifact for the foreground budget should be treated as a fast diagnostic
+failure with explicit no-progress evidence, not as a long opaque run. The next
+repair should make implement_v2 either constrain hard-runtime verifier budgets
+or surface a structured `runtime_no_progress` / `artifact_no_progress` failure
+early enough for the model to patch instead of spending repeated `90s` verifier
+cycles. Preserve the existing rule: no MIPS, `vm.js`, syscall, or frame-file
+special cases.
+
+Measurement tooling note: commit `8cea46c` fixed the diagnostic runner's
+returned `normalized_trace` field. `summarize_latest_run` now normalizes from
+`agent/terminal-bench-harbor-smoke/unknown-task` when present, instead of the
+Harbor trial root. Validation: `tests/test_mew_harbor_runner.py` passed
+(`7 passed`), scoped ruff passed, `git diff --check` passed, and codex-ultra
+review session `019e09c4-0d5f-77e3-8c25-55db55e52a99` returned
+`STATUS: APPROVE`. Future diagnostics should no longer require manual
+renormalization for mew traces.
+
+No-progress verifier repair result 2026-05-09 JST:
+
+Implemented a generic hard-runtime verifier fast-cancel path in implement_v2.
+If a yielded verifier has no stdout/stderr/output bytes after the foreground
+budget, declares exact expected path artifacts, and those artifacts show no
+stat progress compared with `pre_run_artifact_stats`, mew cancels the active
+command immediately instead of spending `active_command_auto_poll_seconds`.
+Glob artifact contracts, including mixed exact+glob contracts, are excluded
+from the fast path because this narrow check cannot prove glob progress safely.
+
+Validation: scoped ruff passed, focused auto-poll/fast-cancel tests passed,
+full `tests/test_implement_lane.py` passed (`298 passed`), and `git diff
+--check` passed. codex-ultra review session
+`019e09cd-ac2c-7963-ad8e-1d3f9454477b` requested two fixes: compare stale
+artifacts against `pre_run_artifact_stats`, and disable the fast path for
+glob/mixed contracts. After both fixes, the same session returned
+`STATUS: APPROVE`. Next step: rerun the 10 minute same-shape diagnostic for
+`make-mips-interpreter` and compare whether repeated no-progress verifier
+cycles disappear before considering `speed_1`.
