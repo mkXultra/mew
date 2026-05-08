@@ -159,7 +159,15 @@ SOURCE_MUTATION_HASH_MAX_BYTES = 1024 * 1024
 SOURCE_MUTATION_CHANGED_PATH_LIMIT = 40
 
 
-class RunTestsShellSurfaceMisuse(ValueError):
+class ExecToolContractMisuse(ValueError):
+    """Structured exec tool-contract misuse."""
+
+    def __init__(self, payload: dict[str, object]):
+        self.payload = dict(payload)
+        super().__init__(str(self.payload.get("reason") or "exec tool-contract misuse"))
+
+
+class RunTestsShellSurfaceMisuse(ExecToolContractMisuse):
     """Structured run_tests tool-contract misuse.
 
     `run_tests` remains a verifier path, not a source mutation path. This
@@ -167,10 +175,6 @@ class RunTestsShellSurfaceMisuse(ValueError):
     machine-readable so v2 can route/recover safe shell verifiers without
     widening the verifier contract into patch execution.
     """
-
-    def __init__(self, payload: dict[str, object]):
-        self.payload = dict(payload)
-        super().__init__(str(self.payload.get("reason") or "run_tests shell surface misuse"))
 
 
 class ImplementV2ManagedExecRuntime:
@@ -213,7 +217,7 @@ class ImplementV2ManagedExecRuntime:
                 payload = self._cancel_command(call)
             else:
                 payload = self._read_command_output(call)
-        except RunTestsShellSurfaceMisuse as exc:
+        except ExecToolContractMisuse as exc:
             return ToolResultEnvelope(
                 lane_attempt_id=call.lane_attempt_id,
                 provider_call_id=call.provider_call_id,
@@ -307,13 +311,6 @@ class ImplementV2ManagedExecRuntime:
                     "failure_class": misuse.get("failure_class"),
                     "failure_subclass": misuse.get("failure_subclass"),
                 }
-        cwd = _workspace_path(args.get("cwd") or ".", self.workspace)
-        cwd = resolve_allowed_path(cwd, self.allowed_roots)
-        if not cwd.is_dir():
-            raise ValueError(f"{call.tool_name} cwd is not a directory: {cwd}")
-        command_run_id = _command_run_id(call)
-        output_ref = f"{call.lane_attempt_id}/{command_run_id}/output.log"
-        output_path = _output_path(self.workspace, output_ref)
         timeout = _bounded_float(args.get("timeout"), default=300.0, minimum=1.0, maximum=3600.0)
         foreground_budget = _bounded_float(
             args.get("foreground_budget_seconds"),
@@ -323,6 +320,20 @@ class ImplementV2ManagedExecRuntime:
         )
         command_intent = _command_intent(args)
         raw_contract = args.get("execution_contract") if isinstance(args.get("execution_contract"), dict) else {}
+        compound_misuse = _run_command_source_mutation_verifier_compound_misuse(
+            command,
+            raw_contract=raw_contract,
+            tool_name=call.tool_name,
+        )
+        if compound_misuse is not None:
+            raise ExecToolContractMisuse(compound_misuse)
+        cwd = _workspace_path(args.get("cwd") or ".", self.workspace)
+        cwd = resolve_allowed_path(cwd, self.allowed_roots)
+        if not cwd.is_dir():
+            raise ValueError(f"{call.tool_name} cwd is not a directory: {cwd}")
+        command_run_id = _command_run_id(call)
+        output_ref = f"{call.lane_attempt_id}/{command_run_id}/output.log"
+        output_path = _output_path(self.workspace, output_ref)
         normalized_contract = _normalize_runtime_contract(
             raw_contract,
             task_contract=self.task_contract,
@@ -1395,6 +1406,71 @@ def _run_tests_source_mutation_misuse(command: object, *, use_shell: bool) -> di
         "suggested_use_shell": False,
         "mutation_paths": list(paths[:8]),
     }
+
+
+def _run_command_source_mutation_verifier_compound_misuse(
+    command: object,
+    *,
+    raw_contract: dict[str, object],
+    tool_name: str,
+) -> dict[str, object] | None:
+    if tool_name != "run_command" or not _raw_execution_contract_is_verifier_like(raw_contract):
+        return None
+    paths = _source_like_mutation_paths(command)
+    if not paths:
+        return None
+    return {
+        "reason": (
+            "run_command verifier commands must not also mutate source-like files; split this into "
+            "a source mutation step with write_file/edit_file/apply_patch or an explicit bounded "
+            "run_command writer, then run a separate verifier command"
+        ),
+        "kind": "run_command_source_mutation_verifier_compound",
+        "failure_class": "tool_contract_misuse",
+        "failure_subclass": "run_command_source_mutation_verifier_compound",
+        "recoverable": True,
+        "recoverable_tool_contract_misuse": True,
+        "tool_contract_recovery_eligible": False,
+        "terminal_failure_reaction_eligible": False,
+        "features": ["source_tree_mutation", "verifier_contract"],
+        "preserved_command": str(command or ""),
+        "suggested_tool": "write_file/edit_file/apply_patch",
+        "suggested_use_shell": False,
+        "mutation_paths": list(paths[:8]),
+    }
+
+
+def _raw_execution_contract_is_verifier_like(raw_contract: dict[str, object]) -> bool:
+    if not isinstance(raw_contract, dict) or not raw_contract:
+        return False
+    contract = normalize_execution_contract(raw_contract, task_contract=None, frontier_state=None)
+    return _execution_contract_is_verifier_like(contract) or any(
+        _execution_substep_is_verifier_like(substep) for substep in contract.substeps
+    )
+
+
+def _execution_contract_is_verifier_like(contract: ExecutionContract) -> bool:
+    return (
+        contract.verifier_required
+        or contract.role == "verify"
+        or contract.stage in {"verification", "artifact_proof", "default_smoke", "custom_runtime_smoke"}
+        or contract.purpose in {"verification", "artifact_proof", "smoke"}
+        or contract.proof_role in {"verifier", "final_artifact", "default_smoke", "custom_runtime_smoke"}
+        or contract.acceptance_kind
+        in {"external_verifier", "candidate_final_proof", "candidate_runtime_smoke", "candidate_artifact_proof"}
+    )
+
+
+def _execution_substep_is_verifier_like(substep: object) -> bool:
+    return (
+        bool(getattr(substep, "verifier_required", False))
+        or getattr(substep, "role", "") == "verify"
+        or getattr(substep, "stage", "") in {"verification", "artifact_proof", "default_smoke", "custom_runtime_smoke"}
+        or getattr(substep, "purpose", "") in {"verification", "artifact_proof", "smoke"}
+        or getattr(substep, "proof_role", "") in {"verifier", "final_artifact", "default_smoke", "custom_runtime_smoke"}
+        or getattr(substep, "acceptance_kind", "")
+        in {"external_verifier", "candidate_final_proof", "candidate_runtime_smoke", "candidate_artifact_proof"}
+    )
 
 
 def _unquoted_run_tests_shell_surface_features(command: object) -> list[str]:

@@ -2235,7 +2235,7 @@ def _latest_terminal_exec_result(tool_results: tuple[ToolResultEnvelope, ...]) -
 
 
 def _is_tool_contract_misuse_result(result: ToolResultEnvelope) -> bool:
-    if result.tool_name != "run_tests" or result.status not in {"failed", "interrupted"}:
+    if result.tool_name not in {"run_command", "run_tests"} or result.status not in {"failed", "interrupted"}:
         return False
     for item in result.content:
         if not isinstance(item, dict):

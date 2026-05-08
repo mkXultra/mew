@@ -5679,6 +5679,65 @@ def test_implement_v2_live_json_run_tests_source_mutation_does_not_spend_reactio
     assert not (tmp_path / "vm.js").exists()
 
 
+def test_implement_v2_live_json_run_command_compound_mutation_does_not_spend_reaction_turn(tmp_path) -> None:
+    command = "cat > vm.js <<'EOF'\nconsole.log(1)\nEOF\nnode -c vm.js"
+
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "tries to patch and verify through one run_command",
+            "tool_calls": [
+                {
+                    "id": "patch-and-verify-in-run-command",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "execution_contract": {
+                            "role": "verify",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create and verify vm.js"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    first_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = first_result["content"][0]
+
+    assert result.metrics["model_turns"] == 1
+    assert payload["failure_subclass"] == "run_command_source_mutation_verifier_compound"
+    assert result.metrics["tool_contract_recovery_turns_used"] == 0
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 0
+    assert not (tmp_path / "vm.js").exists()
+
+
 def test_implement_v2_live_json_tool_contract_recovery_does_not_extend_after_later_success(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {
@@ -9861,6 +9920,90 @@ def test_implement_v2_run_tests_named_source_file_mutation_is_rejected(tmp_path)
     assert payload["failure_subclass"] == "run_tests_source_mutation"
     assert "Makefile" in payload["mutation_paths"]
     assert not (tmp_path / "Makefile").exists()
+
+
+@pytest.mark.parametrize(
+    "execution_contract",
+    (
+        {"role": "verify", "proof_role": "verifier", "acceptance_kind": "external_verifier"},
+        {"proof_role": "final_verifier"},
+        {"verifier_required": True},
+        {"substeps": [{"id": "verify", "verifier_required": True}]},
+    ),
+)
+def test_implement_v2_run_command_rejects_source_mutation_verifier_compound(
+    tmp_path, execution_contract: dict[str, object]
+) -> None:
+    command = "cat > vm.js <<'EOF'\nconsole.log(1)\nEOF\nnode -c vm.js"
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": execution_contract,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "compound rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert payload["kind"] == "run_command_source_mutation_verifier_compound"
+    assert payload["failure_class"] == "tool_contract_misuse"
+    assert payload["failure_subclass"] == "run_command_source_mutation_verifier_compound"
+    assert payload["tool_contract_recovery_eligible"] is False
+    assert payload["terminal_failure_reaction_eligible"] is False
+    assert payload["suggested_tool"] == "write_file/edit_file/apply_patch"
+    assert "vm.js" in payload["mutation_paths"]
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_implement_v2_run_command_allows_bounded_source_writer_without_verifier_contract(tmp_path) -> None:
+    command = "cat > vm.js <<'EOF'\nconsole.log(1)\nEOF"
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "source writer allowed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert payload["source_tree_mutations"][0]["changed_count"] == 1
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log(1)\n"
 
 
 @pytest.mark.parametrize(
