@@ -38,6 +38,7 @@ from .types import ToolResultEnvelope
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
 
 _COMPLETED_FINISH_OUTCOMES = {"completed", "task_complete", "done", "success"}
+_FINAL_VERIFIER_COMMAND_TOOL_NAMES = frozenset({"run_command", "run_tests", "poll_command"})
 _EVIDENCE_PROVIDER_CALL_RE = re.compile(r"\bcall-[A-Za-z0-9_.:-]+\b")
 _PROVIDER_ID_TOKEN_RE = re.compile(r"[A-Za-z0-9_.:-]+")
 _PROVIDER_HISTORY_TEXT_LIMIT = 2400
@@ -870,6 +871,34 @@ def run_live_json_implement_v2(
             artifact_namespace=artifact_namespace,
         )
         exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
+    auto_finish_arguments = _auto_finish_from_structured_final_verifier(
+        finish_arguments,
+        tuple(tool_results),
+    )
+    if auto_finish_arguments:
+        auto_finish_gate_decision = _live_acceptance_done_gate(
+            lane_input,
+            auto_finish_arguments,
+            tuple(tool_results),
+        )
+        finish_gate_decision = dict(auto_finish_gate_decision)
+        if auto_finish_gate_decision.get("decision") == "allow_complete":
+            finish_arguments = dict(auto_finish_arguments)
+            transcript.append(
+                adapter.finish_event_for_turn(
+                    lane=IMPLEMENT_V2_LANE,
+                    lane_attempt_id=lane_attempt_id,
+                    turn_id=f"turn-{model_turns}-auto-final-verifier",
+                    finish_arguments=finish_arguments,
+                )
+            )
+        else:
+            finish_gate_block_count += 1
+            finish_arguments = {
+                "outcome": "blocked",
+                "summary": _finish_gate_continuation_text(auto_finish_gate_decision),
+                "finish_gate": dict(auto_finish_gate_decision),
+            }
 
     integration_observation = _integration_observation_summary(
         lane_input,
@@ -4230,6 +4259,40 @@ def _structured_finish_acceptance_checks(tool_results: tuple[ToolResultEnvelope,
         if check:
             return [check]
     return []
+
+
+def _auto_finish_from_structured_final_verifier(
+    finish_arguments: dict[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    outcome = _finish_outcome(finish_arguments)
+    summary = str((finish_arguments or {}).get("summary") or "").strip()
+    if outcome not in {"", "continue", "blocked"}:
+        return {}
+    if outcome == "blocked" and summary not in {
+        "",
+        "implement_v2 reached max_turns before finish",
+        "model returned no tool calls and no finish object",
+    }:
+        return {}
+    check = _latest_terminal_structured_final_verifier_acceptance_check(tool_results)
+    if not check:
+        return {}
+    return {
+        "outcome": "completed",
+        "summary": "structured final verifier passed; auto-completing without another model turn",
+        "acceptance_checks": [check],
+        "completion_source": "structured_final_verifier_pass",
+    }
+
+
+def _latest_terminal_structured_final_verifier_acceptance_check(
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    for index, result in reversed(tuple(enumerate(tool_results, start=1))):
+        if result.tool_name in _FINAL_VERIFIER_COMMAND_TOOL_NAMES:
+            return _structured_finish_acceptance_check(index, result)
+    return {}
 
 
 def _structured_finish_acceptance_check(index: int, result: ToolResultEnvelope) -> dict[str, object]:

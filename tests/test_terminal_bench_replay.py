@@ -1284,6 +1284,114 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertIn("record implement_v2 pass", next_action)
             self.assertNotIn("debug implement_v2 divergence", next_action)
 
+    def test_replay_terminal_bench_job_projects_final_verifier_pass_after_saved_blocked_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            trial_dir = Path(job_dir) / "build-cython-ext__v2fixture"
+            v2_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "implement_v2"
+            (trial_dir / "result.json").write_text(
+                json.dumps({"trial_name": "build-cython-ext__v2fixture", "verifier_result": {"reward": 1.0}}),
+                encoding="utf-8",
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "final-verifier-pass",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "execution_contract": {
+                                            "role": "runtime",
+                                            "stage": "final-verifier",
+                                            "proof_role": "verifier",
+                                            "acceptance_kind": "external_verifier",
+                                        },
+                                        "verifier_evidence": {"verdict": "pass"},
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": "/tmp/frame.bmp",
+                                                "path": "/tmp/frame.bmp",
+                                                "status": "passed",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            replay = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 1.0},
+            )
+            current_v2 = replay["trials"][0]["current"]["implement_v2"]
+            next_action = replay["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(replay["status"], "pass")
+            self.assertEqual(current_v2["lane_status"], "completed")
+            self.assertIn("record implement_v2 pass", next_action)
+            self.assertNotIn("debug implement_v2 divergence", next_action)
+
+    def test_replay_terminal_bench_job_does_not_project_empty_artifact_id_as_completed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            trial_dir = Path(job_dir) / "build-cython-ext__v2fixture"
+            v2_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "implement_v2"
+            (trial_dir / "result.json").write_text(
+                json.dumps({"trial_name": "build-cython-ext__v2fixture", "verifier_result": {"reward": 1.0}}),
+                encoding="utf-8",
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "final-verifier-pass",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "execution_contract": {
+                                            "role": "runtime",
+                                            "stage": "final-verifier",
+                                            "proof_role": "verifier",
+                                            "acceptance_kind": "external_verifier",
+                                        },
+                                        "verifier_evidence": {"verdict": "pass"},
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": "   ",
+                                                "path": " /tmp/verifier-output.log ",
+                                                "artifact_path": "",
+                                                "status": "passed",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            replay = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 1.0},
+            )
+            current_v2 = replay["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(replay["status"], "pass")
+            self.assertEqual(current_v2["lane_status"], "blocked")
+
     def test_replay_terminal_bench_job_debugs_completed_implement_v2_with_zero_reward(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_implement_v2_replay_fixture(tmp)

@@ -248,10 +248,13 @@ def _implement_v2_replay_summary(report_path, report):
         failed_results,
         structured_replay=structured_replay,
     )
+    lane_status = str(result.get("status") or _implement_v2_step_status(work_report) or "")
+    if _implement_v2_should_project_completed(tool_results, external_reward=_reward_from_trial(_find_parent_with_result(report_path), _read_json(_find_parent_with_result(report_path) / "result.json"))):
+        lane_status = "completed"
     return {
         "runtime_id": runtime_id or "implement_v2_model_json_tool_loop",
         "lane": selected_lane or "implement_v2",
-        "lane_status": str(result.get("status") or _implement_v2_step_status(work_report) or ""),
+        "lane_status": lane_status,
         "replay_valid": bool(metrics.get("replay_valid", True)),
         "history_turn_count": len(history),
         "tool_call_count": sum(len(turn.get("tool_calls") or []) for turn in history if isinstance(turn, dict)),
@@ -353,6 +356,52 @@ def _implement_v2_passed_structured_artifacts(tool_results):
                 if value and value not in artifacts:
                     artifacts.append(value)
     return artifacts[:24]
+
+
+def _implement_v2_should_project_completed(tool_results, *, external_reward):
+    try:
+        reward = float(external_reward)
+    except (TypeError, ValueError):
+        return False
+    if reward != 1.0:
+        return False
+    return _implement_v2_latest_terminal_result_is_passed_final_verifier(tool_results)
+
+
+def _implement_v2_latest_terminal_result_is_passed_final_verifier(tool_results):
+    for result in reversed(tool_results if isinstance(tool_results, list) else []):
+        if not isinstance(result, dict):
+            continue
+        if str(result.get("tool_name") or "") not in _IMPLEMENT_V2_TERMINAL_TOOLS:
+            continue
+        if str(result.get("status") or "").casefold() != "completed":
+            return False
+        content = result.get("content")
+        first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+        verifier = first_content.get("verifier_evidence") if isinstance(first_content, dict) else {}
+        if not isinstance(verifier, dict) or str(verifier.get("verdict") or "").casefold() != "pass":
+            return False
+        contract = first_content.get("execution_contract_normalized")
+        if not isinstance(contract, dict):
+            contract = first_content.get("execution_contract")
+        if not _implement_v2_contract_is_final_verifier(contract):
+            return False
+        artifacts = first_content.get("artifact_evidence") if isinstance(first_content, dict) else []
+        if not isinstance(artifacts, list):
+            return False
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            if str(artifact.get("status") or "").casefold() != "passed":
+                continue
+            candidates = [
+                str(artifact.get(key) or "").strip()
+                for key in ("artifact_id", "path", "artifact_path")
+            ]
+            if any(value and not _verifier_scratch_tmp_artifact(value) for value in candidates):
+                return True
+        return False
+    return False
 
 
 def _implement_v2_contract_is_final_verifier(contract):

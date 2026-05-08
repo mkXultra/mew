@@ -36,6 +36,7 @@ from mew.implement_lane import (
 )
 from mew.implement_lane.v2_runtime import (
     ModelTurnInput,
+    _auto_finish_from_structured_final_verifier,
     _call_model_turn,
     _finish_acceptance_action,
     _finish_evidence_refs,
@@ -1332,6 +1333,204 @@ def test_implement_v2_finish_gate_uses_structured_final_verifier_without_model_e
     assert result.metrics["completion_credit"] is True
     assert result.metrics["finish_gate_block_count"] == 0
     assert result.metrics["finish_gate_decision"]["decision"] == "allow_complete"
+
+
+def test_implement_v2_auto_completes_when_last_turn_final_verifier_passes(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "run fresh final verifier as the last available turn",
+            "tool_calls": [
+                {
+                    "id": "verify-final-runtime",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "rm -f frame000000.bmp /tmp/mew-v2-vmout.txt; "
+                            "printf 'I_InitGraphics: framebuffer: x_res: 640, y_res: 400\\n"
+                            "dimension check passed expected dimensions 640x400\\n' "
+                            "| tee /tmp/mew-v2-vmout.txt; "
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "final-verifier",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {"path": "/tmp/mew-v2-vmout.txt", "checks": [{"exists": True}, {"non_empty": True}]},
+                                {"path": "frame000000.bmp", "checks": [{"exists": True}, {"non_empty": True}]},
+                            ],
+                        },
+                    },
+                }
+            ],
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Run the VM so it saves rendered frames and check the first rendered frame "
+                    "against expected dimensions 640x400."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path), "/tmp"],
+                "allowed_write_roots": [str(tmp_path), "/tmp"],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["completion_credit"] is True
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert result.metrics["finish_gate_decision"]["decision"] == "allow_complete"
+    assert result.updated_lane_state["finish"]["completion_source"] == "structured_final_verifier_pass"
+    assert any(
+        event.kind == "finish" and event.payload["finish_arguments"]["completion_source"] == "structured_final_verifier_pass"
+        for event in result.transcript
+    )
+
+
+def test_implement_v2_auto_complete_ignores_old_final_verifier_after_later_terminal_failure(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "first final verifier passes",
+            "tool_calls": [
+                {
+                    "id": "verify-final-runtime",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf 'dimension check passed expected dimensions 640x400\\n'; "
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('frame000000.bmp').write_bytes(b'BM' + b'0' * 256)\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "final-verifier",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {"path": "frame000000.bmp", "checks": [{"exists": True}, {"non_empty": True}]},
+                            ],
+                        },
+                    },
+                }
+            ],
+        },
+        {
+            "summary": "a later terminal check fails after the verifier",
+            "tool_calls": [
+                {
+                    "id": "late-failure",
+                    "name": "run_command",
+                    "arguments": {"command": "false", "cwd": ".", "use_shell": True},
+                }
+            ],
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        if outputs:
+            return outputs.pop(0)
+        return {
+            "summary": "stop after observing the later failure",
+            "finish": {"outcome": "blocked", "summary": "late terminal failure"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Build and verify the runtime artifact."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path), "/tmp"],
+                "allowed_write_roots": [str(tmp_path), "/tmp"],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["completion_credit"] is False
+    assert result.updated_lane_state["finish"].get("completion_source") != "structured_final_verifier_pass"
+
+
+def test_implement_v2_auto_complete_skips_read_command_output_after_final_verifier() -> None:
+    final_verifier = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="final-verifier",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "execution_contract": {
+                    "role": "runtime",
+                    "stage": "final-verifier",
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                },
+                "verifier_evidence": {"verdict": "pass"},
+                "artifact_evidence": [
+                    {"artifact_id": "frame000000.bmp", "path": "frame000000.bmp", "status": "passed"},
+                ],
+            },
+        ),
+        evidence_refs=("ev:final-verifier",),
+    )
+    output_read = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="read-output",
+        mew_tool_call_id="tool-2",
+        tool_name="read_command_output",
+        status="completed",
+        content=({"stdout_tail": "bounded tail"},),
+        evidence_refs=("ev:read-output",),
+    )
+
+    finish = _auto_finish_from_structured_final_verifier(
+        {"outcome": "blocked", "summary": "implement_v2 reached max_turns before finish"},
+        (final_verifier, output_read),
+    )
+
+    assert finish["outcome"] == "completed"
+    assert finish["completion_source"] == "structured_final_verifier_pass"
 
 
 def test_implement_v2_finish_gate_rejects_structured_visual_sidecar_without_quality_marker(tmp_path) -> None:
