@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..write_tools import edit_file, edit_file_hunks, write_file
+from ..write_tools import delete_file, edit_file, edit_file_hunks, write_file
 from .replay import build_invalid_tool_result
 from .types import ToolCallEnvelope, ToolResultEnvelope
 
@@ -101,13 +101,34 @@ class ImplementV2WriteRuntime:
             return denied
         patch_args = _patch_edit_arguments(args)
         self._raise_for_governance_path(str(_workspace_path(patch_args["path"], self.workspace)))
-        result = edit_file_hunks(
-            str(_workspace_path(patch_args["path"], self.workspace)),
-            patch_args["edits"],
-            self.allowed_write_roots,
-            dry_run=not apply,
-        )
+        patch_path = str(_workspace_path(patch_args["path"], self.workspace))
+        patch_lexical_path = str(_workspace_lexical_path(patch_args["path"], self.workspace))
+        patch_operation = str(patch_args.get("operation") or "update_file")
+        if patch_operation == "add_file":
+            if Path(patch_lexical_path).exists() or Path(patch_lexical_path).is_symlink():
+                raise ValueError(f"apply_patch add file target already exists: {patch_args['path']}")
+            result = write_file(
+                patch_lexical_path,
+                patch_args.get("content", ""),
+                self.allowed_write_roots,
+                create=True,
+                dry_run=not apply,
+            )
+        elif patch_operation == "delete_file":
+            result = delete_file(
+                patch_lexical_path,
+                self.allowed_write_roots,
+                dry_run=not apply,
+            )
+        else:
+            result = edit_file_hunks(
+                patch_path,
+                patch_args["edits"],
+                self.allowed_write_roots,
+                dry_run=not apply,
+            )
         result["operation"] = "apply_patch"
+        result["patch_operation"] = patch_operation
         result["patch_format"] = patch_args["format"]
         return _write_payload(call, result, apply=apply, approval=approval)
 
@@ -179,6 +200,13 @@ def _workspace_path(path: object, workspace: Path) -> Path:
     if requested.is_absolute():
         return requested.resolve(strict=False)
     return (workspace / requested).resolve(strict=False)
+
+
+def _workspace_lexical_path(path: object, workspace: Path) -> Path:
+    requested = Path(str(path or "")).expanduser()
+    if requested.is_absolute():
+        return requested
+    return workspace / requested
 
 
 def _apply_requested(args: dict[str, object]) -> bool:
@@ -275,6 +303,8 @@ def _parse_minimal_apply_patch(patch_text: str) -> dict[str, object]:
     if not lines[-1].strip() == "*** End Patch":
         raise ValueError("apply_patch input must end with *** End Patch")
     path = ""
+    operation = ""
+    add_parts: list[str] = []
     old_parts: list[str] = []
     new_parts: list[str] = []
     edits: list[dict[str, str]] = []
@@ -295,23 +325,45 @@ def _parse_minimal_apply_patch(patch_text: str) -> dict[str, object]:
 
     for raw_line in lines[1:-1]:
         stripped = raw_line.strip()
-        if stripped.startswith("*** Add File:") or stripped.startswith("*** Delete File:"):
-            raise ValueError("minimal apply_patch v0 supports update-file patches only")
+        if stripped.startswith("*** Add File:"):
+            if path:
+                raise ValueError("minimal apply_patch v0 supports exactly one file")
+            path = stripped.split(":", 1)[1].strip()
+            operation = "add_file"
+            continue
+        if stripped.startswith("*** Delete File:"):
+            if path:
+                raise ValueError("minimal apply_patch v0 supports exactly one file")
+            path = stripped.split(":", 1)[1].strip()
+            operation = "delete_file"
+            saw_change = True
+            continue
         if stripped.startswith("*** Update File:"):
             if path:
                 raise ValueError("minimal apply_patch v0 supports exactly one file")
             path = stripped.split(":", 1)[1].strip()
+            operation = "update_file"
             continue
         if stripped.startswith("@@"):
+            if operation != "update_file":
+                raise ValueError("apply_patch @@ hunks are only valid for update-file patches")
             flush_edit()
             continue
         if not path:
             if stripped:
-                raise ValueError("apply_patch update file header is required before hunks")
+                raise ValueError("apply_patch file header is required before patch body")
             continue
         marker = raw_line[:1]
         text = raw_line[1:] if marker in {" ", "-", "+"} else raw_line
-        if marker == "-":
+        if operation == "add_file":
+            if marker != "+":
+                raise ValueError("apply_patch add-file body lines must start with +")
+            add_parts.append(text)
+            saw_change = True
+        elif operation == "delete_file":
+            if stripped:
+                raise ValueError("apply_patch delete-file patch must not include body lines")
+        elif marker == "-":
             old_parts.append(text)
             saw_change = True
         elif marker == "+":
@@ -324,13 +376,27 @@ def _parse_minimal_apply_patch(patch_text: str) -> dict[str, object]:
             raise ValueError(f"unsupported apply_patch hunk line: {stripped}")
     flush_edit()
     if not path:
-        raise ValueError("apply_patch update file header is required")
+        raise ValueError("apply_patch file header is required")
     if not saw_change:
         raise ValueError("apply_patch contains no changes")
+    if operation == "add_file":
+        return {
+            "path": path,
+            "operation": operation,
+            "content": "".join(add_parts),
+            "format": "add_file_patch_v0",
+        }
+    if operation == "delete_file":
+        return {
+            "path": path,
+            "operation": operation,
+            "format": "delete_file_patch_v0",
+        }
     if not edits:
         raise ValueError("apply_patch contains no exact anchored edit hunks")
     return {
         "path": path,
+        "operation": operation or "update_file",
         "edits": edits,
         "format": "exact_update_patch_v0",
     }

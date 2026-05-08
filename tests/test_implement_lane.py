@@ -10018,6 +10018,7 @@ def test_implement_v2_apply_patch_dry_run_and_approved_apply(tmp_path) -> None:
         ),
         finish_arguments={"outcome": "analysis_ready", "summary": "patch preview"},
     )
+
     apply = run_fake_write_implement_v2(
         _write_lane_input(
             tmp_path,
@@ -10105,6 +10106,145 @@ def test_implement_v2_apply_patch_denied_approval_does_not_mutate(tmp_path) -> N
     assert result.status == "blocked"
     assert result.updated_lane_state["proof_manifest"]["tool_results"][0]["status"] == "denied"
     assert target.read_text(encoding="utf-8") == "old\n"
+
+
+def test_implement_v2_apply_patch_add_file_dry_run_and_approved_apply(tmp_path) -> None:
+    target = tmp_path / "new.txt"
+    patch = "*** Begin Patch\n*** Add File: new.txt\n+hello\n+world\n*** End Patch\n"
+
+    dry_run = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch preview"},
+    )
+
+    assert dry_run.status == "analysis_ready"
+    assert dry_run.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]["patch_operation"] == "add_file"
+    assert not target.exists()
+
+    apply = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "apply_patch",
+                "arguments": {"patch": patch, "apply": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch applied"},
+    )
+
+    assert apply.status == "analysis_ready"
+    assert target.read_text(encoding="utf-8") == "hello\nworld\n"
+    assert apply.updated_lane_state["proof_manifest"]["tool_results"][0]["evidence_refs"]
+
+
+def test_implement_v2_apply_patch_add_file_rejects_existing_target(tmp_path) -> None:
+    (tmp_path / "new.txt").write_text("existing\n", encoding="utf-8")
+    patch = "*** Begin Patch\n*** Add File: new.txt\n+replacement\n*** End Patch\n"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch preview"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "already exists" in tool_result["content"][0]["reason"]
+    assert (tmp_path / "new.txt").read_text(encoding="utf-8") == "existing\n"
+
+
+def test_implement_v2_apply_patch_delete_file_dry_run_and_approved_apply(tmp_path) -> None:
+    target = tmp_path / "old.txt"
+    target.write_text("remove me\n", encoding="utf-8")
+    patch = "*** Begin Patch\n*** Delete File: old.txt\n*** End Patch\n"
+
+    dry_run = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch preview"},
+    )
+
+    assert dry_run.status == "analysis_ready"
+    assert dry_run.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]["patch_operation"] == "delete_file"
+    assert target.exists()
+
+    apply = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "apply_patch",
+                "arguments": {"patch": patch, "apply": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch applied"},
+    )
+
+    assert apply.status == "analysis_ready"
+    assert not target.exists()
+    assert apply.updated_lane_state["proof_manifest"]["tool_results"][0]["evidence_refs"]
+
+
+def test_implement_v2_apply_patch_delete_file_rejects_symlink_path(tmp_path) -> None:
+    target = tmp_path / "real.txt"
+    target.write_text("keep me\n", encoding="utf-8")
+    link = tmp_path / "link.txt"
+    link.symlink_to(target)
+    patch = "*** Begin Patch\n*** Delete File: link.txt\n*** End Patch\n"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "delete rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "refuses symlink paths" in tool_result["content"][0]["reason"]
+    assert link.is_symlink()
+    assert target.read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_implement_v2_apply_patch_add_file_rejects_dangling_symlink_target(tmp_path) -> None:
+    link = tmp_path / "new.txt"
+    link.symlink_to(tmp_path / "missing-target.txt")
+    patch = "*** Begin Patch\n*** Add File: new.txt\n+replacement\n*** End Patch\n"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "add rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert "already exists" in tool_result["content"][0]["reason"]
+    assert link.is_symlink()
 
 
 def test_implement_v2_write_rejects_symlink_escape(tmp_path) -> None:

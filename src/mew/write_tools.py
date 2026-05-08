@@ -553,6 +553,34 @@ def edit_file_hunks(path, edits, allowed_roots, dry_run=False, max_chars=DEFAULT
     return result
 
 
+def delete_file(path, allowed_roots, dry_run=False):
+    requested = Path(path or "").expanduser()
+    if not requested.is_absolute():
+        requested = Path.cwd() / requested
+    if requested.is_symlink():
+        raise ValueError(f"delete_file refuses symlink paths; use the explicit target path instead: {requested}")
+    resolved = resolve_allowed_write_path(path, allowed_roots, create=False)
+    before = _read_text_if_exists(resolved)
+    started_at = now_iso()
+    diff = _unified_diff_text(resolved, before, "")
+    if not dry_run:
+        resolved.unlink()
+
+    return {
+        "operation": "delete_file",
+        "path": str(resolved),
+        "deleted": True,
+        "changed": True,
+        "dry_run": bool(dry_run),
+        "written": bool(not dry_run),
+        "size": 0,
+        "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
+        "diff_stats": _text_diff_line_counts(before, ""),
+        "started_at": started_at,
+        "finished_at": now_iso(),
+    }
+
+
 def summarize_write_result(result):
     lines = [
         f"{result.get('operation')} {result.get('path')}",
