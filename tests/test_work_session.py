@@ -11233,6 +11233,72 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_selected_implement_v2_accepts_json_repair_history_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
+                )
+                repair_history = {
+                    "task": "make-mips-interpreter",
+                    "do_not_repeat": ["broad rediscovery after the latest PC loop"],
+                    "next_probe": "inspect the latest runtime trace and artifact path",
+                }
+                guidance = json.dumps(
+                    {
+                        "selected_lane": "implement_v2",
+                        "lane_repair_history": repair_history,
+                    }
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_json_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertEqual(lane_input.persisted_lane_state["lane_repair_history"], repair_history)
+                self.assertNotIn("lane_repair_history", lane_input.task_contract["guidance"])
+                self.assertEqual(json.loads(lane_input.task_contract["guidance"]), {"selected_lane": "implement_v2"})
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_oneshot_stops_before_model_when_wall_budget_too_small(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

@@ -138,6 +138,7 @@ def build_implement_v2_prompt_sections(
     ]
     hard_runtime_profile_active = is_hard_runtime_artifact_task(lane_input.task_contract)
     hard_runtime_frontier = _hard_runtime_frontier_state(lane_input.persisted_lane_state)
+    repair_history = _repair_history_state(lane_input.persisted_lane_state)
     if hard_runtime_profile_active:
         sections.append(
             PromptSection(
@@ -173,6 +174,28 @@ def build_implement_v2_prompt_sections(
                 ),
                 stability=STABILITY_STATIC,
                 cache_policy=CACHE_POLICY_CACHEABLE,
+                profile="implement_v2",
+            )
+        )
+    if repair_history:
+        sections.append(
+            PromptSection(
+                id="implement_v2_repair_history",
+                version="v0",
+                title="Implement V2 Repair History",
+                content=_bounded_stable_json(
+                    {
+                        "instructions": (
+                            "Use this bounded same-task repair history before broad rediscovery. "
+                            "It is advisory context, not completion proof. Reconcile it with current "
+                            "tool evidence, avoid repeating repairs already proven ineffective, and "
+                            "move to the next cheap probe, patch/edit, or verifier-shaped command."
+                        ),
+                        "lane_repair_history": repair_history,
+                    }
+                ),
+                stability=STABILITY_DYNAMIC,
+                cache_policy=CACHE_POLICY_DYNAMIC,
                 profile="implement_v2",
             )
         )
@@ -248,6 +271,27 @@ def _stable_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, indent=2)
 
 
+def _bounded_stable_json(value: object, *, max_chars: int = 6000) -> str:
+    text = _stable_json(value)
+    if len(text) <= max_chars:
+        return text
+    base = {"__mew_truncated__": "true: section exceeded bounded prompt budget", "preview": ""}
+    if len(_stable_json(base)) > max_chars:
+        return '{"__mew_truncated__":"true"}'
+    high = max(0, min(len(text), max_chars))
+    low = 0
+    best = _stable_json(base)
+    while low <= high:
+        mid = (low + high) // 2
+        candidate = _stable_json({**base, "preview": text[:mid].rstrip()})
+        if len(candidate) <= max_chars:
+            best = candidate
+            low = mid + 1
+        else:
+            high = mid - 1
+    return best
+
+
 def is_hard_runtime_artifact_task(task_contract: object) -> bool:
     text = _contract_text(task_contract)
     if not text:
@@ -305,7 +349,7 @@ def _contract_text(task_contract: object) -> str:
 
 def _lane_local_state(persisted_lane_state: dict[str, object]) -> dict[str, object]:
     allowed_prefixes = ("lane_", "reentry_", "resume_")
-    blocked_terms = ("memory", "typed", "durable", "repair_memory")
+    blocked_terms = ("memory", "typed", "durable", "repair_memory", "repair_history", "context_capsule")
     filtered = {}
     for key, value in persisted_lane_state.items():
         key_text = str(key)
@@ -321,6 +365,19 @@ def _lane_local_state(persisted_lane_state: dict[str, object]) -> dict[str, obje
 def _hard_runtime_frontier_state(persisted_lane_state: dict[str, object]) -> dict[str, object]:
     value = persisted_lane_state.get("lane_hard_runtime_frontier")
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _repair_history_state(persisted_lane_state: dict[str, object]) -> dict[str, object]:
+    for key in ("lane_repair_history", "lane_context_capsule", "reentry_repair_history", "resume_repair_history"):
+        value = persisted_lane_state.get(key)
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, list):
+            return {"items": list(value)}
+        text = str(value or "").strip()
+        if text:
+            return {"notes": text}
+    return {}
 
 
 __all__ = [

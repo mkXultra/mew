@@ -4360,6 +4360,54 @@ def test_implement_v2_v0_filters_memory_even_when_memory_summary_exists() -> Non
     assert "lane_safe_resume_token" in lane_state.content
 
 
+def test_implement_v2_prompt_adds_dynamic_repair_history_section() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the latest runtime failure."},
+        persisted_lane_state={
+            "lane_repair_history": {
+                "task": "make-mips-interpreter",
+                "avoid_repeated_repairs": ["rewriting vm.js before checking latest PC loop"],
+                "next_generic_probe": "inspect latest runtime trace and artifact production path",
+            }
+        },
+        lane_config={"mode": "full"},
+    )
+
+    metrics = implement_v2_prompt_section_metrics(lane_input)
+    by_id = {section["id"]: section for section in metrics["sections"]}
+    sections = build_implement_v2_prompt_sections(lane_input)
+    repair_section = next(section for section in sections if section.id == "implement_v2_repair_history")
+    lane_state = next(section for section in sections if section.id == "implement_v2_lane_state")
+
+    assert by_id["implement_v2_repair_history"]["cache_hint"] == "dynamic"
+    assert "advisory context, not completion proof" in repair_section.content
+    assert "avoid_repeated_repairs" in repair_section.content
+    assert "latest runtime trace" in repair_section.content
+    assert "lane_repair_history" not in lane_state.content
+
+
+def test_implement_v2_repair_history_section_is_bounded() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the latest runtime failure."},
+        persisted_lane_state={"lane_repair_history": {"log": ['"quoted\\value"' * 2000]}},
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    repair_section = next(section for section in sections if section.id == "implement_v2_repair_history")
+
+    assert len(repair_section.content) <= 6000
+    assert "__mew_truncated__" in repair_section.content
+
+
 def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",

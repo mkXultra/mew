@@ -7166,6 +7166,48 @@ def _work_guidance_bool_option(guidance, *names):
     return False
 
 
+def _work_guidance_persisted_lane_state(guidance):
+    payload = _work_guidance_json_payload(guidance)
+    if not payload:
+        return {}
+    persisted = {}
+    for container_name in ("persisted_lane_state", "lane_state"):
+        container = payload.get(container_name)
+        if isinstance(container, dict):
+            for key, value in container.items():
+                key_text = str(key)
+                if key_text.startswith(("lane_", "reentry_", "resume_")):
+                    persisted[key_text] = value
+    for key in (
+        "lane_repair_history",
+        "lane_context_capsule",
+        "lane_hard_runtime_frontier",
+        "reentry_repair_history",
+        "resume_repair_history",
+    ):
+        if key in payload:
+            persisted[key] = payload.get(key)
+    return persisted
+
+
+def _work_guidance_task_contract_guidance(guidance):
+    payload = _work_guidance_json_payload(guidance)
+    if not payload:
+        return str(guidance or "")
+    sanitized = dict(payload)
+    for key in (
+        "persisted_lane_state",
+        "lane_state",
+        "lane_repair_history",
+        "lane_context_capsule",
+        "lane_hard_runtime_frontier",
+        "reentry_repair_history",
+        "resume_repair_history",
+    ):
+        sanitized.pop(key, None)
+    return json.dumps(sanitized, ensure_ascii=True, sort_keys=True) if sanitized else ""
+
+
 def _work_ai_workspace_roots(roots, workspace):
     workspace_path = Path(str(workspace or ".")).expanduser().resolve(strict=False)
     normalized = []
@@ -7187,7 +7229,7 @@ def _work_ai_implement_v2_task_contract(task, *, max_steps, max_wall_seconds, gu
         "kind": task_kind(task or {}),
         "max_steps": max_steps,
         "max_wall_seconds": max_wall_seconds,
-        "guidance": guidance or "",
+        "guidance": _work_guidance_task_contract_guidance(guidance),
         "verify_command": verify_command or "",
     }
 
@@ -7291,6 +7333,7 @@ def _run_work_ai_implement_v2(
             guidance=getattr(effective_args, "work_guidance", None) or "",
             verify_command=getattr(effective_args, "verify_command", None) or "",
         ),
+        persisted_lane_state=_work_guidance_persisted_lane_state(getattr(effective_args, "work_guidance", None)),
         lane_config={
             "mode": "full",
             "allowed_read_roots": _work_ai_workspace_roots(effective_args.allow_read or [], workspace),
