@@ -11038,6 +11038,73 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_selected_implement_v2_preserves_timeout_metrics_after_failed_result(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="failed",
+                    lane="implement_v2",
+                    user_visible_summary="model turn failed: request timed out",
+                    metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_json_implement_v2", return_value=v2_result):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        "selected_lane=implement_v2",
+                                        "--model",
+                                        "gpt-5.5",
+                                        "--model-timeout",
+                                        "123",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_exit_code"], 1)
+                state = load_state()
+                metrics = state["work_sessions"][0]["model_turns"][0]["model_metrics"]
+                self.assertEqual(metrics["provider"], "model_json")
+                self.assertEqual(metrics["runtime_id"], "implement_v2_model_json_tool_loop")
+                self.assertEqual(metrics["selected_lane"], "implement_v2")
+                self.assertEqual(metrics["model_backend"], "codex")
+                self.assertEqual(metrics["model"], "gpt-5.5")
+                self.assertEqual(metrics["model_timeout_seconds"], 123.0)
+                self.assertEqual(metrics["timeout_guard"], "work_loop_process_guard")
+                self.assertEqual(metrics["status"], "failed")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_oneshot_selected_implement_v2_can_enable_integration_observation_detail(self):
         from mew.implement_lane import ImplementLaneResult
 
@@ -30850,6 +30917,140 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertEqual(result["summary"], "child ok")
         self.assertEqual(get_context.call_args_list[0].args, ("spawn",))
         self.assertEqual(get_context.call_args_list[-1].args, ("spawn",))
+
+    def test_work_loop_model_calls_poll_guard_in_short_slices(self):
+        from mew.work_loop import WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS, call_model_json_with_retries
+
+        class FakeRecvConn:
+            def __init__(self):
+                self.poll_timeouts = []
+
+            def poll(self, timeout):
+                self.poll_timeouts.append(timeout)
+                return True
+
+            def recv(self):
+                return {"status": "ok", "result": {"summary": "child ok", "action": {"type": "finish"}}}
+
+            def close(self):
+                return None
+
+        class FakeSendConn:
+            def close(self):
+                return None
+
+        class FakeProcess:
+            def start(self):
+                return None
+
+            def is_alive(self):
+                return False
+
+            def join(self, timeout=None):
+                return None
+
+            def terminate(self):
+                return None
+
+        class FakeContext:
+            def __init__(self):
+                self.recv_conn = FakeRecvConn()
+
+            def Pipe(self, duplex=False):
+                return self.recv_conn, FakeSendConn()
+
+            def Process(self, target=None, args=(), daemon=False):
+                return FakeProcess()
+
+        context = FakeContext()
+        with patch("mew.work_loop._work_model_timeout_guard_available", return_value=True):
+            with patch("mew.work_loop.multiprocessing.get_context", return_value=context):
+                result = call_model_json_with_retries(
+                    "codex",
+                    {"path": "auth.json"},
+                    "prompt",
+                    "gpt-5.4",
+                    "https://example.invalid",
+                    45,
+                    log_prefix="work_think codex session=1",
+                )
+
+        self.assertEqual(result["summary"], "child ok")
+        self.assertTrue(context.recv_conn.poll_timeouts)
+        self.assertLessEqual(max(context.recv_conn.poll_timeouts), WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS)
+
+    def test_work_loop_model_calls_terminate_after_sliced_poll_timeout(self):
+        from mew.errors import ModelBackendError
+        from mew.work_loop import WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS, call_model_json_with_retries
+
+        class FakeRecvConn:
+            def __init__(self):
+                self.poll_timeouts = []
+
+            def poll(self, timeout):
+                self.poll_timeouts.append(timeout)
+                time.sleep(timeout)
+                return False
+
+            def recv(self):
+                raise AssertionError("recv should not be called after timeout")
+
+            def close(self):
+                return None
+
+        class FakeSendConn:
+            def close(self):
+                return None
+
+        class FakeProcess:
+            def __init__(self):
+                self.alive = True
+                self.terminated = False
+
+            def start(self):
+                return None
+
+            def is_alive(self):
+                return self.alive
+
+            def join(self, timeout=None):
+                return None
+
+            def terminate(self):
+                self.terminated = True
+                self.alive = False
+
+            def kill(self):
+                self.alive = False
+
+        class FakeContext:
+            def __init__(self):
+                self.recv_conn = FakeRecvConn()
+                self.process = FakeProcess()
+
+            def Pipe(self, duplex=False):
+                return self.recv_conn, FakeSendConn()
+
+            def Process(self, target=None, args=(), daemon=False):
+                return self.process
+
+        context = FakeContext()
+        with patch("mew.work_loop._work_model_timeout_guard_available", return_value=True):
+            with patch("mew.work_loop.multiprocessing.get_context", return_value=context):
+                with self.assertRaisesRegex(ModelBackendError, "request timed out"):
+                    call_model_json_with_retries(
+                        "codex",
+                        {"path": "auth.json"},
+                        "prompt",
+                        "gpt-5.4",
+                        "https://example.invalid",
+                        0.002,
+                        log_prefix="work_think codex session=1",
+                    )
+
+        self.assertTrue(context.process.terminated)
+        self.assertTrue(context.recv_conn.poll_timeouts)
+        self.assertLessEqual(max(context.recv_conn.poll_timeouts), WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS)
 
     def test_compact_model_turns_for_prompt_collapses_redundant_planning_churn(self):
         from mew.work_session import compact_model_turns_for_prompt

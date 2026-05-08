@@ -129,6 +129,7 @@ WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 WORK_TASK_NOTES_CONTEXT_LINES = 12
 WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS = 1.0
+WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS = 1.0
 WORK_TASK_GOAL_TERM_RE = re.compile(r"\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)+\b")
 WORK_TASK_GOAL_TERM_STOPWORDS = {
     "dry-run",
@@ -204,6 +205,28 @@ def _call_model_json_without_guard(*args, **kwargs):
     return _agent_call_model_json_with_retries(*args, **kwargs)
 
 
+def _recv_work_model_call_payload(recv_conn, process, timeout_value):
+    deadline = time.monotonic() + timeout_value
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _terminate_work_model_process(process)
+            raise ModelBackendError("request timed out")
+        poll_timeout = min(WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS, remaining)
+        try:
+            ready = recv_conn.poll(poll_timeout)
+        except (BrokenPipeError, EOFError, OSError) as exc:
+            _terminate_work_model_process(process)
+            raise ModelBackendError("request timed out; model timeout guard child exited without result") from exc
+        if not ready:
+            continue
+        try:
+            return recv_conn.recv()
+        except (EOFError, BrokenPipeError, OSError) as exc:
+            _terminate_work_model_process(process)
+            raise ModelBackendError("request timed out; model timeout guard child exited without result") from exc
+
+
 def call_model_json_with_retries(*args, **kwargs):
     kwargs.setdefault("retry_delays", ())
     on_text_delta = kwargs.get("on_text_delta")
@@ -231,23 +254,14 @@ def call_model_json_with_retries(*args, **kwargs):
     )
     process.start()
     send_conn.close()
-    payload = None
-    child_crash = None
     try:
-        if recv_conn.poll(timeout_value):
-            try:
-                payload = recv_conn.recv()
-            except (EOFError, BrokenPipeError, OSError) as exc:
-                child_crash = exc
-        else:
-            _terminate_work_model_process(process)
-            raise ModelBackendError("request timed out")
+        payload = _recv_work_model_call_payload(recv_conn, process, timeout_value)
+    except BaseException:
+        _terminate_work_model_process(process)
+        raise
     finally:
         recv_conn.close()
     process.join(timeout=WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS)
-    if child_crash is not None:
-        _terminate_work_model_process(process)
-        raise ModelBackendError("request timed out; model timeout guard child exited without result") from child_crash
     if payload is None:
         raise ModelBackendError("request timed out")
     if payload.get("status") == "ok":

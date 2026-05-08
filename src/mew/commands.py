@@ -2327,6 +2327,7 @@ def _work_control_options(args, session=None):
         "model_backend": option("model_backend"),
         "model": option("model"),
         "base_url": option("base_url"),
+        "model_timeout": option("model_timeout"),
         "cwd": cwd_option(),
         "allow_read": list(option("allow_read", []) or []),
         "allow_write": list(option("allow_write", []) or []),
@@ -2422,6 +2423,7 @@ def remember_work_session_default_options(session, args):
             options.get("approval_mode"),
             options.get("model"),
             options.get("base_url"),
+            options.get("model_timeout") not in (None, "", 60.0),
             options.get("cwd"),
             options.get("act_mode") and options.get("act_mode") != "model",
             options.get("compact_live"),
@@ -2469,6 +2471,7 @@ def remember_work_session_default_options(session, args):
         "model_backend": merged_scalar("model_backend"),
         "model": merged_scalar("model"),
         "base_url": merged_scalar("base_url"),
+        "model_timeout": merged_scalar("model_timeout"),
         "cwd": merged_scalar("cwd"),
         "allow_read": merged_list("allow_read"),
         "allow_write": [] if clear_write_defaults else merged_list("allow_write"),
@@ -2596,9 +2599,10 @@ def work_chat_continue_options(session):
         ("model_backend", "--model-backend"),
         ("model", "--model"),
         ("base_url", "--base-url"),
+        ("model_timeout", "--model-timeout"),
     ):
         if options.get(key):
-            parts.extend([flag, options[key]])
+            parts.extend([flag, str(options[key])])
     for root in options.get("allow_read") or []:
         parts.extend(["--allow-read", root])
     for root in options.get("allow_write") or []:
@@ -7205,6 +7209,15 @@ def _run_work_ai_implement_v2(
 ):
     workspace = options.get("cwd") or os.getcwd()
     selected_lane = _work_guidance_selected_lane(getattr(effective_args, "work_guidance", None))
+    model_timeout_seconds = float(getattr(effective_args, "model_timeout", 60.0) or 60.0)
+    implement_v2_runtime_metrics = {
+        "runtime_id": "implement_v2_model_json_tool_loop",
+        "selected_lane": selected_lane,
+        "model_backend": model_backend,
+        "model": model,
+        "model_timeout_seconds": model_timeout_seconds,
+        "timeout_guard": "work_loop_process_guard",
+    }
     report["selected_lane"] = selected_lane
     report["runtime_id"] = "implement_v2_model_json_tool_loop"
     with state_lock():
@@ -7219,6 +7232,7 @@ def _run_work_ai_implement_v2(
             {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE},
             guidance=getattr(effective_args, "work_guidance", None) or "",
         )
+        planning_turn["model_metrics"] = {**implement_v2_runtime_metrics, "status": "running"}
         planning_turn_id = planning_turn.get("id")
         save_state(state)
     lane_input = ImplementLaneInput(
@@ -7260,7 +7274,7 @@ def _run_work_ai_implement_v2(
             lane_input,
             model_auth=model_auth,
             base_url=base_url,
-            timeout=float(getattr(effective_args, "model_timeout", 60.0) or 60.0),
+            timeout=model_timeout_seconds,
             max_turns=max_steps,
             progress=progress,
         )
@@ -7272,6 +7286,11 @@ def _run_work_ai_implement_v2(
         error = "" if result.status == "completed" else result.user_visible_summary
         status = result.status
     action = {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE, "runtime_id": "implement_v2_model_json_tool_loop"}
+    if result:
+        persisted_model_metrics = {**implement_v2_runtime_metrics, **dict(result.metrics or {})}
+    else:
+        persisted_model_metrics = {**implement_v2_runtime_metrics, "error": error}
+    persisted_model_metrics.setdefault("status", status)
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
@@ -7286,7 +7305,7 @@ def _run_work_ai_implement_v2(
                 "act_mode": "implement_v2_model_json_tool_loop",
             },
             action,
-            model_metrics=(result.metrics if result else {"error": error, "runtime_id": "implement_v2_model_json_tool_loop"}),
+            model_metrics=persisted_model_metrics,
         )
         turn = finish_work_model_turn(state, session_id, planning_turn_id, error=error if status != "completed" else "")
         if session is not None:
