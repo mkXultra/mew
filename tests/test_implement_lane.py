@@ -1481,6 +1481,8 @@ def test_implement_v2_integration_observation_summary_is_state_safe_by_default(t
 
     manifest = result.updated_lane_state["proof_manifest"]
     observation = manifest["metrics"]["integration_observation"]
+    hot_path = manifest["metrics"]["hot_path_projection"]
+    sidecar = manifest["metrics"]["resident_sidecar_state"]
     serialized = json.dumps(observation, ensure_ascii=False, sort_keys=True)
 
     assert observation["detail_policy"] == "summary"
@@ -1490,6 +1492,20 @@ def test_implement_v2_integration_observation_summary_is_state_safe_by_default(t
     assert "model_turns" not in observation
     assert secret not in serialized
     assert len(serialized.encode("utf-8")) < 8192
+    assert hot_path["phase"] == "m6_24_hot_path_collapse_phase_0"
+    assert hot_path["normal_full_prompt_bytes"] > 0
+    assert hot_path["normal_full_prompt_bytes"] >= hot_path["normal_prompt_section_bytes"]
+    assert hot_path["provider_visible_tool_result_bytes"] == 0
+    assert sidecar["phase"] == "m6_24_hot_path_collapse_phase_0"
+    assert sidecar["surface"] == "resident_sidecar_state"
+    assert sidecar["total_bytes"] > 0
+    assert sidecar["per_turn_growth_bytes"] > 0
+    assert set(sidecar["families"]) == {
+        "frontier_todo_recovery_cards",
+        "integration_observation_detail",
+        "tool_call_result",
+        "transcript_history",
+    }
     assert not (artifact_dir / "implement_v2" / "integration-observation.json").exists()
     assert all(not path.endswith("integration-observation.json") for path in result.proof_artifacts)
 
@@ -4866,6 +4882,43 @@ def test_implement_v2_prompt_metrics_are_memory_light_by_default() -> None:
     assert by_id["implement_v2_execution_artifact_contract"]["cache_hint"] == "cacheable_prefix"
     assert by_id["implement_v2_compatibility_frontier"]["cache_hint"] == "cacheable_prefix"
     assert by_id["implement_v2_lane_state"]["cache_hint"] == "dynamic"
+
+
+def test_implement_v2_prompt_metrics_include_hot_path_collapse_phase0_inventory() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"objective": "repair a runtime artifact"},
+        persisted_lane_state={
+            "active_work_todo": {
+                "id": "todo-1",
+                "status": "drafting",
+                "source": {"target_paths": ["vm.js"]},
+            },
+            "lane_hard_runtime_frontier": {"schema_version": 1, "status": "active"},
+        },
+        lane_config={"mode": "full"},
+    )
+
+    metrics = implement_v2_prompt_section_metrics(lane_input)
+    collapse = metrics["hot_path_collapse"]
+    inventory = {section["id"]: section for section in collapse["normal_section_inventory"]}
+
+    assert collapse["schema_version"] == 1
+    assert collapse["phase"] == "m6_24_hot_path_collapse_phase_0"
+    assert collapse["surfaces"]["hot_path_projection"] == "hot_path_projection"
+    assert collapse["surfaces"]["resident_sidecar_state"] == "resident_sidecar_state"
+    assert collapse["surfaces"]["finish_replay_recovery"] == "finish_replay_recovery"
+    assert "normal_full_prompt_bytes" not in collapse
+    assert collapse["normal_prompt_section_bytes"] == metrics["total_chars"]
+    assert collapse["normal_static_cacheable_bytes"] > 0
+    assert collapse["resident_model_visible_bytes"] > 0
+    assert inventory["implement_v2_lane_base"]["surface"] == "hot_path_projection"
+    assert inventory["implement_v2_active_work_todo"]["surface"] == "resident_sidecar_state"
+    assert inventory["implement_v2_hard_runtime_frontier_state"]["surface"] == "resident_sidecar_state"
+    assert inventory["implement_v2_execution_artifact_contract"]["surface"] == "finish_replay_recovery"
 
 
 def test_implement_v2_active_coding_rhythm_requires_probe_fallbacks() -> None:

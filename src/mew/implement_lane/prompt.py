@@ -17,6 +17,31 @@ from ..prompt_sections import (
 from .tool_policy import ImplementLaneToolSpec, list_v2_tool_specs_for_mode
 from .types import ImplementLaneInput
 
+HOT_PATH_PROJECTION_SURFACE = "hot_path_projection"
+RESIDENT_SIDECAR_STATE_SURFACE = "resident_sidecar_state"
+FINISH_REPLAY_RECOVERY_SURFACE = "finish_replay_recovery"
+
+_HOT_PATH_SECTION_IDS = frozenset(
+    {
+        "implement_v2_lane_base",
+        "implement_v2_tool_contract",
+        "implement_v2_active_coding_rhythm",
+        "implement_v2_tool_surface",
+        "implement_v2_task_contract",
+        "implement_v2_lane_state",
+    }
+)
+_RESIDENT_SIDECAR_SECTION_IDS = frozenset(
+    {
+        "implement_v2_active_work_todo",
+        "implement_v2_compatibility_frontier",
+        "implement_v2_hard_runtime_frontier_state",
+        "implement_v2_hard_runtime_profile",
+        "implement_v2_repair_history",
+    }
+)
+_FINISH_RECOVERY_SECTION_IDS = frozenset({"implement_v2_execution_artifact_contract"})
+
 
 def build_implement_v2_prompt_sections(
     lane_input: ImplementLaneInput,
@@ -288,7 +313,82 @@ def build_implement_v2_prompt_sections(
 def implement_v2_prompt_section_metrics(lane_input: ImplementLaneInput) -> dict[str, object]:
     """Return prompt-section metrics for v2 prompt assembly."""
 
-    return prompt_section_metrics(build_implement_v2_prompt_sections(lane_input))
+    metrics = prompt_section_metrics(build_implement_v2_prompt_sections(lane_input))
+    metrics["hot_path_collapse"] = _hot_path_collapse_prompt_metrics(metrics)
+    return metrics
+
+
+def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, object]:
+    sections = metrics.get("sections") if isinstance(metrics.get("sections"), list) else []
+    inventory: list[dict[str, object]] = []
+    normal_static_cacheable_bytes = 0
+    normal_dynamic_hot_path_bytes = 0
+    normal_dynamic_recovery_bytes = 0
+    resident_model_visible_bytes = 0
+    finish_replay_recovery_bytes = 0
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        section_id = str(section.get("id") or "")
+        chars = _safe_section_chars(section.get("chars"))
+        surface = _section_surface(section_id)
+        visibility = "ordinary"
+        if surface == RESIDENT_SIDECAR_STATE_SURFACE:
+            resident_model_visible_bytes += chars
+        if surface == FINISH_REPLAY_RECOVERY_SURFACE:
+            finish_replay_recovery_bytes += chars
+        if section.get("cache_policy") == CACHE_POLICY_CACHEABLE:
+            normal_static_cacheable_bytes += chars
+        if section.get("stability") == STABILITY_DYNAMIC and surface == HOT_PATH_PROJECTION_SURFACE:
+            normal_dynamic_hot_path_bytes += chars
+        if section.get("stability") == STABILITY_DYNAMIC and surface != HOT_PATH_PROJECTION_SURFACE:
+            normal_dynamic_recovery_bytes += chars
+        inventory.append(
+            {
+                "id": section_id,
+                "bytes": chars,
+                "surface": surface,
+                "visibility": visibility,
+                "stability": section.get("stability"),
+                "cache_policy": section.get("cache_policy"),
+            }
+        )
+    total_chars = _safe_section_chars(metrics.get("total_chars"))
+    return {
+        "schema_version": 1,
+        "measurement_scope": "prompt_sections_only",
+        "surfaces": {
+            "hot_path_projection": HOT_PATH_PROJECTION_SURFACE,
+            "resident_sidecar_state": RESIDENT_SIDECAR_STATE_SURFACE,
+            "finish_replay_recovery": FINISH_REPLAY_RECOVERY_SURFACE,
+        },
+        "normal_prompt_section_bytes": total_chars,
+        "normal_section_inventory": inventory,
+        "normal_static_cacheable_bytes": normal_static_cacheable_bytes,
+        "normal_dynamic_hot_path_bytes": normal_dynamic_hot_path_bytes,
+        "normal_dynamic_recovery_bytes": normal_dynamic_recovery_bytes,
+        "resident_model_visible_bytes": resident_model_visible_bytes,
+        "finish_replay_recovery_bytes": finish_replay_recovery_bytes,
+        "provider_visible_tool_result_bytes": 0,
+        "phase": "m6_24_hot_path_collapse_phase_0",
+    }
+
+
+def _section_surface(section_id: str) -> str:
+    if section_id in _RESIDENT_SIDECAR_SECTION_IDS:
+        return RESIDENT_SIDECAR_STATE_SURFACE
+    if section_id in _FINISH_RECOVERY_SECTION_IDS:
+        return FINISH_REPLAY_RECOVERY_SURFACE
+    if section_id in _HOT_PATH_SECTION_IDS:
+        return HOT_PATH_PROJECTION_SURFACE
+    return HOT_PATH_PROJECTION_SURFACE
+
+
+def _safe_section_chars(value: object) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _tool_surface_json(tool_specs: tuple[ImplementLaneToolSpec, ...]) -> str:
@@ -460,6 +560,9 @@ def _drop_empty_dict_values(value: dict[str, object]) -> dict[str, object]:
 
 __all__ = [
     "build_implement_v2_prompt_sections",
+    "FINISH_REPLAY_RECOVERY_SURFACE",
+    "HOT_PATH_PROJECTION_SURFACE",
     "implement_v2_prompt_section_metrics",
+    "RESIDENT_SIDECAR_STATE_SURFACE",
     "is_hard_runtime_artifact_task",
 ]

@@ -974,6 +974,28 @@ def run_live_json_implement_v2(
             else ""
         ),
     )
+    prompt_metrics = implement_v2_prompt_section_metrics(
+        _lane_input_with_runtime_prompt_state(
+            lane_input,
+            active_work_todo_state=active_work_todo_state,
+            hard_runtime_frontier_state=hard_runtime_frontier_state,
+        )
+    )
+    hot_path_projection_metrics = _hot_path_projection_runtime_metrics(
+        prompt_metrics,
+        model_turn_observations=tuple(model_turn_observations),
+        prompt_history=tuple(prompt_history),
+    )
+    resident_sidecar_metrics = _resident_sidecar_state_metrics(
+        transcript=tuple(transcript),
+        history=tuple(history),
+        tool_calls=tuple(tool_calls),
+        tool_results=tuple(tool_results),
+        active_work_todo_state=active_work_todo_state,
+        hard_runtime_frontier_state=hard_runtime_frontier_state,
+        model_turn_observations=tuple(model_turn_observations),
+        model_turns=model_turns,
+    )
     typed_acceptance_snapshot = _typed_acceptance_session_from_tool_results(tuple(tool_results), lane_input=lane_input)
     typed_metrics = _typed_acceptance_metrics(typed_acceptance_snapshot, finish_gate_decision)
     manifest = ImplementLaneProofManifest(
@@ -1008,6 +1030,8 @@ def run_live_json_implement_v2(
             "wall_timeout": dict(wall_timeout),
             "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
             "integration_observation": integration_observation,
+            "hot_path_projection": hot_path_projection_metrics,
+            "resident_sidecar_state": resident_sidecar_metrics,
         },
     )
     validation = _validate_write_proof_manifest(manifest)
@@ -1015,13 +1039,6 @@ def run_live_json_implement_v2(
         finish_arguments,
         validation_valid=validation.valid,
         tool_results=tuple(tool_results),
-    )
-    prompt_metrics = implement_v2_prompt_section_metrics(
-        _lane_input_with_runtime_prompt_state(
-            lane_input,
-            active_work_todo_state=active_work_todo_state,
-            hard_runtime_frontier_state=hard_runtime_frontier_state,
-        )
     )
     artifact_paths = _write_live_json_artifacts(
         lane_input,
@@ -1086,6 +1103,8 @@ def run_live_json_implement_v2(
             "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
             "prompt_chars_total": prompt_chars_total,
             "prompt_sections": prompt_metrics,
+            "hot_path_projection": hot_path_projection_metrics,
+            "resident_sidecar_state": resident_sidecar_metrics,
             "write_evidence_count": _write_evidence_count(tool_results),
             "terminal_evidence_count": _terminal_evidence_count(tool_results),
             "command_closeout_count": len(closeout_payloads),
@@ -5756,6 +5775,106 @@ def _integration_observation_summary(
         "state_note": "summary_only; full per-turn detail is never persisted in updated_lane_state",
         "debug_detail_enabled": _should_write_integration_observation_detail(lane_input),
     }
+
+
+def _hot_path_projection_runtime_metrics(
+    prompt_metrics: dict[str, object],
+    *,
+    model_turn_observations: tuple[dict[str, object], ...],
+    prompt_history: tuple[dict[str, object], ...],
+) -> dict[str, object]:
+    base = (
+        dict(prompt_metrics.get("hot_path_collapse"))
+        if isinstance(prompt_metrics.get("hot_path_collapse"), dict)
+        else {}
+    )
+    provider_visible_tool_result_bytes = _provider_visible_tool_result_bytes(prompt_history)
+    observed_prompt_bytes = [
+        _nonnegative_int((observation.get("prompt") if isinstance(observation.get("prompt"), dict) else {}).get("chars"))
+        for observation in model_turn_observations
+    ]
+    for observation in model_turn_observations:
+        projection = (
+            observation.get("history_projection") if isinstance(observation.get("history_projection"), dict) else {}
+        )
+        # Keep projection observations available for later ratios, but do not
+        # treat full prompt-history JSON as tool-result bytes.
+        _nonnegative_int(projection.get("current_projection_chars"))
+    section_bytes = _nonnegative_int(base.get("normal_prompt_section_bytes") or base.get("normal_full_prompt_bytes"))
+    base["provider_visible_tool_result_bytes"] = provider_visible_tool_result_bytes
+    base["normal_prompt_section_bytes"] = section_bytes
+    base["normal_full_prompt_bytes"] = max(observed_prompt_bytes) if observed_prompt_bytes else section_bytes
+    base["normal_full_prompt_bytes_total"] = sum(observed_prompt_bytes)
+    base["normal_full_prompt_turn_count"] = len(observed_prompt_bytes)
+    base["measurement_scope"] = "observed_rendered_prompt_and_projected_tool_results"
+    base["schema_version"] = 1
+    return base
+
+
+def _provider_visible_tool_result_bytes(prompt_history: tuple[dict[str, object], ...]) -> int:
+    total = 0
+    for entry in prompt_history:
+        if not isinstance(entry, dict):
+            continue
+        tool_results = entry.get("tool_results")
+        if not isinstance(tool_results, list):
+            continue
+        for result in tool_results:
+            total += _json_bytes(result)
+    return total
+
+
+def _resident_sidecar_state_metrics(
+    *,
+    transcript: tuple[ImplementLaneTranscriptEvent, ...],
+    history: tuple[dict[str, object], ...],
+    tool_calls: tuple[ToolCallEnvelope, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    active_work_todo_state: dict[str, object],
+    hard_runtime_frontier_state: dict[str, object],
+    model_turn_observations: tuple[dict[str, object], ...],
+    model_turns: int,
+) -> dict[str, object]:
+    families = {
+        "transcript_history": _json_bytes(
+            {
+                "transcript": [event.as_dict() for event in transcript],
+                "history": list(history),
+            }
+        ),
+        "tool_call_result": _json_bytes(
+            {
+                "tool_calls": [call.as_dict() for call in tool_calls],
+                "tool_results": [result.as_dict() for result in tool_results],
+            }
+        ),
+        "frontier_todo_recovery_cards": _json_bytes(
+            {
+                "active_work_todo": dict(active_work_todo_state),
+                "lane_hard_runtime_frontier": dict(hard_runtime_frontier_state),
+            }
+        ),
+        "integration_observation_detail": _json_bytes([dict(observation) for observation in model_turn_observations]),
+    }
+    total_bytes = sum(families.values())
+    return {
+        "schema_version": 1,
+        "surface": "resident_sidecar_state",
+        "total_bytes": total_bytes,
+        "per_turn_growth_bytes": round(total_bytes / max(1, int(model_turns or 0)), 3),
+        "families": families,
+        "cap_bands": {
+            "green_total_ratio": 1.10,
+            "yellow_total_ratio": 1.25,
+            "red_per_turn_growth_ratio": 1.50,
+            "baseline_required": True,
+        },
+        "phase": "m6_24_hot_path_collapse_phase_0",
+    }
+
+
+def _json_bytes(value: object) -> int:
+    return len(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8"))
 
 
 def _integration_observation_detail_payload(
