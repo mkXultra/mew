@@ -4906,6 +4906,16 @@ def _call_model_turn(
     parse_retry_count = 0
     current_turn_input = turn_input
     pending_delay = 0.0
+
+    def remaining_turn_timeout_seconds() -> float:
+        try:
+            total = max(0.0, float(turn_input.timeout_seconds))
+        except (TypeError, ValueError):
+            return 0.0
+        if total <= 0:
+            return 0.0
+        return max(0.0, total - max(0.0, time.monotonic() - started))
+
     while True:
         delay = pending_delay
         pending_delay = 0.0
@@ -4926,27 +4936,41 @@ def _call_model_turn(
             elapsed = time.monotonic() - started
             model_error = _live_json_model_error(exc)
             if parse_retry_count == 0 and _live_json_parse_error_retryable(model_error):
-                parse_retry_count += 1
-                total_retry_count += 1
-                retry_prompt = _append_live_json_parse_retry_instruction(turn_input.rendered_prompt, model_error)
-                current_turn_input = replace(
-                    turn_input,
-                    rendered_prompt=retry_prompt,
-                    prompt_descriptor=_prompt_descriptor(retry_prompt),
-                )
-                if progress:
-                    progress(
-                        f"implement_v2 turn #{turn_input.turn_index}: model_json parse failure "
-                        f"retry={parse_retry_count}"
+                retry_timeout = remaining_turn_timeout_seconds()
+                if retry_timeout <= _IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS:
+                    model_error["retry_suppressed_reason"] = "model_turn_timeout_exhausted"
+                else:
+                    parse_retry_count += 1
+                    total_retry_count += 1
+                    retry_prompt = _append_live_json_parse_retry_instruction(turn_input.rendered_prompt, model_error)
+                    current_turn_input = replace(
+                        turn_input,
+                        rendered_prompt=retry_prompt,
+                        prompt_descriptor=_prompt_descriptor(retry_prompt),
+                        timeout_seconds=retry_timeout,
                     )
-                continue
+                    if progress:
+                        progress(
+                            f"implement_v2 turn #{turn_input.turn_index}: model_json parse failure "
+                            f"retry={parse_retry_count}"
+                        )
+                    continue
             should_retry = _live_json_model_error_retryable(model_error) and transient_retry_count < len(
                 _IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS
             )
             if should_retry:
+                retry_timeout = remaining_turn_timeout_seconds()
+                if retry_timeout <= _IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS:
+                    should_retry = False
+                    model_error["retry_suppressed_reason"] = "model_turn_timeout_exhausted"
+            if should_retry:
                 pending_delay = _IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS[transient_retry_count]
                 transient_retry_count += 1
                 total_retry_count += 1
+                current_turn_input = replace(
+                    current_turn_input,
+                    timeout_seconds=retry_timeout,
+                )
                 if progress:
                     progress(
                         f"implement_v2 turn #{turn_input.turn_index}: model_json transient failure "

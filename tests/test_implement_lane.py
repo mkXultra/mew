@@ -579,6 +579,90 @@ def test_implement_v2_model_turn_retries_transient_backend_error_once() -> None:
     assert output.observation["model_retry_count"] == 1
 
 
+def test_implement_v2_model_turn_transient_retry_uses_remaining_timeout(monkeypatch) -> None:
+    prompt = "return a small JSON action"
+    turn_input = ModelTurnInput(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id="attempt-1",
+        turn_id="turn-1",
+        turn_index=1,
+        transport="model_json",
+        model_backend="codex",
+        model="gpt-5.5",
+        rendered_prompt=prompt,
+        current_projection_bytes=b"[]",
+        prompt_descriptor={"chars": len(prompt), "sha256": "sha256:prompt"},
+        projection_descriptor={"current_projection_chars": 2, "current_projection_sha256": "sha256:projection"},
+        timeout_seconds=5,
+        log_prefix="test",
+    )
+    clock_values = iter([0.0, 1.0, 1.0, 1.1])
+    observed_timeouts = []
+
+    monkeypatch.setattr("mew.implement_lane.v2_runtime.time.monotonic", lambda: next(clock_values))
+
+    def fake_model(*args, **_kwargs):
+        observed_timeouts.append(args[5])
+        if len(observed_timeouts) == 1:
+            raise ModelBackendError("Codex Web API error: IncompleteRead(5188 bytes read)")
+        return {
+            "summary": "retry succeeded",
+            "tool_calls": [],
+            "finish": {"outcome": "failed", "summary": "not done"},
+        }
+
+    output = _call_model_turn(
+        turn_input,
+        model_json_callable=fake_model,
+        model_auth={"path": "auth.json"},
+        base_url="",
+    )
+
+    assert observed_timeouts == [5, 4.0]
+    assert output.model_error == {}
+    assert output.response_shape["retry_count"] == 1
+    assert output.response_shape["transient_retry_count"] == 1
+
+
+def test_implement_v2_model_turn_does_not_retry_transient_after_turn_timeout_exhausted(monkeypatch) -> None:
+    prompt = "return a small JSON action"
+    turn_input = ModelTurnInput(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id="attempt-1",
+        turn_id="turn-1",
+        turn_index=1,
+        transport="model_json",
+        model_backend="codex",
+        model="gpt-5.5",
+        rendered_prompt=prompt,
+        current_projection_bytes=b"[]",
+        prompt_descriptor={"chars": len(prompt), "sha256": "sha256:prompt"},
+        projection_descriptor={"current_projection_chars": 2, "current_projection_sha256": "sha256:projection"},
+        timeout_seconds=1,
+        log_prefix="test",
+    )
+    clock_values = iter([0.0, 1.2, 1.2])
+    calls = []
+
+    monkeypatch.setattr("mew.implement_lane.v2_runtime.time.monotonic", lambda: next(clock_values))
+
+    def fake_model(*_args, **_kwargs):
+        calls.append(True)
+        raise ModelBackendError("Codex Web API error: IncompleteRead(5188 bytes read)")
+
+    output = _call_model_turn(
+        turn_input,
+        model_json_callable=fake_model,
+        model_auth={"path": "auth.json"},
+        base_url="",
+    )
+
+    assert len(calls) == 1
+    assert output.model_error["failure_class"] == "model_backend_error"
+    assert output.model_error["retry_suppressed_reason"] == "model_turn_timeout_exhausted"
+    assert "retry_count" not in output.response_shape
+
+
 def test_implement_v2_model_turn_does_not_retry_json_parse_error() -> None:
     prompt = "bad JSON response"
     turn_input = ModelTurnInput(
