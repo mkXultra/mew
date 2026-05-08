@@ -10198,6 +10198,162 @@ def test_implement_v2_run_command_allows_bounded_source_writer_without_verifier_
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log(1)\n"
 
 
+def test_implement_v2_run_command_rejects_same_path_source_patch_shell_surface(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
+    command = (
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        "p=Path('vm.js')\n"
+        "s=p.read_text()\n"
+        "p.write_text(s.replace('old','new'))\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "source patch rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert payload["kind"] == "run_command_source_patch_shell_surface"
+    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
+    assert payload["terminal_failure_reaction_eligible"] is False
+    assert payload["suggested_tool"] == "write_file/edit_file/apply_patch"
+    assert payload["common_paths"] == ["vm.js"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+
+
+def test_implement_v2_run_command_rejects_same_path_source_patch_with_relative_path_variants(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
+    command = (
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        "s=Path('./vm.js').read_text()\n"
+        "Path('vm.js').write_text(s.replace('old','new'))\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "source patch rejected"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
+    assert payload["common_paths"] == ["vm.js"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+
+
+def test_implement_v2_run_command_rejects_sed_i_source_patch_shell_surface(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": "sed -i 's/old/new/' ./vm.js",
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "source patch rejected"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
+    assert payload["common_paths"] == ["vm.js"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+
+
+def test_implement_v2_run_command_allows_write_only_source_writer_without_readback(tmp_path) -> None:
+    command = (
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        "Path('vm.js').write_text(\"console.log('new')\\n\", encoding='utf-8')\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "source writer allowed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
+
+
 @pytest.mark.parametrize(
     "command,target",
     (

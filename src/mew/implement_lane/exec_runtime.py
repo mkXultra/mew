@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 from pathlib import Path
+import posixpath
 import re
 import shlex
 import time
@@ -327,6 +328,12 @@ class ImplementV2ManagedExecRuntime:
         )
         if compound_misuse is not None:
             raise ExecToolContractMisuse(compound_misuse)
+        patch_misuse = _run_command_source_patch_misuse(
+            command,
+            tool_name=call.tool_name,
+        )
+        if patch_misuse is not None:
+            raise ExecToolContractMisuse(patch_misuse)
         cwd = _workspace_path(args.get("cwd") or ".", self.workspace)
         cwd = resolve_allowed_path(cwd, self.allowed_roots)
         if not cwd.is_dir():
@@ -1440,6 +1447,47 @@ def _run_command_source_mutation_verifier_compound_misuse(
     }
 
 
+def _run_command_source_patch_misuse(
+    command: object,
+    *,
+    tool_name: str,
+) -> dict[str, object] | None:
+    if tool_name != "run_command":
+        return None
+    mutation_paths = _source_like_mutation_paths(command)
+    if not mutation_paths:
+        return None
+    read_paths = _source_like_read_paths(command)
+    if not read_paths:
+        return None
+    read_path_set = set(read_paths)
+    common_paths = tuple(path for path in mutation_paths if path in read_path_set)
+    if not common_paths:
+        return None
+    return {
+        "reason": (
+            "run_command must not patch an existing source-like file by reading and writing the "
+            "same path; use write_file/edit_file/apply_patch for source patches, then run a "
+            "separate verifier. Reserve bounded run_command writers for large generated files "
+            "that are not patching an existing source path."
+        ),
+        "kind": "run_command_source_patch_shell_surface",
+        "failure_class": "tool_contract_misuse",
+        "failure_subclass": "run_command_source_patch_shell_surface",
+        "recoverable": True,
+        "recoverable_tool_contract_misuse": True,
+        "tool_contract_recovery_eligible": False,
+        "terminal_failure_reaction_eligible": False,
+        "features": ["source_tree_mutation", "source_tree_read", "same_path_patch"],
+        "preserved_command": str(command or ""),
+        "suggested_tool": "write_file/edit_file/apply_patch",
+        "suggested_use_shell": False,
+        "mutation_paths": list(mutation_paths[:8]),
+        "read_paths": list(read_paths[:8]),
+        "common_paths": list(common_paths[:8]),
+    }
+
+
 def _raw_execution_contract_is_verifier_like(raw_contract: dict[str, object]) -> bool:
     if not isinstance(raw_contract, dict) or not raw_contract:
         return False
@@ -1546,7 +1594,26 @@ def _source_like_mutation_paths(command: object) -> tuple[str, ...]:
     seen: set[str] = set()
     source_like: list[str] = []
     for path in paths:
-        normalized = _normalize_shell_path_token(path)
+        normalized = _normalize_source_path_identity(path)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        if _shell_path_is_source_like(normalized):
+            source_like.append(normalized)
+    return tuple(source_like)
+
+
+def _source_like_read_paths(command: object) -> tuple[str, ...]:
+    text = str(command or "")
+    if not text.strip():
+        return ()
+    paths = list(_shell_read_api_paths(text))
+    if _text_matches_any(text, (r"(?:^|[;&|()]\s*)(?:sed\s+-i|perl\s+-pi)\b",)):
+        paths.extend(_shell_token_paths(text))
+    seen: set[str] = set()
+    source_like: list[str] = []
+    for path in paths:
+        normalized = _normalize_source_path_identity(path)
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
@@ -1697,6 +1764,46 @@ def _shell_write_api_paths(command: str) -> tuple[str, ...]:
     return tuple(paths)
 
 
+def _shell_read_api_paths(command: str) -> tuple[str, ...]:
+    paths: list[str] = [
+        match.group(1)
+        for match in re.finditer(
+            r"(?:pathlib\.)?Path\s*\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\.\s*read_(?:text|bytes)\s*\(",
+            command,
+            re.IGNORECASE,
+        )
+    ]
+    for match in re.finditer(
+        r"\b(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:pathlib\.)?Path\s*\(\s*['\"](?P<path>[^'\"]+)['\"]\s*\)",
+        command,
+        re.IGNORECASE,
+    ):
+        variable = re.escape(match.group("var"))
+        if re.search(rf"\b{variable}\s*\.\s*read_(?:text|bytes)\s*\(", command, re.IGNORECASE):
+            paths.append(match.group("path"))
+    paths.extend(
+        match.group(1)
+        for match in re.finditer(
+            r"(?:readfilesync|readFileSync)\s*\(\s*['\"]([^'\"]+)['\"]",
+            command,
+            re.IGNORECASE,
+        )
+    )
+    paths.extend(
+        match.group(1)
+        for match in re.finditer(r"\bopen\s*\(\s*['\"]([^'\"]+)['\"]\s*\)", command, re.IGNORECASE)
+    )
+    paths.extend(
+        match.group(1)
+        for match in re.finditer(
+            r"\bopen\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"][^'\"]*r[^'\"]*['\"]",
+            command,
+            re.IGNORECASE,
+        )
+    )
+    return tuple(paths)
+
+
 def _shell_token_paths(command: str) -> tuple[str, ...]:
     try:
         tokens = shlex.split(command)
@@ -1709,8 +1816,18 @@ def _normalize_shell_path_token(path: object) -> str:
     return str(path or "").strip().strip("'\"")
 
 
-def _shell_path_is_source_like(path: object) -> bool:
+def _normalize_source_path_identity(path: object) -> str:
     raw = _normalize_shell_path_token(path)
+    if not raw:
+        return ""
+    if raw.startswith(("$", "-")):
+        return raw
+    normalized = posixpath.normpath(raw.replace("\\", "/"))
+    return "" if normalized == "." else normalized
+
+
+def _shell_path_is_source_like(path: object) -> bool:
+    raw = _normalize_source_path_identity(path)
     if not raw or raw.startswith(("-", "$")) or raw.startswith(("/tmp/", "tmp/", "/var/tmp/")):
         return False
     name = Path(raw).name.casefold()
