@@ -35,7 +35,7 @@ from .prompt import (
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .registry import get_implement_lane_runtime_view
 from .replay import build_invalid_tool_result, validate_proof_manifest_pairing, validate_proof_manifest_write_safety
-from .tool_policy import list_v2_base_tool_specs, list_v2_tool_specs_for_mode
+from .tool_policy import ImplementLaneToolSpec, list_v2_base_tool_specs, list_v2_tool_specs_for_mode
 from .transcript import lane_artifact_namespace
 from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
 from .types import ToolCallEnvelope
@@ -422,6 +422,16 @@ def run_live_json_implement_v2(
             turn_id = f"turn-{turn_index}"
             if progress:
                 progress(f"implement_v2 turn #{turn_index}: prompt_render start")
+            model_visible_tool_specs = _model_visible_tool_specs_for_turn(
+                lane_input,
+                prior_tool_calls=tuple(tool_calls),
+                prior_tool_results=tuple(tool_results),
+            )
+            prewrite_write_tools_hidden = _prewrite_write_tools_hidden_for_turn(
+                lane_input,
+                prior_tool_calls=tuple(tool_calls),
+                prior_tool_results=tuple(tool_results),
+            )
             prompt = _live_json_prompt(
                 lane_input,
                 lane_attempt_id=lane_attempt_id,
@@ -435,6 +445,8 @@ def run_live_json_implement_v2(
                 tool_contract_recovery_turns_used=tool_contract_recovery_turns_used,
                 tool_contract_recovery_turn_limit=tool_contract_recovery_turn_limit,
                 tool_contract_recovery_instruction=tool_contract_recovery_instruction,
+                tool_specs=model_visible_tool_specs,
+                prewrite_write_tools_hidden=prewrite_write_tools_hidden,
                 history=tuple(prompt_history),
             )
             if progress:
@@ -3039,6 +3051,55 @@ def _deep_runtime_prewrite_probe_gate_result(
     )
 
 
+def _model_visible_tool_specs_for_turn(
+    lane_input: ImplementLaneInput,
+    *,
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> tuple[ImplementLaneToolSpec, ...]:
+    specs = list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode") or "read_only")
+    if _write_tools_visible_for_turn(
+        lane_input,
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+    ):
+        return specs
+    return tuple(spec for spec in specs if spec.access != "write")
+
+
+def _prewrite_write_tools_hidden_for_turn(
+    lane_input: ImplementLaneInput,
+    *,
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> bool:
+    specs = list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode") or "read_only")
+    if not any(spec.access == "write" for spec in specs):
+        return False
+    return not _write_tools_visible_for_turn(
+        lane_input,
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+    )
+
+
+def _write_tools_visible_for_turn(
+    lane_input: ImplementLaneInput,
+    *,
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> bool:
+    if not is_deep_probe_hard_runtime_task(lane_input.task_contract):
+        return True
+    if _has_completed_source_tree_mutation(prior_tool_results):
+        return True
+    probe_count = _deep_runtime_prewrite_probe_count(
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+    )
+    return probe_count >= _first_write_probe_threshold(lane_input)
+
+
 def _deep_runtime_prewrite_probe_count(
     *,
     prior_tool_calls: tuple[object, ...],
@@ -3979,15 +4040,20 @@ def _live_json_prompt(
     tool_contract_recovery_turns_used: int = 0,
     tool_contract_recovery_turn_limit: int = 0,
     tool_contract_recovery_instruction: str = "",
+    tool_specs: tuple[ImplementLaneToolSpec, ...] | None = None,
+    prewrite_write_tools_hidden: bool = False,
     history: tuple[dict[str, object], ...],
 ) -> str:
+    specs = tool_specs if tool_specs is not None else list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode"))
+    available_tool_names = " | ".join(spec.name for spec in specs if spec.access != "finish") or "no tool calls"
     sections = render_prompt_sections(
         build_implement_v2_prompt_sections(
             _lane_input_with_runtime_prompt_state(
                 lane_input,
                 active_work_todo_state=active_work_todo_state,
                 hard_runtime_frontier_state=hard_runtime_frontier_state,
-            )
+            ),
+            tool_specs=specs,
         )
     )
     response_contract: dict[str, object] = {
@@ -3995,7 +4061,7 @@ def _live_json_prompt(
         "tool_calls": [
             {
                 "id": "stable-provider-call-id",
-                "name": "read_file | search_text | inspect_dir | glob | git_status | git_diff | run_command | run_tests | poll_command | cancel_command | read_command_output | write_file | edit_file | apply_patch",
+                "name": available_tool_names,
                 "arguments": {"path": "relative/path"},
             }
         ],
@@ -4006,6 +4072,10 @@ def _live_json_prompt(
             "oracle_refs": ["oracle:..."],
         },
     }
+    if prewrite_write_tools_hidden:
+        response_contract["tool_surface_note"] = (
+            "write tools are temporarily hidden for this turn; gather the required cheap probes first"
+        )
     if hard_runtime_frontier_state and _model_frontier_update_enabled(lane_input):
         response_contract["frontier_state_update"] = {
             "optional": True,

@@ -50,6 +50,8 @@ from mew.implement_lane.v2_runtime import (
     _hard_runtime_progress_continuation_signature,
     _hard_runtime_progress_continuation_turn_limit,
     _live_json_prompt,
+    _model_visible_tool_specs_for_turn,
+    _prewrite_write_tools_hidden_for_turn,
     _provider_visible_tool_call_for_history,
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
@@ -1261,6 +1263,129 @@ def test_implement_v2_blocks_hard_runtime_prewrite_even_without_active_work_todo
     assert "deep_runtime_prewrite_probe_budget_not_met" in write_result["content"][0]["reason"]
     assert "vm.js" in write_result["content"][0]["reason"]
     assert not (tmp_path / "vm.js").exists()
+
+
+def test_implement_v2_hides_write_tools_from_hard_runtime_prompt_before_probe_budget(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+        lane_config={"mode": "full"},
+    )
+
+    specs = _model_visible_tool_specs_for_turn(lane_input, prior_tool_calls=(), prior_tool_results=())
+    prompt = _live_json_prompt(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        turn_index=1,
+        max_turns=8,
+        base_max_turns=8,
+        tool_specs=specs,
+        prewrite_write_tools_hidden=_prewrite_write_tools_hidden_for_turn(
+            lane_input,
+            prior_tool_calls=(),
+            prior_tool_results=(),
+        ),
+        history=(),
+    )
+    response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
+
+    assert {spec.name for spec in specs}.isdisjoint({"write_file", "edit_file", "apply_patch"})
+    assert (
+        '"tool_surface_note": "write tools are temporarily hidden for this turn; gather the required cheap probes first"'
+        in response_contract
+    )
+    assert "write_file" not in response_contract
+    assert "edit_file" not in response_contract
+    assert "apply_patch" not in response_contract
+    assert "finish" not in json.loads(response_contract)["tool_calls"][0]["name"]
+    assert "run_command" in response_contract
+
+
+def test_implement_v2_does_not_label_exec_mode_as_prewrite_hidden(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+        lane_config={"mode": "exec"},
+    )
+    specs = _model_visible_tool_specs_for_turn(lane_input, prior_tool_calls=(), prior_tool_results=())
+    prompt = _live_json_prompt(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        turn_index=1,
+        max_turns=8,
+        base_max_turns=8,
+        tool_specs=specs,
+        prewrite_write_tools_hidden=_prewrite_write_tools_hidden_for_turn(
+            lane_input,
+            prior_tool_calls=(),
+            prior_tool_results=(),
+        ),
+        history=(),
+    )
+    response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
+
+    assert {spec.name for spec in specs}.isdisjoint({"write_file", "edit_file", "apply_patch"})
+    assert "tool_surface_note" not in response_contract
+
+
+def test_implement_v2_reveals_write_tools_after_hard_runtime_probe_budget(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+        lane_config={"mode": "full"},
+    )
+    calls = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-1",
+        turn_index=1,
+        calls=tuple(
+            {
+                "provider_call_id": f"probe-{index}",
+                "tool_name": "read_file",
+                "arguments": {"path": f"src/{index}.c"},
+            }
+            for index in range(8)
+        ),
+    )
+    results = tuple(
+        ToolResultEnvelope(
+            lane_attempt_id=call.lane_attempt_id,
+            provider_call_id=call.provider_call_id,
+            mew_tool_call_id=call.mew_tool_call_id,
+            tool_name=call.tool_name,
+            status="completed",
+            content=({"path": call.arguments["path"], "content": "probe"},),
+        )
+        for call in calls
+    )
+
+    specs = _model_visible_tool_specs_for_turn(
+        lane_input,
+        prior_tool_calls=tuple(calls),
+        prior_tool_results=results,
+    )
+
+    assert {"write_file", "edit_file", "apply_patch"} <= {spec.name for spec in specs}
 
 
 def test_implement_v2_allows_normal_task_write_without_deep_prewrite_probe_budget(tmp_path) -> None:
