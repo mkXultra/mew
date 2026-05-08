@@ -820,7 +820,7 @@ def test_implement_v2_active_work_todo_first_write_due_is_visible_next_turn(tmp_
     readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
 
     assert len(prompts) == 2
-    assert '"first_write_due": true' in prompts[1]
+    assert '"first_write_due":true' in prompts[1]
     assert "Implement V2 Active Work Todo" in prompts[1]
     assert target.read_text(encoding="utf-8") == "print('done')\n"
     assert readiness["status"] == "written"
@@ -1391,10 +1391,11 @@ def test_implement_v2_prompt_sections_include_active_work_todo_readiness() -> No
 
     assert section.cache_policy == "dynamic"
     assert section.stability == "dynamic"
-    assert "first_write_readiness.first_write_due" in section.content
-    assert "write_repair is present" in section.content
+    assert "current_work" in section.content
+    assert "first_write_due" in section.content
+    assert "required_next_action" in section.content
     assert "stale_exact_edit" in section.content
-    assert '"target_paths": [' in section.content
+    assert '"target_paths":' in section.content
     assert '"src/app.py"' in section.content
 
 
@@ -4969,11 +4970,18 @@ def test_implement_v2_prompt_metrics_include_hot_path_collapse_phase0_inventory(
     assert "normal_full_prompt_bytes" not in collapse
     assert collapse["normal_prompt_section_bytes"] == metrics["total_chars"]
     assert collapse["normal_static_cacheable_bytes"] > 0
-    assert collapse["resident_model_visible_bytes"] > 0
+    assert collapse["ordinary_resident_summary_bytes"] > 0
+    assert collapse["resident_model_visible_bytes"] == 0
     assert inventory["implement_v2_lane_base"]["surface"] == "hot_path_projection"
-    assert inventory["implement_v2_active_work_todo"]["surface"] == "resident_sidecar_state"
-    assert inventory["implement_v2_hard_runtime_frontier_state"]["surface"] == "resident_sidecar_state"
+    assert inventory["implement_v2_active_work_todo"]["surface"] == "ordinary_resident_summary"
+    assert inventory["implement_v2_hard_runtime_frontier_state"]["surface"] == "ordinary_resident_summary"
     assert inventory["implement_v2_execution_artifact_contract"]["surface"] == "finish_replay_recovery"
+    ordinary_resident_bytes = sum(
+        section["bytes"]
+        for section in collapse["normal_section_inventory"]
+        if section["surface"] == "ordinary_resident_summary"
+    )
+    assert ordinary_resident_bytes <= 1536
 
 
 def test_implement_v2_active_coding_rhythm_requires_probe_fallbacks() -> None:
@@ -5029,6 +5037,8 @@ def test_implement_v2_v0_filters_memory_even_when_memory_summary_exists() -> Non
             "lane_memory_summary": "Do not include me.",
             "reentry_memory_refs": ["mem-1"],
             "lane_safe_resume_token": "resume-1",
+            "lane_safe_resume_payload": {"proof_manifest": {"tool_results": ["do-not-leak"]}},
+            "lane_safe_scalar_list": ["resume-2", {"frontier": "do-not-leak"}],
         },
     )
 
@@ -5042,6 +5052,9 @@ def test_implement_v2_v0_filters_memory_even_when_memory_summary_exists() -> Non
     assert "lane_memory_summary" not in lane_state.content
     assert "reentry_memory_refs" not in lane_state.content
     assert "lane_safe_resume_token" in lane_state.content
+    assert "lane_safe_scalar_list" in lane_state.content
+    assert "lane_safe_resume_payload" not in lane_state.content
+    assert "do-not-leak" not in lane_state.content
 
 
 def test_implement_v2_prompt_adds_dynamic_repair_history_section() -> None:
@@ -5068,7 +5081,7 @@ def test_implement_v2_prompt_adds_dynamic_repair_history_section() -> None:
     lane_state = next(section for section in sections if section.id == "implement_v2_lane_state")
 
     assert by_id["implement_v2_repair_history"]["cache_hint"] == "dynamic"
-    assert "advisory context, not completion proof" in repair_section.content
+    assert "repair_card" in repair_section.content
     assert "avoid_repeated_repairs" in repair_section.content
     assert "latest runtime trace" in repair_section.content
     assert "lane_repair_history" not in lane_state.content
@@ -5088,8 +5101,138 @@ def test_implement_v2_repair_history_section_is_bounded() -> None:
     sections = build_implement_v2_prompt_sections(lane_input)
     repair_section = next(section for section in sections if section.id == "implement_v2_repair_history")
 
-    assert len(repair_section.content) <= 6000
+    assert len(repair_section.content) <= 1536
     assert "__mew_truncated__" in repair_section.content
+    assert "preview" not in repair_section.content
+    assert "quoted" not in repair_section.content
+
+
+def test_implement_v2_repair_history_omits_nested_summary_payloads() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the latest runtime failure."},
+        persisted_lane_state={
+            "lane_repair_history": {
+                "summary": {"proof_object": {"secret": "do-not-leak"}},
+                "notes": [{"evidence": "do-not-leak"}],
+                "avoid_repeated_repairs": [{"summary": {"proof_object": "do-not-leak"}}],
+                "items": [{"summary": {"evidence": "do-not-leak"}, "failure_kind": "runtime"}],
+            }
+        },
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    repair_section = next(section for section in sections if section.id == "implement_v2_repair_history")
+
+    assert "repair_card" in repair_section.content
+    assert "runtime" in repair_section.content
+    assert "proof_object" not in repair_section.content
+    assert "evidence" not in repair_section.content
+    assert "do-not-leak" not in repair_section.content
+
+
+def test_implement_v2_active_work_todo_card_preserves_next_action_under_budget() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the latest runtime failure."},
+        persisted_lane_state={
+            "active_work_todo": {
+                "id": "todo-1",
+                "status": "drafting",
+                "source": {
+                    "plan_item": "inspect and patch " + ("nested runtime source " * 20),
+                    "target_paths": [
+                        "src/" + ("deep/" * 20) + "vm.js",
+                        "tests/" + ("deep/" * 20) + "test_vm.py",
+                        "docs/" + ("deep/" * 20) + "notes.md",
+                        "extra/" + ("deep/" * 20) + "ignored.md",
+                    ],
+                    "verify_command": "python -m pytest " + ("--very-long-flag " * 20),
+                },
+                "first_write_readiness": {
+                    "first_write_due": True,
+                    "probes_seen_without_write": 4,
+                    "required_next_action": "patch the runtime loader before another broad probe " * 10,
+                },
+                "write_repair": {
+                    "failure_kind": "stale_exact_edit" * 20,
+                    "path": "src/" + ("nested/" * 20) + "loader.py",
+                    "required_next_action": "repair the failed edit against current file text " * 10,
+                },
+            },
+            "lane_hard_runtime_frontier": {
+                "latest_runtime_failure": {
+                    "failure_class": "runtime_artifact_contract_mismatch" * 5,
+                    "stderr_tail": "vm halted after malformed frame output " * 20,
+                    "required_next_probe": "compare runtime artifact path and loader ABI " * 10,
+                },
+            }
+        },
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    active_section = next(section for section in sections if section.id == "implement_v2_active_work_todo")
+
+    assert len(active_section.content) <= 640
+    assert "__mew_truncated__" not in active_section.content
+    assert '"first_write_due":true' in active_section.content
+    assert '"target_paths":' in active_section.content
+    assert "required_next_action" in active_section.content
+    assert "repair the failed edit" in active_section.content
+
+
+def test_implement_v2_active_work_todo_omits_nested_next_action_payloads() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the latest runtime failure."},
+        persisted_lane_state={
+            "active_work_todo": {
+                "source": {
+                    "plan_item": {"proof_object": "do-not-leak"},
+                    "target_paths": [{"proof_object": "do-not-leak"}, "src/app.py"],
+                    "verify_command": {"evidence": "do-not-leak"},
+                },
+                "blocker": {"recovery_action": {"proof_object": "do-not-leak"}},
+                "first_write_readiness": {
+                    "first_write_due": True,
+                    "required_next_action": {"proof_object": "do-not-leak"},
+                },
+                "write_repair": {"required_next_action": {"evidence": "do-not-leak"}},
+            },
+            "lane_hard_runtime_frontier": {
+                "latest_runtime_failure": {
+                    "required_next_probe": {"frontier": "do-not-leak"},
+                    "stderr_tail": "safe bounded failure tail",
+                }
+            },
+        },
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    active_section = next(section for section in sections if section.id == "implement_v2_active_work_todo")
+    frontier_section = next(section for section in sections if section.id == "implement_v2_hard_runtime_frontier_state")
+
+    assert '"first_write_due":true' in active_section.content
+    assert "src/app.py" in active_section.content
+    assert "safe bounded failure tail" in active_section.content
+    assert "proof_object" not in active_section.content
+    assert "evidence" not in active_section.content
+    assert "frontier" not in active_section.content
+    assert "do-not-leak" not in active_section.content
+    assert '"frontier":"do-not-leak"' not in frontier_section.content
+    assert "do-not-leak" not in frontier_section.content
 
 
 def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() -> None:
@@ -5114,14 +5257,11 @@ def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() ->
     assert "implement_v2_hard_runtime_profile" in by_id
     assert "handcrafted stub" in by_id["implement_v2_hard_runtime_profile"].content
     assert "provided source" in by_id["implement_v2_hard_runtime_profile"].content
-    assert "recursive source frontier pass" in by_id["implement_v2_hard_runtime_profile"].content
-    assert "source-declared output paths" in by_id["implement_v2_hard_runtime_profile"].content
-    assert "If the chosen search tool is unavailable" in by_id["implement_v2_hard_runtime_profile"].content
-    assert "fresh verifier-shaped run" in by_id["implement_v2_hard_runtime_profile"].content
-    assert "reference similarity" in by_id["implement_v2_hard_runtime_profile"].content
-    assert "artifact ABI/ISA/endianness/entrypoint" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "run one verifier" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "fresh runtime/verifier evidence" in by_id["implement_v2_hard_runtime_profile"].content
     assert "implement_v2_hard_runtime_frontier_state" in by_id
     assert "Do not finish from this state alone" in by_id["implement_v2_hard_runtime_frontier_state"].content
+    assert len(by_id["implement_v2_hard_runtime_frontier_state"].content) <= 1536
 
 
 def test_implement_v2_hard_runtime_profile_expands_terminal_reaction_budget() -> None:
@@ -5329,13 +5469,17 @@ def test_implement_v2_prompt_adds_dynamic_frontier_state_when_persisted() -> Non
     by_id = {section["id"]: section for section in metrics["sections"]}
     sections = build_implement_v2_prompt_sections(lane_input)
     frontier_section = next(section for section in sections if section.id == "implement_v2_hard_runtime_frontier_state")
+    lane_state = next(section for section in sections if section.id == "implement_v2_lane_state")
 
     assert "implement_v2_hard_runtime_profile" not in by_id
     assert by_id["implement_v2_hard_runtime_frontier_state"]["cache_hint"] == "dynamic"
+    assert "lane_hard_runtime_frontier" not in lane_state.content
+    assert "runtime_artifact_contract_mismatch" not in lane_state.content
     assert "preserve source-backed artifact proof" in frontier_section.content
-    assert "runtime_harness" in frontier_section.content
+    assert "vm.js" in frontier_section.content
     assert "runtime_artifact_contract_mismatch" in frontier_section.content
     assert "artifact ABI/ISA/endianness/entrypoint" in frontier_section.content
+    assert len(frontier_section.content) <= 1536
 
 
 def test_implement_v2_prompt_omits_hard_runtime_profile_for_simple_task() -> None:

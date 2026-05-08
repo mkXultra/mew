@@ -18,6 +18,7 @@ from .tool_policy import ImplementLaneToolSpec, list_v2_tool_specs_for_mode
 from .types import ImplementLaneInput
 
 HOT_PATH_PROJECTION_SURFACE = "hot_path_projection"
+ORDINARY_RESIDENT_SUMMARY_SURFACE = "ordinary_resident_summary"
 RESIDENT_SIDECAR_STATE_SURFACE = "resident_sidecar_state"
 FINISH_REPLAY_RECOVERY_SURFACE = "finish_replay_recovery"
 
@@ -31,16 +32,21 @@ _HOT_PATH_SECTION_IDS = frozenset(
         "implement_v2_lane_state",
     }
 )
-_RESIDENT_SIDECAR_SECTION_IDS = frozenset(
+_ORDINARY_RESIDENT_SUMMARY_SECTION_IDS = frozenset(
     {
         "implement_v2_active_work_todo",
-        "implement_v2_compatibility_frontier",
         "implement_v2_hard_runtime_frontier_state",
         "implement_v2_hard_runtime_profile",
         "implement_v2_repair_history",
     }
 )
+_RESIDENT_SIDECAR_SECTION_IDS = frozenset()
 _FINISH_RECOVERY_SECTION_IDS = frozenset({"implement_v2_execution_artifact_contract"})
+_ORDINARY_RESIDENT_SUMMARY_BYTE_CAP = 1536
+_ACTIVE_WORK_CARD_BYTE_CAP = 640
+_REPAIR_HISTORY_CARD_BYTE_CAP = 256
+_HARD_RUNTIME_PROFILE_BYTE_CAP = 224
+_HARD_RUNTIME_FRONTIER_CARD_BYTE_CAP = 416
 
 
 def build_implement_v2_prompt_sections(
@@ -171,22 +177,7 @@ def build_implement_v2_prompt_sections(
                 id="implement_v2_active_work_todo",
                 version="v0",
                 title="Implement V2 Active Work Todo",
-                content=_bounded_stable_json(
-                    {
-                        "instructions": (
-                            "Use active_work_todo as the current work sequencing contract. "
-                            "Stay inside source.target_paths when they are present. If "
-                            "first_write_readiness.first_write_due is true, stop broad probing "
-                            "and make one scoped write_file/edit_file/apply_patch before another "
-                            "broad search or verifier. If write_repair is present, repair that "
-                            "failed source mutation before another verifier. For exact edit misses "
-                            "on generated, minified, or same-attempt-written files, do not keep "
-                            "guessing old strings: read the current target window if needed, then "
-                            "prefer write_file overwrite or apply_patch from exact current text."
-                        ),
-                        "active_work_todo": active_work_todo,
-                    }
-                ),
+                content=_active_work_hot_path_content(active_work_todo, hard_runtime_frontier),
                 stability=STABILITY_DYNAMIC,
                 cache_policy=CACHE_POLICY_DYNAMIC,
                 profile="implement_v2",
@@ -198,32 +189,11 @@ def build_implement_v2_prompt_sections(
                 id="implement_v2_hard_runtime_profile",
                 version="v0",
                 title="Implement V2 Hard Runtime Profile",
-                content=(
-                    "For tasks involving provided source plus a VM, emulator, interpreter, ELF/binary, "
-                    "or runtime-generated artifact, preserve the source-provided implementation path. "
-                    "Do not replace the requested program with a handcrafted stub, surrogate binary, "
-                    "or synthetic artifact producer unless the task explicitly asks for a shim. Treat "
-                    "minimal stand-ins as diagnostic probes only. Inspect the provided source/build files, "
-                    "build or repair that source, and keep verifier evidence tied to the final deliverable. "
-                    "Before the first write/edit for a runtime-generated artifact, perform one recursive "
-                    "source frontier pass over the provided source roots: use glob/search_text or a cheap "
-                    "source command such as `rg --files` with a fallback (`grep -R`, `find`, or Python) "
-                    "plus focused searches for artifact/output path terms like frame, screenshot, output, "
-                    "save, /tmp, .bmp, .png, .log, and platform hook names. If the chosen search tool is "
-                    "unavailable, rerun the source frontier with an available fallback before editing. "
-                    "Treat source-declared output paths and stdout markers as authoritative "
-                    "execution-contract targets; do not invent a different artifact path when the provided "
-                    "source already declares one. "
-                    "For runtime visual, frame, screenshot, log, socket, or pid artifacts, final proof must "
-                    "come from a fresh verifier-shaped run in the final cwd and must ground the required "
-                    "stdout/boot markers plus artifact quality such as task-provided expected dimensions, "
-                    "task-provided reference similarity/SSIM, semantic content, or exact output markers. "
-                    "If the final verifier is expected "
-                    "to create the artifact, remove stale self-check artifacts before finish. When a binary "
-                    "or runtime-generated artifact fails inside a VM, emulator, interpreter, or loader, compare "
-                    "the artifact ABI/ISA/endianness/entrypoint with the runtime loader contract before another "
-                    "broad rebuild or finish. If those conditions are not proven, continue or report a precise "
-                    "runtime gap; do not complete."
+                content=_clip_text(
+                    "Hard-runtime compact rule: no handcrafted stub; preserve provided source/runtime artifacts. "
+                    "Cheaply inspect source/output paths, patch real source, run one verifier. Finish only with "
+                    "fresh runtime/verifier evidence.",
+                    _HARD_RUNTIME_PROFILE_BYTE_CAP,
                 ),
                 stability=STABILITY_STATIC,
                 cache_policy=CACHE_POLICY_CACHEABLE,
@@ -236,16 +206,11 @@ def build_implement_v2_prompt_sections(
                 id="implement_v2_repair_history",
                 version="v0",
                 title="Implement V2 Repair History",
-                content=_bounded_stable_json(
-                    {
-                        "instructions": (
-                            "Use this bounded same-task repair history before broad rediscovery. "
-                            "It is advisory context, not completion proof. Reconcile it with current "
-                            "tool evidence, avoid repeating repairs already proven ineffective, and "
-                            "move to the next cheap probe, patch/edit, or verifier-shaped command."
-                        ),
-                        "lane_repair_history": repair_history,
-                    }
+                content=_bounded_compact_json(
+                        {
+                            "repair_card": _repair_history_hot_path_card(repair_history),
+                        },
+                    max_chars=_REPAIR_HISTORY_CARD_BYTE_CAP,
                 ),
                 stability=STABILITY_DYNAMIC,
                 cache_policy=CACHE_POLICY_DYNAMIC,
@@ -258,16 +223,15 @@ def build_implement_v2_prompt_sections(
                 id="implement_v2_hard_runtime_frontier_state",
                 version="v0",
                 title="Implement V2 Hard Runtime Frontier State",
-                content=_stable_json(
+                content=_bounded_compact_json(
                     {
-                        "instructions": (
-                            "Use this compact state before broad rediscovery. Update it when a newer "
-                            "build/runtime result supersedes it. Do not finish from this state alone; "
-                            "completion still requires deterministic terminal/write evidence."
+                        "rule": "Do not finish from this state alone.",
+                        "frontier_card": _hard_runtime_frontier_hot_path_card(
+                            hard_runtime_frontier
+                            or {"schema_version": 1, "status": "active", "source": "not_yet_populated"}
                         ),
-                        "lane_hard_runtime_frontier": hard_runtime_frontier
-                        or {"schema_version": 1, "status": "active", "source": "not_yet_populated"},
-                    }
+                    },
+                    max_chars=_HARD_RUNTIME_FRONTIER_CARD_BYTE_CAP,
                 ),
                 stability=STABILITY_DYNAMIC,
                 cache_policy=CACHE_POLICY_DYNAMIC,
@@ -324,6 +288,7 @@ def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, o
     normal_static_cacheable_bytes = 0
     normal_dynamic_hot_path_bytes = 0
     normal_dynamic_recovery_bytes = 0
+    ordinary_resident_summary_bytes = 0
     resident_model_visible_bytes = 0
     finish_replay_recovery_bytes = 0
     for section in sections:
@@ -335,6 +300,8 @@ def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, o
         visibility = "ordinary"
         if surface == RESIDENT_SIDECAR_STATE_SURFACE:
             resident_model_visible_bytes += chars
+        if surface == ORDINARY_RESIDENT_SUMMARY_SURFACE:
+            ordinary_resident_summary_bytes += chars
         if surface == FINISH_REPLAY_RECOVERY_SURFACE:
             finish_replay_recovery_bytes += chars
         if section.get("cache_policy") == CACHE_POLICY_CACHEABLE:
@@ -359,6 +326,7 @@ def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, o
         "measurement_scope": "prompt_sections_only",
         "surfaces": {
             "hot_path_projection": HOT_PATH_PROJECTION_SURFACE,
+            "ordinary_resident_summary": ORDINARY_RESIDENT_SUMMARY_SURFACE,
             "resident_sidecar_state": RESIDENT_SIDECAR_STATE_SURFACE,
             "finish_replay_recovery": FINISH_REPLAY_RECOVERY_SURFACE,
         },
@@ -367,6 +335,7 @@ def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, o
         "normal_static_cacheable_bytes": normal_static_cacheable_bytes,
         "normal_dynamic_hot_path_bytes": normal_dynamic_hot_path_bytes,
         "normal_dynamic_recovery_bytes": normal_dynamic_recovery_bytes,
+        "ordinary_resident_summary_bytes": ordinary_resident_summary_bytes,
         "resident_model_visible_bytes": resident_model_visible_bytes,
         "finish_replay_recovery_bytes": finish_replay_recovery_bytes,
         "provider_visible_tool_result_bytes": 0,
@@ -377,11 +346,286 @@ def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, o
 def _section_surface(section_id: str) -> str:
     if section_id in _RESIDENT_SIDECAR_SECTION_IDS:
         return RESIDENT_SIDECAR_STATE_SURFACE
+    if section_id in _ORDINARY_RESIDENT_SUMMARY_SECTION_IDS:
+        return ORDINARY_RESIDENT_SUMMARY_SURFACE
     if section_id in _FINISH_RECOVERY_SECTION_IDS:
         return FINISH_REPLAY_RECOVERY_SURFACE
     if section_id in _HOT_PATH_SECTION_IDS:
         return HOT_PATH_PROJECTION_SURFACE
     return HOT_PATH_PROJECTION_SURFACE
+
+
+def _active_work_hot_path_card(
+    active_work_todo: dict[str, object], hard_runtime_frontier: dict[str, object]
+) -> dict[str, object]:
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    readiness = (
+        active_work_todo.get("first_write_readiness")
+        if isinstance(active_work_todo.get("first_write_readiness"), dict)
+        else {}
+    )
+    write_repair = active_work_todo.get("write_repair") if isinstance(active_work_todo.get("write_repair"), dict) else {}
+    blocker = active_work_todo.get("blocker") if isinstance(active_work_todo.get("blocker"), dict) else {}
+    target_paths = _clip_string_list(source.get("target_paths"), max_items=2, max_chars=72)
+    required_next_action = _first_nonempty_scalar_text(
+        (
+            write_repair.get("required_next_action"),
+            readiness.get("required_next_action"),
+            blocker.get("recovery_action"),
+            _frontier_required_next_action(hard_runtime_frontier),
+        ),
+        limit=220,
+    )
+    return _drop_empty_dict_values(
+        {
+            "current_step": _clip_text(
+                source.get("plan_item") or active_work_todo.get("status") or active_work_todo.get("id"),
+                80,
+            ),
+            "target_paths": target_paths,
+            "verify_command": _clip_text(source.get("verify_command"), 80),
+            "first_write_due": bool(readiness.get("first_write_due")) if readiness else None,
+            "probes_seen_without_write": _safe_numeric(readiness.get("probes_seen_without_write")),
+            "write_repair": _drop_empty_dict_values(
+                {
+                    "failure_kind": _clip_text(write_repair.get("failure_kind"), 80),
+                    "path": _clip_text(write_repair.get("path"), 120),
+                }
+            ),
+            "latest_failure": _frontier_latest_failure_card(hard_runtime_frontier),
+            "required_next_action": _clip_text(required_next_action, 160),
+        }
+    )
+
+
+def _active_work_hot_path_content(
+    active_work_todo: dict[str, object], hard_runtime_frontier: dict[str, object]
+) -> str:
+    card = _active_work_hot_path_card(active_work_todo, hard_runtime_frontier)
+    required = _drop_empty_dict_values(
+        {
+            "first_write_due": card.get("first_write_due"),
+            "target_paths": card.get("target_paths"),
+            "required_next_action": card.get("required_next_action"),
+        }
+    )
+    optional_keys = (
+        "current_step",
+        "probes_seen_without_write",
+        "write_repair",
+        "latest_failure",
+        "verify_command",
+    )
+    compact_card: dict[str, object] = dict(required)
+    for key in optional_keys:
+        value = card.get(key)
+        if value in (None, "", [], {}):
+            continue
+        candidate_card = {**compact_card, key: value}
+        candidate = {"current_work": candidate_card}
+        if len(_compact_json(candidate)) <= _ACTIVE_WORK_CARD_BYTE_CAP:
+            compact_card = candidate_card
+    return _bounded_compact_json({"current_work": compact_card}, max_chars=_ACTIVE_WORK_CARD_BYTE_CAP)
+
+
+def _hard_runtime_frontier_hot_path_card(frontier: dict[str, object]) -> dict[str, object]:
+    latest_failure = _frontier_latest_failure_card(frontier)
+    final_artifact = frontier.get("final_artifact") if isinstance(frontier.get("final_artifact"), dict) else {}
+    verifier = (
+        frontier.get("next_verifier_shaped_command")
+        if isinstance(frontier.get("next_verifier_shaped_command"), dict)
+        else {}
+    )
+    source_roles = frontier.get("source_roles") if isinstance(frontier.get("source_roles"), list) else []
+    source_paths = _clip_string_list(
+        [item.get("path") for item in source_roles if isinstance(item, dict)], max_items=4, max_chars=96
+    )
+    return _drop_empty_dict_values(
+        {
+            "status": _clip_text(frontier.get("status"), 80),
+            "objective": _clip_text(frontier.get("objective"), 160),
+            "source_paths": source_paths,
+            "latest_failure": latest_failure,
+            "required_next_action": _frontier_required_next_action(frontier),
+            "final_artifact_path": _clip_text(final_artifact.get("path"), 120),
+            "next_verifier": _drop_empty_dict_values(
+                {
+                    "tool": _clip_text(verifier.get("tool"), 40),
+                    "cwd": _clip_text(verifier.get("cwd"), 120),
+                    "command": _clip_text(verifier.get("command"), 220),
+                }
+            ),
+        }
+    )
+
+
+def _repair_history_hot_path_card(repair_history: dict[str, object]) -> dict[str, object]:
+    items = repair_history.get("items") if isinstance(repair_history.get("items"), list) else []
+    log = repair_history.get("log") if isinstance(repair_history.get("log"), list) else []
+    hints: dict[str, object] = {}
+    safe_hint_keys = {
+        "task",
+        "summary",
+        "notes",
+        "avoid_repeated_repairs",
+        "next_generic_probe",
+        "required_next_action",
+        "required_next_probe",
+        "failure_class",
+        "failure_kind",
+        "path",
+    }
+    for key, value in repair_history.items():
+        if key in {"items", "log"}:
+            continue
+        if key not in safe_hint_keys:
+            continue
+        if isinstance(value, str) and value.strip():
+            hints[str(key)] = _clip_text(value, 240)
+        elif isinstance(value, list):
+            if key.endswith("refs"):
+                hints[str(key)] = _clip_refs(value)
+            else:
+                clipped_items: list[object] = []
+                for item in value[:2]:
+                    if isinstance(item, (str, int, float, bool)):
+                        clipped_items.append(_clip_text(item, 120))
+                    elif isinstance(item, dict):
+                        card = _repair_history_entry_card(item)
+                        if card:
+                            clipped_items.append(card)
+                if clipped_items:
+                    hints[str(key)] = clipped_items
+        elif isinstance(value, (int, float, bool)):
+            hints[str(key)] = value
+    latest = [_repair_history_entry_card(item) for item in (items[-2:] if items else log[-2:])]
+    return _drop_empty_dict_values(
+        {
+            "latest": latest,
+            "hints": hints,
+            "notes": _clip_text(repair_history.get("notes"), 240),
+            "summary": _clip_text(repair_history.get("summary"), 240),
+        }
+    )
+
+
+def _repair_history_entry_card(item: object) -> dict[str, object]:
+    if isinstance(item, dict):
+        return _drop_empty_dict_values(
+            {
+                "summary": _clip_text(item.get("summary") or item.get("message") or item.get("failure_summary"), 160),
+                "failure_kind": _clip_text(item.get("failure_kind"), 80),
+                "failure_class": _clip_text(item.get("failure_class"), 80),
+                "path": _clip_text(item.get("path") or item.get("target_path"), 120),
+                "required_next_action": _clip_text(
+                    item.get("required_next_action") or item.get("required_next_probe") or item.get("recovery_action"),
+                    180,
+                ),
+                "refs": _clip_refs(item.get("refs") or item.get("evidence_refs")),
+            }
+        )
+    return {"summary": _clip_text(item, 180)}
+
+
+def _clip_refs(value: object) -> list[object]:
+    if not isinstance(value, list):
+        return []
+    clipped: list[object] = []
+    for item in value[:5]:
+        if isinstance(item, dict):
+            clipped.append({str(key): _clip_text(val, 160) for key, val in item.items() if key in {"kind", "id", "ref"}})
+        elif isinstance(item, str):
+            clipped.append(_clip_text(item, 160))
+    return clipped
+
+
+def _frontier_latest_failure_card(frontier: dict[str, object]) -> dict[str, object]:
+    for key in (
+        "latest_runtime_failure",
+        "latest_build_failure",
+        "runtime_artifact_contract_mismatch",
+        "first_write_frontier_stall",
+    ):
+        failure = frontier.get(key)
+        if isinstance(failure, dict) and failure:
+            return _drop_empty_dict_values(
+                {
+                    "source": key,
+                    "failure_class": _clip_text(failure.get("failure_class"), 80),
+                    "failure_kind": _clip_text(failure.get("failure_kind"), 80),
+                    "summary": _clip_text(
+                        failure.get("failure_summary")
+                        or failure.get("summary")
+                        or failure.get("message")
+                        or failure.get("stderr_tail")
+                        or failure.get("stdout_tail")
+                        or failure.get("required_next_probe"),
+                        140,
+                    ),
+                }
+            )
+    return {}
+
+
+def _frontier_required_next_action(frontier: dict[str, object]) -> str:
+    for key in (
+        "latest_runtime_failure",
+        "latest_build_failure",
+        "runtime_artifact_contract_mismatch",
+        "first_write_frontier_stall",
+    ):
+        failure = frontier.get(key)
+        if not isinstance(failure, dict):
+            continue
+        action = _first_nonempty_scalar_text(
+            (
+                failure.get("required_next_action"),
+                failure.get("required_next_probe"),
+                failure.get("recovery_action"),
+            ),
+            limit=220,
+        )
+        if action:
+            return action
+    return ""
+
+
+def _first_nonempty_scalar_text(values: tuple[object, ...], *, limit: int) -> str:
+    for value in values:
+        text = _clip_text(value, limit)
+        if text:
+            return text
+    return ""
+
+
+def _clip_string_list(value: object, *, max_items: int, max_chars: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        text = _clip_text(item, max_chars)
+        if text:
+            items.append(text)
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def _safe_numeric(value: object) -> int | float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return value
+    return None
+
+
+def _clip_text(value: object, limit: int) -> str:
+    if isinstance(value, (dict, list, tuple, set)):
+        return ""
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _safe_section_chars(value: object) -> int:
@@ -418,6 +662,20 @@ def _bounded_stable_json(value: object, *, max_chars: int = 6000) -> str:
         else:
             high = mid - 1
     return best
+
+
+def _compact_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+
+
+def _bounded_compact_json(value: object, *, max_chars: int) -> str:
+    text = _compact_json(value)
+    if len(text) <= max_chars:
+        return text
+    marker = _compact_json({"__mew_truncated__": "true: compact card exceeded bounded prompt budget"})
+    if len(marker) <= max_chars:
+        return marker
+    return '{"__mew_truncated__":"true"}'
 
 
 def is_hard_runtime_artifact_task(task_contract: object) -> bool:
@@ -477,7 +735,20 @@ def _contract_text(task_contract: object) -> str:
 
 def _lane_local_state(persisted_lane_state: dict[str, object]) -> dict[str, object]:
     allowed_prefixes = ("lane_", "reentry_", "resume_")
-    blocked_terms = ("memory", "typed", "durable", "repair_memory", "repair_history", "context_capsule")
+    blocked_terms = (
+        "memory",
+        "typed",
+        "durable",
+        "repair_memory",
+        "repair_history",
+        "context_capsule",
+        "frontier",
+        "proof",
+        "evidence",
+        "oracle",
+        "todo",
+        "active_work",
+    )
     filtered = {}
     for key, value in persisted_lane_state.items():
         key_text = str(key)
@@ -486,8 +757,22 @@ def _lane_local_state(persisted_lane_state: dict[str, object]) -> dict[str, obje
             continue
         if any(term in normalized for term in blocked_terms):
             continue
-        filtered[key_text] = value
+        safe_value = _lane_state_safe_value(value)
+        if safe_value is not None:
+            filtered[key_text] = safe_value
     return filtered
+
+
+def _lane_state_safe_value(value: object) -> object | None:
+    if isinstance(value, str):
+        text = _clip_text(value, 240)
+        return text if text else None
+    if isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, list):
+        items = [_clip_text(item, 120) for item in value if isinstance(item, (str, int, float, bool))]
+        return [item for item in items if item][:5] or None
+    return None
 
 
 def _active_work_todo_state(persisted_lane_state: dict[str, object]) -> dict[str, object]:
@@ -501,19 +786,19 @@ def _active_work_todo_state(persisted_lane_state: dict[str, object]) -> dict[str
     write_repair = value.get("write_repair") if isinstance(value.get("write_repair"), dict) else {}
     cached_refs = value.get("cached_window_refs") if isinstance(value.get("cached_window_refs"), list) else []
     projected = {
-        "id": str(value.get("id") or "").strip(),
-        "lane": str(value.get("lane") or "").strip(),
-        "status": str(value.get("status") or "").strip(),
+        "id": _clip_text(value.get("id"), 120),
+        "lane": _clip_text(value.get("lane"), 80),
+        "status": _clip_text(value.get("status"), 80),
         "source": {
-            "plan_item": str(source.get("plan_item") or "").strip(),
-            "target_paths": [str(path) for path in source.get("target_paths") or [] if str(path or "").strip()][:8],
-            "verify_command": str(source.get("verify_command") or "").strip(),
+            "plan_item": _clip_text(source.get("plan_item"), 240),
+            "target_paths": _clip_string_list(source.get("target_paths"), max_items=8, max_chars=240),
+            "verify_command": _clip_text(source.get("verify_command"), 360),
         },
         "attempts": {str(key): item for key, item in attempts.items() if item not in (None, "", [], {})},
         "blocker": {
-            "code": str(blocker.get("code") or "").strip(),
-            "recovery_action": str(blocker.get("recovery_action") or "").strip(),
-            "path": str(blocker.get("path") or "").strip(),
+            "code": _clip_text(blocker.get("code"), 120),
+            "recovery_action": _clip_text(blocker.get("recovery_action"), 240),
+            "path": _clip_text(blocker.get("path"), 240),
         },
         "cached_window_refs": [
             {
@@ -563,6 +848,7 @@ __all__ = [
     "FINISH_REPLAY_RECOVERY_SURFACE",
     "HOT_PATH_PROJECTION_SURFACE",
     "implement_v2_prompt_section_metrics",
+    "ORDINARY_RESIDENT_SUMMARY_SURFACE",
     "RESIDENT_SIDECAR_STATE_SURFACE",
     "is_hard_runtime_artifact_task",
 ]
