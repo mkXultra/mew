@@ -940,3 +940,35 @@ commit, run one more 10 minute same-shape diagnostic for
 `make-mips-interpreter`; compare verifier duration and whether unsupported
 runtime evidence becomes faster and more repairable. Do not add task-specific
 syscall, MIPS, `vm.js`, or frame-file rules.
+
+Implement-v2 exact-edit recovery checkpoint 2026-05-09 JST:
+
+The same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260509-070628` scored `0/1` with
+runner errors `0`. After the fail-fast profile repair, the step shape improved
+again: first edit moved to `282s`, first verifier to `287s`, broad cycles stayed
+`0`, and the runtime now fails fast with explicit unsupported-syscall evidence
+instead of spending the final wall budget inside a doomed verifier. The next
+gap is narrower: mew still attempted a rejected same-path `run_command` source
+patch, then retried with `edit_file`, but the exact `old_string` was stale and
+the model timed out after the generic `old text was not found` error.
+
+Decision: keep broad measurement paused and repair exact-edit recovery, not the
+task. This is a generic hot-path issue: after a stale exact edit, the model
+needs bounded nearest-current-file context to retry with a real old string. The
+repair makes implement_v2 `edit_file` failures with `old text was not found`
+return a structured `edit_exact_match_miss` payload with bounded
+`nearest_existing_windows`, capped target-file prefix reading, capped old-text
+scoring, and per-anchor candidate collection so a repeated common anchor cannot
+starve later discriminating anchors. No MIPS, `vm.js`, syscall, or frame-file
+rules were added.
+
+Validation after the repair: scoped ruff passed, focused exact-edit recovery
+tests passed, full `tests/test_implement_lane.py` passed (`295 passed`), and
+`git diff --check` passed. codex-ultra review session
+`019e09b1-3ad9-7db2-ad0e-da81d303897d` first requested fixes for anchor
+starvation, task-shaped test data, and unbounded read/scoring work; after those
+fixes, the same session returned `STATUS: APPROVE`. After commit, run one more
+10 minute same-shape diagnostic for `make-mips-interpreter`; compare whether
+the stale edit failure becomes a fast, recoverable exact-text retry. Do not run
+`speed_1` / `proof_5` first.

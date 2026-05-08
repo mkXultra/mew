@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import difflib
+import re
 from pathlib import Path
 
 from ..write_tools import delete_file, edit_file, edit_file_hunks, write_file
@@ -11,6 +13,8 @@ from .types import ToolCallEnvelope, ToolResultEnvelope
 WRITE_TOOL_NAMES = frozenset({"write_file", "edit_file", "apply_patch"})
 PROTECTED_WRITE_PATHS = frozenset({"ROADMAP.md", "ROADMAP_STATUS.md", "SIDE_PROJECT_ROADMAP_STATUS.md"})
 PROTECTED_WRITE_PREFIXES = (".codex/skills/", ".github/workflows/")
+_EDIT_RECOVERY_FILE_CHAR_CAP = 1_000_000
+_EDIT_RECOVERY_OLD_TEXT_CHAR_CAP = 4096
 
 
 class ImplementV2WriteRuntime:
@@ -42,6 +46,9 @@ class ImplementV2WriteRuntime:
             else:
                 payload = self._apply_patch(call)
         except (OSError, RuntimeError, ValueError) as exc:
+            content = {"reason": str(exc)}
+            if call.tool_name == "edit_file":
+                content.update(self._edit_file_recovery_payload(call, reason=str(exc)))
             return ToolResultEnvelope(
                 lane_attempt_id=call.lane_attempt_id,
                 provider_call_id=call.provider_call_id,
@@ -49,7 +56,7 @@ class ImplementV2WriteRuntime:
                 tool_name=call.tool_name,
                 status="failed",
                 is_error=True,
-                content=({"reason": str(exc)},),
+                content=(content,),
             )
         return self._result_from_payload(call, payload)
 
@@ -91,6 +98,31 @@ class ImplementV2WriteRuntime:
             dry_run=not apply,
         )
         return _write_payload(call, result, apply=apply, approval=approval)
+
+    def _edit_file_recovery_payload(self, call: ToolCallEnvelope, *, reason: str) -> dict[str, object]:
+        if "old text was not found" not in reason:
+            return {}
+        args = dict(call.arguments)
+        path = _workspace_path(args.get("path") or "", self.workspace)
+        old_text = str(_first_present(args, "old", "old_string", "old_text") or "")
+        payload: dict[str, object] = {
+            "failure_class": "edit_exact_match_miss",
+            "failure_subclass": "edit_exact_match_miss",
+            "recoverable": True,
+            "path": str(path),
+            "suggested_tool": "read_file/edit_file/apply_patch",
+            "suggested_next_action": "retry with an exact old string from nearest_existing_windows or read the target window",
+        }
+        if old_text:
+            payload["old_string_preview"] = _clip_text(old_text, 240)
+        try:
+            current = _read_text_prefix(path, _EDIT_RECOVERY_FILE_CHAR_CAP)
+        except OSError:
+            return payload
+        windows = _nearest_existing_windows(current, old_text)
+        if windows:
+            payload["nearest_existing_windows"] = windows
+        return payload
 
     def _apply_patch(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
@@ -218,6 +250,81 @@ def _first_present(args: dict[str, object], *keys: str) -> object:
         if key in args and args.get(key) is not None:
             return args.get(key)
     return ""
+
+
+def _clip_text(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "..."
+
+
+def _nearest_existing_windows(current: str, old_text: str) -> list[dict[str, object]]:
+    if not current or not old_text:
+        return []
+    old_text = old_text[:_EDIT_RECOVERY_OLD_TEXT_CHAR_CAP]
+    current = current[:_EDIT_RECOVERY_FILE_CHAR_CAP]
+    window_size = max(160, min(640, len(old_text) * 6))
+    starts: set[int] = set()
+    for anchor in _edit_mismatch_anchors(old_text):
+        search_from = 0
+        matches_for_anchor = 0
+        while matches_for_anchor < 16 and len(starts) < 160:
+            index = current.find(anchor, search_from)
+            if index < 0:
+                break
+            starts.add(max(0, index - window_size // 2))
+            search_from = index + max(1, len(anchor))
+            matches_for_anchor += 1
+    if not starts:
+        return []
+    ranked: list[tuple[float, int, int, str]] = []
+    for start in starts:
+        end = min(len(current), start + window_size)
+        snippet = current[start:end]
+        score = difflib.SequenceMatcher(None, old_text, snippet).ratio()
+        ranked.append((score, start, end, snippet))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    windows: list[dict[str, object]] = []
+    seen: set[tuple[int, int]] = set()
+    for score, start, end, snippet in ranked:
+        key = (start, end)
+        if key in seen:
+            continue
+        seen.add(key)
+        windows.append(
+            {
+                "start": start,
+                "end": end,
+                "similarity": round(score, 3),
+                "text": _clip_text(snippet, 700),
+            }
+        )
+        if len(windows) >= 3:
+            break
+    return windows
+
+
+def _edit_mismatch_anchors(old_text: str) -> list[str]:
+    raw_tokens = re.findall(
+        r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+"
+        r"|0x[0-9A-Fa-f]+"
+        r"|[A-Za-z_$][A-Za-z0-9_$]*"
+        r"|>>>|<<|&&|\|\||==|!=|<=|>=|[0-9]+",
+        old_text,
+    )
+    tokens: list[str] = []
+    for token in raw_tokens:
+        if len(token) < 3 and not token.isdigit():
+            continue
+        if token not in tokens:
+            tokens.append(token)
+    tokens.sort(key=lambda item: (-len(item), item))
+    return tokens[:12]
+
+
+def _read_text_prefix(path: Path, char_limit: int) -> str:
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        return handle.read(char_limit)
 
 
 def _normalize_approval_record(raw_approval: object) -> dict[str, object]:

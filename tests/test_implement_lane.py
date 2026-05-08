@@ -12700,6 +12700,39 @@ def test_implement_v2_edit_file_exact_old_dry_run_and_no_match_failure(tmp_path)
     assert target.read_text(encoding="utf-8") == "alpha\n"
 
 
+def test_implement_v2_edit_file_exact_miss_returns_nearest_existing_windows(tmp_path) -> None:
+    target = tmp_path / "worker.txt"
+    target.write_text(
+        "".join(f"commonIdentifier filler {index}\n" for index in range(120))
+        + "commonIdentifier actualCall rareWidget\n",
+        encoding="utf-8",
+    )
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "edit_file",
+                "arguments": {
+                    "path": "worker.txt",
+                    "old_string": "commonIdentifier missingCall rareWidget",
+                    "new_string": "commonIdentifier replacementCall rareWidget",
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "exact miss recovery"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_class"] == "edit_exact_match_miss"
+    assert payload["recoverable"] is True
+    assert payload["suggested_tool"] == "read_file/edit_file/apply_patch"
+    assert payload["old_string_preview"] == "commonIdentifier missingCall rareWidget"
+    assert "commonIdentifier actualCall rareWidget" in payload["nearest_existing_windows"][0]["text"]
+    assert target.read_text(encoding="utf-8").endswith("commonIdentifier actualCall rareWidget\n")
+
+
 def test_implement_v2_edit_file_accepts_common_string_aliases(tmp_path) -> None:
     target = tmp_path / "README.md"
     target.write_text("alpha\n", encoding="utf-8")
