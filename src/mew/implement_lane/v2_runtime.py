@@ -664,6 +664,30 @@ def run_live_json_implement_v2(
                         current_results_list.append(block_result)
                         wall_blocked_tool_execution = True
                         break
+                    prewrite_block = _deep_runtime_prewrite_probe_gate_result(
+                        capped_call,
+                        lane_input=lane_input,
+                        active_work_todo_state=active_work_todo_state,
+                        prior_tool_calls=tuple(tool_calls) + tuple(executed_calls),
+                        prior_tool_results=tuple(tool_results) + tuple(current_results_list),
+                        probe_threshold=_first_write_probe_threshold(lane_input),
+                    )
+                    if prewrite_block is not None:
+                        executed_calls.append(capped_call)
+                        current_results_list.append(prewrite_block)
+                        for skipped_call in current_calls[call_index + 1 :]:
+                            executed_calls.append(skipped_call)
+                            current_results_list.append(
+                                build_invalid_tool_result(
+                                    skipped_call,
+                                    reason=(
+                                        "blocked_by_deep_runtime_prewrite_probe_gate: "
+                                        f"{capped_call.tool_name}#{capped_call.provider_call_id} "
+                                        "must observe enough cheap source/runtime probes before source mutation"
+                                    ),
+                                )
+                            )
+                        break
                     executed_calls.append(capped_call)
                     current_results_list.append(
                         _execute_live_json_tool(
@@ -2974,6 +2998,72 @@ def _first_write_probe_threshold(lane_input: ImplementLaneInput) -> int:
     return 3
 
 
+def _deep_runtime_prewrite_probe_gate_result(
+    call: object,
+    *,
+    lane_input: ImplementLaneInput,
+    active_work_todo_state: dict[str, object],
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+    probe_threshold: int,
+) -> ToolResultEnvelope | None:
+    if not is_deep_probe_hard_runtime_task(lane_input.task_contract):
+        return None
+    tool_name = str(getattr(call, "tool_name", "") or "").strip()
+    if tool_name not in WRITE_TOOL_NAMES:
+        return None
+    if _has_completed_source_tree_mutation(prior_tool_results):
+        return None
+    threshold = max(1, int(probe_threshold))
+    probe_count = _deep_runtime_prewrite_probe_count(
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+    )
+    if probe_count >= threshold:
+        return None
+    target_paths = _active_work_todo_target_paths(active_work_todo_state) if active_work_todo_state else []
+    if not target_paths:
+        write_path = _write_call_path(call)
+        if write_path:
+            target_paths = [write_path]
+    target_text = ", ".join(str(path) for path in target_paths[:3] if str(path).strip()) or "the target source"
+    return build_invalid_tool_result(
+        call,
+        reason=(
+            "deep_runtime_prewrite_probe_budget_not_met: "
+            f"observed {probe_count}/{threshold} cheap source/runtime probes before first source mutation. "
+            "For emulator/interpreter/runtime-artifact tasks, inspect ABI, symbols, syscalls/hooks, "
+            f"expected outputs, and available source/disassembly around {target_text} before writing."
+        ),
+    )
+
+
+def _deep_runtime_prewrite_probe_count(
+    *,
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> int:
+    count = 0
+    for call, result in zip(prior_tool_calls, prior_tool_results):
+        if _has_completed_source_tree_mutation((result,)):
+            break
+        tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
+        if _is_first_write_probe_result(tool_name, result):
+            count += 1
+    return count
+
+
+def _has_completed_source_tree_mutation(results: tuple[ToolResultEnvelope, ...]) -> bool:
+    return any(
+        result.status == "completed"
+        and (
+            bool(_source_tree_mutation_from_result(result))
+            or (result.tool_name in WRITE_TOOL_NAMES and bool(result.side_effects))
+        )
+        for result in results
+    )
+
+
 def _write_repair_from_trace(
     *,
     tool_calls: tuple[object, ...],
@@ -3127,8 +3217,6 @@ def _first_write_readiness_from_trace(
                 first_source_mutation_tool = tool_name
                 break
             continue
-        if first_write_attempt_turn > 0:
-            continue
         if first_source_mutation_turn > 0:
             break
         if _is_first_write_probe_result(tool_name, result):
@@ -3190,6 +3278,8 @@ def _is_first_write_probe_result(tool_name: str, result: ToolResultEnvelope) -> 
         return False
     if result.status not in {"completed", "failed", "invalid"}:
         return False
+    if result.status == "invalid" and _invalid_result_is_synthetic_non_observation(result):
+        return False
     if tool_name == "run_command":
         if _source_tree_mutation_from_result(result):
             return False
@@ -3198,6 +3288,17 @@ def _is_first_write_probe_result(tool_name: str, result: ToolResultEnvelope) -> 
         if _execution_contract_is_verifier_like(contract):
             return False
     return True
+
+
+def _invalid_result_is_synthetic_non_observation(result: ToolResultEnvelope) -> bool:
+    payload = _first_result_payload(result)
+    reason = str(payload.get("reason") or payload.get("error") or "").casefold()
+    return reason.startswith(
+        (
+            "blocked_by_deep_runtime_prewrite_probe_gate",
+            "blocked_by_prior_failed_write_in_same_turn",
+        )
+    )
 
 
 def _active_work_todo_target_paths(active_work_todo: dict[str, object]) -> list[str]:

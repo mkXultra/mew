@@ -1038,6 +1038,284 @@ def test_implement_v2_first_write_threshold_defaults_to_deeper_hard_runtime_prob
     assert _first_write_probe_threshold(configured_input) == 4
 
 
+def test_implement_v2_blocks_hard_runtime_write_before_deep_prewrite_probe_budget(tmp_path) -> None:
+    (tmp_path / "doomgeneric_mips").write_bytes(b"\x7fELFfake")
+    (tmp_path / "doomgeneric").mkdir()
+    (tmp_path / "doomgeneric" / "i_video.c").write_text("void I_FinishUpdate(void) {}\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "cheap hard-runtime probes",
+            "tool_calls": [
+                {"id": "probe-dir", "name": "inspect_dir", "arguments": {"path": "."}},
+                {"id": "probe-elf", "name": "run_command", "arguments": {"command": "file doomgeneric_mips", "cwd": "."}},
+                {"id": "probe-src", "name": "search_text", "arguments": {"query": "I_FinishUpdate", "path": "."}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "write runtime too early and verify",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "module.exports = {}\n"},
+                },
+                {"id": "verify", "name": "run_command", "arguments": {"command": "node vm.js", "cwd": "."}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "blocked before verifier"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-hard-runtime",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+            },
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    write_result = next(item for item in tool_results if item["provider_call_id"] == "write-vm")
+    verify_result = next(item for item in tool_results if item["provider_call_id"] == "verify")
+    readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
+
+    assert result.status == "blocked"
+    assert not (tmp_path / "vm.js").exists()
+    assert write_result["status"] == "invalid"
+    assert "deep_runtime_prewrite_probe_budget_not_met" in write_result["content"][0]["reason"]
+    assert verify_result["status"] == "invalid"
+    assert "blocked_by_deep_runtime_prewrite_probe_gate" in verify_result["content"][0]["reason"]
+    assert readiness["probe_threshold"] == 8
+    assert readiness["probe_count_before_first_write"] == 3
+    assert readiness["first_write_due"] is False
+    assert readiness["first_write_attempt_tool"] == "write_file"
+    assert "first_source_mutation_turn" not in readiness
+
+
+def test_implement_v2_allows_hard_runtime_write_after_more_probes_follow_blocked_write(tmp_path) -> None:
+    (tmp_path / "doomgeneric_mips").write_bytes(b"\x7fELFfake")
+    (tmp_path / "doomgeneric").mkdir()
+    (tmp_path / "doomgeneric" / "i_video.c").write_text("void I_FinishUpdate(void) {}\n", encoding="utf-8")
+    probe_command = shlex.join([sys.executable, "-c", "print('abi probe')"])
+    outputs = [
+        {
+            "summary": "initial cheap probes",
+            "tool_calls": [
+                {"id": "probe-dir", "name": "inspect_dir", "arguments": {"path": "."}},
+                {"id": "probe-elf", "name": "run_command", "arguments": {"command": "file doomgeneric_mips", "cwd": "."}},
+                {"id": "probe-src", "name": "search_text", "arguments": {"query": "I_FinishUpdate", "path": "."}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "premature runtime write",
+            "tool_calls": [
+                {
+                    "id": "write-too-early",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "module.exports = {}\n"},
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "additional source/runtime probes after blocked write",
+            "tool_calls": [
+                {"id": "probe-src-read", "name": "read_file", "arguments": {"path": "doomgeneric/i_video.c"}},
+                {"id": "probe-glob", "name": "glob", "arguments": {"pattern": "**/*.c"}},
+                {"id": "probe-command", "name": "run_command", "arguments": {"command": probe_command, "cwd": "."}},
+                {"id": "probe-runtime-search", "name": "search_text", "arguments": {"query": "doomgeneric", "path": "."}},
+                {"id": "probe-tree", "name": "inspect_dir", "arguments": {"path": "doomgeneric"}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "write after enough probes",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "module.exports = {}\n"},
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after write"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-hard-runtime",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+            },
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=4,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    premature_write = next(item for item in tool_results if item["provider_call_id"] == "write-too-early")
+    final_write = next(item for item in tool_results if item["provider_call_id"] == "write-vm")
+    readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
+
+    assert premature_write["status"] == "invalid"
+    assert "deep_runtime_prewrite_probe_budget_not_met" in premature_write["content"][0]["reason"]
+    assert final_write["status"] == "completed"
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "module.exports = {}\n"
+    assert readiness["probe_threshold"] == 8
+    assert readiness["probe_count_before_first_write"] == 8
+    assert readiness["first_write_tool"] == "write_file"
+    assert readiness["first_write_provider_call_id"] == "write-vm"
+
+
+def test_implement_v2_blocks_hard_runtime_prewrite_even_without_active_work_todo(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "write strict runtime immediately",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "module.exports = {}\n"},
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "blocked before write"},
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-hard-runtime",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    write_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert write_result["status"] == "invalid"
+    assert "deep_runtime_prewrite_probe_budget_not_met" in write_result["content"][0]["reason"]
+    assert "vm.js" in write_result["content"][0]["reason"]
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_implement_v2_allows_normal_task_write_without_deep_prewrite_probe_budget(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('hello')\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "write normal patch immediately",
+            "tool_calls": [
+                {
+                    "id": "write-sample",
+                    "name": "write_file",
+                    "arguments": {"path": "sample.py", "content": "print('done')\n"},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after write"},
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-normal",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"goal": "Patch a Python file."},
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["sample.py"], "plan_item": "Patch sample.py"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    write_result = next(item for item in tool_results if item["provider_call_id"] == "write-sample")
+
+    assert write_result["status"] == "completed"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('done')\n"
+
+
 def test_implement_v2_counts_shell_source_mutation_as_first_write(tmp_path) -> None:
     target = tmp_path / "sample.py"
     target.write_text("print('hello')\n", encoding="utf-8")
