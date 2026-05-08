@@ -910,3 +910,33 @@ positives, replay write-count recomputation, and negative coverage. After the
 follow-up repair and tests, the same session returned `APPROVE`. After commit,
 run the next 10 minute same-shape diagnostic; do not run broad measurement or
 `speed_1` / `proof_5` first.
+
+Implement-v2 hard-runtime fail-fast checkpoint 2026-05-09 JST:
+
+The latest same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260509-064128` scored `0/1`
+with runner errors `0`. The step shape improved materially: first edit moved
+from `555s` to `331s`, broad cycles dropped from `2` to `0`, and the earlier
+stale shell-verifier issue is gone. Compared with the Codex reference
+(`6m56s`, first edit `367.803s`), mew now reaches a plausible first patch
+early enough, but still wastes the final wall budget after a runtime patch.
+
+Decision: keep broad measurement paused and repair the generic hard-runtime
+profile before `speed_1` / `proof_5`. The remaining blocker is not MIPS-specific
+and not a stale projection problem. The generated runtime continued through an
+unsupported syscall / ABI path and then spent about `66s` in a verifier that was
+doomed to timeout, while the useful evidence was already present:
+`unhandled syscall 4083 pc=0x43da4c` and missing `/app/frame0000.bmp`. The
+generic repair is to require generated runtimes/interpreters to fail fast on
+unsupported opcode/syscall/ABI with explicit PC/code evidence, and to ignore or
+noop only when the provided source proves the operation harmless.
+
+Validation after the repair: scoped ruff passed, focused prompt-section tests
+passed, full `tests/test_implement_lane.py` passed (`294 passed`), and
+`git diff --check` passed. codex-ultra review session
+`019e099c-a780-7ef2-9a1a-272321bbd694` returned `STATUS: APPROVE` with no
+findings and independently ran the focused hard-runtime profile test. After
+commit, run one more 10 minute same-shape diagnostic for
+`make-mips-interpreter`; compare verifier duration and whether unsupported
+runtime evidence becomes faster and more repairable. Do not add task-specific
+syscall, MIPS, `vm.js`, or frame-file rules.

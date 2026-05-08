@@ -7628,6 +7628,31 @@ def test_implement_v2_prompt_omits_hard_runtime_profile_for_simple_task() -> Non
     assert "implement_v2_hard_runtime_frontier_state" not in {section.id for section in sections}
 
 
+def test_implement_v2_hard_runtime_profile_requires_fail_fast_runtime_unknowns() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={
+            "description": "Implement vm.js so a provided runtime binary writes frame.bmp.",
+        },
+        lane_config={"mode": "full"},
+    )
+
+    section = next(
+        item
+        for item in build_implement_v2_prompt_sections(lane_input)
+        if item.id == "implement_v2_hard_runtime_profile"
+    )
+
+    assert "fail fast" in section.content
+    assert "unsupported opcode/syscall/ABI" in section.content
+    assert "explicit PC/code" in section.content
+    assert "only ignore/noop when source proves harmless" in section.content
+    assert len(section.content) <= 360
+
+
 def test_implement_v2_prompt_read_only_mode_does_not_surface_exec_or_write_tools() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",

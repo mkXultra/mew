@@ -46,7 +46,7 @@ _FINISH_RECOVERY_SECTION_IDS = frozenset({"implement_v2_execution_artifact_contr
 _ORDINARY_RESIDENT_SUMMARY_BYTE_CAP = 1536
 _ACTIVE_WORK_CARD_BYTE_CAP = 640
 _REPAIR_HISTORY_CARD_BYTE_CAP = 256
-_HARD_RUNTIME_PROFILE_BYTE_CAP = 224
+_HARD_RUNTIME_PROFILE_BYTE_CAP = 360
 _HARD_RUNTIME_FRONTIER_CARD_BYTE_CAP = 416
 
 
@@ -197,9 +197,10 @@ def build_implement_v2_prompt_sections(
                 version="v0",
                 title="Implement V2 Hard Runtime Profile",
                 content=_clip_text(
-                    "Hard-runtime compact rule: no handcrafted stub; preserve provided source/runtime artifacts. "
-                    "Before first write, probe ABI/symbols/syscalls/outputs. Then patch, run one verifier, "
-                    "finish with fresh runtime/verifier evidence.",
+                    "Hard-runtime: no handcrafted stub; preserve provided source/runtime. "
+                    "Probe ABI/symbol/syscall/output before first write. Patch once, run one verifier, "
+                    "finish with fresh runtime/verifier evidence. Generated runtimes/interpreters must fail fast on "
+                    "unsupported opcode/syscall/ABI with explicit PC/code; only ignore/noop when source proves harmless.",
                     _HARD_RUNTIME_PROFILE_BYTE_CAP,
                 ),
                 stability=STABILITY_STATIC,
