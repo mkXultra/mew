@@ -41,6 +41,7 @@ from mew.implement_lane.v2_runtime import (
     _auto_finish_from_structured_final_verifier,
     _call_model_turn,
     _command_has_verifier_surface,
+    _deep_runtime_prewrite_probe_readiness,
     _finish_acceptance_action,
     _finish_evidence_refs,
     _finish_gate_history,
@@ -1454,6 +1455,197 @@ def test_implement_v2_keeps_write_tools_hidden_after_many_shallow_source_probes(
     assert readiness["first_write_due"] is False
     assert "runtime_binary_layout" in readiness["prewrite_probe_missing_categories"]
     assert "implementation_feature_surface" in readiness["prewrite_probe_missing_categories"]
+
+
+def test_implement_v2_counts_shell_source_read_probe_toward_deep_runtime_categories() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-source-shell",
+        mew_tool_call_id="mew-probe-source-shell",
+        tool_name="run_command",
+        arguments={"command": "sed -n '1,240p' src/runtime_backend.c", "cwd": "."},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "command": call.arguments["command"],
+                "stdout": (
+                    "int main(void) { host_api_open(); host_api_write(); }\n"
+                    "void draw_frame(void) { /* output frame artifact */ }\n"
+                    "switch (opcode) { case 1: instruction(); }\n"
+                ),
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "source_output_contract" in readiness["covered_categories"]
+    assert "entry_symbol_surface" in readiness["covered_categories"]
+    assert "host_interface_surface" in readiness["covered_categories"]
+    assert "implementation_feature_surface" in readiness["covered_categories"]
+    assert "runtime_binary_layout" in readiness["missing_categories"]
+
+
+def test_implement_v2_does_not_treat_broad_find_as_source_output_contract() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-find",
+        mew_tool_call_id="mew-probe-find",
+        tool_name="run_command",
+        arguments={"command": "find . -maxdepth 3 -type f", "cwd": "."},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "command": call.arguments["command"],
+                "stdout": "./src/runtime_backend.c\n./README.md\n",
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "source_output_contract" not in readiness["covered_categories"]
+    assert "source_output_contract" in readiness["missing_categories"]
+
+
+def test_implement_v2_counts_shell_source_directory_probe_toward_source_output_contract() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-rg-src",
+        mew_tool_call_id="mew-probe-rg-src",
+        tool_name="run_command",
+        arguments={"command": "rg -n 'draw_frame|output' src", "cwd": "."},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "command": call.arguments["command"],
+                "stdout": "src/runtime_backend.c:42:void draw_frame(void) { /* output frame artifact */ }\n",
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "source_output_contract" in readiness["covered_categories"]
+
+
+def test_implement_v2_does_not_count_source_like_search_pattern_as_path_operand() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-rg-readme",
+        mew_tool_call_id="mew-probe-rg-readme",
+        tool_name="run_command",
+        arguments={"command": "rg -n src README.md", "cwd": "."},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "command": call.arguments["command"],
+                "stdout": "README.md:1:src is mentioned here\n",
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "source_output_contract" not in readiness["covered_categories"]
+    assert "source_output_contract" in readiness["missing_categories"]
+
+
+def test_implement_v2_does_not_count_tmp_source_directory_probe_as_source_contract() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-tmp-src",
+        mew_tool_call_id="mew-probe-tmp-src",
+        tool_name="run_command",
+        arguments={"command": "cat /tmp/src/runtime_backend.c", "cwd": "."},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "command": call.arguments["command"],
+                "stdout": "void draw_frame(void) { /* output frame artifact */ }\n",
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "source_output_contract" not in readiness["covered_categories"]
+    assert "source_output_contract" in readiness["missing_categories"]
 
 
 def test_implement_v2_does_not_label_exec_mode_as_prewrite_hidden(tmp_path) -> None:

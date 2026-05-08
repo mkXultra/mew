@@ -6,6 +6,7 @@ import json
 import hashlib
 from pathlib import Path, PurePosixPath
 import re
+import shlex
 import time
 from dataclasses import dataclass, replace
 
@@ -3248,11 +3249,20 @@ def _deep_runtime_prewrite_probe_categories(
         return ()
     argument_text = _deep_runtime_prewrite_probe_argument_text(call)
     result_text = _tool_result_content_text(result).casefold()
+    raw_command_text = _call_command_text(call).casefold() if tool_name in {"run_command", "run_tests"} else ""
     command_text = argument_text if tool_name in {"run_command", "run_tests"} else ""
     output_text = result_text if tool_name == "read_command_output" else ""
     search_text = argument_text if tool_name == "search_text" else ""
     source_intent_text = argument_text if tool_name in {"glob", "inspect_dir", "read_file", "search_text"} else ""
+    source_shell_text = (
+        f"{raw_command_text}\n{result_text}"
+        if tool_name in {"run_command", "run_tests"} and _shell_command_reads_source_like_path(raw_command_text)
+        else ""
+    )
+    probe_text = "\n".join(part for part in (command_text, output_text, search_text, source_shell_text) if part)
     categories: list[str] = []
+    if source_shell_text:
+        categories.append("source_output_contract")
     if tool_name in {"glob", "inspect_dir", "read_file", "search_text"}:
         if _text_matches_any(
             source_intent_text,
@@ -3264,7 +3274,7 @@ def _deep_runtime_prewrite_probe_categories(
         ):
             categories.append("source_output_contract")
     if _text_matches_any(
-        command_text or output_text,
+        probe_text,
         (
             r"\b(file|readelf|objdump|llvm-objdump|llvm-readobj|nm|otool|ldd|dumpbin|javap|wasm-objdump)\b",
             r"\b(elf|mach-o|pe32|pe64|wasm|bytecode|archive|shared object|executable)\b",
@@ -3273,7 +3283,7 @@ def _deep_runtime_prewrite_probe_categories(
     ):
         categories.append("runtime_binary_layout")
     if _text_matches_any(
-        command_text or output_text or search_text,
+        probe_text,
         (
             r"\b(entry|entrypoint|_start|main|exports?|symbols?|functions?|global .* func|object)\b",
             r"\b(readelf\s+-s|nm\b|objdump\s+-t|llvm-objdump\s+.*(?:--syms|-t))\b",
@@ -3282,7 +3292,7 @@ def _deep_runtime_prewrite_probe_categories(
     ):
         categories.append("entry_symbol_surface")
     if _text_matches_any(
-        command_text or output_text or search_text,
+        probe_text,
         (
             r"\b(syscall|host|hook|api|ffi|native|extern|import|export)\b",
             r"\b(open|read|write|close|fopen|fread|fwrite|stdin|stdout|stderr|filesystem|socket|process|env)\b",
@@ -3291,7 +3301,7 @@ def _deep_runtime_prewrite_probe_categories(
     ):
         categories.append("host_interface_surface")
     if _text_matches_any(
-        command_text or output_text or search_text,
+        probe_text,
         (
             r"\b(disassembl|opcode|instruction|bytecode|mnemonic|register|relocation|section dump)\b",
             r"\b(llvm-objdump|objdump\s+-d|javap\s+-c|wasm-objdump|readelf\s+-x|readelf\s+-r)\b",
@@ -3305,6 +3315,150 @@ def _deep_runtime_prewrite_probe_categories(
 def _deep_runtime_prewrite_probe_argument_text(call: object) -> str:
     arguments = getattr(call, "arguments", {})
     return (json.dumps(arguments, sort_keys=True, default=str) if isinstance(arguments, dict) else str(arguments)).casefold()
+
+
+def _shell_command_reads_source_like_path(command: object) -> bool:
+    text = str(command or "").strip()
+    if not text:
+        return False
+    if not _text_matches_any(
+        text,
+        (
+            r"(?:^|[;&|()]\s*)(?:cat|sed|grep|rg|ag|ack|nl|head|tail|awk)\b",
+            r"\bpython(?:3)?\s+-c\b.*\b(?:read_text|read_bytes|open\s*\()",
+            r"\bnode\s+-e\b.*\b(?:readfilesync|readFileSync)\s*\(",
+        ),
+    ):
+        return False
+    return any(_shell_path_is_source_read_surface(path) for path in _shell_read_probe_path_candidates(text))
+
+
+def _shell_read_probe_path_candidates(command: str) -> tuple[str, ...]:
+    try:
+        tokens = tuple(shlex.split(command))
+    except ValueError:
+        tokens = tuple(token for token in re.split(r"\s+", command) if token)
+    if not tokens:
+        return ()
+    executable = PurePosixPath(tokens[0]).name.casefold()
+    args = tokens[1:]
+    if executable in {"grep", "rg", "ag", "ack"}:
+        return _grep_like_source_path_operands(args)
+    if executable in {"cat", "head", "nl", "tail"}:
+        return _non_option_shell_operands(args)
+    if executable == "sed":
+        operands = _sed_source_path_operands(args)
+        return operands[1:] if len(operands) > 1 else ()
+    if executable == "awk":
+        operands = _non_option_shell_operands(args)
+        return operands[1:] if len(operands) > 1 else ()
+    if executable in {"python", "python3", "node"}:
+        return _shell_read_api_paths(command)
+    return _shell_token_paths(command) + _shell_quoted_paths(command)
+
+
+def _grep_like_source_path_operands(args: tuple[str, ...]) -> tuple[str, ...]:
+    candidates: list[str] = []
+    pattern_seen = False
+    skip_next = False
+    option_value_flags = {"-e", "--regexp", "-f", "--file", "--include", "--exclude", "--exclude-dir"}
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in option_value_flags:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        if not pattern_seen:
+            pattern_seen = True
+            continue
+        candidates.append(arg)
+    return tuple(candidates)
+
+
+def _non_option_shell_operands(args: tuple[str, ...]) -> tuple[str, ...]:
+    operands: list[str] = []
+    skip_next = False
+    option_value_flags = {"-A", "-B", "-C", "-c", "-e", "-f", "-m", "-n"}
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in option_value_flags:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        operands.append(arg)
+    return tuple(operands)
+
+
+def _sed_source_path_operands(args: tuple[str, ...]) -> tuple[str, ...]:
+    operands: list[str] = []
+    skip_next = False
+    option_value_flags = {"-e", "-f"}
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in option_value_flags:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        operands.append(arg)
+    return tuple(operands)
+
+
+def _shell_read_api_paths(command: str) -> tuple[str, ...]:
+    paths = [
+        match.group(1)
+        for match in re.finditer(
+            r"(?:pathlib\.)?Path\s*\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\.\s*read_(?:text|bytes)\s*\(",
+            command,
+            re.IGNORECASE,
+        )
+    ]
+    paths.extend(
+        match.group(1)
+        for match in re.finditer(
+            r"(?:open|readfilesync|readFileSync)\s*\(\s*['\"]([^'\"]+)['\"]",
+            command,
+            re.IGNORECASE,
+        )
+    )
+    return tuple(paths)
+
+
+def _shell_path_is_source_read_surface(path: object) -> bool:
+    raw = str(path or "").strip().strip("'\"").rstrip(",;:)]}")
+    if not raw or raw.startswith(("-", "$")):
+        return False
+    if raw.startswith(("/tmp/", "tmp/")):
+        return False
+    if _shell_path_is_source_like(raw):
+        return True
+    clean = raw.removeprefix("./").strip("/")
+    if not clean:
+        return False
+    source_dirs = {
+        "app",
+        "apps",
+        "include",
+        "includes",
+        "lib",
+        "libs",
+        "source",
+        "sources",
+        "spec",
+        "specs",
+        "src",
+        "test",
+        "tests",
+    }
+    return any(part.casefold() in source_dirs for part in PurePosixPath(clean).parts)
 
 
 def _is_deep_runtime_prewrite_source_mutation_attempt(call: object) -> bool:
