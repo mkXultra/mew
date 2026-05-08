@@ -1883,6 +1883,10 @@ def test_implement_v2_live_json_prompt_omits_frontier_update_contract_without_fr
 
     assert '"frontier_state_update"' not in prompt
     assert "implement_v2_hard_runtime_frontier_state" not in prompt
+    assert '"evidence_refs"' in prompt
+    assert '"oracle_refs": [\n      "oracle:..."\n    ]' in prompt
+    assert '"acceptance_evidence"' not in prompt
+    assert "do not rely on prose-only acceptance_evidence claims" in prompt
 
 
 def test_implement_v2_live_json_prompt_hides_frontier_update_contract_by_default_with_frontier(tmp_path) -> None:

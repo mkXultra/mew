@@ -3881,8 +3881,8 @@ def _live_json_prompt(
         "finish": {
             "outcome": "continue | completed | blocked | failed",
             "summary": "why this attempt can stop",
-            "evidence_refs": [{"kind": "evidence_event", "id": "ev:..."}],
-            "acceptance_evidence": ["optional human-readable evidence summary"],
+            "evidence_refs": [{"kind": "evidence_event | tool_call | command_run", "id": "ev:..."}],
+            "oracle_refs": ["oracle:..."],
         },
     }
     if hard_runtime_frontier_state and _model_frontier_update_enabled(lane_input):
@@ -3922,7 +3922,9 @@ def _live_json_prompt(
         "write/edit/apply_patch calls without dry_run=true or apply=false are intended to mutate; "
         "mew defaults omitted apply to true and supplies independent approval outside the model output. "
         "For a missing write_file target, mew also defaults omitted create to true. If tests or an external verifier matter, "
-        "run a concrete run_command or run_tests before claiming completed.\n"
+        "run a concrete run_command or run_tests before claiming completed. Finish completed with cited "
+        "finish.evidence_refs/oracle_refs from the latest verifier or typed evidence; do not rely on prose-only "
+        "acceptance_evidence claims.\n"
         f"{terminal_reaction_guidance}"
         f"lane_attempt_id: {lane_attempt_id}\n"
         f"turn: {turn_index}/{max_turns}\n"
