@@ -72,6 +72,19 @@ _PROVIDER_HISTORY_CLIP_KEYS = {
     "text",
 }
 _PROVIDER_HISTORY_TERMINAL_TOOL_NAMES = {"run_command", "run_tests", "poll_command", "cancel_command"}
+_FIRST_WRITE_PROBE_TOOL_NAMES = frozenset(
+    {
+        "glob",
+        "git_diff",
+        "git_status",
+        "inspect_dir",
+        "read_command_output",
+        "read_file",
+        "run_command",
+        "run_tests",
+        "search_text",
+    }
+)
 _PROVIDER_HISTORY_TERMINAL_DIAGNOSTIC_KEYS = (
     "reason",
     "error",
@@ -219,6 +232,7 @@ def run_live_json_implement_v2(
         task_id=lane_input.task_id,
         lane=IMPLEMENT_V2_LANE,
     )
+    active_work_todo_state = _initial_active_work_todo_state(lane_input)
     hard_runtime_frontier_state = _initial_hard_runtime_frontier_state(lane_input)
     hard_runtime_frontier_enabled = bool(hard_runtime_frontier_state) or is_hard_runtime_artifact_task(
         lane_input.task_contract
@@ -403,6 +417,7 @@ def run_live_json_implement_v2(
             prompt = _live_json_prompt(
                 lane_input,
                 lane_attempt_id=lane_attempt_id,
+                active_work_todo_state=active_work_todo_state,
                 hard_runtime_frontier_state=hard_runtime_frontier_state,
                 turn_index=turn_index,
                 max_turns=turn_budget_limit,
@@ -702,6 +717,13 @@ def run_live_json_implement_v2(
                 )
             tool_calls.extend(current_calls)
             tool_results.extend(current_results)
+            if active_work_todo_state:
+                active_work_todo_state = _merge_active_work_todo_first_write_readiness(
+                    existing=active_work_todo_state,
+                    tool_calls=tuple(tool_calls),
+                    tool_results=tuple(tool_results),
+                    probe_threshold=_first_write_probe_threshold(lane_input),
+                )
             if hard_runtime_frontier_enabled or frontier_state_update:
                 hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
                     existing=hard_runtime_frontier_state,
@@ -925,6 +947,19 @@ def run_live_json_implement_v2(
                 "finish_gate": dict(auto_finish_gate_decision),
             }
 
+    first_write_readiness = _first_write_readiness_from_trace(
+        active_work_todo_state,
+        tool_calls=tuple(tool_calls),
+        tool_results=tuple(tool_results),
+        probe_threshold=_first_write_probe_threshold(lane_input),
+    )
+    if active_work_todo_state:
+        active_work_todo_state = _merge_active_work_todo_first_write_readiness(
+            existing=active_work_todo_state,
+            tool_calls=tuple(tool_calls),
+            tool_results=tuple(tool_results),
+            probe_threshold=_first_write_probe_threshold(lane_input),
+        )
     integration_observation = _integration_observation_summary(
         lane_input,
         lane_attempt_id=lane_attempt_id,
@@ -968,6 +1003,7 @@ def run_live_json_implement_v2(
             "orphaned_command_cleanup_count": len(cleanup_payloads),
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
+            "first_write_readiness": dict(first_write_readiness),
             **typed_metrics,
             "wall_timeout": dict(wall_timeout),
             "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
@@ -981,7 +1017,11 @@ def run_live_json_implement_v2(
         tool_results=tuple(tool_results),
     )
     prompt_metrics = implement_v2_prompt_section_metrics(
-        _lane_input_with_hard_runtime_frontier(lane_input, hard_runtime_frontier_state)
+        _lane_input_with_runtime_prompt_state(
+            lane_input,
+            active_work_todo_state=active_work_todo_state,
+            hard_runtime_frontier_state=hard_runtime_frontier_state,
+        )
     )
     artifact_paths = _write_live_json_artifacts(
         lane_input,
@@ -1010,6 +1050,7 @@ def run_live_json_implement_v2(
             "finish_gate": dict(finish_gate_decision),
             "proof_manifest": manifest.as_dict(),
             "artifact_paths": list(artifact_paths),
+            **({"active_work_todo": dict(active_work_todo_state)} if active_work_todo_state else {}),
             **({"lane_hard_runtime_frontier": dict(hard_runtime_frontier_state)} if hard_runtime_frontier_state else {}),
         },
         metrics={
@@ -1035,6 +1076,11 @@ def run_live_json_implement_v2(
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
+            "first_write_readiness": dict(first_write_readiness),
+            "first_write_due": bool(first_write_readiness.get("first_write_due")),
+            "first_write_latency_turns": first_write_readiness.get("first_write_latency_turns"),
+            "first_write_probe_count": first_write_readiness.get("probe_count_before_first_write"),
+            "probes_seen_without_write": first_write_readiness.get("probes_seen_without_write"),
             **typed_metrics,
             "wall_timeout": dict(wall_timeout),
             "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
@@ -2525,9 +2571,105 @@ def _lane_input_with_hard_runtime_frontier(
     return replace(lane_input, persisted_lane_state=persisted_lane_state)
 
 
+def _lane_input_with_runtime_prompt_state(
+    lane_input: ImplementLaneInput,
+    *,
+    active_work_todo_state: dict[str, object] | None,
+    hard_runtime_frontier_state: dict[str, object] | None,
+) -> ImplementLaneInput:
+    persisted_lane_state = dict(lane_input.persisted_lane_state)
+    if active_work_todo_state:
+        persisted_lane_state["active_work_todo"] = dict(active_work_todo_state)
+    if hard_runtime_frontier_state:
+        persisted_lane_state["lane_hard_runtime_frontier"] = dict(hard_runtime_frontier_state)
+    if persisted_lane_state == lane_input.persisted_lane_state:
+        return lane_input
+    return replace(lane_input, persisted_lane_state=persisted_lane_state)
+
+
+def _initial_active_work_todo_state(lane_input: ImplementLaneInput) -> dict[str, object]:
+    value = lane_input.persisted_lane_state.get("active_work_todo")
+    return _compact_active_work_todo_state(value) if isinstance(value, dict) else {}
+
+
 def _initial_hard_runtime_frontier_state(lane_input: ImplementLaneInput) -> dict[str, object]:
     value = lane_input.persisted_lane_state.get("lane_hard_runtime_frontier")
     return _compact_hard_runtime_frontier_state(value) if isinstance(value, dict) else {}
+
+
+def _merge_active_work_todo_first_write_readiness(
+    *,
+    existing: dict[str, object],
+    tool_calls: tuple[object, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    probe_threshold: int,
+) -> dict[str, object]:
+    active_todo = _compact_active_work_todo_state(existing)
+    if not active_todo:
+        return {}
+    active_todo["first_write_readiness"] = _first_write_readiness_from_trace(
+        active_todo,
+        tool_calls=tool_calls,
+        tool_results=tool_results,
+        probe_threshold=probe_threshold,
+    )
+    return _drop_empty_frontier_values(active_todo)
+
+
+def _compact_active_work_todo_state(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    source = value.get("source") if isinstance(value.get("source"), dict) else {}
+    blocker = value.get("blocker") if isinstance(value.get("blocker"), dict) else {}
+    compact = {
+        "id": _frontier_clip_text(value.get("id"), limit=160),
+        "lane": _frontier_clip_text(value.get("lane"), limit=80),
+        "status": _frontier_clip_text(value.get("status"), limit=120),
+        "source": {
+            "plan_item": _frontier_clip_text(source.get("plan_item"), limit=500),
+            "target_paths": [
+                _frontier_clip_text(path, limit=240)
+                for path in source.get("target_paths") or []
+                if str(path or "").strip()
+            ][:8],
+            "verify_command": _frontier_clip_text(source.get("verify_command"), limit=800),
+        },
+        "attempts": _frontier_compact_mapping(value.get("attempts")),
+        "blocker": {
+            "code": _frontier_clip_text(blocker.get("code"), limit=160),
+            "recovery_action": _frontier_clip_text(blocker.get("recovery_action"), limit=240),
+            "path": _frontier_clip_text(blocker.get("path"), limit=240),
+        },
+        "cached_window_refs": [
+            {
+                "path": _frontier_clip_text(ref.get("path"), limit=240),
+                "line_start": ref.get("line_start"),
+                "line_end": ref.get("line_end"),
+            }
+            for ref in (value.get("cached_window_refs") or [])[:6]
+            if isinstance(ref, dict)
+        ],
+        "first_write_readiness": _frontier_compact_mapping(value.get("first_write_readiness")),
+    }
+    return _drop_empty_frontier_values(_drop_empty_active_todo_nested(compact))
+
+
+def _drop_empty_active_todo_nested(value: object) -> object:
+    if isinstance(value, dict):
+        dropped = {}
+        for key, item in value.items():
+            nested = _drop_empty_active_todo_nested(item)
+            if nested not in (None, "", [], {}):
+                dropped[str(key)] = nested
+        return dropped
+    if isinstance(value, list):
+        dropped = []
+        for item in value:
+            nested = _drop_empty_active_todo_nested(item)
+            if nested not in (None, "", [], {}):
+                dropped.append(nested)
+        return dropped
+    return value
 
 
 def _merge_hard_runtime_frontier_state(
@@ -2774,6 +2916,118 @@ def _prior_observation_count(
         }:
             count += 1
     return count
+
+
+def _first_write_probe_threshold(lane_input: ImplementLaneInput) -> int:
+    configured = lane_input.lane_config.get("first_write_probe_threshold")
+    try:
+        return max(1, min(12, int(configured))) if configured not in (None, "") else 3
+    except (TypeError, ValueError):
+        return 3
+
+
+def _first_write_readiness_from_trace(
+    active_work_todo: dict[str, object],
+    *,
+    tool_calls: tuple[object, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    probe_threshold: int,
+) -> dict[str, object]:
+    if not active_work_todo:
+        return {}
+    first_write_attempt_turn = 0
+    first_write_attempt_call_id = ""
+    first_write_attempt_tool = ""
+    first_source_mutation_turn = 0
+    first_source_mutation_call_id = ""
+    first_source_mutation_tool = ""
+    probes_before_first_write = 0
+    probe_call_ids: list[str] = []
+    for call, result in zip(tool_calls, tool_results):
+        tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
+        if tool_name in WRITE_TOOL_NAMES:
+            if first_write_attempt_turn <= 0:
+                first_write_attempt_turn = int(getattr(call, "turn_index", 0) or 0)
+                first_write_attempt_call_id = str(getattr(call, "provider_call_id", "") or result.provider_call_id or "")
+                first_write_attempt_tool = tool_name
+            if result.status == "completed" and result.side_effects:
+                first_source_mutation_turn = int(getattr(call, "turn_index", 0) or 0)
+                first_source_mutation_call_id = str(
+                    getattr(call, "provider_call_id", "") or result.provider_call_id or ""
+                )
+                first_source_mutation_tool = tool_name
+                break
+            continue
+        if first_write_attempt_turn > 0:
+            continue
+        if first_source_mutation_turn > 0:
+            break
+        if _is_first_write_probe_result(tool_name, result):
+            probes_before_first_write += 1
+            if len(probe_call_ids) < 8:
+                probe_call_ids.append(str(getattr(call, "provider_call_id", "") or result.provider_call_id or ""))
+
+    all_probe_count = sum(
+        1
+        for call, result in zip(tool_calls, tool_results)
+        if _is_first_write_probe_result(str(getattr(call, "tool_name", "") or result.tool_name or ""), result)
+    )
+    write_count = sum(1 for call in tool_calls if str(getattr(call, "tool_name", "") or "") in WRITE_TOOL_NAMES)
+    target_paths = _active_work_todo_target_paths(active_work_todo)
+    first_write_due = first_source_mutation_turn <= 0 and probes_before_first_write >= max(1, int(probe_threshold))
+    status = "written" if first_source_mutation_turn > 0 else ("due" if first_write_due else "not_due")
+    readiness = {
+        "schema_version": 1,
+        "status": status,
+        "first_write_due": first_write_due,
+        "probe_threshold": max(1, int(probe_threshold)),
+        "probes_seen_without_write": probes_before_first_write if first_source_mutation_turn <= 0 else 0,
+        "probe_count_before_first_write": probes_before_first_write,
+        "probe_count_total": all_probe_count,
+        "write_attempt_count": write_count,
+        "first_write_attempt_turn": first_write_attempt_turn or None,
+        "first_write_attempt_latency_turns": max(0, first_write_attempt_turn - 1)
+        if first_write_attempt_turn > 0
+        else None,
+        "first_write_attempt_tool": first_write_attempt_tool,
+        "first_write_attempt_provider_call_id": first_write_attempt_call_id,
+        "first_source_mutation_turn": first_source_mutation_turn or None,
+        "first_write_latency_turns": max(0, first_source_mutation_turn - 1)
+        if first_source_mutation_turn > 0
+        else None,
+        "first_write_tool": first_source_mutation_tool,
+        "first_write_provider_call_id": first_source_mutation_call_id,
+        "target_paths": target_paths,
+        "probe_provider_call_ids": probe_call_ids,
+        "source": "implement_v2_tool_trace",
+    }
+    if first_write_due:
+        target_text = ", ".join(target_paths[:3]) if target_paths else "active_work_todo.source.target_paths"
+        readiness["required_next_action"] = (
+            "make one scoped source mutation with write_file/edit_file/apply_patch "
+            f"inside {target_text} before another broad search or verifier"
+        )
+    return _drop_empty_frontier_values(readiness)
+
+
+def _is_first_write_probe_result(tool_name: str, result: ToolResultEnvelope) -> bool:
+    if tool_name not in _FIRST_WRITE_PROBE_TOOL_NAMES:
+        return False
+    if result.status not in {"completed", "failed", "invalid"}:
+        return False
+    if tool_name == "run_command":
+        payload = _first_result_payload(result)
+        contract = _payload_execution_contract(payload)
+        if _execution_contract_is_verifier_like(contract):
+            return False
+    return True
+
+
+def _active_work_todo_target_paths(active_work_todo: dict[str, object]) -> list[str]:
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    return [_frontier_clip_text(path, limit=240) for path in source.get("target_paths") or [] if str(path or "").strip()][
+        :8
+    ]
 
 
 def _frontier_evidence_registry(
@@ -3436,6 +3690,7 @@ def _live_json_prompt(
     lane_input: ImplementLaneInput,
     *,
     lane_attempt_id: str,
+    active_work_todo_state: dict[str, object] | None = None,
     hard_runtime_frontier_state: dict[str, object] | None = None,
     turn_index: int,
     max_turns: int,
@@ -3448,7 +3703,13 @@ def _live_json_prompt(
     history: tuple[dict[str, object], ...],
 ) -> str:
     sections = render_prompt_sections(
-        build_implement_v2_prompt_sections(_lane_input_with_hard_runtime_frontier(lane_input, hard_runtime_frontier_state))
+        build_implement_v2_prompt_sections(
+            _lane_input_with_runtime_prompt_state(
+                lane_input,
+                active_work_todo_state=active_work_todo_state,
+                hard_runtime_frontier_state=hard_runtime_frontier_state,
+            )
+        )
     )
     response_contract: dict[str, object] = {
         "summary": "short natural-language summary of this turn",

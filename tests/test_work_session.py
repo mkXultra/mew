@@ -1170,6 +1170,36 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(blocker.get("line_start"), 5)
         self.assertEqual(blocker.get("line_end"), 10)
 
+    def test_normalize_active_work_todo_preserves_first_write_readiness(self):
+        todo = _normalize_active_work_todo(
+            {
+                "id": "todo-1-1",
+                "status": "drafting",
+                "source": {
+                    "plan_item": "Draft one edit",
+                    "target_paths": ["src/mew/work_session.py"],
+                },
+                "first_write_readiness": {
+                    "status": "due",
+                    "first_write_due": True,
+                    "probe_threshold": 3,
+                    "probes_seen_without_write": 3,
+                    "probe_count_before_first_write": 3,
+                    "first_write_attempt_turn": 2,
+                    "target_paths": ["src/mew/work_session.py"],
+                    "required_next_action": "make one scoped source mutation",
+                    "probe_provider_call_ids": ["probe-1", "probe-2", "probe-3"],
+                },
+            }
+        )
+        readiness = todo.get("first_write_readiness") or {}
+
+        self.assertTrue(readiness.get("first_write_due"))
+        self.assertEqual(readiness.get("probe_count_before_first_write"), 3)
+        self.assertEqual(readiness.get("first_write_attempt_turn"), 2)
+        self.assertEqual(readiness.get("target_paths"), ["src/mew/work_session.py"])
+        self.assertEqual(readiness.get("probe_provider_call_ids"), ["probe-1", "probe-2", "probe-3"])
+
     def test_active_work_todo_lane_normalizes_tiny_default_and_preserves_explicit_strings(self):
         base_todo = {
             "id": "todo-1-1",
@@ -43198,7 +43228,10 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertIn("inspect those artifact/output properties or run a small command that asserts them", prompt)
         self.assertIn("remember the exact unverified acceptance gap", prompt)
         self.assertIn("artifact existence, nonzero pixels, valid headers", prompt)
-        self.assertIn("expected dimensions/resolution, reference similarity", prompt)
+        self.assertIn(
+            "task-provided expected dimensions/resolution, task-provided reference similarity/SSIM",
+            prompt,
+        )
         self.assertIn("For external dependency/source acquisition tasks", prompt)
         self.assertIn("authoritative source channel", prompt)
         self.assertIn("Place or repeat saved source readbacks after noisy build/install output", prompt)

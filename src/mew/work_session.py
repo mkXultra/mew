@@ -9154,6 +9154,45 @@ def _normalize_active_work_todo_executor_lifecycle(lifecycle):
     return normalized
 
 
+def _normalize_active_work_todo_first_write_readiness(readiness):
+    if not isinstance(readiness, dict):
+        return {}
+    normalized = {
+        "schema_version": 1,
+        "status": clip_output(str(readiness.get("status") or "").strip(), 120),
+        "first_write_due": bool(readiness.get("first_write_due")),
+        "probe_threshold": max(0, _coerce_non_negative_int(readiness.get("probe_threshold"))),
+        "probes_seen_without_write": max(0, _coerce_non_negative_int(readiness.get("probes_seen_without_write"))),
+        "probe_count_before_first_write": max(0, _coerce_non_negative_int(readiness.get("probe_count_before_first_write"))),
+        "probe_count_total": max(0, _coerce_non_negative_int(readiness.get("probe_count_total"))),
+        "write_attempt_count": max(0, _coerce_non_negative_int(readiness.get("write_attempt_count"))),
+        "first_write_attempt_turn": max(0, _coerce_non_negative_int(readiness.get("first_write_attempt_turn"))),
+        "first_write_attempt_latency_turns": max(0, _coerce_non_negative_int(readiness.get("first_write_attempt_latency_turns"))),
+        "first_source_mutation_turn": max(0, _coerce_non_negative_int(readiness.get("first_source_mutation_turn"))),
+        "first_write_latency_turns": max(0, _coerce_non_negative_int(readiness.get("first_write_latency_turns"))),
+        "first_write_attempt_tool": clip_output(str(readiness.get("first_write_attempt_tool") or "").strip(), 80),
+        "first_write_tool": clip_output(str(readiness.get("first_write_tool") or "").strip(), 80),
+        "first_write_attempt_provider_call_id": clip_output(
+            str(readiness.get("first_write_attempt_provider_call_id") or "").strip(),
+            160,
+        ),
+        "first_write_provider_call_id": clip_output(str(readiness.get("first_write_provider_call_id") or "").strip(), 160),
+        "required_next_action": clip_output(str(readiness.get("required_next_action") or "").strip(), 1000),
+        "source": clip_output(str(readiness.get("source") or "").strip(), 160),
+    }
+    target_paths = _coerce_working_memory_target_paths(readiness.get("target_paths") or [])
+    if target_paths:
+        normalized["target_paths"] = target_paths[:8]
+    provider_call_ids = [
+        clip_output(str(item or "").strip(), 160)
+        for item in readiness.get("probe_provider_call_ids") or []
+        if str(item or "").strip()
+    ]
+    if provider_call_ids:
+        normalized["probe_provider_call_ids"] = provider_call_ids[:8]
+    return {key: value for key, value in normalized.items() if value not in (None, "", [], {})}
+
+
 def _normalize_active_work_todo(todo):
     if not isinstance(todo, dict):
         return {}
@@ -9207,6 +9246,9 @@ def _normalize_active_work_todo(todo):
     executor_lifecycle = _normalize_active_work_todo_executor_lifecycle(todo.get("executor_lifecycle"))
     if executor_lifecycle:
         normalized["executor_lifecycle"] = executor_lifecycle
+    first_write_readiness = _normalize_active_work_todo_first_write_readiness(todo.get("first_write_readiness"))
+    if first_write_readiness:
+        normalized["first_write_readiness"] = first_write_readiness
     if not normalized["id"] and not normalized["status"] and not normalized["source"]["plan_item"]:
         return {}
     return normalized

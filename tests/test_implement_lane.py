@@ -441,6 +441,237 @@ def test_implement_v2_clears_first_write_frontier_stall_after_successful_write(t
     assert "first_write_frontier_stall" not in frontier
 
 
+def test_implement_v2_records_active_work_todo_first_write_due_after_probe_threshold(tmp_path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("print('hello')\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "cheap source probes before first write",
+            "tool_calls": [
+                {"id": "probe-dir", "name": "inspect_dir", "arguments": {"path": "."}},
+                {"id": "probe-file", "name": "read_file", "arguments": {"path": "sample.py"}},
+                {"id": "probe-search", "name": "search_text", "arguments": {"query": "hello", "path": "."}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["sample.py"], "plan_item": "Patch sample.py"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "first_write_probe_threshold": 3,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
+
+    assert result.status == "blocked"
+    assert readiness["status"] == "due"
+    assert readiness["first_write_due"] is True
+    assert readiness["probes_seen_without_write"] == 3
+    assert readiness["probe_count_before_first_write"] == 3
+    assert readiness["target_paths"] == ["sample.py"]
+    assert "write_file/edit_file/apply_patch" in readiness["required_next_action"]
+    assert result.metrics["first_write_due"] is True
+    assert result.metrics["first_write_probe_count"] == 3
+
+
+def test_implement_v2_does_not_emit_first_write_due_without_active_work_todo(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('hello')\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "cheap source probes without active todo",
+            "tool_calls": [
+                {"id": "probe-dir", "name": "inspect_dir", "arguments": {"path": "."}},
+                {"id": "probe-file", "name": "read_file", "arguments": {"path": "sample.py"}},
+                {"id": "probe-search", "name": "search_text", "arguments": {"query": "hello", "path": "."}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "first_write_probe_threshold": 3,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert "active_work_todo" not in result.updated_lane_state
+    assert result.metrics["first_write_due"] is False
+    assert result.metrics["first_write_probe_count"] is None
+
+
+def test_implement_v2_failed_write_attempt_does_not_clear_first_write_due(tmp_path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("print('hello')\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "cheap source probes before first write",
+            "tool_calls": [
+                {"id": "probe-dir", "name": "inspect_dir", "arguments": {"path": "."}},
+                {"id": "probe-file", "name": "read_file", "arguments": {"path": "sample.py"}},
+                {"id": "probe-search", "name": "search_text", "arguments": {"query": "hello", "path": "."}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "attempt a bad edit",
+            "tool_calls": [
+                {
+                    "id": "bad-edit",
+                    "name": "edit_file",
+                    "arguments": {"path": "sample.py", "old": "missing\n", "new": "print('done')\n"},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "bad edit failed"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["sample.py"], "plan_item": "Patch sample.py"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+                "first_write_probe_threshold": 3,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
+
+    assert target.read_text(encoding="utf-8") == "print('hello')\n"
+    assert readiness["status"] == "due"
+    assert readiness["first_write_due"] is True
+    assert readiness["first_write_attempt_turn"] == 2
+    assert readiness["first_write_attempt_latency_turns"] == 1
+    assert "first_source_mutation_turn" not in readiness
+    assert "first_write_latency_turns" not in readiness
+
+
+def test_implement_v2_active_work_todo_first_write_due_is_visible_next_turn(tmp_path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("print('hello')\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "cheap source probes before first write",
+            "tool_calls": [
+                {"id": "probe-dir", "name": "inspect_dir", "arguments": {"path": "."}},
+                {"id": "probe-file", "name": "read_file", "arguments": {"path": "sample.py"}},
+                {"id": "probe-search", "name": "search_text", "arguments": {"query": "hello", "path": "."}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "make first scoped write",
+            "tool_calls": [
+                {"id": "write-sample", "name": "write_file", "arguments": {"path": "sample.py", "content": "print('done')\n"}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after first write"},
+        },
+    ]
+    prompts: list[str] = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["sample.py"], "plan_item": "Patch sample.py"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+                "first_write_probe_threshold": 3,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
+
+    assert len(prompts) == 2
+    assert '"first_write_due": true' in prompts[1]
+    assert "Implement V2 Active Work Todo" in prompts[1]
+    assert target.read_text(encoding="utf-8") == "print('done')\n"
+    assert readiness["status"] == "written"
+    assert readiness["first_write_attempt_turn"] == 2
+    assert readiness["first_write_latency_turns"] == 1
+
+
 def test_implement_v2_does_not_classify_tmp_artifact_missing_read_as_first_write_stall(tmp_path) -> None:
     outputs = [
         {
@@ -971,6 +1202,37 @@ def test_implement_v2_prompt_sections_include_active_coding_rhythm() -> None:
     assert "at most one focused diagnostic/read turn" in section.content
     assert "write_file, edit_file, or apply_patch" in section.content
     assert "run_command for probes, builds, runtime execution, and verification" in section.content
+
+
+def test_implement_v2_prompt_sections_include_active_work_todo_readiness() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        persisted_lane_state={
+            "active_work_todo": {
+                "id": "todo-1",
+                "status": "drafting",
+                "source": {"target_paths": ["src/app.py"], "plan_item": "Patch app"},
+                "first_write_readiness": {
+                    "first_write_due": True,
+                    "probes_seen_without_write": 3,
+                    "required_next_action": "make one scoped source mutation",
+                },
+            }
+        },
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    section = next(item for item in sections if item.id == "implement_v2_active_work_todo")
+
+    assert section.cache_policy == "dynamic"
+    assert section.stability == "dynamic"
+    assert "first_write_readiness.first_write_due" in section.content
+    assert '"target_paths": [' in section.content
+    assert '"src/app.py"' in section.content
 
 
 def test_implement_v2_live_json_prompt_omits_frontier_update_contract_without_frontier(tmp_path) -> None:

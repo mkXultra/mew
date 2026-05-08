@@ -137,8 +137,32 @@ def build_implement_v2_prompt_sections(
         ),
     ]
     hard_runtime_profile_active = is_hard_runtime_artifact_task(lane_input.task_contract)
+    active_work_todo = _active_work_todo_state(lane_input.persisted_lane_state)
     hard_runtime_frontier = _hard_runtime_frontier_state(lane_input.persisted_lane_state)
     repair_history = _repair_history_state(lane_input.persisted_lane_state)
+    if active_work_todo:
+        sections.append(
+            PromptSection(
+                id="implement_v2_active_work_todo",
+                version="v0",
+                title="Implement V2 Active Work Todo",
+                content=_bounded_stable_json(
+                    {
+                        "instructions": (
+                            "Use active_work_todo as the current work sequencing contract. "
+                            "Stay inside source.target_paths when they are present. If "
+                            "first_write_readiness.first_write_due is true, stop broad probing "
+                            "and make one scoped write_file/edit_file/apply_patch before another "
+                            "broad search or verifier."
+                        ),
+                        "active_work_todo": active_work_todo,
+                    }
+                ),
+                stability=STABILITY_DYNAMIC,
+                cache_policy=CACHE_POLICY_DYNAMIC,
+                profile="implement_v2",
+            )
+        )
     if hard_runtime_profile_active:
         sections.append(
             PromptSection(
@@ -362,6 +386,44 @@ def _lane_local_state(persisted_lane_state: dict[str, object]) -> dict[str, obje
     return filtered
 
 
+def _active_work_todo_state(persisted_lane_state: dict[str, object]) -> dict[str, object]:
+    value = persisted_lane_state.get("active_work_todo")
+    if not isinstance(value, dict):
+        return {}
+    source = value.get("source") if isinstance(value.get("source"), dict) else {}
+    blocker = value.get("blocker") if isinstance(value.get("blocker"), dict) else {}
+    attempts = value.get("attempts") if isinstance(value.get("attempts"), dict) else {}
+    readiness = value.get("first_write_readiness") if isinstance(value.get("first_write_readiness"), dict) else {}
+    cached_refs = value.get("cached_window_refs") if isinstance(value.get("cached_window_refs"), list) else []
+    projected = {
+        "id": str(value.get("id") or "").strip(),
+        "lane": str(value.get("lane") or "").strip(),
+        "status": str(value.get("status") or "").strip(),
+        "source": {
+            "plan_item": str(source.get("plan_item") or "").strip(),
+            "target_paths": [str(path) for path in source.get("target_paths") or [] if str(path or "").strip()][:8],
+            "verify_command": str(source.get("verify_command") or "").strip(),
+        },
+        "attempts": {str(key): item for key, item in attempts.items() if item not in (None, "", [], {})},
+        "blocker": {
+            "code": str(blocker.get("code") or "").strip(),
+            "recovery_action": str(blocker.get("recovery_action") or "").strip(),
+            "path": str(blocker.get("path") or "").strip(),
+        },
+        "cached_window_refs": [
+            {
+                "path": str(ref.get("path") or "").strip(),
+                "line_start": ref.get("line_start"),
+                "line_end": ref.get("line_end"),
+            }
+            for ref in cached_refs[:6]
+            if isinstance(ref, dict)
+        ],
+        "first_write_readiness": readiness,
+    }
+    return _drop_empty_dict_values(projected)
+
+
 def _hard_runtime_frontier_state(persisted_lane_state: dict[str, object]) -> dict[str, object]:
     value = persisted_lane_state.get("lane_hard_runtime_frontier")
     return dict(value) if isinstance(value, dict) else {}
@@ -378,6 +440,16 @@ def _repair_history_state(persisted_lane_state: dict[str, object]) -> dict[str, 
         if text:
             return {"notes": text}
     return {}
+
+
+def _drop_empty_dict_values(value: dict[str, object]) -> dict[str, object]:
+    dropped: dict[str, object] = {}
+    for key, item in value.items():
+        if isinstance(item, dict):
+            item = _drop_empty_dict_values(item)
+        if item not in (None, "", [], {}):
+            dropped[key] = item
+    return dropped
 
 
 __all__ = [

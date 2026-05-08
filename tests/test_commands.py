@@ -1553,6 +1553,56 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(captured[0].no_prompt_approval)
 
+    def test_work_guidance_persisted_lane_state_allows_active_work_todo(self):
+        guidance = json.dumps(
+            {
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["src/app.py"]},
+                },
+                "lane_hard_runtime_frontier": {"status": "active"},
+            }
+        )
+
+        persisted = commands_module._work_guidance_persisted_lane_state(guidance)
+        task_guidance = commands_module._work_guidance_task_contract_guidance(guidance)
+
+        self.assertEqual(persisted["active_work_todo"]["id"], "todo-1")
+        self.assertEqual(persisted["lane_hard_runtime_frontier"]["status"], "active")
+        self.assertNotIn("active_work_todo", task_guidance)
+
+    def test_work_session_active_work_todo_prefers_session_then_resume(self):
+        session = {
+            "active_work_todo": {"id": "session-todo"},
+            "resume": {"active_work_todo": {"id": "resume-todo"}},
+        }
+        resume_only = {"resume": {"active_work_todo": {"id": "resume-todo"}}}
+
+        self.assertEqual(commands_module._work_session_active_work_todo(session)["id"], "session-todo")
+        self.assertEqual(commands_module._work_session_active_work_todo(resume_only)["id"], "resume-todo")
+
+    def test_merge_work_session_active_work_todo_readiness_updates_canonical_todo(self):
+        session = {
+            "active_work_todo": {"id": "todo-1", "status": "drafting"},
+            "resume": {"active_work_todo": {"id": "todo-1", "status": "drafting"}},
+        }
+        updated = {
+            "active_work_todo": {
+                "id": "todo-1",
+                "first_write_readiness": {
+                    "first_write_due": True,
+                    "probes_seen_without_write": 3,
+                },
+            }
+        }
+
+        changed = commands_module._merge_work_session_active_work_todo_readiness(session, updated)
+
+        self.assertTrue(changed)
+        self.assertTrue(session["active_work_todo"]["first_write_readiness"]["first_write_due"])
+        self.assertEqual(session["resume"]["active_work_todo"]["first_write_readiness"]["probes_seen_without_write"], 3)
+
     def test_do_rejects_zero_max_steps(self):
         with patch("mew.commands.cmd_work_ai") as work_ai:
             with redirect_stdout(StringIO()), redirect_stderr(StringIO()) as stderr:

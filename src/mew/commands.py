@@ -7178,7 +7178,10 @@ def _work_guidance_persisted_lane_state(guidance):
                 key_text = str(key)
                 if key_text.startswith(("lane_", "reentry_", "resume_")):
                     persisted[key_text] = value
+                elif key_text == "active_work_todo" and isinstance(value, dict):
+                    persisted[key_text] = value
     for key in (
+        "active_work_todo",
         "lane_repair_history",
         "lane_context_capsule",
         "lane_hard_runtime_frontier",
@@ -7198,6 +7201,7 @@ def _work_guidance_task_contract_guidance(guidance):
     for key in (
         "persisted_lane_state",
         "lane_state",
+        "active_work_todo",
         "lane_repair_history",
         "lane_context_capsule",
         "lane_hard_runtime_frontier",
@@ -7206,6 +7210,42 @@ def _work_guidance_task_contract_guidance(guidance):
     ):
         sanitized.pop(key, None)
     return json.dumps(sanitized, ensure_ascii=True, sort_keys=True) if sanitized else ""
+
+
+def _work_session_active_work_todo(session):
+    if not isinstance(session, dict):
+        return {}
+    value = session.get("active_work_todo")
+    if isinstance(value, dict) and value:
+        return dict(value)
+    resume = session.get("resume") if isinstance(session.get("resume"), dict) else {}
+    value = resume.get("active_work_todo") if isinstance(resume, dict) else {}
+    return dict(value) if isinstance(value, dict) and value else {}
+
+
+def _merge_work_session_active_work_todo_readiness(session, updated_lane_state):
+    if not isinstance(session, dict) or not isinstance(updated_lane_state, dict):
+        return False
+    updated_todo = updated_lane_state.get("active_work_todo")
+    if not isinstance(updated_todo, dict):
+        return False
+    readiness = updated_todo.get("first_write_readiness")
+    if not isinstance(readiness, dict) or not readiness:
+        return False
+    active_todo = _work_session_active_work_todo(session)
+    if not active_todo:
+        active_todo = dict(updated_todo)
+    else:
+        updated_id = str(updated_todo.get("id") or "").strip()
+        active_id = str(active_todo.get("id") or "").strip()
+        if updated_id and active_id and updated_id != active_id:
+            return False
+        active_todo["first_write_readiness"] = dict(readiness)
+    session["active_work_todo"] = active_todo
+    resume = session.get("resume") if isinstance(session.get("resume"), dict) else None
+    if resume is not None:
+        resume["active_work_todo"] = dict(active_todo)
+    return True
 
 
 def _work_ai_workspace_roots(roots, workspace):
@@ -7318,6 +7358,12 @@ def _run_work_ai_implement_v2(
                 session["updated_at"] = metrics_update["last_runtime_progress_at"]
             save_state(state)
 
+    persisted_lane_state = _work_guidance_persisted_lane_state(getattr(effective_args, "work_guidance", None))
+    if "active_work_todo" not in persisted_lane_state:
+        active_work_todo = _work_session_active_work_todo(session)
+        if active_work_todo:
+            persisted_lane_state["active_work_todo"] = active_work_todo
+
     lane_input = ImplementLaneInput(
         work_session_id=str(session_id),
         task_id=str(task_id),
@@ -7333,7 +7379,7 @@ def _run_work_ai_implement_v2(
             guidance=getattr(effective_args, "work_guidance", None) or "",
             verify_command=getattr(effective_args, "verify_command", None) or "",
         ),
-        persisted_lane_state=_work_guidance_persisted_lane_state(getattr(effective_args, "work_guidance", None)),
+        persisted_lane_state=persisted_lane_state,
         lane_config={
             "mode": "full",
             "allowed_read_roots": _work_ai_workspace_roots(effective_args.allow_read or [], workspace),
@@ -7400,6 +7446,8 @@ def _run_work_ai_implement_v2(
         )
         turn = finish_work_model_turn(state, session_id, planning_turn_id, error=error if status != "completed" else "")
         if session is not None:
+            if result is not None:
+                _merge_work_session_active_work_todo_readiness(session, result.updated_lane_state)
             add_work_session_note(
                 session,
                 f"implement_v2 attempt status={status}: {(result.user_visible_summary if result else error) or ''}",
