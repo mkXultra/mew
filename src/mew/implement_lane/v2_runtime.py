@@ -91,6 +91,20 @@ _FIRST_WRITE_PROBE_TOOL_NAMES = frozenset(
         "search_text",
     }
 )
+_DEEP_RUNTIME_PREWRITE_REQUIRED_CATEGORIES = (
+    "source_output_contract",
+    "runtime_binary_layout",
+    "entry_symbol_surface",
+    "host_interface_surface",
+    "implementation_feature_surface",
+)
+_DEEP_RUNTIME_PREWRITE_CATEGORY_LABELS = {
+    "source_output_contract": "source/output contract",
+    "runtime_binary_layout": "runtime or binary layout",
+    "entry_symbol_surface": "entrypoint or symbol surface",
+    "host_interface_surface": "host interface, syscall, hook, or API surface",
+    "implementation_feature_surface": "implementation feature, disassembly, opcode, bytecode, or API shape",
+}
 _PROVIDER_HISTORY_TERMINAL_DIAGNOSTIC_KEYS = (
     "reason",
     "error",
@@ -427,6 +441,11 @@ def run_live_json_implement_v2(
                 prior_tool_calls=tuple(tool_calls),
                 prior_tool_results=tuple(tool_results),
             )
+            prewrite_probe_readiness = _deep_runtime_prewrite_probe_readiness(
+                prior_tool_calls=tuple(tool_calls),
+                prior_tool_results=tuple(tool_results),
+                probe_threshold=_first_write_probe_threshold(lane_input),
+            )
             prewrite_write_tools_hidden = _prewrite_write_tools_hidden_for_turn(
                 lane_input,
                 prior_tool_calls=tuple(tool_calls),
@@ -447,6 +466,7 @@ def run_live_json_implement_v2(
                 tool_contract_recovery_instruction=tool_contract_recovery_instruction,
                 tool_specs=model_visible_tool_specs,
                 prewrite_write_tools_hidden=prewrite_write_tools_hidden,
+                prewrite_probe_readiness=prewrite_probe_readiness,
                 history=tuple(prompt_history),
             )
             if progress:
@@ -770,6 +790,7 @@ def run_live_json_implement_v2(
                     tool_calls=tuple(tool_calls),
                     tool_results=tuple(tool_results),
                     probe_threshold=_first_write_probe_threshold(lane_input),
+                    requires_deep_runtime_coverage=is_deep_probe_hard_runtime_task(lane_input.task_contract),
                 )
             if hard_runtime_frontier_enabled or frontier_state_update:
                 hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
@@ -999,6 +1020,7 @@ def run_live_json_implement_v2(
         tool_calls=tuple(tool_calls),
         tool_results=tuple(tool_results),
         probe_threshold=_first_write_probe_threshold(lane_input),
+        requires_deep_runtime_coverage=is_deep_probe_hard_runtime_task(lane_input.task_contract),
     )
     if active_work_todo_state:
         active_work_todo_state = _merge_active_work_todo_first_write_readiness(
@@ -1006,6 +1028,7 @@ def run_live_json_implement_v2(
             tool_calls=tuple(tool_calls),
             tool_results=tuple(tool_results),
             probe_threshold=_first_write_probe_threshold(lane_input),
+            requires_deep_runtime_coverage=is_deep_probe_hard_runtime_task(lane_input.task_contract),
         )
     integration_observation = _integration_observation_summary(
         lane_input,
@@ -2677,6 +2700,7 @@ def _merge_active_work_todo_first_write_readiness(
     tool_calls: tuple[object, ...],
     tool_results: tuple[ToolResultEnvelope, ...],
     probe_threshold: int,
+    requires_deep_runtime_coverage: bool = False,
 ) -> dict[str, object]:
     active_todo = _compact_active_work_todo_state(existing)
     if not active_todo:
@@ -2686,6 +2710,7 @@ def _merge_active_work_todo_first_write_readiness(
         tool_calls=tool_calls,
         tool_results=tool_results,
         probe_threshold=probe_threshold,
+        requires_deep_runtime_coverage=requires_deep_runtime_coverage,
     )
     write_repair = _write_repair_from_trace(tool_calls=tool_calls, tool_results=tool_results)
     if write_repair:
@@ -3022,8 +3047,7 @@ def _deep_runtime_prewrite_probe_gate_result(
 ) -> ToolResultEnvelope | None:
     if not is_deep_probe_hard_runtime_task(lane_input.task_contract):
         return None
-    tool_name = str(getattr(call, "tool_name", "") or "").strip()
-    if tool_name not in WRITE_TOOL_NAMES:
+    if not _is_deep_runtime_prewrite_source_mutation_attempt(call):
         return None
     if _has_completed_source_tree_mutation(prior_tool_results):
         return None
@@ -3032,8 +3056,15 @@ def _deep_runtime_prewrite_probe_gate_result(
         prior_tool_calls=prior_tool_calls,
         prior_tool_results=prior_tool_results,
     )
-    if probe_count >= threshold:
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+        probe_threshold=threshold,
+    )
+    if bool(readiness.get("ready")):
         return None
+    missing = _prewrite_missing_category_labels(readiness)
+    missing_text = ", ".join(missing) if missing else "required hard-runtime probe categories"
     target_paths = _active_work_todo_target_paths(active_work_todo_state) if active_work_todo_state else []
     if not target_paths:
         write_path = _write_call_path(call)
@@ -3045,8 +3076,10 @@ def _deep_runtime_prewrite_probe_gate_result(
         reason=(
             "deep_runtime_prewrite_probe_budget_not_met: "
             f"observed {probe_count}/{threshold} cheap source/runtime probes before first source mutation. "
-            "For emulator/interpreter/runtime-artifact tasks, inspect ABI, symbols, syscalls/hooks, "
-            f"expected outputs, and available source/disassembly around {target_text} before writing."
+            f"Missing coverage: {missing_text}. "
+            "For emulator/interpreter/runtime-artifact tasks, inspect source/output contract, binary layout, "
+            "entry or symbols, host interfaces/hooks, and feature/disassembly/API shape "
+            f"around {target_text} before writing."
         ),
     )
 
@@ -3093,11 +3126,12 @@ def _write_tools_visible_for_turn(
         return True
     if _has_completed_source_tree_mutation(prior_tool_results):
         return True
-    probe_count = _deep_runtime_prewrite_probe_count(
+    readiness = _deep_runtime_prewrite_probe_readiness(
         prior_tool_calls=prior_tool_calls,
         prior_tool_results=prior_tool_results,
+        probe_threshold=_first_write_probe_threshold(lane_input),
     )
-    return probe_count >= _first_write_probe_threshold(lane_input)
+    return bool(readiness.get("ready"))
 
 
 def _deep_runtime_prewrite_probe_count(
@@ -3113,6 +3147,239 @@ def _deep_runtime_prewrite_probe_count(
         if _is_first_write_probe_result(tool_name, result):
             count += 1
     return count
+
+
+def _deep_runtime_prewrite_probe_readiness(
+    *,
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+    probe_threshold: int,
+) -> dict[str, object]:
+    threshold = max(1, int(probe_threshold))
+    categories: dict[str, list[str]] = {name: [] for name in _DEEP_RUNTIME_PREWRITE_REQUIRED_CATEGORIES}
+    probe_count = 0
+    for call, result in zip(prior_tool_calls, prior_tool_results):
+        if _has_completed_source_tree_mutation((result,)):
+            break
+        tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
+        if not _is_first_write_probe_result(tool_name, result):
+            continue
+        probe_count += 1
+        provider_call_id = str(getattr(call, "provider_call_id", "") or result.provider_call_id or "")
+        for category in _deep_runtime_prewrite_probe_categories(tool_name, call, result):
+            if category in categories and provider_call_id and provider_call_id not in categories[category]:
+                categories[category].append(provider_call_id)
+    covered = tuple(category for category in _DEEP_RUNTIME_PREWRITE_REQUIRED_CATEGORIES if categories[category])
+    missing = tuple(category for category in _DEEP_RUNTIME_PREWRITE_REQUIRED_CATEGORIES if not categories[category])
+    return {
+        "schema_version": 1,
+        "ready": probe_count >= threshold and not missing,
+        "probe_threshold": threshold,
+        "probe_count": probe_count,
+        "required_categories": _DEEP_RUNTIME_PREWRITE_REQUIRED_CATEGORIES,
+        "covered_categories": covered,
+        "missing_categories": missing,
+        "category_provider_call_ids": {category: ids[:3] for category, ids in categories.items() if ids},
+    }
+
+
+def _deep_runtime_prewrite_probe_categories(
+    tool_name: str,
+    call: object,
+    result: ToolResultEnvelope,
+) -> tuple[str, ...]:
+    if not _is_first_write_probe_result(tool_name, result):
+        return ()
+    argument_text = _deep_runtime_prewrite_probe_argument_text(call)
+    result_text = _tool_result_content_text(result).casefold()
+    command_text = argument_text if tool_name in {"run_command", "run_tests"} else ""
+    output_text = result_text if tool_name == "read_command_output" else ""
+    search_text = argument_text if tool_name == "search_text" else ""
+    source_intent_text = argument_text if tool_name in {"glob", "inspect_dir", "read_file", "search_text"} else ""
+    categories: list[str] = []
+    if tool_name in {"glob", "inspect_dir", "read_file", "search_text"}:
+        if _text_matches_any(
+            source_intent_text,
+            (
+                r"\b(src|source|include|lib|app|main|test|tests)\b",
+                r"\.(?:c|cc|cpp|cxx|h|hpp|hh|rs|go|py|js|ts|java|kt|swift|zig|s|asm|wat|wasm)\b",
+                r"\b(output|artifact|frame|image|file|hook|api|contract|expected)\b",
+            ),
+        ):
+            categories.append("source_output_contract")
+    if _text_matches_any(
+        command_text or output_text,
+        (
+            r"\b(file|readelf|objdump|llvm-objdump|llvm-readobj|nm|otool|ldd|dumpbin|javap|wasm-objdump)\b",
+            r"\b(elf|mach-o|pe32|pe64|wasm|bytecode|archive|shared object|executable)\b",
+            r"\b(endianness|little endian|big endian|architecture|machine|abi|segments?|sections?)\b",
+        ),
+    ):
+        categories.append("runtime_binary_layout")
+    if _text_matches_any(
+        command_text or output_text or search_text,
+        (
+            r"\b(entry|entrypoint|_start|main|exports?|symbols?|functions?|global .* func|object)\b",
+            r"\b(readelf\s+-s|nm\b|objdump\s+-t|llvm-objdump\s+.*(?:--syms|-t))\b",
+            r"\b(init|start|run|handler|callback|hook)\b",
+        ),
+    ):
+        categories.append("entry_symbol_surface")
+    if _text_matches_any(
+        command_text or output_text or search_text,
+        (
+            r"\b(syscall|host|hook|api|ffi|native|extern|import|export)\b",
+            r"\b(open|read|write|close|fopen|fread|fwrite|stdin|stdout|stderr|filesystem|socket|process|env)\b",
+            r"\b(input|output|io|i/o|callback|interface)\b",
+        ),
+    ):
+        categories.append("host_interface_surface")
+    if _text_matches_any(
+        command_text or output_text or search_text,
+        (
+            r"\b(disassembl|opcode|instruction|bytecode|mnemonic|register|relocation|section dump)\b",
+            r"\b(llvm-objdump|objdump\s+-d|javap\s+-c|wasm-objdump|readelf\s+-x|readelf\s+-r)\b",
+            r"\b(feature|compatibility|supported|unsupported|operation|operator|runtime behavior)\b",
+        ),
+    ):
+        categories.append("implementation_feature_surface")
+    return tuple(dict.fromkeys(categories))
+
+
+def _deep_runtime_prewrite_probe_argument_text(call: object) -> str:
+    arguments = getattr(call, "arguments", {})
+    return (json.dumps(arguments, sort_keys=True, default=str) if isinstance(arguments, dict) else str(arguments)).casefold()
+
+
+def _is_deep_runtime_prewrite_source_mutation_attempt(call: object) -> bool:
+    tool_name = str(getattr(call, "tool_name", "") or "").strip()
+    if tool_name in WRITE_TOOL_NAMES:
+        return True
+    if tool_name not in {"run_command", "run_tests"}:
+        return False
+    command = _call_command_text(call)
+    return _shell_command_may_mutate_source_tree(command)
+
+
+def _call_command_text(call: object) -> str:
+    arguments = getattr(call, "arguments", {})
+    if not isinstance(arguments, dict):
+        return ""
+    return str(arguments.get("command") or "")
+
+
+def _shell_command_may_mutate_source_tree(command: object) -> bool:
+    text = str(command or "")
+    if not text.strip():
+        return False
+    if any(_shell_path_is_source_like(path) for path in _shell_redirection_write_paths(text)):
+        return True
+    if _text_matches_any(text, (r"\b(?:writefilesync|writeFileSync|open\s*\(|Path\s*\()",)):
+        return any(_shell_path_is_source_like(path) for path in _shell_write_api_paths(text))
+    if _text_matches_any(text, (r"(?:^|[;&|()]\s*)(?:sed\s+-i|perl\s+-pi)\b",)):
+        return any(_shell_path_is_source_like(path) for path in _shell_token_paths(text))
+    return False
+
+
+def _shell_redirection_write_paths(command: str) -> tuple[str, ...]:
+    paths: list[str] = []
+    for match in re.finditer(r"(?<![0-9])>\s*([^\s;&|]+)", command):
+        paths.append(match.group(1))
+    for match in re.finditer(r"(?:^|[;&|()]\s*)tee\s+([^\s;&|]+)", command):
+        paths.append(match.group(1))
+    return tuple(paths)
+
+
+def _shell_quoted_paths(command: str) -> tuple[str, ...]:
+    return tuple(match.group(1) for match in re.finditer(r"['\"]([^'\"]+)['\"]", command))
+
+
+def _shell_write_api_paths(command: str) -> tuple[str, ...]:
+    paths = [
+        match.group(1)
+        for match in re.finditer(
+            r"(?:pathlib\.)?Path\s*\(\s*['\"]([^'\"]+)['\"]\s*\)\s*\.\s*write_(?:text|bytes)\s*\(",
+            command,
+            re.IGNORECASE,
+        )
+    ]
+    paths.extend(
+        match.group(1)
+        for match in re.finditer(
+            r"(?:open|writefilesync|writeFileSync)\s*\(\s*['\"]([^'\"]+)['\"]",
+            command,
+            re.IGNORECASE,
+        )
+    )
+    return tuple(paths) if paths else _shell_quoted_paths(command)
+
+
+def _shell_token_paths(command: str) -> tuple[str, ...]:
+    return tuple(token for token in re.split(r"\s+", command) if token and "/" in token or "." in token)
+
+
+def _shell_path_is_source_like(path: object) -> bool:
+    raw = str(path or "").strip().strip("'\"")
+    if not raw or raw.startswith(("-", "$")) or raw.startswith(("/tmp/", "tmp/")):
+        return False
+    name = PurePosixPath(raw).name
+    if name in {
+        "Makefile",
+        "Dockerfile",
+        "CMakeLists.txt",
+        "Cargo.toml",
+        "Cargo.lock",
+        "go.mod",
+        "go.sum",
+        "package.json",
+        "package-lock.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "pom.xml",
+        "build.gradle",
+        "settings.gradle",
+    }:
+        return True
+    return PurePosixPath(name).suffix.casefold() in {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hpp",
+        ".hh",
+        ".rs",
+        ".go",
+        ".py",
+        ".js",
+        ".ts",
+        ".java",
+        ".kt",
+        ".swift",
+        ".zig",
+        ".s",
+        ".asm",
+        ".wat",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+    }
+
+
+def _text_matches_any(text: str, patterns: tuple[str, ...]) -> bool:
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _prewrite_missing_category_labels(readiness: dict[str, object]) -> tuple[str, ...]:
+    missing = readiness.get("missing_categories")
+    if not isinstance(missing, (list, tuple)):
+        missing = _DEEP_RUNTIME_PREWRITE_REQUIRED_CATEGORIES
+    labels = []
+    for category in missing:
+        category_key = str(category)
+        labels.append(_DEEP_RUNTIME_PREWRITE_CATEGORY_LABELS.get(category_key, category_key))
+    return tuple(labels)
 
 
 def _has_completed_source_tree_mutation(results: tuple[ToolResultEnvelope, ...]) -> bool:
@@ -3252,6 +3519,7 @@ def _first_write_readiness_from_trace(
     tool_calls: tuple[object, ...],
     tool_results: tuple[ToolResultEnvelope, ...],
     probe_threshold: int,
+    requires_deep_runtime_coverage: bool = False,
 ) -> dict[str, object]:
     if not active_work_todo:
         return {}
@@ -3266,7 +3534,10 @@ def _first_write_readiness_from_trace(
     for call, result in zip(tool_calls, tool_results):
         tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
         source_tree_mutation_write = bool(_source_tree_mutation_from_result(result))
-        if tool_name in WRITE_TOOL_NAMES or source_tree_mutation_write:
+        source_tree_mutation_attempt = tool_name in WRITE_TOOL_NAMES or _is_deep_runtime_prewrite_source_mutation_attempt(
+            call
+        )
+        if source_tree_mutation_attempt or source_tree_mutation_write:
             if first_write_attempt_turn <= 0:
                 first_write_attempt_turn = int(getattr(call, "turn_index", 0) or 0)
                 first_write_attempt_call_id = str(getattr(call, "provider_call_id", "") or result.provider_call_id or "")
@@ -3294,11 +3565,20 @@ def _first_write_readiness_from_trace(
     write_count = sum(
         1
         for call, result in zip(tool_calls, tool_results)
-        if str(getattr(call, "tool_name", "") or result.tool_name or "") in WRITE_TOOL_NAMES
+        if _is_deep_runtime_prewrite_source_mutation_attempt(call)
         or bool(_source_tree_mutation_from_result(result))
     )
     target_paths = _active_work_todo_target_paths(active_work_todo)
-    first_write_due = first_source_mutation_turn <= 0 and probes_before_first_write >= max(1, int(probe_threshold))
+    prewrite_readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=tool_calls,
+        prior_tool_results=tool_results,
+        probe_threshold=probe_threshold,
+    )
+    count_ready = probes_before_first_write >= max(1, int(probe_threshold))
+    coverage_ready = bool(prewrite_readiness.get("ready"))
+    first_write_due = first_source_mutation_turn <= 0 and (
+        coverage_ready if requires_deep_runtime_coverage else count_ready
+    )
     status = "written" if first_source_mutation_turn > 0 else ("due" if first_write_due else "not_due")
     readiness = {
         "schema_version": 1,
@@ -3323,6 +3603,9 @@ def _first_write_readiness_from_trace(
         "first_write_provider_call_id": first_source_mutation_call_id,
         "target_paths": target_paths,
         "probe_provider_call_ids": probe_call_ids,
+        "prewrite_probe_covered_categories": prewrite_readiness.get("covered_categories") or (),
+        "prewrite_probe_missing_categories": prewrite_readiness.get("missing_categories") or (),
+        "prewrite_probe_category_provider_call_ids": prewrite_readiness.get("category_provider_call_ids") or {},
         "source": "implement_v2_tool_trace",
     }
     if first_write_due:
@@ -3359,6 +3642,7 @@ def _invalid_result_is_synthetic_non_observation(result: ToolResultEnvelope) -> 
         (
             "blocked_by_deep_runtime_prewrite_probe_gate",
             "blocked_by_prior_failed_write_in_same_turn",
+            "deep_runtime_prewrite_probe_budget_not_met",
         )
     )
 
@@ -4042,6 +4326,7 @@ def _live_json_prompt(
     tool_contract_recovery_instruction: str = "",
     tool_specs: tuple[ImplementLaneToolSpec, ...] | None = None,
     prewrite_write_tools_hidden: bool = False,
+    prewrite_probe_readiness: dict[str, object] | None = None,
     history: tuple[dict[str, object], ...],
 ) -> str:
     specs = tool_specs if tool_specs is not None else list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode"))
@@ -4073,8 +4358,11 @@ def _live_json_prompt(
         },
     }
     if prewrite_write_tools_hidden:
+        missing = _prewrite_missing_category_labels(prewrite_probe_readiness or {})
+        missing_text = ", ".join(missing) if missing else "the required hard-runtime probe categories"
         response_contract["tool_surface_note"] = (
-            "write tools are temporarily hidden for this turn; gather the required cheap probes first"
+            "write tools are temporarily hidden for this turn; gather cheap probes before writing. "
+            f"Missing: {missing_text}."
         )
     if hard_runtime_frontier_state and _model_frontier_update_enabled(lane_input):
         response_contract["frontier_state_update"] = {

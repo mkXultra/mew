@@ -55,6 +55,7 @@ from mew.implement_lane.v2_runtime import (
     _provider_visible_tool_call_for_history,
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
+    _shell_command_may_mutate_source_tree,
     _terminal_failure_reaction_turn_limit,
     _typed_finish_evidence_refs,
     _typed_retired_legacy_blockers_for_bundle,
@@ -1123,7 +1124,16 @@ def test_implement_v2_allows_hard_runtime_write_after_more_probes_follow_blocked
     (tmp_path / "doomgeneric_mips").write_bytes(b"\x7fELFfake")
     (tmp_path / "doomgeneric").mkdir()
     (tmp_path / "doomgeneric" / "i_video.c").write_text("void I_FinishUpdate(void) {}\n", encoding="utf-8")
-    probe_command = shlex.join([sys.executable, "-c", "print('abi probe')"])
+    probe_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "print('file readelf -s objdump -d ELF little endian main symbol "
+                "syscall hook api open read write opcode instruction output frame')"
+            ),
+        ]
+    )
     outputs = [
         {
             "summary": "initial cheap probes",
@@ -1213,6 +1223,7 @@ def test_implement_v2_allows_hard_runtime_write_after_more_probes_follow_blocked
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "module.exports = {}\n"
     assert readiness["probe_threshold"] == 8
     assert readiness["probe_count_before_first_write"] == 8
+    assert readiness["prewrite_probe_missing_categories"] == ()
     assert readiness["first_write_tool"] == "write_file"
     assert readiness["first_write_provider_call_id"] == "write-vm"
 
@@ -1265,6 +1276,85 @@ def test_implement_v2_blocks_hard_runtime_prewrite_even_without_active_work_todo
     assert not (tmp_path / "vm.js").exists()
 
 
+def test_implement_v2_blocks_hard_runtime_shell_writer_before_probe_coverage(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "open('vm.js','w').write('module.exports = {}\\n')"])
+    outputs = [
+        {
+            "summary": "shell writer too early with self-declared verifier contract",
+            "tool_calls": [
+                {
+                    "id": "shell-write",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "execution_contract": {"role": "runtime", "proof_role": "verifier"},
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "blocked before shell writer"},
+        }
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-hard-runtime",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+            },
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    shell_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
+
+    assert shell_result["status"] == "invalid"
+    assert "deep_runtime_prewrite_probe_budget_not_met" in shell_result["content"][0]["reason"]
+    assert readiness["first_write_attempt_tool"] == "run_command"
+    assert readiness["probe_count_before_first_write"] == 0
+    assert len(readiness["prewrite_probe_missing_categories"]) == 5
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_implement_v2_shell_writer_source_like_path_detection_is_artifact_safe() -> None:
+    assert _shell_command_may_mutate_source_tree("cat > package.json <<'EOF'\n{}\nEOF")
+    assert _shell_command_may_mutate_source_tree("cat > Makefile <<'EOF'\nall:\n\ttrue\nEOF")
+    assert _shell_command_may_mutate_source_tree("python -c \"open('vm.js','w').write('x')\"")
+    assert _shell_command_may_mutate_source_tree("python -c \"from pathlib import Path; Path('vm.js').write_text('x')\"")
+    assert not _shell_command_may_mutate_source_tree("python -c \"open('/tmp/frame.txt','w').write('x')\"")
+    assert not _shell_command_may_mutate_source_tree(
+        "python -c \"from pathlib import Path; Path('/tmp/frame.txt').write_text('x')\""
+    )
+    assert not _shell_command_may_mutate_source_tree(
+        "python -c \"from pathlib import Path; Path('/tmp/frame.txt').write_text('vm.js')\""
+    )
+    assert not _shell_command_may_mutate_source_tree("printf frame > frame.txt && test -s frame.txt")
+
+
 def test_implement_v2_hides_write_tools_from_hard_runtime_prompt_before_probe_budget(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
@@ -1297,15 +1387,70 @@ def test_implement_v2_hides_write_tools_from_hard_runtime_prompt_before_probe_bu
     response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
 
     assert {spec.name for spec in specs}.isdisjoint({"write_file", "edit_file", "apply_patch"})
-    assert (
-        '"tool_surface_note": "write tools are temporarily hidden for this turn; gather the required cheap probes first"'
-        in response_contract
-    )
+    assert "write tools are temporarily hidden for this turn" in response_contract
+    assert "source/output contract" in response_contract
     assert "write_file" not in response_contract
     assert "edit_file" not in response_contract
     assert "apply_patch" not in response_contract
     assert "finish" not in json.loads(response_contract)["tool_calls"][0]["name"]
     assert "run_command" in response_contract
+
+
+def test_implement_v2_keeps_write_tools_hidden_after_many_shallow_source_probes(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+        lane_config={"mode": "full"},
+    )
+    calls = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-1",
+        turn_index=1,
+        calls=tuple(
+            {
+                "provider_call_id": f"probe-{index}",
+                "tool_name": "read_file",
+                "arguments": {"path": f"src/{index}.c"},
+            }
+            for index in range(8)
+        ),
+    )
+    results = tuple(
+        ToolResultEnvelope(
+            lane_attempt_id=call.lane_attempt_id,
+            provider_call_id=call.provider_call_id,
+            mew_tool_call_id=call.mew_tool_call_id,
+            tool_name=call.tool_name,
+            status="completed",
+            content=({"path": call.arguments["path"], "content": "int ordinary_source_probe(void) { return 0; }"},),
+        )
+        for call in calls
+    )
+
+    specs = _model_visible_tool_specs_for_turn(
+        lane_input,
+        prior_tool_calls=tuple(calls),
+        prior_tool_results=results,
+    )
+    readiness = _first_write_readiness_from_trace(
+        {"id": "todo-1", "source": {"target_paths": ["vm.js"]}},
+        tool_calls=tuple(calls),
+        tool_results=results,
+        probe_threshold=8,
+        requires_deep_runtime_coverage=True,
+    )
+
+    assert {"write_file", "edit_file", "apply_patch"}.isdisjoint({spec.name for spec in specs})
+    assert readiness["probe_count_before_first_write"] == 8
+    assert readiness["first_write_due"] is False
+    assert "runtime_binary_layout" in readiness["prewrite_probe_missing_categories"]
+    assert "implementation_feature_surface" in readiness["prewrite_probe_missing_categories"]
 
 
 def test_implement_v2_does_not_label_exec_mode_as_prewrite_hidden(tmp_path) -> None:
@@ -1355,17 +1500,36 @@ def test_implement_v2_reveals_write_tools_after_hard_runtime_probe_budget(tmp_pa
         },
         lane_config={"mode": "full"},
     )
+    probe_calls = (
+        {"provider_call_id": "probe-src", "tool_name": "read_file", "arguments": {"path": "src/runtime.c"}},
+        {
+            "provider_call_id": "probe-binary",
+            "tool_name": "run_command",
+            "arguments": {"command": "file app.bin && readelf -h app.bin", "cwd": "."},
+        },
+        {
+            "provider_call_id": "probe-symbols",
+            "tool_name": "run_command",
+            "arguments": {"command": "readelf -s app.bin | grep main", "cwd": "."},
+        },
+        {
+            "provider_call_id": "probe-host",
+            "tool_name": "search_text",
+            "arguments": {"query": "syscall hook api open read write", "path": "."},
+        },
+        {
+            "provider_call_id": "probe-features",
+            "tool_name": "run_command",
+            "arguments": {"command": "objdump -d app.bin | grep opcode", "cwd": "."},
+        },
+        {"provider_call_id": "probe-output", "tool_name": "search_text", "arguments": {"query": "output frame artifact", "path": "."}},
+        {"provider_call_id": "probe-api", "tool_name": "search_text", "arguments": {"query": "entry callback interface", "path": "."}},
+        {"provider_call_id": "probe-glob", "tool_name": "glob", "arguments": {"pattern": "**/*.[ch]"}},
+    )
     calls = FakeProviderAdapter().normalize_tool_calls(
         lane_attempt_id="lane-v2-1",
         turn_index=1,
-        calls=tuple(
-            {
-                "provider_call_id": f"probe-{index}",
-                "tool_name": "read_file",
-                "arguments": {"path": f"src/{index}.c"},
-            }
-            for index in range(8)
-        ),
+        calls=probe_calls,
     )
     results = tuple(
         ToolResultEnvelope(
@@ -1374,7 +1538,7 @@ def test_implement_v2_reveals_write_tools_after_hard_runtime_probe_budget(tmp_pa
             mew_tool_call_id=call.mew_tool_call_id,
             tool_name=call.tool_name,
             status="completed",
-            content=({"path": call.arguments["path"], "content": "probe"},),
+            content=({"content": json.dumps(call.arguments)},),
         )
         for call in calls
     )
