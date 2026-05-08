@@ -77,6 +77,45 @@ ADVERTISED_ARTIFACT_SUFFIXES = frozenset(
         ".wasm",
     }
 )
+SOURCE_MUTATION_TRACKED_SUFFIXES = frozenset(
+    {
+        "",
+        ".c",
+        ".cc",
+        ".cfg",
+        ".conf",
+        ".cpp",
+        ".css",
+        ".go",
+        ".h",
+        ".hpp",
+        ".html",
+        ".java",
+        ".js",
+        ".json",
+        ".jsx",
+        ".lock",
+        ".lua",
+        ".mjs",
+        ".md",
+        ".py",
+        ".rs",
+        ".sh",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".txt",
+        ".yaml",
+        ".yml",
+    }
+)
+SOURCE_MUTATION_TRACKED_NAMES = frozenset({"makefile", "dockerfile", "cmakelists.txt", "configure"})
+SOURCE_MUTATION_IGNORED_DIRS = frozenset(
+    {".git", ".hg", ".mew", "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules", "target", "dist", "build"}
+)
+SOURCE_MUTATION_SNAPSHOT_MAX_FILES = 500
+SOURCE_MUTATION_HASH_MAX_BYTES = 1024 * 1024
+SOURCE_MUTATION_CHANGED_PATH_LIMIT = 40
 
 
 class RunTestsShellSurfaceMisuse(ValueError):
@@ -106,9 +145,11 @@ class ImplementV2ManagedExecRuntime:
         route_run_tests_shell_surface: bool = True,
         task_contract: dict[str, object] | None = None,
         frontier_state: dict[str, object] | None = None,
+        source_mutation_roots: tuple[str, ...] | list[str] | None = None,
     ):
         self.workspace = Path(str(workspace or ".")).expanduser().resolve(strict=False)
         self.allowed_roots = tuple(str(root) for root in (allowed_roots or (str(self.workspace),)))
+        self.source_mutation_roots = tuple(str(root) for root in (source_mutation_roots or (str(self.workspace),)))
         self.allow_shell = bool(allow_shell)
         self.run_command_available = bool(run_command_available)
         self.route_run_tests_shell_surface = bool(route_run_tests_shell_surface)
@@ -252,6 +293,12 @@ class ImplementV2ManagedExecRuntime:
                 workspace=self.workspace,
                 allowed_roots=self.allowed_roots,
             )
+        pre_run_source_tree_snapshot = {}
+        if call.tool_name == "run_command":
+            pre_run_source_tree_snapshot = _capture_source_tree_snapshot(
+                self.source_mutation_roots,
+                workspace=self.workspace,
+            )
         started_epoch = time.time()
         self.runner.start(
             command,
@@ -271,6 +318,7 @@ class ImplementV2ManagedExecRuntime:
             "command_intent": command_intent,
             "execution_contract_normalized": normalized_contract.as_dict(),
             "pre_run_artifact_stats": pre_run_artifact_stats,
+            "pre_run_source_tree_snapshot": pre_run_source_tree_snapshot,
             "started_epoch": started_epoch,
             "tool_run_record_ids": [],
             **({"execution_contract": dict(raw_contract_preserved)} if raw_contract_preserved else {}),
@@ -522,6 +570,14 @@ class ImplementV2ManagedExecRuntime:
                 previous_evidence=(),
                 stream_outputs=_stream_outputs_from_payload(payload, tool_run_record_id=record.record_id),
             )
+        source_tree_mutations = ()
+        if _is_terminal_record(record) and str(payload.get("tool_name") or tool_name) == "run_command":
+            source_tree_mutations = _source_tree_mutation_records(
+                metadata.get("pre_run_source_tree_snapshot"),
+                _capture_source_tree_snapshot(self.source_mutation_roots, workspace=self.workspace),
+                command_run_id=command_run_id,
+                provider_call_id=provider_call_id,
+            )
         verifier = derive_verifier_evidence(contract, (record,), artifact_evidence)
         classification = classify_execution_failure(record, artifact_evidence, verifier, contract)
         finish_gate = apply_finish_gate(contract, verifier, (classification,))
@@ -529,6 +585,7 @@ class ImplementV2ManagedExecRuntime:
         payload["command_run"] = command_run.as_dict()
         payload["tool_run_record"] = record.as_dict()
         payload["artifact_evidence"] = [item.as_dict() for item in artifact_evidence]
+        payload["source_tree_mutations"] = [dict(item) for item in source_tree_mutations]
         payload["verifier_evidence"] = verifier.as_dict()
         payload["failure_classification"] = classification.as_dict()
         payload["structured_finish_gate"] = finish_gate.as_dict()
@@ -536,6 +593,7 @@ class ImplementV2ManagedExecRuntime:
             {"kind": "command_run", "record": command_run.as_dict()},
             {"kind": "tool_run_record", "record": record.as_dict()},
             *({"kind": "artifact_evidence", "record": item.as_dict()} for item in artifact_evidence),
+            *({"kind": "source_tree_mutation", "record": dict(item)} for item in source_tree_mutations),
             {"kind": "verifier_evidence", "record": verifier.as_dict()},
             {"kind": "failure_classification", "record": classification.as_dict()},
             {"kind": "structured_finish_gate", "record": finish_gate.as_dict()},
@@ -683,6 +741,159 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _capture_source_tree_snapshot(
+    roots: tuple[str, ...] | list[str],
+    *,
+    workspace: Path,
+) -> dict[str, object]:
+    files: dict[str, dict[str, object]] = {}
+    truncated = False
+    for root in roots or (str(workspace),):
+        root_path = Path(str(root or workspace)).expanduser()
+        if not root_path.is_absolute():
+            root_path = workspace / root_path
+        root_path = root_path.resolve(strict=False)
+        candidates = (root_path,) if root_path.is_file() else _iter_source_tree_candidates(root_path)
+        for path in candidates:
+            if len(files) >= SOURCE_MUTATION_SNAPSHOT_MAX_FILES:
+                truncated = True
+                break
+            item = _source_tree_file_fingerprint(path)
+            if not item:
+                continue
+            files[str(item["path"])] = item
+        if truncated:
+            break
+    return {
+        "schema_version": 1,
+        "file_count": len(files),
+        "truncated": truncated,
+        "files": files,
+    }
+
+
+def _iter_source_tree_candidates(root: Path):
+    if not root.exists() or not root.is_dir():
+        return ()
+
+    def walk():
+        stack = [root]
+        while stack:
+            current = stack.pop()
+            try:
+                entries = sorted(current.iterdir(), key=lambda item: item.name)
+            except OSError:
+                continue
+            for path in entries:
+                if path.name in SOURCE_MUTATION_IGNORED_DIRS:
+                    continue
+                try:
+                    if path.is_dir() and not path.is_symlink():
+                        stack.append(path)
+                        continue
+                except OSError:
+                    continue
+                yield path
+
+    return walk()
+
+
+def _source_tree_file_fingerprint(path: Path) -> dict[str, object]:
+    try:
+        if path.is_symlink() or not path.is_file() or not _should_track_source_mutation_path(path):
+            return {}
+        stat = path.stat()
+    except OSError:
+        return {}
+    sha256 = ""
+    if stat.st_size <= SOURCE_MUTATION_HASH_MAX_BYTES:
+        try:
+            digest = hashlib.sha256()
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            sha256 = digest.hexdigest()
+        except OSError:
+            sha256 = ""
+    return {
+        "path": str(path.resolve(strict=False)),
+        "size": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+        "sha256": sha256,
+    }
+
+
+def _should_track_source_mutation_path(path: Path) -> bool:
+    name = path.name.casefold()
+    if name in SOURCE_MUTATION_TRACKED_NAMES:
+        return True
+    return path.suffix.casefold() in SOURCE_MUTATION_TRACKED_SUFFIXES
+
+
+def _source_tree_mutation_records(
+    before_snapshot: object,
+    after_snapshot: object,
+    *,
+    command_run_id: str,
+    provider_call_id: str,
+) -> tuple[dict[str, object], ...]:
+    if not isinstance(before_snapshot, dict) or not isinstance(after_snapshot, dict):
+        return ()
+    before_files = before_snapshot.get("files")
+    after_files = after_snapshot.get("files")
+    if not isinstance(before_files, dict) or not isinstance(after_files, dict):
+        return ()
+    changes: list[dict[str, object]] = []
+    for path in sorted(set(before_files) | set(after_files)):
+        before = before_files.get(path)
+        after = after_files.get(path)
+        if before is None and isinstance(after, dict):
+            changes.append(_source_tree_change(path, "created", after=after))
+        elif after is None and isinstance(before, dict):
+            changes.append(_source_tree_change(path, "deleted", before=before))
+        elif isinstance(before, dict) and isinstance(after, dict) and _source_tree_fingerprint_changed(before, after):
+            changes.append(_source_tree_change(path, "modified", before=before, after=after))
+    if not changes:
+        return ()
+    return (
+        {
+            "schema_version": 1,
+            "command_run_id": command_run_id,
+            "provider_call_id": provider_call_id,
+            "source": "bounded_source_tree_snapshot",
+            "changed_count": len(changes),
+            "changes": changes[:SOURCE_MUTATION_CHANGED_PATH_LIMIT],
+            "truncated": bool(before_snapshot.get("truncated") or after_snapshot.get("truncated"))
+            or len(changes) > SOURCE_MUTATION_CHANGED_PATH_LIMIT,
+        },
+    )
+
+
+def _source_tree_fingerprint_changed(before: dict[str, object], after: dict[str, object]) -> bool:
+    before_sha = str(before.get("sha256") or "")
+    after_sha = str(after.get("sha256") or "")
+    if before_sha and after_sha:
+        return before_sha != after_sha
+    return before.get("size") != after.get("size") or before.get("mtime_ns") != after.get("mtime_ns")
+
+
+def _source_tree_change(
+    path: str,
+    change: str,
+    *,
+    before: dict[str, object] | None = None,
+    after: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "path": path,
+        "change": change,
+        "before_sha256": str((before or {}).get("sha256") or ""),
+        "after_sha256": str((after or {}).get("sha256") or ""),
+        "before_size": (before or {}).get("size"),
+        "after_size": (after or {}).get("size"),
+    }
 
 
 def _tool_result_status(payload: dict[str, object]) -> str:
@@ -944,6 +1155,8 @@ def _execution_evidence_ref(*, lane_attempt_id: str, effect: dict[str, object]) 
         identifier = str(record.get("record_id") or "")
     elif kind == "artifact_evidence":
         identifier = str(record.get("evidence_id") or "")
+    elif kind == "source_tree_mutation":
+        identifier = str(record.get("command_run_id") or record.get("provider_call_id") or "")
     elif kind == "verifier_evidence":
         identifier = str(record.get("verifier_id") or "")
     elif kind == "failure_classification":

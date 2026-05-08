@@ -246,6 +246,7 @@ def run_live_json_implement_v2(
         route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
         task_contract=lane_input.task_contract,
         frontier_state=hard_runtime_frontier_state,
+        source_mutation_roots=_source_mutation_roots(lane_input),
     )
     transcript: list[ImplementLaneTranscriptEvent] = []
     tool_calls: list[object] = []
@@ -1264,6 +1265,7 @@ def run_fake_exec_implement_v2(
             route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
             task_contract=lane_input.task_contract,
             frontier_state=_initial_hard_runtime_frontier_state(lane_input),
+            source_mutation_roots=_source_mutation_roots(lane_input),
         )
         try:
             tool_results = tuple(
@@ -1391,6 +1393,7 @@ def run_fake_write_implement_v2(
             route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
             task_contract=lane_input.task_contract,
             frontier_state=_initial_hard_runtime_frontier_state(lane_input),
+            source_mutation_roots=_source_mutation_roots(lane_input),
         )
         write_runtime = ImplementV2WriteRuntime(
             workspace=lane_input.workspace,
@@ -2375,6 +2378,10 @@ def _allowed_write_roots(lane_input: ImplementLaneInput) -> tuple[str, ...]:
     if isinstance(raw_roots, (list, tuple)):
         return tuple(str(root) for root in raw_roots if str(root or "").strip())
     return ()
+
+
+def _source_mutation_roots(lane_input: ImplementLaneInput) -> tuple[str, ...]:
+    return _allowed_write_roots(lane_input) or (lane_input.workspace,)
 
 
 def _approved_write_calls(lane_input: ImplementLaneInput) -> tuple[object, ...]:
@@ -4617,10 +4624,182 @@ def _live_acceptance_done_gate(
             "invalid_evidence_refs": [],
             "continuation_prompt": "",
         }
+    source_mutation_block = _unaccounted_source_tree_mutation_block(tool_results, finish_arguments=finish_arguments)
+    if source_mutation_block:
+        return source_mutation_block
     return acceptance_done_gate_decision(
         _live_task_description(lane_input),
         _finish_acceptance_action(finish_arguments, tool_results, task_description=_live_task_description(lane_input)),
         session=_acceptance_session_from_tool_results(tool_results, lane_input=lane_input),
+    )
+
+
+def _unaccounted_source_tree_mutation_block(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    finish_arguments: dict[str, object],
+) -> dict[str, object]:
+    pending: list[dict[str, object]] = []
+    for result in tool_results:
+        mutation = _source_tree_mutation_from_result(result)
+        if mutation:
+            if not _result_self_accounts_for_source_tree_mutation(result, finish_arguments=finish_arguments):
+                pending.append(mutation)
+            continue
+        if pending:
+            pending = [
+                item for item in pending if not _result_accounts_for_source_tree_mutation(result, pending_mutation=item)
+            ]
+    if not pending:
+        return {}
+    changed_count = sum(max(0, int(item.get("changed_count") or 0)) for item in pending)
+    changes: list[object] = []
+    for item in pending:
+        item_changes = item.get("changes")
+        if isinstance(item_changes, list):
+            changes.extend(item_changes)
+    changed_paths = [str(item.get("path") or "") for item in changes if isinstance(item, dict) and item.get("path")]
+    command_run_ids = [str(item.get("command_run_id") or "") for item in pending if item.get("command_run_id")]
+    provider_call_ids = [str(item.get("provider_call_id") or "") for item in pending if item.get("provider_call_id")]
+    return {
+        "decision": "block_continue",
+        "reason": "run_command mutated source tree without later write or verifier evidence",
+        "blockers": [
+            {
+                "code": "unaccounted_source_tree_mutation",
+                "changed_count": changed_count,
+                "changed_paths": changed_paths[:8],
+                "command_run_id": command_run_ids[0] if command_run_ids else "",
+                "command_run_ids": command_run_ids[:8],
+                "provider_call_id": provider_call_ids[0] if provider_call_ids else "",
+                "provider_call_ids": provider_call_ids[:8],
+            }
+        ],
+        "invalid_evidence_refs": [],
+        "continuation_prompt": (
+            "A run_command changed source files. Account for that mutation before finishing: "
+            "either move the mutation through write_file/edit_file/apply_patch, or run one verifier-shaped "
+            "command that proves the mutated tree is correct and then cite that evidence."
+        ),
+    }
+
+
+def _source_tree_mutation_from_result(result: ToolResultEnvelope) -> dict[str, object]:
+    for effect in result.side_effects or ():
+        if isinstance(effect, dict) and effect.get("kind") == "source_tree_mutation":
+            record = effect.get("record")
+            if isinstance(record, dict) and int(record.get("changed_count") or 0) > 0:
+                return dict(record)
+    return {}
+
+
+def _result_accounts_for_source_tree_mutation(
+    result: ToolResultEnvelope,
+    *,
+    pending_mutation: dict[str, object],
+) -> bool:
+    if result.status != "completed":
+        return False
+    if result.tool_name in WRITE_TOOL_NAMES and bool(result.side_effects):
+        return _write_result_covers_source_tree_mutation(result, pending_mutation)
+    if result.tool_name not in EXEC_TOOL_NAMES:
+        return False
+    return _result_has_source_mutation_verifier_evidence(result)
+
+
+def _result_self_accounts_for_source_tree_mutation(
+    result: ToolResultEnvelope,
+    *,
+    finish_arguments: dict[str, object],
+) -> bool:
+    if result.status != "completed" or result.tool_name not in EXEC_TOOL_NAMES:
+        return False
+    if _result_has_structured_source_mutation_verifier_evidence(result):
+        return True
+    return _command_has_verifier_surface(_result_command_text(result)) and _finish_cites_provider_call(
+        finish_arguments, result.provider_call_id
+    )
+
+
+def _result_has_source_mutation_verifier_evidence(result: ToolResultEnvelope) -> bool:
+    if result.status != "completed" or result.tool_name not in EXEC_TOOL_NAMES:
+        return False
+    if _command_has_verifier_surface(_result_command_text(result)):
+        return True
+    return _result_has_structured_source_mutation_verifier_evidence(result)
+
+
+def _result_has_structured_source_mutation_verifier_evidence(result: ToolResultEnvelope) -> bool:
+    if result.status != "completed" or result.tool_name not in EXEC_TOOL_NAMES:
+        return False
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    contract = payload.get("execution_contract_normalized")
+    if not isinstance(contract, dict):
+        return False
+    acceptance_kind = str(contract.get("acceptance_kind") or "")
+    proof_role = str(contract.get("proof_role") or "")
+    verifier_acceptance_kinds = {
+        "candidate_artifact_proof",
+        "candidate_runtime_smoke",
+        "candidate_final_proof",
+        "external_verifier",
+    }
+    verifier_proof_roles = {
+        "default_smoke",
+        "custom_runtime_smoke",
+        "final_artifact",
+        "verifier",
+    }
+    if acceptance_kind not in verifier_acceptance_kinds and proof_role not in verifier_proof_roles:
+        return False
+    expected_artifacts = contract.get("expected_artifacts")
+    return isinstance(expected_artifacts, list) and bool(expected_artifacts)
+
+
+def _write_result_covers_source_tree_mutation(
+    result: ToolResultEnvelope,
+    pending_mutation: dict[str, object],
+) -> bool:
+    if bool(pending_mutation.get("truncated")):
+        return False
+    pending_paths = _source_tree_mutation_changed_paths(pending_mutation)
+    if len(pending_paths) != int(pending_mutation.get("changed_count") or 0):
+        return False
+    write_paths = _write_result_paths(result)
+    return bool(pending_paths) and all(
+        any(_write_paths_match(pending_path, write_path) for write_path in write_paths) for pending_path in pending_paths
+    )
+
+
+def _source_tree_mutation_changed_paths(pending_mutation: dict[str, object]) -> tuple[str, ...]:
+    changes = pending_mutation.get("changes")
+    if not isinstance(changes, list):
+        return ()
+    return tuple(str(item.get("path") or "") for item in changes if isinstance(item, dict) and item.get("path"))
+
+
+def _finish_cites_provider_call(finish_arguments: dict[str, object], provider_call_id: str) -> bool:
+    needle = str(provider_call_id or "").strip().casefold()
+    if not needle:
+        return False
+    return needle in json.dumps(finish_arguments or {}, sort_keys=True, default=str).casefold()
+
+
+def _result_command_text(result: ToolResultEnvelope) -> str:
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    return str(payload.get("command") or "")
+
+
+def _command_has_verifier_surface(command: object) -> bool:
+    text = str(command or "").casefold()
+    return bool(
+        re.search(r"(?:^|[;&|()])\s*test\s+(?:-[a-z]\b|.*(?:=|!=|-eq|-ne|-lt|-gt|-le|-ge)\s+)", text)
+        or re.search(
+            r"(?:^|[;&|()])\s*(?:(?:uv|poetry)\s+run\s+|python(?:3(?:\.\d+)?)?\s+-m\s+)?"
+            r"(?:pytest|unittest)(?:\s|$)",
+            text,
+        )
+        or re.search(r"(?:^|[;&|()])\s*(?:cargo\s+test|go\s+test|npm\s+test)(?:\s|$)", text)
     )
 
 

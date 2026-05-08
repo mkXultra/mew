@@ -38,6 +38,7 @@ from mew.implement_lane.v2_runtime import (
     ModelTurnInput,
     _auto_finish_from_structured_final_verifier,
     _call_model_turn,
+    _command_has_verifier_surface,
     _finish_acceptance_action,
     _finish_evidence_refs,
     _frontier_failure_payload,
@@ -51,6 +52,7 @@ from mew.implement_lane.v2_runtime import (
     _terminal_failure_reaction_turn_limit,
     _typed_finish_evidence_refs,
     _typed_retired_legacy_blockers_for_bundle,
+    _write_result_covers_source_tree_mutation,
 )
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
@@ -276,6 +278,467 @@ def test_implement_v2_live_json_runtime_can_edit_verify_and_finish(tmp_path) -> 
     assert result.metrics["terminal_evidence_count"] == 1
     assert result.metrics["replay_valid"] is True
     assert target.read_text(encoding="utf-8") == "after\n"
+
+
+def test_implement_v2_live_json_blocks_unaccounted_run_command_source_mutation(tmp_path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('sample.txt').write_text('after\\n', encoding='utf-8')",
+        ]
+    )
+    outputs = [
+        {
+            "summary": "mutate source through shell",
+            "tool_calls": [
+                {
+                    "id": "shell-write",
+                    "name": "run_command",
+                    "arguments": {"command": command, "cwd": ".", "timeout": 10},
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "source mutated"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    side_effect_kinds = {effect["kind"] for effect in tool_result["side_effects"]}
+
+    assert result.status == "blocked"
+    assert "source_tree_mutation" in side_effect_kinds
+    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_source_tree_mutation"
+    assert target.read_text(encoding="utf-8") == "after\n"
+
+
+def test_implement_v2_live_json_verifier_accounts_for_run_command_source_mutation(tmp_path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+    mutate_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('sample.txt').write_text('after\\n', encoding='utf-8')",
+        ]
+    )
+    outputs = [
+        {
+            "summary": "mutate source through shell",
+            "tool_calls": [
+                {
+                    "id": "shell-write",
+                    "name": "run_command",
+                    "arguments": {"command": mutate_command, "cwd": ".", "timeout": 10},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "verify mutated source",
+            "tool_calls": [
+                {
+                    "id": "verify-source",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "test \"$(cat sample.txt)\" = after",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 10,
+                        "execution_contract": {
+                            "role": "verify",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "zero"},
+                        },
+                    },
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "source mutated and verified"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    blocker_codes = {
+        str(blocker.get("code") or "")
+        for blocker in result.metrics["finish_gate_decision"].get("blockers", [])
+        if isinstance(blocker, dict)
+    }
+    assert result.status == "blocked"
+    assert "unaccounted_source_tree_mutation" not in blocker_codes
+    assert target.read_text(encoding="utf-8") == "after\n"
+
+
+def test_implement_v2_live_json_unrelated_write_does_not_account_for_shell_source_mutation(tmp_path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+    mutate_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('sample.txt').write_text('after\\n', encoding='utf-8')",
+        ]
+    )
+    outputs = [
+        {
+            "summary": "mutate source through shell",
+            "tool_calls": [
+                {
+                    "id": "shell-write",
+                    "name": "run_command",
+                    "arguments": {"command": mutate_command, "cwd": ".", "timeout": 10},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "write unrelated file",
+            "tool_calls": [
+                {
+                    "id": "write-other",
+                    "name": "write_file",
+                    "arguments": {"path": "other.txt", "content": "ok\n"},
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "unrelated write done"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_source_tree_mutation"
+    assert target.read_text(encoding="utf-8") == "after\n"
+    assert (tmp_path / "other.txt").read_text(encoding="utf-8") == "ok\n"
+
+
+def test_implement_v2_live_json_keeps_earlier_unaccounted_shell_source_mutation(tmp_path) -> None:
+    first = tmp_path / "first.py"
+    second = tmp_path / "second.py"
+    first.write_text("before\n", encoding="utf-8")
+    second.write_text("before\n", encoding="utf-8")
+    mutate_first = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('first.py').write_text('after\\n', encoding='utf-8')",
+        ]
+    )
+    mutate_second = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('second.py').write_text('after\\n', encoding='utf-8')",
+        ]
+    )
+    outputs = [
+        {
+            "summary": "mutate first source through shell",
+            "tool_calls": [
+                {
+                    "id": "shell-write-first",
+                    "name": "run_command",
+                    "arguments": {"command": mutate_first, "cwd": ".", "timeout": 10},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "mutate second source through shell",
+            "tool_calls": [
+                {
+                    "id": "shell-write-second",
+                    "name": "run_command",
+                    "arguments": {"command": mutate_second, "cwd": ".", "timeout": 10},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "cover only second mutation",
+            "tool_calls": [
+                {
+                    "id": "write-second",
+                    "name": "write_file",
+                    "arguments": {"path": "second.py", "content": "final\n"},
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "covered latest mutation only"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+
+    blocker = result.metrics["finish_gate_decision"]["blockers"][0]
+    assert result.status == "blocked"
+    assert blocker["code"] == "unaccounted_source_tree_mutation"
+    assert blocker["changed_count"] == 1
+    assert any(str(path).endswith("first.py") for path in blocker["changed_paths"])
+    assert first.read_text(encoding="utf-8") == "after\n"
+    assert second.read_text(encoding="utf-8") == "final\n"
+
+
+def test_implement_v2_write_does_not_account_for_truncated_shell_source_mutation() -> None:
+    mutation = {
+        "changed_count": 41,
+        "changes": [{"path": f"/workspace/src/file_{index}.py", "change": "modified"} for index in range(40)],
+        "truncated": True,
+    }
+    write_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="write-many",
+        mew_tool_call_id="mew-write-many",
+        tool_name="write_file",
+        status="completed",
+        side_effects=tuple(
+            {
+                "kind": "file_write",
+                "path": f"/workspace/src/file_{index}.py",
+                "written": True,
+            }
+            for index in range(40)
+        ),
+    )
+
+    assert _write_result_covers_source_tree_mutation(write_result, mutation) is False
+
+
+def test_implement_v2_live_json_superficial_check_text_does_not_account_for_shell_source_mutation(
+    tmp_path,
+) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+    command = (
+        shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('sample.txt').write_text('after\\n', encoding='utf-8')",
+        ]
+    )
+        + "; echo test"
+    )
+    outputs = [
+        {
+            "summary": "mutate source through shell",
+            "tool_calls": [
+                {
+                    "id": "shell-write-check",
+                    "name": "run_command",
+                    "arguments": {"command": command, "cwd": ".", "use_shell": True, "timeout": 10},
+                },
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "source mutated",
+                "acceptance_evidence": ["shell-write-check confirmed sample.txt"],
+            },
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_source_tree_mutation"
+    assert target.read_text(encoding="utf-8") == "after\n"
+
+
+def test_implement_v2_live_json_structured_label_without_verifier_evidence_does_not_account_for_shell_source_mutation(
+    tmp_path,
+) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+    mutate_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('sample.txt').write_text('after\\n', encoding='utf-8')",
+        ]
+    )
+    outputs = [
+        {
+            "summary": "mutate source through shell",
+            "tool_calls": [
+                {
+                    "id": "shell-write",
+                    "name": "run_command",
+                    "arguments": {"command": mutate_command, "cwd": ".", "timeout": 10},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "fake verifier label",
+            "tool_calls": [
+                {
+                    "id": "fake-smoke",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 10,
+                        "execution_contract": {
+                            "role": "verify",
+                            "stage": "verification",
+                            "proof_role": "default_smoke",
+                            "acceptance_kind": "candidate_runtime_smoke",
+                            "expected_exit": {"mode": "zero"},
+                        },
+                    },
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "fake smoke passed"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_source_tree_mutation"
+    assert target.read_text(encoding="utf-8") == "after\n"
+
+
+def test_implement_v2_verifier_surface_requires_command_boundary() -> None:
+    assert _command_has_verifier_surface("echo test") is False
+    assert _command_has_verifier_surface("echo pytest") is False
+    assert _command_has_verifier_surface("printf ok; test -f sample.txt") is True
+    assert _command_has_verifier_surface("uv run pytest tests/test_sample.py") is True
+    assert _command_has_verifier_surface("python -m unittest tests.test_sample") is True
+    assert _command_has_verifier_surface("cargo test") is True
 
 
 def test_implement_v2_live_json_accept_edits_defaults_new_write_to_create_and_apply(tmp_path) -> None:
@@ -3431,7 +3894,10 @@ def test_implement_v2_live_json_extends_after_final_diagnostic_of_prior_terminal
             "finish": {
                 "outcome": "completed",
                 "summary": "prior terminal failure repaired after diagnostic",
-                "acceptance_evidence": ["repair-after-diagnostic confirmed repaired.txt"],
+                "acceptance_evidence": [
+                    "diagnose-failure confirmed diagnostic.txt",
+                    "repair-after-diagnostic confirmed repaired.txt",
+                ],
             },
         },
     ]
