@@ -7762,6 +7762,109 @@ def test_implement_v2_frontier_diagnostic_stream_miss_does_not_replace_runtime_f
     assert "latest_build_failure" not in frontier
 
 
+def test_implement_v2_frontier_closeout_kill_preserves_prior_runtime_failure(tmp_path) -> None:
+    calls = {"count": 0}
+    long_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('started', flush=True); time.sleep(5)",
+        ]
+    )
+
+    def frame_contract() -> dict[str, object]:
+        return {
+            "id": "contract:runtime-frame",
+            "role": "runtime",
+            "stage": "verification",
+            "purpose": "verification",
+            "proof_role": "verifier",
+            "acceptance_kind": "external_verifier",
+            "expected_exit": 0,
+            "expected_artifacts": [
+                {
+                    "id": "frame",
+                    "kind": "file",
+                    "path": "frame.bmp",
+                    "checks": [{"type": "exists", "severity": "blocking"}],
+                }
+            ],
+        }
+
+    def fake_model(*_args, **_kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return {
+                "summary": "record the actionable runtime artifact miss",
+                "tool_calls": [
+                    {
+                        "id": "runtime-frame-missing",
+                        "name": "run_command",
+                        "arguments": {
+                            "command": "printf 'NO_FRAME\\n'; exit 1",
+                            "cwd": ".",
+                            "use_shell": True,
+                            "timeout": 5,
+                            "execution_contract": frame_contract(),
+                        },
+                    }
+                ],
+                "finish": {"outcome": "continue", "summary": "repair frame artifact"},
+            }
+        return {
+            "summary": "start a final verifier that cannot close out usefully",
+            "tool_calls": [
+                {
+                    "id": "final-verifier-yield",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": long_command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 10,
+                        "foreground_budget_seconds": 0.001,
+                        "execution_contract": frame_contract(),
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "wait for final verifier"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Run verifier so it writes frame.bmp.", "max_wall_seconds": 600},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "active_command_auto_poll_seconds": 0,
+                "command_closeout_seconds": 0,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+    runtime_failure = frontier["latest_runtime_failure"]
+
+    assert result.metrics["orphaned_command_cleanup_count"] == 1
+    assert runtime_failure["failure_class"] == "runtime_artifact_missing"
+    assert runtime_failure["failure_kind"] == "missing_artifact"
+    assert "NO_FRAME" in runtime_failure["stdout_tail"]
+    assert "killed" not in runtime_failure["failure_summary"]
+    assert "latest_build_failure" not in frontier
+
+
 def test_implement_v2_frontier_final_artifact_uses_blocking_runtime_artifact(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {

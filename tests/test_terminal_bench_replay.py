@@ -926,6 +926,251 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertTrue(current_v2["active_command_closeout_failed"])
             self.assertIn("active command closeout", trial["current"]["next_action"])
 
+    def test_replay_terminal_bench_job_detects_budget_exhausted_closeout_only_gap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "build-cython-ext__v2fixture"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "final-closeout",
+                                "tool_name": "run_command",
+                                "status": "interrupted",
+                                "content": [
+                                    {
+                                        "command_run_id": "cmd-final",
+                                        "reason": "implement_v2 active command closeout budget exhausted",
+                                        "status": "killed",
+                                        "kill_status": "process_group_terminated",
+                                        "exit_code": None,
+                                        "stdout": "",
+                                        "stderr": "",
+                                        "stdout_tail": "",
+                                        "stderr_tail": "",
+                                        "output_bytes": 0,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["latest_failure"]["provider_call_id"], "final-closeout")
+            self.assertTrue(current_v2["active_command_closeout_failed"])
+            self.assertIn("active command closeout", trial["current"]["next_action"])
+
+    def test_replay_terminal_bench_job_keeps_closeout_gap_when_only_prior_failure_is_closeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = (
+                Path(job_dir)
+                / "build-cython-ext__v2fixture"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+            )
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "prior-closeout",
+                                "tool_name": "run_command",
+                                "status": "interrupted",
+                                "content": [
+                                    {
+                                        "reason": "implement_v2 live_json attempt closed before command finalized",
+                                        "kill_status": "process_group_terminated",
+                                    }
+                                ],
+                            },
+                            {
+                                "provider_call_id": "final-budget-closeout",
+                                "tool_name": "run_command",
+                                "status": "interrupted",
+                                "content": [
+                                    {
+                                        "command_run_id": "cmd-final",
+                                        "reason": "implement_v2 active command closeout budget exhausted",
+                                        "status": "killed",
+                                        "exit_code": None,
+                                        "stdout": "",
+                                        "stderr": "",
+                                        "stdout_tail": "",
+                                        "stderr_tail": "",
+                                        "output_bytes": 0,
+                                    }
+                                ],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(current_v2["active_command_closeout_failed"])
+            self.assertIn("active command closeout", trial["current"]["next_action"])
+
+    def test_replay_terminal_bench_job_ignores_low_signal_closeout_for_latest_runtime_frontier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            trial_dir = Path(job_dir) / "build-cython-ext__v2fixture"
+            (trial_dir / "verifier" / "test-stdout.txt").write_text(
+                "FileNotFoundError: [Errno 2] No such file or directory: '/tmp/frame.bmp'\n",
+                encoding="utf-8",
+            )
+            v2_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "implement_v2"
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "prior-runtime-missing",
+                                "tool_name": "run_command",
+                                "status": "failed",
+                                "content": [
+                                    {
+                                        "command_run_id": "cmd-prior",
+                                        "exit_code": 1,
+                                        "status": "failed",
+                                        "stdout": "NO_FRAME\n",
+                                        "stdout_tail": "NO_FRAME\n",
+                                        "tool_run_record": {
+                                            "record_id": "record-prior",
+                                            "command_run_id": "cmd-prior",
+                                            "status": "failed",
+                                            "exit_code": 1,
+                                            "semantic_exit": {"ok": False, "category": "nonzero_exit"},
+                                            "stdout_preview": "NO_FRAME\n",
+                                            "stderr_preview": "",
+                                        },
+                                        "execution_contract": {
+                                            "role": "runtime",
+                                            "stage": "verification",
+                                            "purpose": "verification",
+                                            "proof_role": "verifier",
+                                            "acceptance_kind": "external_verifier",
+                                            "expected_exit": 0,
+                                            "expected_artifacts": [
+                                                {
+                                                    "path": "/tmp/frame.bmp",
+                                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                                }
+                                            ],
+                                        },
+                                        "artifact_evidence": [
+                                            {
+                                                "evidence_id": "artifact-prior",
+                                                "path": "/tmp/frame.bmp",
+                                                "status": "failed",
+                                                "blocking": True,
+                                                "checks": [
+                                                    {
+                                                        "type": "exists",
+                                                        "passed": False,
+                                                        "severity": "blocking",
+                                                    }
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                            {
+                                "provider_call_id": "final-closeout",
+                                "tool_name": "run_command",
+                                "status": "interrupted",
+                                "content": [
+                                    {
+                                        "command_run_id": "cmd-final",
+                                        "reason": "implement_v2 active command closeout budget exhausted",
+                                        "status": "killed",
+                                        "kill_status": "process_group_terminated",
+                                        "exit_code": None,
+                                        "stdout": "",
+                                        "stderr": "",
+                                        "stdout_tail": "",
+                                        "stderr_tail": "",
+                                        "output_bytes": 0,
+                                        "tool_run_record": {
+                                            "record_id": "record-final",
+                                            "command_run_id": "cmd-final",
+                                            "status": "killed",
+                                            "exit_code": None,
+                                            "interrupted": True,
+                                            "semantic_exit": {"ok": False, "category": "interrupted"},
+                                            "stdout_preview": "",
+                                            "stderr_preview": "",
+                                        },
+                                        "execution_contract": {
+                                            "role": "runtime",
+                                            "stage": "final_verifier",
+                                            "proof_role": "verifier",
+                                            "acceptance_kind": "external_verifier",
+                                            "expected_exit": 0,
+                                            "expected_artifacts": [
+                                                {
+                                                    "path": "/tmp/frame.bmp",
+                                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                                }
+                                            ],
+                                        },
+                                    }
+                                ],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["latest_failure"]["provider_call_id"], "prior-runtime-missing")
+            self.assertEqual(current_v2["latest_failure"]["failure_class"], "runtime_artifact_missing")
+            self.assertEqual(current_v2["latest_failure"]["failure_kind"], "missing_artifact")
+            self.assertIn("NO_FRAME", current_v2["latest_failure"]["stdout_tail"])
+            self.assertFalse(current_v2["active_command_closeout_failed"])
+            self.assertIn("runtime producer", next_action)
+            self.assertNotIn("active command closeout", next_action)
+
     def test_replay_terminal_bench_job_routes_run_tests_shell_surface_to_tool_contract_recovery(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_implement_v2_replay_fixture(tmp)

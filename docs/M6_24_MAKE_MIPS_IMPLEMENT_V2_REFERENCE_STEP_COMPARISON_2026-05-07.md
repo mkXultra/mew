@@ -820,3 +820,44 @@ Current implication:
   rather than a generic wall timeout or killed verifier closeout.
 - After the repair, run focused UT/local replay/dogfood/emulator, review, and
   one more 10 minute step-shape diagnostic before `speed_1` / `proof_5`.
+
+## 2026-05-08 Wall-Budget Closeout Projection Repair
+
+Repair implemented:
+
+- `implement_v2` runtime state preserves an earlier actionable
+  `runtime_artifact_missing` / artifact frontier when the final result is only
+  a low-signal active-command closeout;
+- replay mirrors the same projection for `current.implement_v2.latest_failure`
+  and `current.next_action`;
+- closeout-only and mixed closeout-only artifacts still route to active-command
+  closeout recovery instead of being hidden.
+
+Validation:
+
+- focused closeout tests: `5 passed`;
+- `tests/test_terminal_bench_replay.py`: `32 passed`;
+- `tests/test_implement_lane.py`: `203 passed`;
+- scoped ruff: pass;
+- exact `1520` replay: pass;
+- exact `1520` terminal-bench replay dogfood: pass;
+- `m6_24-implement-v2-hard-runtime-progress-continuation-emulator`: pass;
+- codex-ultra review session `019e065a-716d-7121-b01a-92266beb9196`:
+  `APPROVE`.
+
+Current exact replay projection for `1520`:
+
+- `current.implement_v2.latest_failure.provider_call_id`:
+  `call-verify-vm-10b`;
+- `failure_class`: `runtime_artifact_missing`;
+- `failure_kind`: `missing_artifact`;
+- `failure_phase`: `runtime`;
+- `active_command_closeout_failed`: `false`;
+- `next_action`: runtime producer/resource/syscall frontier blocked before
+  `/tmp/frame.bmp`.
+
+Next operation:
+
+- commit this repair;
+- run one same-shape 10 minute `make-mips-interpreter` step-shape diagnostic;
+- compare against the Codex reference before any `speed_1` / `proof_5`.

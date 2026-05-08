@@ -637,10 +637,13 @@ def _first_tool_result_payload(result):
     return content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
 
 
-def _latest_structured_failure_record(structured_replay):
+def _latest_structured_failure_record(structured_replay, *, skip_provider_call_ids=None):
+    skip_ids = {str(item) for item in (skip_provider_call_ids or set()) if str(item)}
     records = structured_replay.get("records") if isinstance(structured_replay, dict) else []
     for record in reversed(records if isinstance(records, list) else []):
         if not isinstance(record, dict):
+            continue
+        if str(record.get("provider_call_id") or "") in skip_ids:
             continue
         classification = record.get("classification") if isinstance(record.get("classification"), dict) else {}
         if classification.get("class") and classification.get("class") != "unknown_failure":
@@ -649,7 +652,11 @@ def _latest_structured_failure_record(structured_replay):
 
 
 def _implement_v2_latest_failure(failed_results, *, structured_replay=None):
-    structured_record = _latest_structured_failure_record(structured_replay or {})
+    low_signal_closeout_ids = _implement_v2_low_signal_active_command_closeout_ids(failed_results)
+    structured_record = _latest_structured_failure_record(
+        structured_replay or {},
+        skip_provider_call_ids=low_signal_closeout_ids,
+    )
     if not failed_results:
         if structured_record:
             classification = structured_record.get("classification") or {}
@@ -664,11 +671,22 @@ def _implement_v2_latest_failure(failed_results, *, structured_replay=None):
                 "source": "recomputed_structured_execution_evidence",
             }
         return {}
-    result = failed_results[-1]
-    for candidate in reversed(failed_results):
-        if isinstance(candidate, dict) and str(candidate.get("tool_name") or "") in _IMPLEMENT_V2_TERMINAL_TOOLS:
-            result = candidate
-            break
+    by_provider_call_id = {
+        str(result.get("provider_call_id") or ""): result
+        for result in failed_results
+        if isinstance(result, dict) and str(result.get("provider_call_id") or "")
+    }
+    result = by_provider_call_id.get(str(structured_record.get("provider_call_id") or "")) if structured_record else None
+    if result is None:
+        result = failed_results[-1]
+        for candidate in reversed(failed_results):
+            if not isinstance(candidate, dict):
+                continue
+            if str(candidate.get("provider_call_id") or "") in low_signal_closeout_ids:
+                continue
+            if str(candidate.get("tool_name") or "") in _IMPLEMENT_V2_TERMINAL_TOOLS:
+                result = candidate
+                break
     first_content = _first_tool_result_payload(result)
     latest = {
         "provider_call_id": str(result.get("provider_call_id") or ""),
@@ -695,6 +713,40 @@ def _implement_v2_latest_failure(failed_results, *, structured_replay=None):
     return latest
 
 
+def _implement_v2_low_signal_active_command_closeout_ids(failed_results):
+    ids = set()
+    for result in failed_results:
+        if not _implement_v2_tool_result_is_low_signal_active_command_closeout(result):
+            continue
+        provider_call_id = str(result.get("provider_call_id") or "")
+        if provider_call_id:
+            ids.add(provider_call_id)
+    return ids
+
+
+def _implement_v2_tool_result_is_low_signal_active_command_closeout(result):
+    if not isinstance(result, dict):
+        return False
+    payload = _first_tool_result_payload(result)
+    reason = str(payload.get("reason") or "").lower()
+    if "active command closeout budget exhausted" not in reason:
+        return False
+    status = str(payload.get("status") or "").lower()
+    if status not in {"killed", "timed_out", "orphaned"}:
+        return False
+    if payload.get("exit_code") is not None:
+        return False
+    stdout = str(payload.get("stdout") or payload.get("stdout_tail") or "").strip()
+    stderr = str(payload.get("stderr") or payload.get("stderr_tail") or "").strip()
+    if stdout or stderr:
+        return False
+    try:
+        output_bytes = int(payload.get("output_bytes") or 0)
+    except (TypeError, ValueError):
+        output_bytes = 0
+    return output_bytes <= 0
+
+
 def _implement_v2_latest_failed_terminal_result(failed_results):
     for result in reversed(failed_results):
         if isinstance(result, dict) and str(result.get("tool_name") or "") in _IMPLEMENT_V2_TERMINAL_TOOLS:
@@ -703,14 +755,43 @@ def _implement_v2_latest_failed_terminal_result(failed_results):
 
 
 def _implement_v2_active_command_closeout_failed(failed_results):
-    for result in failed_results:
+    for index in range(len(failed_results) - 1, -1, -1):
+        result = failed_results[index]
         if not isinstance(result, dict):
             continue
-        content = result.get("content")
-        first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
-        reason = str(first_content.get("reason") or "")
-        status = str(result.get("status") or "")
-        if status == "interrupted" and "closed before command finalized" in reason:
+        if str(result.get("tool_name") or "") in _IMPLEMENT_V2_TERMINAL_TOOLS:
+            if not _implement_v2_tool_result_is_active_command_closeout(result):
+                return False
+            if _implement_v2_tool_result_is_low_signal_active_command_closeout(
+                result
+            ) and _implement_v2_has_prior_actionable_terminal_failure(failed_results[:index]):
+                return False
+            return True
+    return False
+
+
+def _implement_v2_tool_result_is_active_command_closeout(result):
+    if not isinstance(result, dict):
+        return False
+    content = result.get("content")
+    first_content = content[0] if isinstance(content, list) and content and isinstance(content[0], dict) else {}
+    reason = str(first_content.get("reason") or "").lower()
+    status = str(result.get("status") or "").lower()
+    if status != "interrupted":
+        return False
+    return (
+        "closed before command finalized" in reason
+        or "active command closeout budget exhausted" in reason
+    )
+
+
+def _implement_v2_has_prior_actionable_terminal_failure(failed_results):
+    for result in reversed(failed_results):
+        if not isinstance(result, dict):
+            continue
+        if str(result.get("tool_name") or "") not in _IMPLEMENT_V2_TERMINAL_TOOLS:
+            continue
+        if not _implement_v2_tool_result_is_active_command_closeout(result):
             return True
     return False
 
@@ -982,6 +1063,7 @@ def _implement_v2_runtime_producer_blocked(summary, latest):
         "program terminated",
         "no_frame",
         "bmp_missing",
+        "frame missing",
     )
     return any(marker in text for marker in progress_markers)
 

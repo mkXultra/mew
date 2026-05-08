@@ -2975,6 +2975,7 @@ def _frontier_build_target_from_contract(
 def _latest_runtime_frontier_failure(
     tool_results: tuple[ToolResultEnvelope, ...],
 ) -> tuple[str, dict[str, object]] | None:
+    low_signal_closeout: tuple[str, dict[str, object]] | None = None
     for result in reversed(tool_results):
         if result.tool_name not in {"run_command", "run_tests", "poll_command"}:
             continue
@@ -2987,8 +2988,34 @@ def _latest_runtime_frontier_failure(
         if contract and not _execution_contract_updates_hard_runtime_frontier(contract):
             continue
         key = _frontier_failure_key_from_payload(payload)
-        return key, _frontier_failure_payload(payload)
-    return None
+        failure = _frontier_failure_payload(payload)
+        if _is_low_signal_active_command_closeout_failure(payload):
+            low_signal_closeout = low_signal_closeout or (key, failure)
+            continue
+        return key, failure
+    return low_signal_closeout
+
+
+def _is_low_signal_active_command_closeout_failure(payload: dict[str, object]) -> bool:
+    reason = str(payload.get("reason") or "").strip().lower()
+    if "active command closeout budget exhausted" not in reason:
+        return False
+    status = str(payload.get("status") or "").strip().lower()
+    if status not in {"killed", "timed_out", "orphaned"}:
+        return False
+    if payload.get("exit_code") is not None:
+        return False
+    stdout = str(payload.get("stdout") or payload.get("stdout_tail") or "").strip()
+    stderr = str(payload.get("stderr") or payload.get("stderr_tail") or "").strip()
+    if stdout or stderr:
+        return False
+    try:
+        output_bytes = int(payload.get("output_bytes") or 0)
+    except (TypeError, ValueError):
+        output_bytes = 0
+    if output_bytes > 0:
+        return False
+    return True
 
 
 def _has_structured_frontier_evidence(tool_results: tuple[ToolResultEnvelope, ...]) -> bool:
