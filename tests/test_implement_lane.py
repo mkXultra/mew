@@ -7075,6 +7075,144 @@ def test_implement_v2_provider_history_surfaces_structured_evidence_summary(tmp_
     assert "stdout_stderr_body_omitted" not in projected["execution_evidence_digest"]
 
 
+def test_implement_v2_prompt_history_keeps_only_latest_same_family_failure() -> None:
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "first failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-1",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "command_run_id": "cmd-1",
+                                "output_ref": "out-1",
+                                "latest_failure": {
+                                    "class": "runtime_artifact_missing",
+                                    "kind": "missing_artifact",
+                                    "summary": "old artifact miss",
+                                },
+                                "execution_evidence_digest": {
+                                    "artifact_miss": [{"artifact_id": "frame", "path": "/tmp/frame.bmp"}]
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+        {
+            "turn": 2,
+            "summary": "newer failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-2",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "command_run_id": "cmd-2",
+                                "output_ref": "out-2",
+                                "latest_failure": {
+                                    "class": "runtime_artifact_missing",
+                                    "kind": "missing_artifact",
+                                    "summary": "new artifact miss",
+                                },
+                                "execution_evidence_digest": {
+                                    "artifact_miss": [{"artifact_id": "frame", "path": "/tmp/frame.bmp"}]
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+    first_item = rendered[0]["tool_results"][0]["content"]["content"][0]
+    second_item = rendered[1]["tool_results"][0]["content"]["content"][0]
+
+    assert first_item["provider_history_projection"] == "terminal_result_replaced_by_latest_failure_v1"
+    assert first_item["latest_failure_family"] == "runtime_artifact_missing:missing_artifact:artifact:frame:/tmp/frame.bmp"
+    assert first_item["output_ref"] == "out-1"
+    assert "latest_failure" not in first_item
+    assert second_item["latest_failure"]["summary"] == "new artifact miss"
+    assert prompt_history[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "old artifact miss"
+
+
+def test_implement_v2_prompt_history_keeps_different_artifact_failures() -> None:
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "first artifact",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-1",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "latest_failure": {
+                                    "class": "runtime_artifact_missing",
+                                    "kind": "missing_artifact",
+                                    "summary": "frame miss",
+                                },
+                                "execution_evidence_digest": {
+                                    "artifact_miss": [{"artifact_id": "frame", "path": "/tmp/frame.bmp"}]
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+        {
+            "turn": 2,
+            "summary": "second artifact",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-2",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "latest_failure": {
+                                    "class": "runtime_artifact_missing",
+                                    "kind": "missing_artifact",
+                                    "summary": "log miss",
+                                },
+                                "execution_evidence_digest": {
+                                    "artifact_miss": [{"artifact_id": "log", "path": "/tmp/run.log"}]
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+
+    assert rendered[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "frame miss"
+    assert rendered[1]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "log miss"
+
+
 def test_implement_v2_exec_contract_accepted_nonzero_exit_can_complete(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(

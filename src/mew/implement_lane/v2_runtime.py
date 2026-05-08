@@ -5742,10 +5742,10 @@ def _current_projection_descriptor(prompt_history: tuple[dict[str, object], ...]
     projection_sha256 = _sha256_text(projection)
     projection_chars = len(projection)
     return {
-        "current_projection_schema": "provider_history_projection_v0",
+        "current_projection_schema": "provider_history_projection_v1",
         "current_projection_sha256": projection_sha256,
         "current_projection_chars": projection_chars,
-        "future_projection_schema": "provider_history_projection_candidate_v0",
+        "future_projection_schema": "provider_history_projection_candidate_v1",
         "future_projection_sha256": projection_sha256,
         "future_projection_chars": projection_chars,
         "future_projection_mode": "identity",
@@ -5762,7 +5762,93 @@ def _current_projection_descriptor(prompt_history: tuple[dict[str, object], ...]
 def _render_prompt_history_json(prompt_history: tuple[dict[str, object], ...] | list[dict[str, object]]) -> str:
     """Render the exact history_json bytes used by _live_json_prompt."""
 
-    return json.dumps(list(prompt_history)[-8:], ensure_ascii=False, indent=2)
+    return json.dumps(_project_prompt_history_for_next_turn(list(prompt_history)[-8:]), ensure_ascii=False, indent=2)
+
+
+def _project_prompt_history_for_next_turn(prompt_history: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Replace stale same-family terminal failures in model-visible history.
+
+    Full tool results remain in the proof manifest and sidecar history. This
+    projection only keeps the latest actionable failure per family in the next
+    model prompt so the model does not repair stale terminal evidence.
+    """
+
+    projected = json.loads(json.dumps(prompt_history, ensure_ascii=False))
+    occurrences: list[tuple[int, int, int, str]] = []
+    latest_by_family: dict[str, tuple[int, int, int]] = {}
+    for entry_index, entry in enumerate(projected):
+        if not isinstance(entry, dict):
+            continue
+        tool_results = entry.get("tool_results")
+        if not isinstance(tool_results, list):
+            continue
+        for result_index, result in enumerate(tool_results):
+            if not isinstance(result, dict):
+                continue
+            content = result.get("content")
+            if not isinstance(content, dict):
+                continue
+            items = content.get("content")
+            if not isinstance(items, list):
+                continue
+            for item_index, item in enumerate(items):
+                family = _provider_latest_failure_family(item)
+                if not family:
+                    continue
+                occurrences.append((entry_index, result_index, item_index, family))
+                latest_by_family[family] = (entry_index, result_index, item_index)
+    for entry_index, result_index, item_index, family in occurrences:
+        if latest_by_family.get(family) == (entry_index, result_index, item_index):
+            continue
+        result = projected[entry_index]["tool_results"][result_index]
+        item = result["content"]["content"][item_index]
+        replacement = {
+            "provider_history_projection": "terminal_result_replaced_by_latest_failure_v1",
+            "status": result.get("status"),
+            "tool_name": result.get("tool_name"),
+            "command_run_id": item.get("command_run_id") if isinstance(item, dict) else "",
+            "output_ref": item.get("output_ref") if isinstance(item, dict) else "",
+            "latest_failure_family": family,
+            "replaced_by_later_latest_failure": True,
+        }
+        result["content"]["content"][item_index] = _drop_empty_frontier_values(replacement)
+    return projected
+
+
+def _provider_latest_failure_family(item: object) -> str:
+    if not isinstance(item, dict):
+        return ""
+    latest_failure = item.get("latest_failure")
+    if not isinstance(latest_failure, dict):
+        return ""
+    failure_class = str(latest_failure.get("class") or latest_failure.get("failure_class") or "").strip()
+    failure_kind = str(latest_failure.get("kind") or "").strip()
+    if not (failure_class or failure_kind):
+        return ""
+    identity = _provider_latest_failure_identity(item)
+    if not identity:
+        return ""
+    return f"{failure_class or 'unknown'}:{failure_kind or 'unknown'}:{identity}"
+
+
+def _provider_latest_failure_identity(item: dict[str, object]) -> str:
+    digest = item.get("execution_evidence_digest")
+    if isinstance(digest, dict):
+        artifact_misses = digest.get("artifact_miss")
+        if isinstance(artifact_misses, list):
+            for artifact in artifact_misses:
+                if not isinstance(artifact, dict):
+                    continue
+                artifact_id = str(artifact.get("artifact_id") or "").strip()
+                path = str(artifact.get("path") or "").strip()
+                if artifact_id or path:
+                    return f"artifact:{artifact_id}:{path}"
+    latest_failure = item.get("latest_failure")
+    if isinstance(latest_failure, dict):
+        summary = str(latest_failure.get("summary") or "").strip()
+        if summary:
+            return f"summary:{summary[:120]}"
+    return ""
 
 
 def _sha256_text(value: str) -> str:
