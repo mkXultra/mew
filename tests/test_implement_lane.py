@@ -13035,6 +13035,75 @@ def test_implement_v2_edit_file_ambiguous_match_fails_closed(tmp_path) -> None:
     assert target.read_text(encoding="utf-8") == "same\nsame\n"
 
 
+def test_implement_v2_apply_patch_exact_miss_returns_anchor_windows(tmp_path) -> None:
+    target = tmp_path / "worker.txt"
+    target.write_text(
+        "function actualCall() {\n  return rareWidget;\n}\n",
+        encoding="utf-8",
+    )
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: worker.txt\n"
+        "@@\n"
+        "-function missingCall() {\n"
+        "-  return rareWidget;\n"
+        "-}\n"
+        "+function replacementCall() {\n"
+        "+  return rareWidget;\n"
+        "+}\n"
+        "*** End Patch\n"
+    )
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch exact miss recovery"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_class"] == "patch_anchor_mismatch"
+    assert payload["failure_subclass"] == "patch_exact_match_miss"
+    assert payload["recoverable"] is True
+    assert payload["suggested_tool"] == "read_file/apply_patch/edit_file"
+    assert payload["patch_anchor_windows"][0]["hunk_index"] == 1
+    assert "actualCall" in payload["patch_anchor_windows"][0]["nearest_existing_windows"][0]["text"]
+    assert target.read_text(encoding="utf-8").startswith("function actualCall")
+
+
+def test_implement_v2_apply_patch_ambiguous_match_returns_matching_windows(tmp_path) -> None:
+    target = tmp_path / "worker.txt"
+    target.write_text(
+        "same();\nalpha();\nsame();\nbeta();\n",
+        encoding="utf-8",
+    )
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: worker.txt\n"
+        "@@\n"
+        "-same();\n"
+        "+different();\n"
+        "*** End Patch\n"
+    )
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-1", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch ambiguous recovery"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_class"] == "patch_anchor_mismatch"
+    assert payload["failure_subclass"] == "patch_ambiguous_anchor"
+    assert payload["patch_anchor_windows"][0]["hunk_index"] == 1
+    assert len(payload["patch_anchor_windows"][0]["matching_existing_windows"]) == 2
+    assert "old text matched 2 times" in payload["reason"]
+    assert target.read_text(encoding="utf-8") == "same();\nalpha();\nsame();\nbeta();\n"
+
+
 def test_implement_v2_apply_patch_parse_failure_pairs_error(tmp_path) -> None:
     result = run_fake_write_implement_v2(
         _write_lane_input(tmp_path),

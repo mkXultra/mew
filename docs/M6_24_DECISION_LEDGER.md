@@ -1025,3 +1025,48 @@ glob/mixed contracts. After both fixes, the same session returned
 `STATUS: APPROVE`. Next step: rerun the 10 minute same-shape diagnostic for
 `make-mips-interpreter` and compare whether repeated no-progress verifier
 cycles disappear before considering `speed_1`.
+
+Same-shape diagnostic after no-progress repair 2026-05-09 JST:
+
+The diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260509-080932` still scored
+`0/1`, but the intended verifier wait-time repair worked. Compared with the
+previous `073023` run, `command_duration_seconds` dropped from `182.28s` to
+`2.564s`, verifier count dropped from `7` to `3`, and there were no broad
+cycles. First edit was `249s` and first verifier was `253s`. The remaining gap
+is not command runtime; it is repeated source-mutation failure and model-turn
+inflation. The run ended after `22` model turns with `9` edits and one
+`model_timeout`, while the Codex reference for this task uses `8` messages and
+`4` edits.
+
+Observed generic failure pattern: `apply_patch` failed on ambiguous anchors
+(`old text matched 67 times`) and stale anchors (`old text was not found`) in
+turns 7, 8, 10, 11, and 16. `edit_file` already had nearest-window recovery,
+but `apply_patch` returned only plain failure text, so the next turn often had
+to spend a read or another failed patch to recover exact source context.
+
+Decision: keep measurement paused and repair apply_patch anchor recovery
+generically. This is not a task-specific VM/MIPS fix. The write runtime should
+return structured `patch_anchor_mismatch` evidence with hunk index, nearest
+current-source windows for missing anchors, and matching windows for ambiguous
+anchors so the next model turn can patch from current text instead of
+rediscovering context. After this repair, rerun the same 10 minute diagnostic
+before moving to `speed_1`.
+
+Patch-anchor recovery result 2026-05-09 JST:
+
+Implemented generic apply_patch recovery payloads in implement_v2. On patch
+anchor mismatch, mew now returns `failure_class=patch_anchor_mismatch`,
+`failure_subclass=patch_exact_match_miss` or `patch_ambiguous_anchor`, the
+target path, suggested recovery action, and bounded `patch_anchor_windows` for
+the relevant hunk. Missing anchors include `nearest_existing_windows`; ambiguous
+anchors include `matching_existing_windows`. No benchmark-specific strings or
+runtime-specific rules were added.
+
+Validation: scoped ruff passed, focused apply_patch recovery tests passed,
+full `tests/test_implement_lane.py` passed (`300 passed`), and `git diff
+--check` passed. codex-ultra review session
+`019e09e7-c3cb-72e3-a99d-d96087f99368` returned `STATUS: APPROVE`. Next step:
+rerun `scripts/run_harbor_mew_diagnostic.py make-mips-interpreter --mode
+step-check-10min` and compare whether failed patch turns shrink before broad
+M6.24 measurement resumes.

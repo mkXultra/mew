@@ -49,6 +49,8 @@ class ImplementV2WriteRuntime:
             content = {"reason": str(exc)}
             if call.tool_name == "edit_file":
                 content.update(self._edit_file_recovery_payload(call, reason=str(exc)))
+            elif call.tool_name == "apply_patch":
+                content.update(self._apply_patch_recovery_payload(call, reason=str(exc)))
             return ToolResultEnvelope(
                 lane_attempt_id=call.lane_attempt_id,
                 provider_call_id=call.provider_call_id,
@@ -122,6 +124,64 @@ class ImplementV2WriteRuntime:
         windows = _nearest_existing_windows(current, old_text)
         if windows:
             payload["nearest_existing_windows"] = windows
+        return payload
+
+    def _apply_patch_recovery_payload(self, call: ToolCallEnvelope, *, reason: str) -> dict[str, object]:
+        anchor_missing = "old text was not found" in reason
+        anchor_ambiguous = "old text matched" in reason
+        if not anchor_missing and not anchor_ambiguous:
+            return {}
+        try:
+            patch_args = _patch_edit_arguments(dict(call.arguments))
+        except ValueError:
+            return {}
+        if str(patch_args.get("operation") or "") != "update_file":
+            return {}
+        path = _workspace_path(patch_args.get("path") or "", self.workspace)
+        edits = patch_args.get("edits") if isinstance(patch_args.get("edits"), list) else []
+        hunk_index = _hunk_index_from_reason(reason)
+        selected_edits = (
+            [edits[hunk_index - 1]]
+            if hunk_index is not None and 0 < hunk_index <= len(edits)
+            else [edit for edit in edits if isinstance(edit, dict)]
+        )
+        failure_subclass = "patch_ambiguous_anchor" if anchor_ambiguous else "patch_exact_match_miss"
+        payload: dict[str, object] = {
+            "failure_class": "patch_anchor_mismatch",
+            "failure_subclass": failure_subclass,
+            "recoverable": True,
+            "path": str(path),
+            "suggested_tool": "read_file/apply_patch/edit_file",
+            "suggested_next_action": (
+                "retry with exact current source context from patch_anchor_windows "
+                "or read the target window before the next patch"
+            ),
+        }
+        try:
+            current = _read_text_prefix(path, _EDIT_RECOVERY_FILE_CHAR_CAP)
+        except OSError:
+            return payload
+        windows: list[dict[str, object]] = []
+        for offset, edit in enumerate(selected_edits):
+            if not isinstance(edit, dict):
+                continue
+            old_text = str(edit.get("old") or "")
+            if not old_text:
+                continue
+            index = hunk_index if hunk_index is not None else offset + 1
+            item: dict[str, object] = {
+                "hunk_index": index,
+                "old_string_preview": _clip_text(old_text, 240),
+            }
+            if anchor_ambiguous:
+                item["matching_existing_windows"] = _matching_existing_windows(current, old_text)
+            else:
+                item["nearest_existing_windows"] = _nearest_existing_windows(current, old_text)
+            windows.append(item)
+            if len(windows) >= 3:
+                break
+        if windows:
+            payload["patch_anchor_windows"] = windows
         return payload
 
     def _apply_patch(self, call: ToolCallEnvelope) -> dict[str, object]:
@@ -302,6 +362,41 @@ def _nearest_existing_windows(current: str, old_text: str) -> list[dict[str, obj
         if len(windows) >= 3:
             break
     return windows
+
+
+def _matching_existing_windows(current: str, old_text: str) -> list[dict[str, object]]:
+    if not current or not old_text:
+        return []
+    old_text = old_text[:_EDIT_RECOVERY_OLD_TEXT_CHAR_CAP]
+    current = current[:_EDIT_RECOVERY_FILE_CHAR_CAP]
+    window_size = max(160, min(640, len(old_text) * 4))
+    windows: list[dict[str, object]] = []
+    search_from = 0
+    while len(windows) < 3:
+        index = current.find(old_text, search_from)
+        if index < 0:
+            break
+        start = max(0, index - window_size // 2)
+        end = min(len(current), index + len(old_text) + window_size // 2)
+        windows.append(
+            {
+                "start": start,
+                "end": end,
+                "text": _clip_text(current[start:end], 700),
+            }
+        )
+        search_from = index + max(1, len(old_text))
+    return windows
+
+
+def _hunk_index_from_reason(reason: str) -> int | None:
+    match = re.search(r"edit hunk #(\d+)", reason)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
 
 
 def _edit_mismatch_anchors(old_text: str) -> list[str]:
