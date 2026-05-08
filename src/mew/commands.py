@@ -7223,6 +7223,25 @@ def _work_session_active_work_todo(session):
     return dict(value) if isinstance(value, dict) and value else {}
 
 
+def _work_oneshot_implement_v2_active_work_todo(task):
+    if not isinstance(task, dict):
+        return {}
+    task_id = str(task.get("id") or "").strip()
+    description = str(task.get("description") or task.get("title") or "").strip()
+    if not task_id or not description:
+        return {}
+    return {
+        "id": f"oneshot-{task_id}-implement",
+        "lane": IMPLEMENT_V2_LANE,
+        "status": "drafting",
+        "source": {
+            "plan_item": "Make the first coherent source mutation for this one-shot implementation task.",
+            "target_paths": [],
+            "verify_command": "",
+        },
+    }
+
+
 def _merge_work_session_active_work_todo_readiness(session, updated_lane_state):
     if not isinstance(session, dict) or not isinstance(updated_lane_state, dict):
         return False
@@ -7359,8 +7378,13 @@ def _run_work_ai_implement_v2(
             save_state(state)
 
     persisted_lane_state = _work_guidance_persisted_lane_state(getattr(effective_args, "work_guidance", None))
-    if "active_work_todo" not in persisted_lane_state:
+    if not isinstance(persisted_lane_state.get("active_work_todo"), dict) or not persisted_lane_state.get(
+        "active_work_todo"
+    ):
+        persisted_lane_state.pop("active_work_todo", None)
         active_work_todo = _work_session_active_work_todo(session)
+        if not active_work_todo and getattr(effective_args, "oneshot_mode", False):
+            active_work_todo = _work_oneshot_implement_v2_active_work_todo(task)
         if active_work_todo:
             persisted_lane_state["active_work_todo"] = active_work_todo
 

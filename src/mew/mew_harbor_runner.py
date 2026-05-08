@@ -210,10 +210,18 @@ def summarize_latest_run(config: MewHarborRun) -> list[dict[str, object]]:
 
 
 def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
-    report = read_json(task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "mew-report.json")
+    report_path = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "mew-report.json"
+    report = read_json(report_path)
     manifest_dir = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "implement_v2"
-    manifest = read_json(manifest_dir / "proof-manifest.json")
-    result = read_json(task_dir / "result.json")
+    proof_manifest_path = manifest_dir / "proof-manifest.json"
+    history_path = manifest_dir / "history.json"
+    transcript_path = manifest_dir / "transcript.json"
+    result_path = task_dir / "result.json"
+    command_transcript_path = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "command-transcript.json"
+    verifier_stdout_path = task_dir / "verifier" / "test-stdout.txt"
+    verifier_reward_path = task_dir / "verifier" / "reward.txt"
+    manifest = read_json(proof_manifest_path)
+    result = read_json(result_path)
     metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
     observation = metrics.get("integration_observation") if isinstance(metrics.get("integration_observation"), dict) else {}
     observation_summary = (
@@ -235,6 +243,15 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
         "observer_detail_written": bool(observation_summary.get("detail_written")),
         "observer_detail_ref": artifact_ref,
         "observer_detail_exists": bool(detail_path and detail_path.exists()),
+        "observer_detail_path": str(detail_path) if detail_path else "",
+        "proof_manifest_path": str(proof_manifest_path),
+        "history_path": str(history_path),
+        "transcript_path": str(transcript_path),
+        "mew_report_path": str(report_path),
+        "result_path": str(result_path),
+        "command_transcript_path": str(command_transcript_path),
+        "verifier_stdout_path": str(verifier_stdout_path),
+        "verifier_reward_path": str(verifier_reward_path),
         "prompt_chars": observation_summary.get("prompt_chars"),
         "model_elapsed_seconds": observation_summary.get("model_elapsed_seconds"),
     }

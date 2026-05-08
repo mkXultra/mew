@@ -11042,7 +11042,7 @@ class WorkSessionTests(unittest.TestCase):
                                             "--approval-mode",
                                             "accept-edits",
                                             "--work-guidance",
-                                            "selected_lane=implement_v2",
+                                            json.dumps({"selected_lane": "implement_v2", "active_work_todo": {}}),
                                             "--max-steps",
                                             "2",
                                             "--json",
@@ -11058,6 +11058,11 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(lane_input.lane_config["mode"], "full")
                 self.assertTrue(lane_input.lane_config["auto_approve_writes"])
                 self.assertEqual(lane_input.lane_config["allowed_write_roots"], [str(workspace.resolve())])
+                self.assertEqual(
+                    lane_input.persisted_lane_state["active_work_todo"]["id"],
+                    f"oneshot-{lane_input.task_id}-implement",
+                )
+                self.assertEqual(lane_input.persisted_lane_state["active_work_todo"]["lane"], "implement_v2")
                 payload = json.loads(stdout.getvalue())
                 self.assertEqual(payload["work_exit_code"], 0)
                 work_report = payload["work_report"]

@@ -133,6 +133,15 @@ def test_collect_mew_trial_summary_reports_observer_detail(tmp_path):
     assert summary["observer_detail_enabled"] is True
     assert summary["observer_detail_written"] is True
     assert summary["observer_detail_exists"] is True
+    assert summary["observer_detail_path"] == str(detail_path)
+    assert summary["proof_manifest_path"] == str(manifest_path)
+    assert summary["history_path"] == str(manifest_path.parent / "history.json")
+    assert summary["transcript_path"] == str(manifest_path.parent / "transcript.json")
+    assert summary["mew_report_path"] == str(unknown_task / "mew-report.json")
+    assert summary["result_path"] == str(task_dir / "result.json")
+    assert summary["command_transcript_path"] == str(unknown_task / "command-transcript.json")
+    assert summary["verifier_stdout_path"] == str(task_dir / "verifier" / "test-stdout.txt")
+    assert summary["verifier_reward_path"] == str(task_dir / "verifier" / "reward.txt")
     assert summary["model_turns"] == 3
     assert summary["prompt_chars"] == 123
     assert observer_detail_missing([summary]) is False

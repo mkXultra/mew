@@ -1582,6 +1582,17 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(commands_module._work_session_active_work_todo(session)["id"], "session-todo")
         self.assertEqual(commands_module._work_session_active_work_todo(resume_only)["id"], "resume-todo")
 
+    def test_work_oneshot_implement_v2_active_work_todo_seeds_sequence_contract(self):
+        todo = commands_module._work_oneshot_implement_v2_active_work_todo(
+            {"id": 42, "description": "Repair the benchmark task."}
+        )
+
+        self.assertEqual(todo["id"], "oneshot-42-implement")
+        self.assertEqual(todo["lane"], "implement_v2")
+        self.assertEqual(todo["status"], "drafting")
+        self.assertIn("first coherent source mutation", todo["source"]["plan_item"])
+        self.assertEqual(todo["source"]["target_paths"], [])
+
     def test_merge_work_session_active_work_todo_readiness_updates_canonical_todo(self):
         session = {
             "active_work_todo": {"id": "todo-1", "status": "drafting"},
