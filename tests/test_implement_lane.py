@@ -607,6 +607,162 @@ def test_implement_v2_failed_write_attempt_does_not_clear_first_write_due(tmp_pa
     assert "first_write_latency_turns" not in readiness
 
 
+def test_implement_v2_active_work_todo_records_generated_file_write_repair(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+    outputs = [
+        {
+            "summary": "write generated runtime",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "function sys(){return 0}\n"},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "attempt stale exact edit",
+            "tool_calls": [
+                {
+                    "id": "stale-edit",
+                    "name": "edit_file",
+                    "arguments": {
+                        "path": "vm.js",
+                        "old": "function sys(n){",
+                        "new": "function sys(){let n=R[2]>>>0;",
+                    },
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "edit failed"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Repair generated VM"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    repair = result.updated_lane_state["active_work_todo"]["write_repair"]
+
+    assert target.read_text(encoding="utf-8") == "function sys(){return 0}\n"
+    assert repair["status"] == "blocked"
+    assert repair["failure_kind"] == "stale_exact_edit"
+    assert repair["path"] == "vm.js"
+    assert repair["path_previously_mutated_this_attempt"] is True
+    assert "stale-edit" in repair["recent_failed_write_provider_call_ids"]
+    assert "write_file overwrite" in repair["required_next_action"]
+    assert "do not run verifier again until a write succeeds" in repair["required_next_action"]
+
+
+def test_implement_v2_active_work_todo_clears_write_repair_after_apply_patch_side_effect_path(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: vm.js\n"
+        "@@\n"
+        "-function sys(){return 0}\n"
+        "+function sys(){let n=R[2]>>>0;return n}\n"
+        "*** End Patch\n"
+    )
+    outputs = [
+        {
+            "summary": "write generated runtime",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "function sys(){return 0}\n"},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "attempt stale exact edit",
+            "tool_calls": [
+                {
+                    "id": "stale-edit",
+                    "name": "edit_file",
+                    "arguments": {
+                        "path": "vm.js",
+                        "old": "function sys(n){",
+                        "new": "function sys(){let n=R[2]>>>0;",
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "repair from current text",
+            "tool_calls": [
+                {
+                    "id": "apply-repair",
+                    "name": "apply_patch",
+                    "arguments": {"patch": patch, "apply": True},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after write repair"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Repair generated VM"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+
+    assert target.read_text(encoding="utf-8") == "function sys(){let n=R[2]>>>0;return n}\n"
+    assert "write_repair" not in result.updated_lane_state["active_work_todo"]
+
+
 def test_implement_v2_active_work_todo_first_write_due_is_visible_next_turn(tmp_path) -> None:
     target = tmp_path / "sample.py"
     target.write_text("print('hello')\n", encoding="utf-8")
@@ -1220,6 +1376,11 @@ def test_implement_v2_prompt_sections_include_active_work_todo_readiness() -> No
                     "probes_seen_without_write": 3,
                     "required_next_action": "make one scoped source mutation",
                 },
+                "write_repair": {
+                    "failure_kind": "stale_exact_edit",
+                    "path": "src/app.py",
+                    "required_next_action": "repair src/app.py before verifier",
+                },
             }
         },
         lane_config={"mode": "full"},
@@ -1231,6 +1392,8 @@ def test_implement_v2_prompt_sections_include_active_work_todo_readiness() -> No
     assert section.cache_policy == "dynamic"
     assert section.stability == "dynamic"
     assert "first_write_readiness.first_write_due" in section.content
+    assert "write_repair is present" in section.content
+    assert "stale_exact_edit" in section.content
     assert '"target_paths": [' in section.content
     assert '"src/app.py"' in section.content
 

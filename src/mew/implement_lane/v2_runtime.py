@@ -2613,6 +2613,11 @@ def _merge_active_work_todo_first_write_readiness(
         tool_results=tool_results,
         probe_threshold=probe_threshold,
     )
+    write_repair = _write_repair_from_trace(tool_calls=tool_calls, tool_results=tool_results)
+    if write_repair:
+        active_todo["write_repair"] = write_repair
+    else:
+        active_todo.pop("write_repair", None)
     return _drop_empty_frontier_values(active_todo)
 
 
@@ -2650,6 +2655,7 @@ def _compact_active_work_todo_state(value: object) -> dict[str, object]:
             if isinstance(ref, dict)
         ],
         "first_write_readiness": _frontier_compact_mapping(value.get("first_write_readiness")),
+        "write_repair": _frontier_compact_mapping(value.get("write_repair")),
     }
     return _drop_empty_frontier_values(_drop_empty_active_todo_nested(compact))
 
@@ -2924,6 +2930,126 @@ def _first_write_probe_threshold(lane_input: ImplementLaneInput) -> int:
         return max(1, min(12, int(configured))) if configured not in (None, "") else 3
     except (TypeError, ValueError):
         return 3
+
+
+def _write_repair_from_trace(
+    *,
+    tool_calls: tuple[object, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    latest_repair: dict[str, object] = {}
+    prior_success_paths: list[str] = []
+    failed_ids: list[str] = []
+    for call, result in zip(tool_calls, tool_results):
+        tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
+        if tool_name not in WRITE_TOOL_NAMES:
+            continue
+        path = _write_call_path(call)
+        if result.status == "completed" and result.side_effects:
+            success_paths = _unique_write_paths((path, *_write_result_paths(result)))
+            prior_success_paths.extend(success_paths)
+            if any(_write_paths_match(success_path, latest_repair.get("path")) for success_path in success_paths):
+                latest_repair = {}
+            continue
+        if result.status not in {"failed", "invalid", "denied"}:
+            continue
+        provider_call_id = str(getattr(call, "provider_call_id", "") or result.provider_call_id or "")
+        if provider_call_id:
+            failed_ids.append(provider_call_id)
+        failure_kind = _write_failure_kind(result)
+        path_previously_mutated = bool(
+            path and any(_write_paths_match(path, prior_success_path) for prior_success_path in prior_success_paths)
+        )
+        latest_repair = {
+            "schema_version": 1,
+            "status": "blocked",
+            "failure_kind": failure_kind,
+            "tool_name": tool_name,
+            "provider_call_id": provider_call_id,
+            "path": path,
+            "path_previously_mutated_this_attempt": path_previously_mutated,
+            "recent_failed_write_provider_call_ids": failed_ids[-3:],
+            "reason": _frontier_clip_text(_write_failure_reason(result), limit=360),
+            "required_next_action": _write_repair_required_next_action(
+                path=path,
+                failure_kind=failure_kind,
+                path_previously_mutated=path_previously_mutated,
+            ),
+            "source": "implement_v2_write_trace",
+        }
+    return _drop_empty_frontier_values(latest_repair)
+
+
+def _write_call_path(call: object) -> str:
+    arguments = getattr(call, "arguments", {})
+    if not isinstance(arguments, dict):
+        return ""
+    return _frontier_clip_text(arguments.get("path"), limit=240)
+
+
+def _write_result_paths(result: ToolResultEnvelope) -> tuple[str, ...]:
+    paths: list[str] = []
+    for effect in result.side_effects or ():
+        if isinstance(effect, dict):
+            paths.append(_frontier_clip_text(effect.get("path"), limit=240))
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    paths.append(_frontier_clip_text(payload.get("path"), limit=240))
+    return tuple(path for path in paths if path)
+
+
+def _unique_write_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
+    unique: list[str] = []
+    for path in paths:
+        if path and path not in unique:
+            unique.append(path)
+    return tuple(unique)
+
+
+def _write_paths_match(left: object, right: object) -> bool:
+    left_path = str(left or "").strip()
+    right_path = str(right or "").strip()
+    if not left_path or not right_path:
+        return False
+    if left_path == right_path:
+        return True
+    return left_path.endswith(f"/{right_path}") or right_path.endswith(f"/{left_path}")
+
+
+def _write_failure_reason(result: ToolResultEnvelope) -> str:
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    return str(payload.get("reason") or payload.get("error") or "")
+
+
+def _write_failure_kind(result: ToolResultEnvelope) -> str:
+    reason = _write_failure_reason(result).casefold()
+    if "old text was not found" in reason:
+        return "stale_exact_edit"
+    if "blocked_by_prior_failed_write" in reason:
+        return "same_turn_write_chain_blocked"
+    if "approval" in reason and "denied" in reason:
+        return "write_denied"
+    return "write_failed"
+
+
+def _write_repair_required_next_action(
+    *,
+    path: str,
+    failure_kind: str,
+    path_previously_mutated: bool,
+) -> str:
+    target = path or "the failed write target"
+    if failure_kind == "stale_exact_edit" and path_previously_mutated:
+        return (
+            f"repair {target} with the current file text: use one read_file window if needed, "
+            "then prefer write_file overwrite for generated/minified same-attempt files or apply_patch "
+            "from exact current text; do not run verifier again until a write succeeds"
+        )
+    if failure_kind == "stale_exact_edit":
+        return (
+            f"repair {target} from exact current text: read the current target window, then use "
+            "edit_file/apply_patch with an exact old string; do not chain a verifier in the same turn"
+        )
+    return f"repair the failed write to {target} before another verifier or broad probe"
 
 
 def _first_write_readiness_from_trace(

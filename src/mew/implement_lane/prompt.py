@@ -153,7 +153,11 @@ def build_implement_v2_prompt_sections(
                             "Stay inside source.target_paths when they are present. If "
                             "first_write_readiness.first_write_due is true, stop broad probing "
                             "and make one scoped write_file/edit_file/apply_patch before another "
-                            "broad search or verifier."
+                            "broad search or verifier. If write_repair is present, repair that "
+                            "failed source mutation before another verifier. For exact edit misses "
+                            "on generated, minified, or same-attempt-written files, do not keep "
+                            "guessing old strings: read the current target window if needed, then "
+                            "prefer write_file overwrite or apply_patch from exact current text."
                         ),
                         "active_work_todo": active_work_todo,
                     }
@@ -394,6 +398,7 @@ def _active_work_todo_state(persisted_lane_state: dict[str, object]) -> dict[str
     blocker = value.get("blocker") if isinstance(value.get("blocker"), dict) else {}
     attempts = value.get("attempts") if isinstance(value.get("attempts"), dict) else {}
     readiness = value.get("first_write_readiness") if isinstance(value.get("first_write_readiness"), dict) else {}
+    write_repair = value.get("write_repair") if isinstance(value.get("write_repair"), dict) else {}
     cached_refs = value.get("cached_window_refs") if isinstance(value.get("cached_window_refs"), list) else []
     projected = {
         "id": str(value.get("id") or "").strip(),
@@ -420,6 +425,7 @@ def _active_work_todo_state(persisted_lane_state: dict[str, object]) -> dict[str
             if isinstance(ref, dict)
         ],
         "first_write_readiness": readiness,
+        "write_repair": write_repair,
     }
     return _drop_empty_dict_values(projected)
 
