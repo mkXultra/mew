@@ -10,6 +10,7 @@ from mew.mew_harbor_runner import (
     collect_mew_trial_summary,
     make_jobs_dir,
     observer_detail_missing,
+    summarize_latest_run,
 )
 
 
@@ -145,6 +146,69 @@ def test_collect_mew_trial_summary_reports_observer_detail(tmp_path):
     assert summary["model_turns"] == 3
     assert summary["prompt_chars"] == 123
     assert observer_detail_missing([summary]) is False
+
+
+def test_summarize_latest_run_normalizes_nested_mew_unknown_task_trace(tmp_path):
+    config = _config(tmp_path)
+    task_dir = config.jobs_dir / "2026-05-09__07-30-24" / "trial"
+    unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    manifest_dir = unknown_task / "implement_v2"
+    manifest_dir.mkdir(parents=True)
+    (task_dir / "result.json").write_text(json.dumps({"reward": 0.0}), encoding="utf-8")
+    (unknown_task / "mew-report.json").write_text(
+        json.dumps({"work_exit_code": 1, "work_report": {"steps": []}}),
+        encoding="utf-8",
+    )
+    (unknown_task / "command-transcript.json").write_text(json.dumps({}), encoding="utf-8")
+    (manifest_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "tool_calls": 1,
+                    "tool_results": 1,
+                    "integration_observation": {"summary": {"detail_written": True}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (manifest_dir / "integration-observation.json").write_text(
+        json.dumps({"turns": [{"turn_index": 1, "elapsed_seconds": 1.25}]}),
+        encoding="utf-8",
+    )
+    (manifest_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "summary": "run a verifier",
+                    "tool_calls": [
+                        {
+                            "provider_call_id": "call-1",
+                            "tool_name": "run_command",
+                            "arguments": {"cmd": "pytest -q"},
+                        }
+                    ],
+                    "tool_results": [
+                        {
+                            "provider_call_id": "call-1",
+                            "tool_name": "run_command",
+                            "status": "completed",
+                            "content": {"content": [{"exit_code": 0}]},
+                        }
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = summarize_latest_run(config)[0]
+
+    assert summary["trace_dir"] == str(task_dir / "normalized-trace")
+    assert summary["normalized_trace"]["command_count"] == 1
+    assert summary["normalized_trace"]["message_count"] == 1
+    assert (task_dir / "normalized-trace" / "summary.json").exists()
 
 
 def test_observer_detail_missing_detects_summary_only_run():

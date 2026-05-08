@@ -196,8 +196,10 @@ def summarize_latest_run(config: MewHarborRun) -> list[dict[str, object]]:
     summaries: list[dict[str, object]] = []
     for task_dir in trial_dirs(run_dir):
         normalized_summary: dict[str, object] = {}
+        agent_task_dir = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+        normalize_task_dir = agent_task_dir if agent_task_dir.exists() else task_dir
         try:
-            events, normalized_summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+            events, normalized_summary = normalize_harbor_agent_trace(agent="mew", task_dir=normalize_task_dir)
             write_normalized_trace(events, normalized_summary, task_dir / "normalized-trace")
         except Exception as exc:  # pragma: no cover - defensive around Harbor format drift.
             normalized_summary = {"normalize_error": str(exc)}
