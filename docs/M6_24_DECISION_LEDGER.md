@@ -1070,3 +1070,48 @@ full `tests/test_implement_lane.py` passed (`300 passed`), and `git diff
 rerun `scripts/run_harbor_mew_diagnostic.py make-mips-interpreter --mode
 step-check-10min` and compare whether failed patch turns shrink before broad
 M6.24 measurement resumes.
+
+Same-shape diagnostic after patch-anchor recovery 2026-05-09 JST:
+
+The diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260509-082616` still scored
+`0/1`, but the source-mutation shape improved materially. Compared with
+`080932`, model turns dropped from `22` to `11`, edits dropped from `9` to `2`,
+prompt chars dropped from about `1.12M` to about `736k`, and command duration
+stayed low at `2.84s`. The remaining blocker is no longer patch-anchor
+rediscovery. The run spent the late turns on diagnostic output around a
+generated one-line runtime file, then hit `model_timeout` after a successful
+diagnostic command with no new structured actionable failure. The provider
+history still carried too much recent terminal/output detail for a hot-path
+repair turn.
+
+Decision: keep broad measurement paused and continue Hot-Path Collapse Phase 2,
+not task-specific VM repair. The generic repair is to compact provider-visible
+history more aggressively: keep only the latest two turns as full hot-path
+history, summarize older turns as refs/latest failures, and summarize long-line
+stdout/stderr streams instead of projecting raw source-like tails. Full output
+remains available through `output_ref` / `read_command_output`; the normal
+model turn should see compact failure/output evidence and act, not parse large
+source dumps. After this repair, run focused projection tests, review, then one
+more 10 minute same-shape diagnostic before `speed_1` / `proof_5`.
+
+Provider-history hot-path compaction repair result 2026-05-09 JST:
+
+Implemented the generic provider-history repair. Normal prompt history now
+keeps only the latest two turns as full hot-path history; older turns compact
+to call/result refs and latest-failure summaries. Terminal stdout/stderr
+projection now summarizes provider-visible streams that contain very long
+single lines, while preserving short actionable tails when only the full body
+contains earlier long lines. Full terminal output remains in sidecar artifacts
+and can be retrieved by `output_ref` / `read_command_output`. This repair adds
+no benchmark-specific VM/MIPS/DOOM/frame-file rules and does not alter proof
+manifest, replay, sidecar, or typed-evidence source of truth.
+
+Validation: scoped ruff passed, focused projection tests passed, full
+`tests/test_implement_lane.py` passed (`303 passed`), and `git diff --check`
+passed. codex-ultra review session `019e09fc-4d19-7982-a928-7db6472bf4e9`
+initially requested preserving short actionable tails when the full stream has
+an earlier long line; after the fix and regression test, the same session
+returned `STATUS: APPROVE`. Next step: run one 10 minute same-shape diagnostic
+for `make-mips-interpreter` and compare prompt bytes/model turns before
+`speed_1` / `proof_5`.

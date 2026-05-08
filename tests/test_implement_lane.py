@@ -9465,6 +9465,50 @@ def test_implement_v2_prompt_history_keeps_only_latest_same_family_failure() -> 
     assert prompt_history[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "old artifact miss"
 
 
+def test_implement_v2_prompt_history_keeps_only_latest_two_full_turns() -> None:
+    prompt_history = [
+        {
+            "turn": turn,
+            "summary": f"turn {turn}",
+            "tool_calls": [
+                {
+                    "provider_call_id": f"call-{turn}",
+                    "tool_name": "run_command",
+                    "arguments": {"command": "python - <<'PY'\nprint('large probe')\nPY"},
+                }
+            ],
+            "tool_results": [
+                {
+                    "provider_call_id": f"call-{turn}",
+                    "tool_name": "run_command",
+                    "status": "completed",
+                    "is_error": False,
+                    "content": {
+                        "content_refs": [f"out-{turn}"],
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "command_run_id": f"cmd-{turn}",
+                                "output_ref": f"out-{turn}",
+                                "stdout_tail": "probe output",
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+        for turn in range(1, 6)
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+
+    assert [entry["turn"] for entry in rendered] == [1, 2, 3, 4, 5]
+    assert [entry.get("history_compacted", False) for entry in rendered] == [True, True, True, False, False]
+    assert rendered[0]["tool_results"][0]["content_refs"] == ["out-1"]
+    assert "content" not in rendered[0]["tool_results"][0]
+    assert rendered[-1]["tool_results"][0]["content"]["content"][0]["stdout_tail"] == "probe output"
+
+
 def test_implement_v2_prompt_history_keeps_different_artifact_failures() -> None:
     prompt_history = [
         {
@@ -9527,6 +9571,73 @@ def test_implement_v2_prompt_history_keeps_different_artifact_failures() -> None
 
     assert rendered[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "frame miss"
     assert rendered[1]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "log miss"
+
+
+def test_implement_v2_terminal_projection_summarizes_long_line_streams() -> None:
+    long_line = "x" * 1200
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="call-long-output",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "command": "python diagnose.py",
+                "status": "completed",
+                "exit_code": 0,
+                "stdout": f"node_check_exit=0\n{long_line}\nshort tail\n",
+                "stdout_tail": f"{long_line}\nshort tail\n",
+                "output_ref": "cmd/output",
+            },
+        ),
+        content_refs=("cmd/output",),
+        evidence_refs=(),
+        side_effects=(),
+    )
+
+    history = _provider_visible_tool_result_for_history(result)
+    projected = history["content"]["content"][0]
+    rendered = json.dumps(projected)
+
+    assert projected["stdout_tail"].startswith("[stdout summarized for hot-path history:")
+    assert projected["stdout_summary"]["projection"] == "long_line_stream_summary_v0"
+    assert projected["stdout_summary"]["longest_line_chars"] == 1200
+    assert long_line not in rendered
+    assert projected["output_ref"] == "cmd/output"
+
+
+def test_implement_v2_terminal_projection_preserves_short_tail_when_full_stream_has_long_line() -> None:
+    long_line = "x" * 1200
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="call-short-tail",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "python diagnose.py",
+                "status": "failed",
+                "exit_code": 1,
+                "stdout": f"{long_line}\nFINAL_ERROR: missing artifact\n",
+                "stdout_tail": "FINAL_ERROR: missing artifact\n",
+                "output_ref": "cmd/output",
+            },
+        ),
+        content_refs=("cmd/output",),
+        evidence_refs=(),
+        side_effects=(),
+    )
+
+    history = _provider_visible_tool_result_for_history(result)
+    projected = history["content"]["content"][0]
+
+    assert projected["stdout_tail"] == "FINAL_ERROR: missing artifact\n"
+    assert "stdout_summary" not in projected
+    assert projected["output_ref"] == "cmd/output"
 
 
 def test_implement_v2_exec_contract_accepted_nonzero_exit_can_complete(tmp_path) -> None:

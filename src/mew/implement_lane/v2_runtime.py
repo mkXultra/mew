@@ -54,7 +54,10 @@ _PROVIDER_HISTORY_TEXT_TAIL = 900
 _PROVIDER_HISTORY_TOOL_ARG_TEXT_LIMIT = 1200
 _PROVIDER_HISTORY_SOURCE_MUTATION_TEXT_LIMIT = 900
 _PROVIDER_HISTORY_LIST_LIMIT = 24
-_PROVIDER_HISTORY_FULL_TURN_LIMIT = 4
+_PROVIDER_HISTORY_FULL_TURN_LIMIT = 2
+_PROVIDER_HISTORY_STREAM_TAIL_LIMIT = 900
+_PROVIDER_HISTORY_STREAM_LONG_LINE_THRESHOLD = 500
+_PROVIDER_HISTORY_STREAM_SUMMARY_LINE_LIMIT = 160
 _PROVIDER_HISTORY_SOURCE_MUTATION_KEYS = frozenset(
     {
         "content",
@@ -5488,15 +5491,81 @@ def _project_terminal_payload_for_provider_history(payload: dict[str, object]) -
     stderr = str(payload.get("stderr") or "")
     stdout_tail = str(payload.get("stdout_tail") or "")
     stderr_tail = str(payload.get("stderr_tail") or "")
-    if stdout_tail or stdout:
-        projected["stdout_tail"] = stdout_tail or _clip_provider_history_text(stdout, limit=900)[0]
-    if stderr_tail or stderr:
-        projected["stderr_tail"] = stderr_tail or _clip_provider_history_text(stderr, limit=900)[0]
+    stdout_projection = _project_terminal_stream_for_provider_history(
+        stdout,
+        tail=stdout_tail,
+        stream_name="stdout",
+    )
+    stderr_projection = _project_terminal_stream_for_provider_history(
+        stderr,
+        tail=stderr_tail,
+        stream_name="stderr",
+    )
+    if stdout_projection.get("tail"):
+        projected["stdout_tail"] = stdout_projection["tail"]
+    if stdout_projection.get("summary"):
+        projected["stdout_summary"] = stdout_projection["summary"]
+    if stderr_projection.get("tail"):
+        projected["stderr_tail"] = stderr_projection["tail"]
+    if stderr_projection.get("summary"):
+        projected["stderr_summary"] = stderr_projection["summary"]
     if stdout or stderr:
         projected["stdout_stderr_body_omitted"] = True
         projected["stdout_chars"] = len(stdout)
         projected["stderr_chars"] = len(stderr)
     return projected
+
+
+def _project_terminal_stream_for_provider_history(
+    text: str,
+    *,
+    tail: str = "",
+    stream_name: str,
+) -> dict[str, object]:
+    visible = tail or text
+    if not visible:
+        return {}
+    summary = _terminal_stream_summary_for_provider_history(visible, stream_name=stream_name)
+    if summary:
+        chars = int(summary.get("chars") or 0)
+        lines = int(summary.get("lines") or 0)
+        longest = int(summary.get("longest_line_chars") or 0)
+        return {
+            "tail": (
+                f"[{stream_name} summarized for hot-path history: "
+                f"{chars} chars, {lines} lines, longest_line={longest} chars; "
+                "use output_ref/read_command_output for full output]"
+            ),
+            "summary": summary,
+        }
+    return {"tail": _clip_provider_history_text(visible, limit=_PROVIDER_HISTORY_STREAM_TAIL_LIMIT)[0]}
+
+
+def _terminal_stream_summary_for_provider_history(text: str, *, stream_name: str) -> dict[str, object]:
+    if not text:
+        return {}
+    lines = text.splitlines() or [text]
+    longest = max((len(line) for line in lines), default=0)
+    if longest < _PROVIDER_HISTORY_STREAM_LONG_LINE_THRESHOLD:
+        return {}
+    nonempty = [line.strip() for line in lines if line.strip()]
+    head = [_provider_scalar_text(line, limit=_PROVIDER_HISTORY_STREAM_SUMMARY_LINE_LIMIT) for line in nonempty[:3]]
+    tail = [_provider_scalar_text(line, limit=_PROVIDER_HISTORY_STREAM_SUMMARY_LINE_LIMIT) for line in nonempty[-3:]]
+    long_line_count = sum(1 for line in lines if len(line) >= _PROVIDER_HISTORY_STREAM_LONG_LINE_THRESHOLD)
+    return _drop_empty_frontier_values(
+        {
+            "schema_version": 1,
+            "stream": stream_name,
+            "projection": "long_line_stream_summary_v0",
+            "chars": len(text),
+            "lines": len(lines),
+            "long_line_count": long_line_count,
+            "longest_line_chars": longest,
+            "head_lines": head,
+            "tail_lines": tail,
+            "full_output_ref_required": True,
+        }
+    )
 
 
 def _latest_actionable_failure_for_provider_history(payload: dict[str, object]) -> dict[str, object]:
