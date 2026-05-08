@@ -259,6 +259,202 @@ def test_normalize_mew_report_steps(tmp_path):
     assert summary["verifier_count"] == 1
 
 
+def test_normalize_mew_implement_v2_history_tool_calls_and_summary(tmp_path):
+    task_dir = tmp_path / "task"
+    report = {
+        "work_report": {
+            "steps": [
+                {
+                    "index": 1,
+                    "status": "blocked",
+                    "action": {"type": "implement_lane", "lane": "implement_v2"},
+                    "model_turn": {"started_at": "2026-05-08T00:00:00Z"},
+                }
+            ]
+        }
+    }
+    (task_dir / "mew-report.json").parent.mkdir(parents=True, exist_ok=True)
+    (task_dir / "mew-report.json").write_text(json.dumps(report), encoding="utf-8")
+    impl_dir = task_dir / "implement_v2"
+    impl_dir.mkdir(parents=True, exist_ok=True)
+    (impl_dir / "integration-observation.json").write_text(
+        json.dumps(
+            {
+                "turns": [
+                    {"turn_index": 1, "elapsed_seconds": 1.0},
+                    {"turn_index": 2, "elapsed_seconds": 2.0},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (impl_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "summary": "Inspect the task.",
+                    "tool_calls": [
+                        {
+                            "provider_call_id": "call-1",
+                            "tool_name": "inspect_dir",
+                            "arguments": {"path": "."},
+                        }
+                    ],
+                    "tool_results": [
+                        {
+                            "provider_call_id": "call-1",
+                            "tool_name": "inspect_dir",
+                            "status": "completed",
+                            "content": {"content": [{"summary": "Inspected directory"}], "side_effects": []},
+                        }
+                    ],
+                },
+                {
+                    "turn": 2,
+                    "summary": "Write and verify.",
+                    "tool_calls": [
+                        {
+                            "provider_call_id": "call-2",
+                            "tool_name": "write_file",
+                            "arguments": {"path": "vm.js", "content": "console.log(1)"},
+                        },
+                        {
+                            "provider_call_id": "call-3",
+                            "tool_name": "run_command",
+                            "arguments": {
+                                "cmd": "node vm.js",
+                                "execution_contract": {"proof_role": "verifier", "expected_exit": 0},
+                            },
+                        },
+                    ],
+                    "tool_results": [
+                        {
+                            "provider_call_id": "call-2",
+                            "tool_name": "write_file",
+                            "status": "completed",
+                            "content": {
+                                "content": [
+                                    {
+                                        "operation": "write_file",
+                                        "path": "/app/vm.js",
+                                        "started_at": "2026-05-08T00:00:03Z",
+                                        "finished_at": "2026-05-08T00:00:03Z",
+                                    }
+                                ],
+                                "side_effects": [{"kind": "file_write", "path": "/app/vm.js"}],
+                            },
+                        },
+                        {
+                            "provider_call_id": "call-3",
+                            "tool_name": "run_command",
+                            "status": "completed",
+                            "content": {
+                                "side_effects": [
+                                    {
+                                        "kind": "tool_run_record",
+                                        "record": {
+                                            "record_id": "run-1",
+                                            "provider_call_id": "call-3",
+                                            "started_at": "2026-05-08T00:00:04Z",
+                                            "finished_at": "2026-05-08T00:00:05Z",
+                                            "duration_seconds": 1.0,
+                                            "status": "completed",
+                                            "exit_code": 0,
+                                        },
+                                    },
+                                    {
+                                        "kind": "command_run",
+                                        "record": {"terminal_record_id": "run-1", "status": "completed"},
+                                    },
+                                ]
+                            },
+                        },
+                    ],
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["message_count"] == 2
+    assert summary["tool_call_started_count"] == 3
+    assert summary["tool_call_completed_count"] == 3
+    assert summary["command_count"] == 1
+    assert summary["edit_count"] == 1
+    assert summary["verifier_count"] == 1
+    assert summary["first_tool_seconds"] == 1.0
+    assert summary["first_edit_seconds"] == 3.0
+    assert summary["first_command_seconds"] == 4.0
+    assert summary["first_verifier_seconds"] == 4.0
+    assert summary["command_duration_seconds"] == 1.0
+    write_started = [event for event in events if event.get("tool") == "write_file" and event.get("phase") == "started"][0]
+    assert write_started["arguments"]["content_chars"] == len("console.log(1)")
+    assert "content" not in write_started["arguments"]
+
+
+def test_normalize_mew_implement_v2_history_command_metadata_without_side_effects(tmp_path):
+    task_dir = tmp_path / "task"
+    report = {"work_report": {"steps": [{"model_turn": {"started_at": "2026-05-08T00:00:00Z"}}]}}
+    (task_dir / "mew-report.json").parent.mkdir(parents=True, exist_ok=True)
+    (task_dir / "mew-report.json").write_text(json.dumps(report), encoding="utf-8")
+    impl_dir = task_dir / "implement_v2"
+    impl_dir.mkdir(parents=True, exist_ok=True)
+    (impl_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "tool_calls": [
+                        {
+                            "provider_call_id": "call-1",
+                            "tool_name": "run_command",
+                            "arguments": {
+                                "cmd": "pytest -q",
+                                "execution_contract": {"proof_role": "verifier"},
+                            },
+                        }
+                    ],
+                    "tool_results": [
+                        {
+                            "provider_call_id": "call-1",
+                            "tool_name": "run_command",
+                            "status": "completed",
+                            "content": {
+                                "content": [
+                                    {
+                                        "command": "pytest -q",
+                                        "started_at": "2026-05-08T00:00:02Z",
+                                        "finished_at": "2026-05-08T00:00:02.250Z",
+                                        "duration_seconds": 0.25,
+                                        "status": "completed",
+                                        "exit_code": 0,
+                                    }
+                                ],
+                                "side_effects": [],
+                            },
+                        }
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["command_count"] == 1
+    assert summary["verifier_count"] == 1
+    assert summary["first_verifier_seconds"] == 2.0
+    assert summary["command_duration_observed_count"] == 1
+    assert summary["command_duration_seconds"] == 0.25
+    completed = [event for event in events if event.get("tool") == "run_command" and event.get("phase") == "completed"][0]
+    assert completed["exit_code"] == 0
+    assert completed["status"] == "completed"
+
+
 def test_summarize_trace_reports_frontier_anchor_to_patch_and_broad_cycles(tmp_path):
     task_dir = tmp_path / "task"
     report = {

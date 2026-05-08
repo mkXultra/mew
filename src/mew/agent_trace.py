@@ -23,6 +23,16 @@ def _read_json(path: Path) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _read_json_list(path: Path) -> list[Any]:
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return payload if isinstance(payload, list) else []
+
+
 def _parse_timestamp(value: Any) -> dt.datetime | None:
     if not isinstance(value, str) or not value:
         return None
@@ -517,6 +527,12 @@ def _event_sort_key(event: dict[str, Any]) -> tuple[str, int, int]:
 
 
 def normalize_mew_report(report_path: Path) -> list[dict[str, Any]]:
+    history_path = report_path.parent / "implement_v2" / "history.json"
+    if history_path.exists():
+        events = normalize_mew_implement_v2_history(history_path=history_path, report_path=report_path)
+        if events:
+            return events
+
     report = _read_json(report_path)
     work_report = report.get("work_report") if isinstance(report.get("work_report"), dict) else {}
     steps = work_report.get("steps") if isinstance(work_report.get("steps"), list) else []
@@ -566,6 +582,273 @@ def normalize_mew_report(report_path: Path) -> list[dict[str, Any]]:
             }
         events.append(event)
     return events
+
+
+def normalize_mew_implement_v2_history(*, history_path: Path, report_path: Path | None = None) -> list[dict[str, Any]]:
+    turns = _read_json_list(history_path)
+    if not turns:
+        return []
+    report = _read_json(report_path) if report_path is not None else {}
+    start = _mew_report_start(report)
+    elapsed_by_turn = _mew_observed_elapsed_by_turn(history_path.parent / "integration-observation.json")
+    events: list[dict[str, Any]] = []
+    for line_number, turn in enumerate(turns, 1):
+        if not isinstance(turn, dict):
+            continue
+        turn_index = turn.get("turn") if isinstance(turn.get("turn"), int) else line_number
+        turn_elapsed_ms = elapsed_by_turn.get(turn_index)
+        turn_timestamp = start + dt.timedelta(milliseconds=turn_elapsed_ms) if start and turn_elapsed_ms is not None else None
+        summary = turn.get("summary")
+        if isinstance(summary, str) and summary:
+            event = _base_event(
+                agent="mew",
+                source_path=history_path,
+                line_number=line_number,
+                kind="message",
+                timestamp=turn_timestamp,
+                elapsed_ms=turn_elapsed_ms,
+                step_id=turn_index,
+            )
+            event["source_role"] = "agent"
+            event["summary"] = _truncate(summary)
+            events.append(event)
+
+        results_by_id = {
+            str(result.get("provider_call_id") or result.get("id") or ""): result
+            for result in turn.get("tool_results", [])
+            if isinstance(result, dict)
+        }
+        tool_calls = turn.get("tool_calls") if isinstance(turn.get("tool_calls"), list) else []
+        for sequence_index, tool_call in enumerate(tool_calls, 1):
+            if not isinstance(tool_call, dict):
+                continue
+            provider_call_id = str(tool_call.get("provider_call_id") or tool_call.get("id") or "")
+            result = results_by_id.get(provider_call_id, {})
+            events.extend(
+                _events_from_mew_implement_v2_tool_call(
+                    history_path=history_path,
+                    line_number=line_number,
+                    turn_index=turn_index,
+                    sequence_index=sequence_index,
+                    turn_elapsed_ms=turn_elapsed_ms,
+                    start=start,
+                    tool_call=tool_call,
+                    result=result,
+                )
+            )
+    events.sort(key=_event_sort_key)
+    return events
+
+
+def _mew_report_start(report: dict[str, Any]) -> dt.datetime | None:
+    work_report = report.get("work_report") if isinstance(report.get("work_report"), dict) else {}
+    steps = work_report.get("steps") if isinstance(work_report.get("steps"), list) else []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        model_turn = step.get("model_turn") if isinstance(step.get("model_turn"), dict) else {}
+        for key in ("started_at", "created", "updated_at", "finished_at"):
+            timestamp = _parse_timestamp(model_turn.get(key))
+            if timestamp is not None:
+                return timestamp
+    return None
+
+
+def _mew_observed_elapsed_by_turn(observation_path: Path) -> dict[int, int]:
+    observation = _read_json(observation_path)
+    turns = observation.get("turns") if isinstance(observation.get("turns"), list) else []
+    elapsed_by_turn: dict[int, int] = {}
+    cumulative_ms = 0
+    for fallback_index, turn in enumerate(turns, 1):
+        if not isinstance(turn, dict):
+            continue
+        elapsed_seconds = turn.get("elapsed_seconds")
+        if isinstance(elapsed_seconds, (int, float)):
+            cumulative_ms += max(0, int(elapsed_seconds * 1000))
+        turn_index = turn.get("turn_index") if isinstance(turn.get("turn_index"), int) else fallback_index
+        elapsed_by_turn[turn_index] = cumulative_ms
+    return elapsed_by_turn
+
+
+def _events_from_mew_implement_v2_tool_call(
+    *,
+    history_path: Path,
+    line_number: int,
+    turn_index: int,
+    sequence_index: int,
+    turn_elapsed_ms: int | None,
+    start: dt.datetime | None,
+    tool_call: dict[str, Any],
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    tool = str(tool_call.get("tool_name") or result.get("tool_name") or "tool_call")
+    tool_id = str(tool_call.get("provider_call_id") or result.get("provider_call_id") or "")
+    arguments = tool_call.get("arguments") if isinstance(tool_call.get("arguments"), dict) else {}
+    content = result.get("content") if isinstance(result.get("content"), dict) else {}
+    terminal_record = _mew_terminal_tool_run_record(content, tool_id)
+    started_at = _parse_timestamp(terminal_record.get("started_at"))
+    finished_at = _parse_timestamp(terminal_record.get("finished_at"))
+    if started_at is None:
+        started_at = _mew_content_timestamp(content, "started_at")
+    if finished_at is None:
+        finished_at = _mew_content_timestamp(content, "finished_at")
+    started_elapsed = _elapsed_ms(started_at, start)
+    finished_elapsed = _elapsed_ms(finished_at, start)
+    if started_elapsed is None:
+        started_elapsed = turn_elapsed_ms
+    if finished_elapsed is None:
+        finished_elapsed = turn_elapsed_ms
+
+    summary = _mew_tool_summary(tool=tool, arguments=arguments, content=content)
+    status = _mew_tool_result_status(result=result, terminal_record=terminal_record)
+    exit_code = terminal_record.get("exit_code")
+    duration_seconds = terminal_record.get("duration_seconds")
+    duration_ms = int(duration_seconds * 1000) if isinstance(duration_seconds, (int, float)) else None
+    started = _tool_event(
+        agent="mew",
+        source_path=history_path,
+        line_number=line_number,
+        phase="started",
+        tool=tool,
+        tool_id=tool_id,
+        summary=summary,
+        timestamp=started_at,
+        elapsed_ms=started_elapsed,
+        step_id=turn_index,
+    )
+    completed = _tool_event(
+        agent="mew",
+        source_path=history_path,
+        line_number=line_number,
+        phase="completed",
+        tool=tool,
+        tool_id=tool_id,
+        summary=summary,
+        status=status,
+        exit_code=exit_code,
+        timestamp=finished_at,
+        elapsed_ms=finished_elapsed,
+        step_id=turn_index,
+        duration_ms=duration_ms,
+    )
+    compact_arguments = _compact_mew_tool_arguments(arguments)
+    if compact_arguments:
+        started["arguments"] = compact_arguments
+        completed["arguments"] = compact_arguments
+    if sequence_index:
+        started["sequence_index"] = sequence_index
+        completed["sequence_index"] = sequence_index
+    execution_contract = arguments.get("execution_contract")
+    if isinstance(execution_contract, dict):
+        projected_contract = {
+            key: execution_contract.get(key)
+            for key in (
+                "role",
+                "purpose",
+                "stage",
+                "risk_class",
+                "proof_role",
+                "acceptance_kind",
+                "expected_exit",
+            )
+            if key in execution_contract
+        }
+        started["execution_contract"] = projected_contract
+        completed["execution_contract"] = projected_contract
+    side_effects = content.get("side_effects") if isinstance(content.get("side_effects"), list) else []
+    side_effect_kinds = [str(effect.get("kind")) for effect in side_effects if isinstance(effect, dict) and effect.get("kind")]
+    if side_effect_kinds:
+        completed["side_effect_kinds"] = side_effect_kinds
+    return [started, completed]
+
+
+def _mew_terminal_tool_run_record(content: dict[str, Any], provider_call_id: str) -> dict[str, Any]:
+    side_effects = content.get("side_effects") if isinstance(content.get("side_effects"), list) else []
+    records: list[dict[str, Any]] = []
+    terminal_record_id = ""
+    for effect in side_effects:
+        if not isinstance(effect, dict):
+            continue
+        record = effect.get("record") if isinstance(effect.get("record"), dict) else {}
+        if effect.get("kind") == "command_run" and not terminal_record_id:
+            terminal_record_id = str(record.get("terminal_record_id") or "")
+        if effect.get("kind") != "tool_run_record":
+            continue
+        if provider_call_id and record.get("provider_call_id") not in (None, provider_call_id):
+            continue
+        records.append(record)
+    if terminal_record_id:
+        for record in records:
+            if record.get("record_id") == terminal_record_id:
+                return record
+    if records:
+        return records[-1]
+    items = content.get("content") if isinstance(content.get("content"), list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if any(key in item for key in ("command_run_id", "duration_seconds", "exit_code", "started_at", "finished_at")):
+            return item
+    return {}
+
+
+def _mew_content_timestamp(content: dict[str, Any], key: str) -> dt.datetime | None:
+    items = content.get("content") if isinstance(content.get("content"), list) else []
+    for item in items:
+        if isinstance(item, dict):
+            timestamp = _parse_timestamp(item.get(key))
+            if timestamp is not None:
+                return timestamp
+    return None
+
+
+def _mew_tool_result_status(*, result: dict[str, Any], terminal_record: dict[str, Any]) -> str:
+    if terminal_record.get("status"):
+        return str(terminal_record.get("status"))
+    status = result.get("status")
+    if isinstance(status, str) and status:
+        return status
+    if result.get("is_error") is True:
+        return "failed"
+    return "completed"
+
+
+def _mew_tool_summary(*, tool: str, arguments: dict[str, Any], content: dict[str, Any]) -> Any:
+    for key in ("cmd", "command", "path", "query", "pattern"):
+        value = arguments.get(key)
+        if value:
+            return value
+    items = content.get("content") if isinstance(content.get("content"), list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for key in ("summary", "operation", "path"):
+            value = item.get(key)
+            if value:
+                return value
+    return tool
+
+
+def _compact_mew_tool_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key in (
+        "cmd",
+        "command",
+        "path",
+        "query",
+        "pattern",
+        "foreground_budget_seconds",
+        "timeout_seconds",
+        "apply",
+        "create",
+    ):
+        if arguments.get(key) not in (None, "", [], {}):
+            compact[key] = arguments[key]
+    for key in ("content", "old_string", "new_string"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value:
+            compact[f"{key}_chars"] = len(value)
+    return compact
 
 
 def normalize_harbor_agent_trace(
@@ -700,6 +983,13 @@ def _count_invocations(events: Sequence[dict[str, Any]]) -> int:
 
 
 def _is_verifier_event(event: dict[str, Any]) -> bool:
+    execution_contract = event.get("execution_contract") if isinstance(event.get("execution_contract"), dict) else {}
+    if str(execution_contract.get("proof_role") or "").casefold() in {"verifier", "acceptance", "proof"}:
+        return True
+    if str(execution_contract.get("acceptance_kind") or "").casefold():
+        return True
+    if str(execution_contract.get("stage") or "").casefold() in {"verify", "verification"}:
+        return True
     summary = str(event.get("summary", "")).lower()
     if any(token in summary for token in ("pytest", "verifier", "verify", "cargo test", "npm test", "go test")):
         return True
