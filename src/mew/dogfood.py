@@ -18512,6 +18512,7 @@ def run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(workspace):
                 "allowed_write_roots": [str(workspace)],
                 "allow_shell": True,
                 "allow_verify": True,
+                "debug_model_frontier_update": True,
                 "route_run_tests_shell_surface": False,
                 "terminal_failure_reaction_turns": 1,
                 "tool_contract_recovery_turns": 1,

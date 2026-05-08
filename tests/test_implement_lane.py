@@ -1421,7 +1421,7 @@ def test_implement_v2_live_json_prompt_omits_frontier_update_contract_without_fr
     assert "implement_v2_hard_runtime_frontier_state" not in prompt
 
 
-def test_implement_v2_live_json_prompt_adds_compact_frontier_update_contract_with_frontier(tmp_path) -> None:
+def test_implement_v2_live_json_prompt_hides_frontier_update_contract_by_default_with_frontier(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -1429,6 +1429,30 @@ def test_implement_v2_live_json_prompt_adds_compact_frontier_update_contract_wit
         lane=IMPLEMENT_V2_LANE,
         task_contract={"description": "Continue a runtime artifact repair."},
         lane_config={"mode": "full"},
+    )
+
+    prompt = _live_json_prompt(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        hard_runtime_frontier_state={"schema_version": 1, "status": "active"},
+        turn_index=2,
+        max_turns=8,
+        base_max_turns=8,
+        history=(),
+    )
+
+    assert '"frontier_state_update"' not in prompt
+    assert "mew derives the latest failure from paired tool results" not in prompt
+
+
+def test_implement_v2_live_json_prompt_adds_frontier_update_contract_with_debug_opt_in(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Continue a runtime artifact repair."},
+        lane_config={"mode": "full", "debug_model_frontier_update": True},
     )
 
     prompt = _live_json_prompt(
@@ -1449,6 +1473,37 @@ def test_implement_v2_live_json_prompt_adds_compact_frontier_update_contract_wit
     assert '"latest_build_failure"' not in prompt
     assert '"next_verifier_shaped_command"' in prompt
     assert '"source_roles"' not in prompt
+
+
+def test_implement_v2_live_json_ignores_model_frontier_update_by_default(tmp_path) -> None:
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "try model-authored frontier",
+            "frontier_state_update": {
+                "status": "resolved",
+                "final_artifact": {"path": "fabricated.txt", "kind": "file"},
+            },
+            "finish": {"outcome": "blocked", "summary": "state only"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Do not trust model-authored frontier state."},
+            lane_config={"mode": "full"},
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    assert "lane_hard_runtime_frontier" not in result.updated_lane_state
+    assert result.metrics["ignored_model_frontier_state_updates"] == 1
 
 
 def test_implement_v2_integration_observation_summary_is_state_safe_by_default(tmp_path) -> None:
@@ -7805,6 +7860,7 @@ def test_implement_v2_frontier_drops_fabricated_refs_and_keeps_valid_refs(tmp_pa
                 "allowed_read_roots": [str(tmp_path)],
                 "allowed_write_roots": [str(tmp_path)],
                 "allow_shell": True,
+                "debug_model_frontier_update": True,
             },
         ),
         model_auth={"path": "auth.json"},
@@ -8695,6 +8751,7 @@ def test_implement_v2_frontier_update_can_infer_same_turn_expected_artifact(tmp_
                 "allowed_read_roots": [str(tmp_path)],
                 "allowed_write_roots": [str(tmp_path)],
                 "allow_shell": True,
+                "debug_model_frontier_update": True,
                 "terminal_failure_reaction_turns": 0,
             },
         ),
@@ -8753,6 +8810,7 @@ def test_implement_v2_frontier_update_can_infer_with_read_only_evidence_plus_sin
                 "allowed_read_roots": [str(tmp_path)],
                 "allowed_write_roots": [str(tmp_path)],
                 "allow_shell": True,
+                "debug_model_frontier_update": True,
                 "terminal_failure_reaction_turns": 0,
             },
         ),
@@ -8950,6 +9008,7 @@ def test_implement_v2_frontier_drops_model_only_latest_failures_and_prefix_artif
                 "allowed_read_roots": [str(tmp_path)],
                 "allowed_write_roots": [str(tmp_path)],
                 "allow_shell": True,
+                "debug_model_frontier_update": True,
             },
         ),
         model_auth={"path": "auth.json"},
@@ -9072,6 +9131,7 @@ def test_implement_v2_frontier_state_does_not_satisfy_finish_gate_without_termin
                 "allowed_read_roots": [str(tmp_path)],
                 "allowed_write_roots": [str(tmp_path)],
                 "allow_shell": True,
+                "debug_model_frontier_update": True,
             },
         ),
         model_auth={"path": "auth.json"},

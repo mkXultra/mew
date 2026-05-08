@@ -275,6 +275,7 @@ def run_live_json_implement_v2(
         base_max_turns=base_max_turns,
     )
     hard_runtime_progress_continuation_turns_used = 0
+    ignored_model_frontier_state_updates = 0
     hard_runtime_progress_signatures_seen: set[str] = set()
     tool_contract_recovery_turn_limit = _tool_contract_recovery_turn_limit(lane_input)
     tool_contract_recovery_turns_used = 0
@@ -514,9 +515,12 @@ def run_live_json_implement_v2(
                 break
             normalized = dict(model_turn_output.normalized_payload)
             finish_arguments = normalized.get("finish") or {}
-            frontier_state_update = (
+            raw_frontier_state_update = (
                 normalized.get("frontier_state_update") if isinstance(normalized.get("frontier_state_update"), dict) else {}
             )
+            if raw_frontier_state_update and not _model_frontier_update_enabled(lane_input):
+                ignored_model_frontier_state_updates += 1
+            frontier_state_update = raw_frontier_state_update if _model_frontier_update_enabled(lane_input) else {}
             if frontier_state_update:
                 hard_runtime_frontier_enabled = True
             raw_tool_calls = normalized.get("tool_calls") or ()
@@ -1017,6 +1021,7 @@ def run_live_json_implement_v2(
             "terminal_failure_reaction_turns_used": terminal_failure_reaction_turns_used,
             "hard_runtime_progress_continuation_turn_limit": hard_runtime_progress_continuation_turn_limit,
             "hard_runtime_progress_continuation_turns_used": hard_runtime_progress_continuation_turns_used,
+            "ignored_model_frontier_state_updates": ignored_model_frontier_state_updates,
             "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "command_closeout_count": len(closeout_payloads),
@@ -1089,6 +1094,7 @@ def run_live_json_implement_v2(
             "terminal_failure_reaction_turns_used": terminal_failure_reaction_turns_used,
             "hard_runtime_progress_continuation_turn_limit": hard_runtime_progress_continuation_turn_limit,
             "hard_runtime_progress_continuation_turns_used": hard_runtime_progress_continuation_turns_used,
+            "ignored_model_frontier_state_updates": ignored_model_frontier_state_updates,
             "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "finish_gate_block_count": finish_gate_block_count,
@@ -3872,7 +3878,7 @@ def _live_json_prompt(
             "acceptance_evidence": ["optional human-readable evidence summary"],
         },
     }
-    if hard_runtime_frontier_state:
+    if hard_runtime_frontier_state and _model_frontier_update_enabled(lane_input):
         response_contract["frontier_state_update"] = {
             "optional": True,
             "use_only_when": "a hard-runtime or compatibility frontier genuinely changed",
@@ -3923,6 +3929,10 @@ def _live_json_prompt(
         f"history_json:\n{_render_prompt_history_json(history)}\n"
         "[/section:implement_v2_live_json_transport]"
     )
+
+
+def _model_frontier_update_enabled(lane_input: ImplementLaneInput) -> bool:
+    return bool(lane_input.lane_config.get("debug_model_frontier_update"))
 
 
 def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str, object] | None) -> str:
