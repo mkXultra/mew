@@ -2303,11 +2303,15 @@ def test_implement_v2_prompt_history_render_helper_matches_existing_json_shape()
     history = tuple({"turn": index, "summary": f"履歴 {index}"} for index in range(1, 11))
 
     rendered = _render_prompt_history_json(history)
+    projected = json.loads(rendered)
 
-    assert rendered == json.dumps(list(history)[-8:], ensure_ascii=False, indent=2)
     assert '"summary": "履歴 1"' not in rendered
     assert '"summary": "履歴 2"' not in rendered
     assert '"summary": "履歴 3"' in rendered
+    assert len(projected) == 8
+    assert projected[0]["turn"] == 3
+    assert projected[0]["history_compacted"] is True
+    assert projected[-1] == {"turn": 10, "summary": "履歴 10"}
 
 
 def test_implement_v2_prompt_sections_include_active_coding_rhythm() -> None:
@@ -5692,6 +5696,69 @@ def test_implement_v2_history_projects_terminal_side_effects_for_next_turn() -> 
     assert "stdout_preview" not in tool_run_record
     assert "large readelf output" not in serialized
     assert len(serialized) < 5000
+
+
+def test_implement_v2_history_compacts_older_turns_for_hot_path() -> None:
+    large_read = "vm head\n" + ("generated vm body\n" * 600) + "vm tail\n"
+    old_result = ToolResultEnvelope(
+        lane_attempt_id="lane-v2-1",
+        provider_call_id="call-read-old-vm",
+        mew_tool_call_id="lane-v2-1:tool:1:1",
+        tool_name="read_file",
+        status="completed",
+        content=(
+            {
+                "path": "vm.js",
+                "content": large_read,
+                "chars": len(large_read),
+                "summary": "Read file vm.js",
+            },
+        ),
+        content_refs=("implement-v2-read://lane-v2-1/call-read-old-vm/content",),
+        evidence_refs=("implement-v2-read://lane-v2-1/call-read-old-vm/evidence",),
+    )
+    old_call = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-1",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-read-old-vm",
+                "tool_name": "read_file",
+                "arguments": {"path": "vm.js"},
+            },
+        ),
+    )[0]
+    history = [
+        {
+            "turn": 1,
+            "summary": "Read generated VM after a verifier failure.",
+            "tool_calls": [_provider_visible_tool_call_for_history(old_call)],
+            "tool_results": [_provider_visible_tool_result_for_history(old_result)],
+        }
+    ]
+    for turn in range(2, 7):
+        history.append(
+            {
+                "turn": turn,
+                "summary": f"Recent turn {turn}.",
+                "tool_calls": [],
+                "tool_results": [],
+            }
+        )
+
+    rendered = _render_prompt_history_json(history)
+    projected = json.loads(rendered)
+    old_entry = projected[0]
+
+    assert old_entry["history_compacted"] is True
+    assert old_entry["tool_calls"][0]["arguments"] == {"path": "vm.js"}
+    assert old_entry["tool_results"][0]["content_refs"] == [
+        "implement-v2-read://lane-v2-1/call-read-old-vm/content"
+    ]
+    assert old_entry["tool_results"][0]["evidence_ref_count"] == 1
+    assert "generated vm body" not in rendered
+    assert "vm tail" not in rendered
+    assert projected[-1]["summary"] == "Recent turn 6."
 
 
 def test_implement_v2_history_projection_preserves_terminal_diagnostics_without_output() -> None:

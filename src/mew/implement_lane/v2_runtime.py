@@ -52,6 +52,7 @@ _PROVIDER_HISTORY_TEXT_TAIL = 900
 _PROVIDER_HISTORY_TOOL_ARG_TEXT_LIMIT = 1200
 _PROVIDER_HISTORY_SOURCE_MUTATION_TEXT_LIMIT = 900
 _PROVIDER_HISTORY_LIST_LIMIT = 24
+_PROVIDER_HISTORY_FULL_TURN_LIMIT = 4
 _PROVIDER_HISTORY_SOURCE_MUTATION_KEYS = frozenset(
     {
         "content",
@@ -6214,6 +6215,7 @@ def _current_projection_descriptor(prompt_history: tuple[dict[str, object], ...]
     projection = _render_prompt_history_json(prompt_history)
     projection_sha256 = _sha256_text(projection)
     projection_chars = len(projection)
+    rendered_history = _project_prompt_history_for_next_turn(list(prompt_history)[-8:])
     return {
         "current_projection_schema": "provider_history_projection_v1",
         "current_projection_sha256": projection_sha256,
@@ -6228,7 +6230,10 @@ def _current_projection_descriptor(prompt_history: tuple[dict[str, object], ...]
             "truncated_fields": [],
             "preserved_refs": [],
         },
-        "history_turns_included": len(list(prompt_history)[-8:]),
+        "history_turns_included": len(rendered_history),
+        "history_turns_compacted": sum(
+            1 for entry in rendered_history if isinstance(entry, dict) and entry.get("history_compacted")
+        ),
     }
 
 
@@ -6285,7 +6290,105 @@ def _project_prompt_history_for_next_turn(prompt_history: list[dict[str, object]
             "replaced_by_later_latest_failure": True,
         }
         result["content"]["content"][item_index] = _drop_empty_frontier_values(replacement)
+    projected = _compact_older_prompt_history_for_next_turn(projected)
     return projected
+
+
+def _compact_older_prompt_history_for_next_turn(prompt_history: list[dict[str, object]]) -> list[dict[str, object]]:
+    if len(prompt_history) <= _PROVIDER_HISTORY_FULL_TURN_LIMIT:
+        return prompt_history
+    cutoff = len(prompt_history) - _PROVIDER_HISTORY_FULL_TURN_LIMIT
+    compacted: list[dict[str, object]] = []
+    for index, entry in enumerate(prompt_history):
+        if index >= cutoff or not isinstance(entry, dict):
+            compacted.append(entry)
+            continue
+        compacted.append(_compact_prompt_history_entry_for_next_turn(entry))
+    return compacted
+
+
+def _compact_prompt_history_entry_for_next_turn(entry: dict[str, object]) -> dict[str, object]:
+    tool_calls = entry.get("tool_calls") if isinstance(entry.get("tool_calls"), list) else []
+    tool_results = entry.get("tool_results") if isinstance(entry.get("tool_results"), list) else []
+    return _drop_empty_frontier_values(
+        {
+            "turn": entry.get("turn"),
+            "summary": _provider_scalar_text(entry.get("summary"), limit=240),
+            "history_compacted": True,
+            "history_projection_note": (
+                "older provider history is summarized for the hot path; full calls/results remain in proof artifacts"
+            ),
+            "tool_calls": [
+                _compact_prompt_history_call_for_next_turn(call)
+                for call in tool_calls[:_PROVIDER_HISTORY_LIST_LIMIT]
+                if isinstance(call, dict)
+            ],
+            "tool_results": [
+                _compact_prompt_history_result_for_next_turn(result)
+                for result in tool_results[:_PROVIDER_HISTORY_LIST_LIMIT]
+                if isinstance(result, dict)
+            ],
+            "omitted_tool_calls": max(0, len(tool_calls) - _PROVIDER_HISTORY_LIST_LIMIT),
+            "omitted_tool_results": max(0, len(tool_results) - _PROVIDER_HISTORY_LIST_LIMIT),
+        }
+    )
+
+
+def _compact_prompt_history_call_for_next_turn(call: dict[str, object]) -> dict[str, object]:
+    arguments = call.get("arguments") if isinstance(call.get("arguments"), dict) else {}
+    return _drop_empty_frontier_values(
+        {
+            "provider_call_id": call.get("provider_call_id"),
+            "tool_name": call.get("tool_name"),
+            "arguments": _compact_prompt_history_arguments_for_next_turn(arguments),
+        }
+    )
+
+
+def _compact_prompt_history_arguments_for_next_turn(arguments: dict[str, object]) -> dict[str, object]:
+    summary: dict[str, object] = {}
+    for key in ("path", "pattern", "query", "command_intent", "command_run_id"):
+        value = arguments.get(key)
+        if value not in (None, "", [], {}):
+            summary[key] = _provider_scalar_text(value, limit=220)
+    command = arguments.get("cmd") or arguments.get("command")
+    if command not in (None, ""):
+        summary["command_excerpt"] = _provider_scalar_text(command, limit=320)
+    return summary
+
+
+def _compact_prompt_history_result_for_next_turn(result: dict[str, object]) -> dict[str, object]:
+    content = result.get("content") if isinstance(result.get("content"), dict) else {}
+    latest_failures = _latest_failures_from_provider_history_content(content)
+    content_refs = content.get("content_refs") if isinstance(content.get("content_refs"), list) else []
+    evidence_refs = content.get("evidence_refs") if isinstance(content.get("evidence_refs"), list) else []
+    return _drop_empty_frontier_values(
+        {
+            "provider_call_id": result.get("provider_call_id"),
+            "tool_name": result.get("tool_name"),
+            "status": result.get("status"),
+            "is_error": result.get("is_error"),
+            "latest_failures": latest_failures,
+            "content_refs": [_provider_scalar_text(ref, limit=220) for ref in content_refs[:3]],
+            "content_ref_count": len(content_refs),
+            "evidence_ref_count": len(evidence_refs),
+            "typed_evidence": result.get("typed_evidence") if isinstance(result.get("typed_evidence"), list) else [],
+        }
+    )
+
+
+def _latest_failures_from_provider_history_content(content: dict[str, object]) -> list[dict[str, object]]:
+    failures: list[dict[str, object]] = []
+    items = content.get("content") if isinstance(content.get("content"), list) else []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        latest_failure = item.get("latest_failure")
+        if isinstance(latest_failure, dict) and latest_failure:
+            failures.append(_frontier_compact_mapping(latest_failure))
+        if len(failures) >= 2:
+            break
+    return failures
 
 
 def _provider_latest_failure_family(item: object) -> str:
