@@ -331,6 +331,157 @@ def test_implement_v2_live_json_accept_edits_defaults_new_write_to_create_and_ap
     assert tool_result["content"][0]["approval_source"] == "cli_accept_edits"
 
 
+def test_implement_v2_records_first_write_frontier_stall_after_missing_target_timeout(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "probe source and inspect target before writing",
+            "tool_calls": [
+                {
+                    "id": "call-probe-source",
+                    "name": "inspect_dir",
+                    "arguments": {"path": "."},
+                },
+                {
+                    "id": "call-read-target",
+                    "name": "read_file",
+                    "arguments": {"path": "generated.js"},
+                },
+            ],
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        if outputs:
+            return outputs.pop(0)
+        raise ModelBackendError("request timed out")
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+    stall = frontier["first_write_frontier_stall"]
+
+    assert result.status == "blocked"
+    assert result.metrics["write_evidence_count"] == 0
+    assert result.metrics["model_error"]["semantic_failure_class"] == "first_write_frontier_stall"
+    assert stall["failure_class"] == "first_write_frontier_stall"
+    assert stall["target_path"] == "generated.js"
+    assert "write_file/edit_file/apply_patch" in stall["required_next_action"]
+
+
+def test_implement_v2_clears_first_write_frontier_stall_after_successful_write(tmp_path) -> None:
+    target = tmp_path / "generated.js"
+    outputs = [
+        {
+            "summary": "write the missing first target",
+            "tool_calls": [
+                {
+                    "id": "call-write-target",
+                    "name": "write_file",
+                    "arguments": {"path": "generated.js", "content": "console.log('ok')\n"},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after write"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "lane_hard_runtime_frontier": {
+                    "schema_version": 1,
+                    "status": "blocked",
+                    "first_write_frontier_stall": {
+                        "failure_class": "first_write_frontier_stall",
+                        "target_path": "generated.js",
+                    },
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert result.metrics["write_evidence_count"] == 1
+    assert target.exists()
+    assert "first_write_frontier_stall" not in frontier
+
+
+def test_implement_v2_does_not_classify_tmp_artifact_missing_read_as_first_write_stall(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "probe source and inspect missing external artifact",
+            "tool_calls": [
+                {"id": "call-probe-source", "name": "inspect_dir", "arguments": {"path": "."}},
+                {"id": "call-read-artifact", "name": "read_file", "arguments": {"path": "/tmp/frame.bmp"}},
+            ],
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        if outputs:
+            return outputs.pop(0)
+        raise ModelBackendError("request timed out")
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path), "/tmp"],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert result.metrics["model_error"]["failure_class"] == "model_timeout"
+    assert "semantic_failure_class" not in result.metrics["model_error"]
+    assert "lane_hard_runtime_frontier" not in result.updated_lane_state
+
+
 def test_implement_v2_live_json_accept_edits_preserves_explicit_dry_run(tmp_path) -> None:
     target = tmp_path / "preview.txt"
     outputs = [

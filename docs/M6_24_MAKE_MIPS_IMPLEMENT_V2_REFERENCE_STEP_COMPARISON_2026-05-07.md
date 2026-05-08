@@ -861,3 +861,61 @@ Next operation:
 - commit this repair;
 - run one same-shape 10 minute `make-mips-interpreter` step-shape diagnostic;
 - compare against the Codex reference before any `speed_1` / `proof_5`.
+
+## 2026-05-08 First-Write Frontier Stall Diagnostic
+
+Diagnostic artifact:
+
+- `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-wall-budget-frontier-make-mips-step-shape-10min-20260508-1609`
+
+Observed shape:
+
+- score: `0/1`;
+- runner errors: `0`;
+- Harbor runtime: `7m10s`;
+- replay/dogfood: pass;
+- model turns: `6`;
+- tool calls/results: `12` / `12`;
+- write evidence: `0`;
+- latest failed tool: `read_file /app/vm.js` missing;
+- model error: `model_timeout`;
+- prompt/model load: about `395,639` prompt chars and `352s` model time.
+
+Step delta:
+
+1. The wall-budget closeout repair worked: there is no final closeout masking
+   the useful signal.
+2. The lane now reaches the likely first-write target quickly, but it stalls
+   before the first source mutation.
+3. Codex reaches its first coherent patch around the same wall window; mew
+   spends the remaining model turn in timeout with no write evidence.
+4. External `/tmp/frame.bmp` is still missing, but that is downstream. The
+   immediate generic gap is `first_write_frontier_stall`.
+
+Repair implemented:
+
+- runtime records `first_write_frontier_stall` in compact lane frontier state
+  when source/probe evidence exists, no writes have happened, a target read
+  failed because the path is missing, and the model times out;
+- replay mirrors the same detection and routes next action to
+  `write_file` / `edit_file` / `apply_patch` before another live speed run;
+- the repair is generic and must not grow into MIPS/DOOM/`vm.js` special cases.
+
+Validation:
+
+- focused first-write/closeout/replay tests: pass;
+- `tests/test_terminal_bench_replay.py`: `35 passed`;
+- `tests/test_implement_lane.py`: `206 passed`;
+- scoped ruff: pass;
+- exact `1609` replay: pass;
+- exact `1609` terminal-bench replay dogfood: pass;
+- `m6_24-implement-v2-hard-runtime-progress-continuation-emulator`: pass.
+- codex-ultra review session `019e0687-1980-70d0-a44e-d7a070b69d98`:
+  `APPROVE` after stale-frontier clearing, target eligibility, replay
+  write-count recomputation, and negative tests were added.
+
+Next operation:
+
+- commit if approved;
+- run one more 10 minute same-shape diagnostic and compare first-write timing
+  against the Codex reference before any `speed_1` / `proof_5`.

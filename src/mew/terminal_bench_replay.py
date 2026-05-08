@@ -12,6 +12,7 @@ from .work_session import build_work_session_resume
 
 
 _IMPLEMENT_V2_TERMINAL_TOOLS = {"run_command", "run_tests", "poll_command"}
+_IMPLEMENT_V2_WRITE_TOOLS = {"write_file", "edit_file", "apply_patch"}
 _FAILURE_CLASSIFICATION_COMPARE_KEYS = (
     "schema_version",
     "classification_id",
@@ -236,6 +237,7 @@ def _implement_v2_replay_summary(report_path, report):
         if isinstance(result, dict) and str(result.get("tool_name") or "") in {"run_command", "run_tests", "poll_command"}
     ]
     structured_replay = _implement_v2_structured_execution_replay(tool_results)
+    write_evidence_count = _implement_v2_write_evidence_count(tool_results)
     external_expected_artifacts = _external_verifier_expected_artifacts(_find_parent_with_result(report_path))
     external_verifier_missing_artifacts = _external_verifier_missing_artifacts(_find_parent_with_result(report_path))
     passed_structured_artifacts = _implement_v2_passed_structured_artifacts(tool_results)
@@ -247,6 +249,12 @@ def _implement_v2_replay_summary(report_path, report):
     legacy_marker_fallback = _implement_v2_legacy_runtime_marker_fallback(
         failed_results,
         structured_replay=structured_replay,
+    )
+    first_write_frontier_stall = _implement_v2_first_write_frontier_stall(
+        history,
+        tool_results,
+        model_error=model_error,
+        write_evidence_count=write_evidence_count,
     )
     lane_status = str(result.get("status") or _implement_v2_step_status(work_report) or "")
     if _implement_v2_should_project_completed(tool_results, external_reward=_reward_from_trial(_find_parent_with_result(report_path), _read_json(_find_parent_with_result(report_path) / "result.json"))):
@@ -262,10 +270,11 @@ def _implement_v2_replay_summary(report_path, report):
         "failed_tool_result_count": len(failed_results),
         "terminal_result_count": len(terminal_results),
         "terminal_evidence_count": int(metrics.get("terminal_evidence_count") or 0),
-        "write_evidence_count": int(metrics.get("write_evidence_count") or 0),
+        "write_evidence_count": write_evidence_count,
         "latest_failure": _implement_v2_latest_failure(failed_results, structured_replay=structured_replay),
         "structured_execution_replay": structured_replay,
         "model_error": model_error,
+        "first_write_frontier_stall": first_write_frontier_stall,
         "active_command_closeout_failed": _implement_v2_active_command_closeout_failed(failed_results),
         "tool_contract_shell_surface_misuse": _implement_v2_tool_contract_shell_surface_misuse(failed_results),
         "tool_contract_shell_surface_misuse_seen": _implement_v2_any_tool_contract_shell_surface_misuse(failed_results),
@@ -713,6 +722,150 @@ def _implement_v2_latest_failure(failed_results, *, structured_replay=None):
     return latest
 
 
+def _implement_v2_first_write_frontier_stall(history, tool_results, *, model_error, write_evidence_count):
+    if not isinstance(model_error, dict) or model_error.get("failure_class") != "model_timeout":
+        return {}
+    try:
+        writes = int(write_evidence_count or 0)
+    except (TypeError, ValueError):
+        writes = 0
+    if writes > 0:
+        return {}
+    by_provider_call_id = _implement_v2_history_calls_by_provider_id(history)
+    missing = _implement_v2_latest_missing_read_target(tool_results, by_provider_call_id=by_provider_call_id)
+    if not missing:
+        return {}
+    prior_observations = _implement_v2_prior_observation_count(tool_results, before_provider_call_id=missing["provider_call_id"])
+    if prior_observations <= 0:
+        return {}
+    target = str(missing.get("target_path") or "").strip()
+    required = (
+        f"create or update {target} with write_file/edit_file/apply_patch before another live speed run"
+        if target
+        else "make the first source mutation with write_file/edit_file/apply_patch before another live speed run"
+    )
+    return {
+        "detected": True,
+        "failure_class": "first_write_frontier_stall",
+        "failure_kind": "missing_target_create_frontier",
+        "failure_phase": "planning_to_edit",
+        "provider_call_id": missing["provider_call_id"],
+        "tool_name": "read_file",
+        "target_path": target,
+        "target_path_display": missing.get("target_path_display") or target,
+        "prior_observation_count": prior_observations,
+        "source": "model_timeout_after_missing_read_target_without_write",
+        "required_next_action": required,
+    }
+
+
+def _implement_v2_history_calls_by_provider_id(history):
+    calls: dict[str, dict[str, object]] = {}
+    for turn in history if isinstance(history, list) else []:
+        if not isinstance(turn, dict):
+            continue
+        for call in turn.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            provider_call_id = str(call.get("provider_call_id") or call.get("id") or "")
+            if provider_call_id:
+                calls[provider_call_id] = call
+    return calls
+
+
+def _implement_v2_latest_missing_read_target(tool_results, *, by_provider_call_id):
+    for result in reversed(tool_results if isinstance(tool_results, list) else []):
+        if not isinstance(result, dict):
+            continue
+        if str(result.get("tool_name") or "") != "read_file":
+            continue
+        if str(result.get("status") or "").casefold() not in {"failed", "invalid", "denied"}:
+            continue
+        payload = _first_tool_result_payload(result)
+        reason = str(payload.get("reason") or "")
+        if "path does not exist" not in reason.casefold():
+            continue
+        provider_call_id = str(result.get("provider_call_id") or "")
+        call = by_provider_call_id.get(provider_call_id) if provider_call_id else {}
+        arguments = call.get("arguments") if isinstance(call, dict) and isinstance(call.get("arguments"), dict) else {}
+        target = str(arguments.get("path") or _missing_path_from_read_reason(reason) or "").strip()
+        target = _createable_first_write_target_path(target)
+        if not target:
+            continue
+        return {
+            "provider_call_id": provider_call_id,
+            "target_path": target,
+            "target_path_display": target,
+            "reason": reason,
+        }
+    return {}
+
+
+def _missing_path_from_read_reason(reason):
+    text = str(reason or "")
+    marker = "path does not exist:"
+    index = text.casefold().find(marker)
+    if index < 0:
+        return ""
+    return text[index + len(marker) :].split(";", 1)[0].strip()
+
+
+def _workspace_relative_path_display(path):
+    value = str(path or "").strip()
+    for prefix in ("/app/", "/workspace/"):
+        if value.startswith(prefix):
+            return value[len(prefix) :]
+    return value
+
+
+def _createable_first_write_target_path(path):
+    value = str(path or "").strip()
+    if not value:
+        return ""
+    lowered = value.casefold()
+    if lowered.startswith(("/tmp/", "/var/tmp/")):
+        return ""
+    relative = _workspace_relative_path_display(value)
+    if not relative or relative in {".", ".."}:
+        return ""
+    if relative.startswith("../") or relative.startswith("/"):
+        return ""
+    return relative
+
+
+def _implement_v2_write_evidence_count(tool_results):
+    count = 0
+    for result in tool_results if isinstance(tool_results, list) else []:
+        if not isinstance(result, dict):
+            continue
+        if str(result.get("tool_name") or "") not in _IMPLEMENT_V2_WRITE_TOOLS:
+            continue
+        if result.get("side_effects"):
+            count += 1
+    return count
+
+
+def _implement_v2_prior_observation_count(tool_results, *, before_provider_call_id):
+    count = 0
+    for result in tool_results if isinstance(tool_results, list) else []:
+        if not isinstance(result, dict):
+            continue
+        if str(result.get("provider_call_id") or "") == str(before_provider_call_id or ""):
+            break
+        if str(result.get("status") or "").casefold() != "completed":
+            continue
+        if str(result.get("tool_name") or "") in {
+            "glob",
+            "inspect_dir",
+            "read_command_output",
+            "read_file",
+            "run_command",
+            "search_text",
+        }:
+            count += 1
+    return count
+
+
 def _implement_v2_low_signal_active_command_closeout_ids(failed_results):
     ids = set()
     for result in failed_results:
@@ -956,6 +1109,17 @@ def _implement_v2_next_action(summary, *, external_reward=None):
     if summary.get("tool_contract_shell_surface_misuse_seen") and latest:
         tool = latest.get("tool_name") or "tool"
         return f"debug implement_v2 divergence: inspect latest failed {tool} result before another live speed run"
+    first_write_stall = (
+        summary.get("first_write_frontier_stall")
+        if isinstance(summary.get("first_write_frontier_stall"), dict)
+        else {}
+    )
+    if first_write_stall.get("detected"):
+        target = str(first_write_stall.get("target_path") or "the missing target file")
+        return (
+            "debug implement_v2 divergence: first_write_frontier_stall after cheap source/probe evidence; "
+            f"create or update {target} with write_file/edit_file/apply_patch before another live speed run"
+        )
     missing_external = summary.get("external_expected_artifact_missing")
     if missing_external and _implement_v2_runtime_producer_blocked(summary, latest):
         preview = ", ".join(str(item) for item in list(missing_external)[:3])

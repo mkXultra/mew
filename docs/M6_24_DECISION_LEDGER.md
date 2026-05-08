@@ -874,3 +874,36 @@ slice (`7 passed`), exact `0535` replay, terminal-bench replay dogfood, scoped
 ruff, and `git diff --check` pass. Next live action before speed/proof is another
 10 minute step-shape diagnostic to verify that the finish-gate dead loop is gone
 and the remaining blocker is the true external stdout/runtime behavior gap.
+
+Implement-v2 first-write frontier stall checkpoint 2026-05-08 JST:
+
+The valid same-shape diagnostic
+`mew-m6-24-wall-budget-frontier-make-mips-step-shape-10min-20260508-1609`
+scored `0/1` with runner errors `0` and Harbor runtime `7m10s`.
+Replay and terminal-bench replay dogfood pass. The wall-budget projection
+repair exposed the next generic gap: the lane gathered cheap source/probe
+evidence in `6` turns and `12` tool calls, but produced `0` write evidence.
+The latest failed tool was `read_file /app/vm.js` missing, followed by a
+`model_timeout` with about `395,639` prompt chars and `352s` model time.
+
+Decision: classify this as `first_write_frontier_stall`, not as an external
+runtime artifact mismatch. The repair is generic: if source/probe evidence
+exists, no writes have happened, a target read failed because the path is
+missing, and the model times out before the first mutation, mew must preserve a
+compact first-write frontier and route reentry to `write_file` / `edit_file` /
+`apply_patch` before another live speed run. This is not a `vm.js`, MIPS, or
+DOOM-specific solver. The exact `1609` replay now projects
+`first_write_frontier_stall` with target `vm.js` and next action:
+create or update `vm.js` before another live speed run.
+
+Validation after the repair: focused first-write/closeout/replay tests pass,
+`tests/test_terminal_bench_replay.py` (`35 passed`),
+`tests/test_implement_lane.py` (`206 passed`), scoped ruff pass, exact `1609`
+replay pass, exact `1609` terminal-bench replay dogfood pass, and
+`m6_24-implement-v2-hard-runtime-progress-continuation-emulator` pass.
+codex-ultra review session `019e0687-1980-70d0-a44e-d7a070b69d98` initially
+requested fixes for stale frontier clearing, `/tmp` / out-of-workspace false
+positives, replay write-count recomputation, and negative coverage. After the
+follow-up repair and tests, the same session returned `APPROVE`. After commit,
+run the next 10 minute same-shape diagnostic; do not run broad measurement or
+`speed_1` / `proof_5` first.

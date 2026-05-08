@@ -444,6 +444,26 @@ def run_live_json_implement_v2(
             model_turn_observations.append(dict(model_turn_output.observation))
             if model_turn_output.model_error:
                 model_error = dict(model_turn_output.model_error)
+                first_write_stall = _first_write_frontier_stall_from_live_results(
+                    model_error,
+                    tuple(tool_results),
+                    workspace=lane_input.workspace,
+                )
+                if first_write_stall:
+                    model_error["semantic_failure_class"] = "first_write_frontier_stall"
+                    model_error["first_write_frontier_stall"] = dict(first_write_stall)
+                    hard_runtime_frontier_enabled = True
+                    hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
+                        existing=hard_runtime_frontier_state,
+                        update={
+                            "status": "blocked",
+                            "objective": "resume from the first source mutation frontier instead of broad rediscovery",
+                            "first_write_frontier_stall": first_write_stall,
+                        },
+                        tool_results=tuple(tool_results),
+                        artifact_namespace=artifact_namespace,
+                    )
+                    exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
                 finish_arguments = {
                     "outcome": "failed",
                     "summary": str(model_error.get("message") or "model_json call failed"),
@@ -2528,6 +2548,7 @@ def _merge_hard_runtime_frontier_state(
         "final_artifact",
         "prohibited_surrogates",
         "next_verifier_shaped_command",
+        "first_write_frontier_stall",
     ):
         if key in update_state:
             merged[key] = update_state[key]
@@ -2554,6 +2575,9 @@ def _merge_hard_runtime_frontier_state(
         elif failure_key == "latest_build_failure":
             merged.pop("latest_runtime_failure", None)
 
+    if _write_evidence_count(tool_results) > 0:
+        merged.pop("first_write_frontier_stall", None)
+
     merged["schema_version"] = _HARD_RUNTIME_FRONTIER_SCHEMA_VERSION
     status = str(merged.get("status") or "active").strip().lower()
     merged["status"] = status if status in {"active", "blocked", "resolved"} else "active"
@@ -2577,6 +2601,7 @@ def _compact_hard_runtime_frontier_state(value: object) -> dict[str, object]:
         "latest_runtime_failure",
         "legacy_runtime_marker_fallback",
         "next_verifier_shaped_command",
+        "first_write_frontier_stall",
     ):
         if key in value:
             compact[key] = _frontier_compact_value(value[key], key=key)
@@ -2623,6 +2648,132 @@ def _frontier_clip_text(value: object, *, limit: int = _FRONTIER_TEXT_LIMIT) -> 
 
 def _drop_empty_frontier_values(value: dict[str, object]) -> dict[str, object]:
     return {str(key): item for key, item in value.items() if item not in (None, "", [], {})}
+
+
+def _first_write_frontier_stall_from_live_results(
+    model_error: dict[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    workspace: object = "",
+) -> dict[str, object]:
+    if str(model_error.get("failure_class") or "") != "model_timeout":
+        return {}
+    if _write_evidence_count(tool_results) > 0:
+        return {}
+    missing = _latest_missing_read_target_result(tool_results, workspace=workspace)
+    if not missing:
+        return {}
+    prior_observations = _prior_observation_count(tool_results, before_provider_call_id=missing["provider_call_id"])
+    if prior_observations <= 0:
+        return {}
+    target_path = str(missing.get("target_path") or "").strip()
+    required = (
+        f"create or update {target_path} with write_file/edit_file/apply_patch"
+        if target_path
+        else "make the first source mutation with write_file/edit_file/apply_patch"
+    )
+    return {
+        "failure_class": "first_write_frontier_stall",
+        "failure_kind": "missing_target_create_frontier",
+        "failure_phase": "planning_to_edit",
+        "provider_call_id": str(missing.get("provider_call_id") or ""),
+        "tool_name": "read_file",
+        "target_path": target_path,
+        "target_path_display": str(missing.get("target_path_display") or target_path),
+        "prior_observation_count": prior_observations,
+        "source": "model_timeout_after_missing_read_target_without_write",
+        "required_next_action": required,
+    }
+
+
+def _latest_missing_read_target_result(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    workspace: object = "",
+) -> dict[str, object]:
+    for result in reversed(tool_results):
+        if result.tool_name != "read_file":
+            continue
+        if result.status not in {"failed", "invalid", "denied"}:
+            continue
+        payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+        reason = str(payload.get("reason") or "")
+        if "path does not exist" not in reason.casefold():
+            continue
+        target_path = _target_path_from_missing_read_reason(reason)
+        target_path = _createable_first_write_target_path(target_path, workspace=workspace)
+        if not target_path:
+            continue
+        return {
+            "provider_call_id": str(result.provider_call_id or ""),
+            "target_path": target_path,
+            "target_path_display": target_path,
+            "reason": reason,
+        }
+    return {}
+
+
+def _target_path_from_missing_read_reason(reason: str) -> str:
+    marker = "path does not exist:"
+    text = str(reason or "")
+    index = text.casefold().find(marker)
+    if index < 0:
+        return ""
+    return text[index + len(marker) :].split(";", 1)[0].strip()
+
+
+def _workspace_relative_target_path(path: object, *, workspace: object = "") -> str:
+    value = str(path or "").strip()
+    workspace_value = str(workspace or "").strip().rstrip("/")
+    if workspace_value:
+        workspace_value = str(Path(workspace_value).expanduser().resolve(strict=False)).rstrip("/")
+    if workspace_value and value == workspace_value:
+        return "."
+    if workspace_value and value.startswith(f"{workspace_value}/"):
+        return value[len(workspace_value) + 1 :]
+    for prefix in ("/app/", "/workspace/"):
+        if value.startswith(prefix):
+            return value[len(prefix) :]
+    return value
+
+
+def _createable_first_write_target_path(path: object, *, workspace: object = "") -> str:
+    value = str(path or "").strip()
+    if not value:
+        return ""
+    lowered = value.casefold()
+    if lowered.startswith(("/tmp/", "/var/tmp/")):
+        return ""
+    relative = _workspace_relative_target_path(value, workspace=workspace)
+    if not relative or relative in {".", ".."}:
+        return ""
+    if relative.startswith("../") or relative.startswith("/"):
+        return ""
+    return relative
+
+
+def _prior_observation_count(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    before_provider_call_id: object,
+) -> int:
+    count = 0
+    before_id = str(before_provider_call_id or "")
+    for result in tool_results:
+        if str(result.provider_call_id or "") == before_id:
+            break
+        if result.status != "completed":
+            continue
+        if result.tool_name in {
+            "glob",
+            "inspect_dir",
+            "read_command_output",
+            "read_file",
+            "run_command",
+            "search_text",
+        }:
+            count += 1
+    return count
 
 
 def _frontier_evidence_registry(
@@ -3376,6 +3527,19 @@ def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str
     )
     if not hard_runtime_frontier_state:
         return guidance
+    first_write_stall = hard_runtime_frontier_state.get("first_write_frontier_stall")
+    if isinstance(first_write_stall, dict) and first_write_stall:
+        target = _frontier_clip_text(first_write_stall.get("target_path") or "the missing target file", limit=180)
+        required = _frontier_clip_text(first_write_stall.get("required_next_action") or "", limit=360)
+        required_hint = f" required_next_action={required}" if required else ""
+        return (
+            guidance
+            + "First-write frontier stall: prior source/probe evidence is already available, but no "
+            "source mutation happened before the model failure. Do not rediscover the same missing target "
+            f"or run an external verifier first. Create or update {target} with write_file/edit_file/"
+            "apply_patch, then run one verifier-shaped command."
+            f"{required_hint}\n"
+        )
     latest_failure = hard_runtime_frontier_state.get("latest_runtime_failure")
     if not isinstance(latest_failure, dict):
         latest_failure = hard_runtime_frontier_state.get("latest_build_failure")

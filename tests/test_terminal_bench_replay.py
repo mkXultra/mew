@@ -706,6 +706,281 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertEqual(current_v2["model_error"]["failure_class"], "model_json_parse_error")
             self.assertIn("model_json parse failure", trial["current"]["next_action"])
 
+    def test_replay_terminal_bench_job_routes_model_timeout_after_missing_target_to_first_write_stall(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_model_error_fixture(tmp)
+            trial_dir = Path(job_dir) / "feal-differential-cryptanalysis__v2modelerror"
+            agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+            verifier_dir = trial_dir / "verifier"
+            v2_dir = agent_dir / "implement_v2"
+            v2_dir.mkdir(parents=True)
+            report_path = agent_dir / "mew-report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["work_report"]["implement_lane_result"] = {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 0,
+                    "model_error": {
+                        "failure_class": "model_timeout",
+                        "error_type": "ModelBackendError",
+                        "message": "request timed out",
+                    },
+                },
+            }
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            verifier_dir.joinpath("test-stdout.txt").write_text(
+                "AssertionError: expected /tmp/frame.bmp but it does not exist\n",
+                encoding="utf-8",
+            )
+            v2_dir.joinpath("history.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "turn": 1,
+                            "summary": "probe source and then inspect missing target before patch",
+                            "tool_calls": [
+                                {
+                                    "id": "call-probe-source",
+                                    "name": "run_command",
+                                    "arguments": {"command": "find . -maxdepth 2 -type f"},
+                                },
+                                {
+                                    "id": "call-read-target",
+                                    "name": "read_file",
+                                    "arguments": {"path": "vm.js"},
+                                },
+                            ],
+                        },
+                        {"turn": 2, "summary": "model_json_error", "model_error": {"message": "request timed out"}},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            v2_dir.joinpath("proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "call-probe-source",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [{"exit_code": 0, "stdout": "main.c\n"}],
+                            },
+                            {
+                                "provider_call_id": "call-read-target",
+                                "tool_name": "read_file",
+                                "status": "failed",
+                                "content": [{"reason": "path does not exist: /app/vm.js"}],
+                            },
+                        ],
+                        "metrics": {
+                            "model_error": {
+                                "failure_class": "model_timeout",
+                                "error_type": "ModelBackendError",
+                                "message": "request timed out",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="feal-differential-cryptanalysis",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(current_v2["first_write_frontier_stall"]["detected"])
+            self.assertEqual(current_v2["first_write_frontier_stall"]["target_path"], "vm.js")
+            self.assertIn("first_write_frontier_stall", next_action)
+            self.assertIn("write_file/edit_file/apply_patch", next_action)
+            self.assertNotIn("external verifier expected runtime artifact", next_action)
+
+    def test_replay_terminal_bench_job_does_not_route_tmp_artifact_missing_read_to_first_write_stall(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_model_error_fixture(tmp)
+            trial_dir = Path(job_dir) / "feal-differential-cryptanalysis__v2modelerror"
+            agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+            v2_dir = agent_dir / "implement_v2"
+            v2_dir.mkdir(parents=True)
+            report_path = agent_dir / "mew-report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["work_report"]["implement_lane_result"] = {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 0,
+                    "model_error": {
+                        "failure_class": "model_timeout",
+                        "error_type": "ModelBackendError",
+                        "message": "request timed out",
+                    },
+                },
+            }
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            v2_dir.joinpath("history.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "turn": 1,
+                            "tool_calls": [
+                                {"id": "call-probe-source", "name": "run_command", "arguments": {"command": "ls"}},
+                                {
+                                    "id": "call-read-artifact",
+                                    "name": "read_file",
+                                    "arguments": {"path": "/tmp/frame.bmp"},
+                                },
+                            ],
+                        },
+                        {"turn": 2, "summary": "model_json_error", "model_error": {"message": "request timed out"}},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            v2_dir.joinpath("proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "call-probe-source",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [{"exit_code": 0, "stdout": "main.c\n"}],
+                            },
+                            {
+                                "provider_call_id": "call-read-artifact",
+                                "tool_name": "read_file",
+                                "status": "failed",
+                                "content": [{"reason": "path does not exist: /tmp/frame.bmp"}],
+                            },
+                        ],
+                        "metrics": {
+                            "model_error": {
+                                "failure_class": "model_timeout",
+                                "error_type": "ModelBackendError",
+                                "message": "request timed out",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="feal-differential-cryptanalysis",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+            next_action = report["trials"][0]["current"]["next_action"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["first_write_frontier_stall"], {})
+            self.assertNotIn("first_write_frontier_stall", next_action)
+
+    def test_replay_terminal_bench_job_recomputes_write_count_before_first_write_stall(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_model_error_fixture(tmp)
+            trial_dir = Path(job_dir) / "feal-differential-cryptanalysis__v2modelerror"
+            agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+            v2_dir = agent_dir / "implement_v2"
+            v2_dir.mkdir(parents=True)
+            report_path = agent_dir / "mew-report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["work_report"]["implement_lane_result"] = {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 0,
+                    "model_error": {
+                        "failure_class": "model_timeout",
+                        "error_type": "ModelBackendError",
+                        "message": "request timed out",
+                    },
+                },
+            }
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            v2_dir.joinpath("history.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "turn": 1,
+                            "tool_calls": [
+                                {"id": "call-probe-source", "name": "run_command", "arguments": {"command": "ls"}},
+                                {
+                                    "id": "call-write-target",
+                                    "name": "write_file",
+                                    "arguments": {"path": "vm.js", "content": "ok\n"},
+                                },
+                                {"id": "call-read-target", "name": "read_file", "arguments": {"path": "vm.js"}},
+                            ],
+                        },
+                        {"turn": 2, "summary": "model_json_error", "model_error": {"message": "request timed out"}},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            v2_dir.joinpath("proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "call-probe-source",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [{"exit_code": 0, "stdout": "main.c\n"}],
+                            },
+                            {
+                                "provider_call_id": "call-write-target",
+                                "tool_name": "write_file",
+                                "status": "completed",
+                                "content": [{"written": True}],
+                                "side_effects": [{"kind": "file_write", "path": "vm.js", "dry_run": False}],
+                            },
+                            {
+                                "provider_call_id": "call-read-target",
+                                "tool_name": "read_file",
+                                "status": "failed",
+                                "content": [{"reason": "path does not exist: /app/vm.js"}],
+                            },
+                        ],
+                        "metrics": {
+                            "model_error": {
+                                "failure_class": "model_timeout",
+                                "error_type": "ModelBackendError",
+                                "message": "request timed out",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="feal-differential-cryptanalysis",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["write_evidence_count"], 1)
+            self.assertEqual(current_v2["first_write_frontier_stall"], {})
+
     def test_replay_terminal_bench_job_routes_implement_v2_max_turns_to_latest_terminal_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_implement_v2_max_turns_fixture(tmp)
