@@ -2678,6 +2678,84 @@ def test_implement_v2_live_json_blocks_same_turn_calls_after_failed_write(tmp_pa
     assert not side_effect.exists()
 
 
+def test_implement_v2_live_json_blocks_same_turn_verifier_after_run_command_source_patch_misuse(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
+    side_effect = tmp_path / "verifier_ran.txt"
+    verify_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('verifier_ran.txt').write_text('bad', encoding='utf-8')",
+        ]
+    )
+    outputs = [
+        {
+            "summary": "shell patch and verify in one turn",
+            "tool_calls": [
+                {
+                    "id": "shell-patch",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "p=Path('vm.js')\n"
+                            "s=p.read_text()\n"
+                            "p.write_text(s.replace('old','new'))\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                },
+                {
+                    "id": "verify-1",
+                    "name": "run_command",
+                    "arguments": {"command": verify_command, "cwd": ".", "use_shell": True, "timeout": 5},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "source patch misuse"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    patch_result = manifest["tool_results"][0]
+    skipped_result = manifest["tool_results"][1]
+
+    assert result.status == "blocked"
+    assert patch_result["status"] == "failed"
+    assert patch_result["content"][0]["failure_subclass"] == "run_command_source_patch_shell_surface"
+    assert skipped_result["status"] == "invalid"
+    assert "blocked_by_prior_failed_write_in_same_turn" in skipped_result["content"][0]["reason"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+    assert not side_effect.exists()
+
+
 def test_implement_v2_model_turn_boundary_preserves_rendered_prompt_and_call_args(tmp_path) -> None:
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
     lane_input = ImplementLaneInput(

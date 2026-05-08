@@ -4972,9 +4972,18 @@ def _write_file_target_is_missing(lane_input: ImplementLaneInput, args: dict[str
 
 
 def _same_turn_write_failure_blocks_remaining_calls(result: ToolResultEnvelope) -> bool:
-    if result.tool_name not in WRITE_TOOL_NAMES:
+    if result.tool_name in WRITE_TOOL_NAMES:
+        return result.status in {"failed", "denied", "invalid", "interrupted"} or bool(result.is_error)
+    if result.tool_name not in {"run_command", "run_tests"}:
         return False
-    return result.status in {"failed", "denied", "invalid", "interrupted"} or bool(result.is_error)
+    if not _is_tool_contract_misuse_result(result):
+        return False
+    payload = _first_result_payload(result)
+    return str(payload.get("failure_subclass") or "") in {
+        "run_command_source_mutation_verifier_compound",
+        "run_command_source_patch_shell_surface",
+        "run_tests_source_mutation",
+    }
 
 
 def _provider_visible_tool_call_for_history(call: ToolCallEnvelope) -> dict[str, object]:
