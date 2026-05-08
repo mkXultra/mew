@@ -9,6 +9,9 @@ import urllib.request
 from datetime import datetime, timezone
 import base64
 import errno
+import signal
+import threading
+from contextlib import contextmanager
 
 from .config import DEFAULT_AUTH_PATHS, DEFAULT_CODEX_REASONING_EFFORT
 from .errors import CodexApiError, CodexRefusalError, MewError
@@ -424,6 +427,42 @@ def _deadline_read_timeout(deadline):
     return max(0.01, remaining)
 
 
+@contextmanager
+def _hard_request_deadline(deadline):
+    if deadline is None:
+        yield
+        return
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    if not hasattr(signal, "SIGALRM") or not hasattr(signal, "setitimer"):
+        yield
+        return
+    try:
+        previous_timer = signal.getitimer(signal.ITIMER_REAL)
+    except (AttributeError, OSError, ValueError):
+        yield
+        return
+    if previous_timer and previous_timer[0] > 0:
+        yield
+        return
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise CodexApiError("request timed out")
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def timeout_handler(signum, frame):
+        raise CodexApiError("request timed out")
+
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.setitimer(signal.ITIMER_REAL, max(0.01, remaining))
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
 def _read_stream_body(response, deadline, on_text_delta=None):
     chunks = []
     while True:
@@ -480,13 +519,14 @@ def _send_codex_responses_request(auth, url, body, timeout, deadline, on_text_de
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            content_type = response.headers.get("content-type", "")
-            if on_text_delta or "text/event-stream" in content_type:
-                raw = _read_stream_body(response, deadline, on_text_delta=on_text_delta)
-            else:
-                _raise_if_request_timed_out(deadline)
-                raw = response.read().decode("utf-8", errors="replace")
+        with _hard_request_deadline(deadline):
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                content_type = response.headers.get("content-type", "")
+                if on_text_delta or "text/event-stream" in content_type:
+                    raw = _read_stream_body(response, deadline, on_text_delta=on_text_delta)
+                else:
+                    _raise_if_request_timed_out(deadline)
+                    raw = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")
         detail = body_text[:800].replace("\n", " ")

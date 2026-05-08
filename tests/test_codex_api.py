@@ -1,6 +1,7 @@
 import json
 import io
 import os
+import signal
 import socket
 import tempfile
 import unittest
@@ -603,7 +604,7 @@ class CodexApiTests(unittest.TestCase):
             readline_side_effects=[socket.timeout("idle")],
         )
         with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
-            with patch("mew.codex_api.time.monotonic", side_effect=[0.0, 0.0]):
+            with patch("mew.codex_api.time.monotonic", side_effect=[0.0, 0.0, 0.0]):
                 with self.assertRaisesRegex(CodexApiError, "request timed out"):
                     call_codex_web_api(
                         {"access_token": "token"},
@@ -615,6 +616,25 @@ class CodexApiTests(unittest.TestCase):
                     )
 
         self.assertEqual(deltas, [])
+
+    def test_call_codex_web_api_hard_deadline_interrupts_blocked_stream_read(self):
+        class BlockingReadResponse(FakeUrlopenResponse):
+            def readline(self):
+                handler = signal.getsignal(signal.SIGALRM)
+                handler(signal.SIGALRM, None)
+                return b""
+
+        response = BlockingReadResponse([], headers={"content-type": "text/event-stream"})
+
+        with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(CodexApiError, "request timed out"):
+                call_codex_web_api(
+                    {"access_token": "token"},
+                    "prompt",
+                    "model",
+                    "https://example.invalid",
+                    45,
+                )
 
     def test_call_codex_web_api_enforces_timeout_when_keepalives_arrive_without_deltas(self):
         deltas = []
@@ -665,7 +685,7 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(text, "ok")
         self.assertEqual(deltas, ["ok"])
         self.assertEqual(captured["timeout"], 45)
-        self.assertEqual(response.socket_timeouts, [45.0, 44.0, 43.5])
+        self.assertEqual(response.socket_timeouts, [44.0, 43.5, 43.0])
 
     def test_call_codex_web_api_wraps_timed_out_response_reader_oserror(self):
         response = FakeUrlopenResponse(
