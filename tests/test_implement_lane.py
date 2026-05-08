@@ -41,6 +41,7 @@ from mew.implement_lane.v2_runtime import (
     _command_has_verifier_surface,
     _finish_acceptance_action,
     _finish_evidence_refs,
+    _finish_gate_history,
     _frontier_failure_payload,
     _hard_runtime_frontier_progress_signature,
     _hard_runtime_progress_continuation_signature,
@@ -1887,6 +1888,38 @@ def test_implement_v2_live_json_prompt_omits_frontier_update_contract_without_fr
     assert '"oracle_refs": [\n      "oracle:..."\n    ]' in prompt
     assert '"acceptance_evidence"' not in prompt
     assert "do not rely on prose-only acceptance_evidence claims" in prompt
+
+
+def test_implement_v2_finish_gate_history_projects_compact_recovery_card() -> None:
+    history = _finish_gate_history(
+        turn_index=2,
+        decision={
+            "decision": "block_continue",
+            "reason": "missing typed evidence",
+            "missing_obligations": ["oracle:task:frame_similarity"],
+            "invalid_evidence_refs": ["ev:bad"],
+            "blockers": [
+                {
+                    "code": "missing_typed_evidence",
+                    "reason": "need final verifier",
+                    "proof_object": {"large": "do-not-project"},
+                }
+            ],
+            "proof_object": {"large": "do-not-project"},
+        },
+        continuation_prompt="run one verifier-shaped comparison and finish with its evidence id",
+    )
+    content = history["tool_results"][0]["content"]
+    card = content["finish_gate_recovery_card"]
+    rendered = json.dumps(history, sort_keys=True)
+
+    assert "finish_gate" not in content
+    assert card["finish_blocked"] is True
+    assert card["missing"] == ["oracle:task:frame_similarity"]
+    assert card["invalid_evidence_refs"] == ["ev:bad"]
+    assert card["blockers"][0]["code"] == "missing_typed_evidence"
+    assert card["next_action"] == "run one verifier-shaped comparison and finish with its evidence id"
+    assert "do-not-project" not in rendered
 
 
 def test_implement_v2_live_json_prompt_hides_frontier_update_contract_by_default_with_frontier(tmp_path) -> None:

@@ -5666,12 +5666,49 @@ def _finish_gate_history(
                 "is_error": True,
                 "content": {
                     "mew_status": "failed",
-                    "finish_gate": decision,
+                    "finish_gate_recovery_card": _finish_gate_recovery_card(decision, continuation_prompt),
                     "continuation_prompt": continuation_prompt,
                 },
             }
         ],
     }
+
+
+def _finish_gate_recovery_card(decision: dict[str, object], continuation_prompt: str) -> dict[str, object]:
+    blockers = decision.get("blockers")
+    compact_blockers: list[dict[str, object]] = []
+    if isinstance(blockers, list):
+        for blocker in blockers[:4]:
+            if not isinstance(blocker, dict):
+                continue
+            compact_blockers.append(
+                _drop_empty_frontier_values(
+                    {
+                        "code": _frontier_clip_text(blocker.get("code"), limit=120),
+                        "subject": _frontier_clip_text(blocker.get("subject"), limit=160),
+                        "reason": _frontier_clip_text(blocker.get("reason"), limit=220),
+                        "provider_call_id": _frontier_clip_text(blocker.get("provider_call_id"), limit=120),
+                        "changed_paths": _frontier_compact_value(blocker.get("changed_paths"), key="changed_paths"),
+                    }
+                )
+            )
+    missing = decision.get("missing_obligations")
+    invalid_refs = decision.get("invalid_evidence_refs")
+    return _drop_empty_frontier_values(
+        {
+            "finish_blocked": True,
+            "decision": _frontier_clip_text(decision.get("decision"), limit=80),
+            "reason": _frontier_clip_text(decision.get("reason"), limit=240),
+            "missing": _frontier_compact_value(missing, key="missing") if isinstance(missing, list) else [],
+            "invalid_evidence_refs": (
+                _frontier_compact_value(invalid_refs, key="invalid_evidence_refs")
+                if isinstance(invalid_refs, list)
+                else []
+            ),
+            "blockers": compact_blockers,
+            "next_action": _frontier_clip_text(continuation_prompt, limit=360),
+        }
+    )
 
 
 def _live_finish_status(
