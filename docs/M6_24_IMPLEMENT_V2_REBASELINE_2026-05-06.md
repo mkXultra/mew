@@ -131,7 +131,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
 | `make-doom-for-mips` | 1/5 | recorded/deferred after 0/1 strategy-wall-budget frontier | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217` | no same-shape rerun until a generic frontier-throttling or strategy design is selected and locally proven |
-| `make-mips-interpreter` | 3/5 | post-nonterminal-cleanup visual-quality finish-gate repair reviewed | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260508-0134-nonterminal-cleanup` | run the mandatory next 10min `selected_lane=implement_v2` step-shape diagnostic before live speed/proof or further repair |
+| `make-mips-interpreter` | 3/5 | active timeout-guard repair after invalid first-turn stalls | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-hard-deadline-make-mips-speed1-20260508-1217` | follow newest `docs/M6_24_DECISION_LEDGER.md` row: commit fail-closed model timeout guard, then rerun the same controlled speed_1 |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
 | `polyglot-c-py` | 5/5 | pending | none | run v2 speed_1 |
@@ -799,6 +799,37 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   visible within the bounded validation window. Source-grounding sidecars do not
   cover unrelated behavior claims. This is the M6.24 "proof/evidence behind
   deterministic sidecars" backlog item.
+- Post-visual-quality-gate diagnostics:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260508-0206-visual-quality-gate`
+  is invalid as v2 evidence because multiple `--work-guidance` flags caused the
+  later guidance value to override `selected_lane=implement_v2`. The corrected
+  run
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-make-mips-interpreter-step-shape-10min-20260508-0223-visual-quality-gate-v2`
+  is valid `implement_v2` evidence. It scored reward `0.0` with runner errors
+  `0`, total runtime `9m47s`, `mew` exit `0`, `model_turns=22`,
+  `tool_calls=39`, `prompt_chars_total=3,608,027`, and exact replay/dogfood
+  passed with external reward `0.0`. The visual-marker tightening moved in the
+  right direction: v2 did not finish on mere file/header/boot evidence and asked
+  for visual quality. The remaining blocker is generic visual-oracle grounding:
+  v2 accepted self-authored/scaled visual-quality proof and a proof artifact,
+  then finished, while the external verifier failed reference similarity
+  (`0.8065 < 0.95`). The next repair must reject model-authored visual-quality
+  proxies for runtime visual artifact tasks unless the evidence is grounded in a
+  task-provided verifier/reference, explicit expected-output marker, or
+  external-verifier-shaped command. Do not add task-specific MIPS/VM logic and
+  do not run live `speed_1`/`proof_5` until focused UT, exact replay/dogfood,
+  emulator, and a new 10min step-shape analysis are recorded.
+- Post-final-closeout timeout diagnostics:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-final-closeout-make-mips-speed1-20260508-1154`
+  and
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-hard-deadline-make-mips-speed1-20260508-1217`
+  are invalid as benchmark/task evidence because both stalled before the first
+  `implement_v2` tool call and were manually killed. Treat them as
+  model-transport evidence only. The active repair is generic timeout
+  containment: Codex Web API streaming reads must obey the model timeout, and
+  `work_loop` timeout-guard child crashes must fail closed instead of falling
+  back to an unguarded model call. After this repair, rerun the same controlled
+  speed_1 before classifying task behavior.
 
 ## Repair Trigger
 

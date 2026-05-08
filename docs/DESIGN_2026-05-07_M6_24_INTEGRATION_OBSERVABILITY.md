@@ -697,6 +697,60 @@ which dynamic fields churn, and which model-visible projections should remain.
 Otherwise mew risks caching a prompt shape that is already known to be too heavy
 for the active coding hot path.
 
+### Evidence Contract V0 Trigger
+
+The acceptance gate is a temporary safety boundary, not the intended long-term
+center of the coding loop. Codex-like behavior means the model naturally uses
+tool results, verifier failures, and artifact evidence to choose the next patch
+or finish point, while deterministic gates become last-mile assertions rather
+than frequent correction mechanisms.
+
+This section is a trigger rule for evidence/acceptance-mismatch repairs, not the
+current M6.24 active next action. The active next action is always the newest
+row in `docs/M6_24_DECISION_LEDGER.md`; as of 2026-05-08, model-transport
+timeout guard repair takes precedence over further evidence-contract work.
+
+Use this sequence only when the active ledger row classifies the current miss as
+an evidence/projection/acceptance mismatch:
+
+1. Commit the current repair only after review and focused validation pass.
+2. Run one 10min `make-mips-interpreter selected_lane=implement_v2`
+   step-shape diagnostic before any live `speed_1`, `proof_5`, or broad
+   measurement.
+3. Compare the new trace against the Codex reference. The diagnostic question
+   is not score first; it is whether the loop moved toward:
+   cheap probe -> coherent patch -> verifier -> latest-failure repair.
+4. If the next miss is again caused by finish/projection/acceptance evidence
+   mismatch, stop adding narrow acceptance heuristics and implement an
+   `EvidenceEvent` / `oracle bundle` / cited-finish contract v0.
+5. If the miss is not an evidence mismatch, classify the observed hot-path gap
+   and choose the smallest generic repair from this design's tuning backlog.
+
+`EvidenceEvent` / `oracle bundle` / cited-finish v0 should make the following
+objects first-class in `implement_v2`:
+
+- task oracle bundle: expected paths, expected outputs, verifier command shape,
+  task-provided dimensions/resolution, task-provided reference/golden/oracle
+  artifacts, and explicit acceptance markers;
+- evidence events: command id, tool/result id, exit code, artifact path,
+  stdout/stderr refs, structured artifact checks, oracle pass/fail, and failure
+  class;
+- cited finish: completion may reference evidence ids and oracle ids, but
+  free-form model claims alone do not satisfy runtime/artifact/model-output
+  tasks.
+
+The model-visible projection should stay small: latest command, exit code,
+bounded tails, artifact miss or oracle verdict, refs, and one concise blocker
+class. Full proof objects, verifier transcripts, and historical evidence stay
+in sidecars/replay artifacts by default.
+
+Do not treat a more complex acceptance gate as progress by itself. A healthy
+post-repair trace is one where the gate rarely blocks because the work loop has
+already gathered and cited verifier-shaped evidence that matches the external
+truth. If the gate keeps discovering missing/ungrounded evidence, the next
+repair belongs in the tool-result -> evidence -> next-action -> cited-finish
+structure, not another task-family-specific gate patch.
+
 ## Acceptance For This Design
 
 The design is acceptable when reviewers agree that:

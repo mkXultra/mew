@@ -247,7 +247,7 @@ def call_model_json_with_retries(*args, **kwargs):
     process.join(timeout=WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS)
     if child_crash is not None:
         _terminate_work_model_process(process)
-        return _call_model_json_without_guard(*args, **kwargs)
+        raise ModelBackendError("request timed out; model timeout guard child exited without result") from child_crash
     if payload is None:
         raise ModelBackendError("request timed out")
     if payload.get("status") == "ok":

@@ -30741,7 +30741,8 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
 
         self.assertLess(time.monotonic() - started, 0.2)
 
-    def test_work_loop_model_calls_fall_back_after_child_crash(self):
+    def test_work_loop_model_calls_fail_closed_after_child_crash(self):
+        from mew.errors import ModelBackendError
         from mew.work_loop import call_model_json_with_retries
 
         class FakeRecvConn:
@@ -30784,18 +30785,18 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
                     "mew.work_loop._call_model_json_without_guard",
                     return_value={"summary": "fallback ok", "action": {"type": "finish"}},
                 ) as call_model:
-                    result = call_model_json_with_retries(
-                        "codex",
-                        {"path": "auth.json"},
-                        "prompt",
-                        "gpt-5.4",
-                        "https://example.invalid",
-                        45,
-                        log_prefix="work_think codex session=1",
-                    )
+                    with self.assertRaisesRegex(ModelBackendError, "request timed out"):
+                        call_model_json_with_retries(
+                            "codex",
+                            {"path": "auth.json"},
+                            "prompt",
+                            "gpt-5.4",
+                            "https://example.invalid",
+                            45,
+                            log_prefix="work_think codex session=1",
+                        )
 
-        self.assertEqual(result["summary"], "fallback ok")
-        self.assertEqual(call_model.call_count, 1)
+        self.assertEqual(call_model.call_count, 0)
 
     def test_work_loop_model_calls_use_spawn_timeout_guard_on_macos(self):
         from mew.work_loop import call_model_json_with_retries
