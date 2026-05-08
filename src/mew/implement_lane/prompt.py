@@ -134,7 +134,9 @@ def build_implement_v2_prompt_sections(
                 "evidence ids, verifier evidence, or blocker classes from the latest tool result instead of only "
                 "describing terminal output. If task or frontier state already declares a final artifact, a "
                 "verifier-shaped command may rely on mew to runtime-infer that artifact, but explicit "
-                "expected_artifacts are preferred."
+                "expected_artifacts are preferred. For cheap probes or diagnostics that are not acceptance proof, "
+                "omit execution_contract or set command_intent=probe|diagnostic; mew will keep those commands as "
+                "non-acceptance sidecar evidence even if a detailed artifact contract is accidentally supplied."
             ),
             stability=STABILITY_STATIC,
             cache_policy=CACHE_POLICY_CACHEABLE,

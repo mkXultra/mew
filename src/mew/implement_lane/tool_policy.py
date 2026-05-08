@@ -66,14 +66,18 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         access="execute",
         description=(
             "Run a command through managed exec with nonterminal state. Accepts command/cmd strings or argv arrays; "
-            "compound shell strings are run as shell scripts."
+            "compound shell strings are run as shell scripts. Optional command_intent=probe|diagnostic marks cheap "
+            "non-acceptance commands."
         ),
         approval_required=True,
     ),
     ImplementLaneToolSpec(
         name="run_tests",
         access="execute",
-        description="Run a verifier command through managed exec with nonterminal state.",
+        description=(
+            "Run a verifier command through managed exec with nonterminal state. Optional "
+            "command_intent=probe|diagnostic marks cheap non-acceptance commands."
+        ),
         approval_required=True,
     ),
     ImplementLaneToolSpec(

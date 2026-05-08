@@ -235,13 +235,16 @@ class ImplementV2ManagedExecRuntime:
             minimum=0.0,
             maximum=min(30.0, timeout),
         )
+        command_intent = _command_intent(args)
         raw_contract = args.get("execution_contract") if isinstance(args.get("execution_contract"), dict) else {}
         normalized_contract = _normalize_runtime_contract(
             raw_contract,
             task_contract=self.task_contract,
             frontier_state=self.frontier_state,
             fallback_id=f"contract:{command_run_id}",
+            command_intent=command_intent,
         )
+        raw_contract_preserved = raw_contract if not _intent_downgrades_artifact_contract(command_intent) else {}
         pre_run_artifact_stats = {}
         if normalized_contract.expected_artifacts:
             pre_run_artifact_stats = capture_pre_run_artifact_stats(
@@ -265,11 +268,13 @@ class ImplementV2ManagedExecRuntime:
             "tool_name": call.tool_name,
             "effective_tool_name": effective_tool_name,
             "command_source": command_source,
+            "command_intent": command_intent,
             "execution_contract_normalized": normalized_contract.as_dict(),
             "pre_run_artifact_stats": pre_run_artifact_stats,
             "started_epoch": started_epoch,
             "tool_run_record_ids": [],
-            **({"execution_contract": dict(args["execution_contract"])} if isinstance(args.get("execution_contract"), dict) else {}),
+            **({"execution_contract": dict(raw_contract_preserved)} if raw_contract_preserved else {}),
+            **({"execution_contract_downgraded": True} if raw_contract and not raw_contract_preserved else {}),
             **({"tool_contract_recovery": dict(tool_contract_recovery)} if tool_contract_recovery is not None else {}),
         }
         payload = self.runner.poll(wait_seconds=foreground_budget, command_run_id=command_run_id)
@@ -281,8 +286,11 @@ class ImplementV2ManagedExecRuntime:
         payload["tool_name"] = call.tool_name
         payload["effective_tool_name"] = effective_tool_name
         payload["command_source"] = command_source
-        if isinstance(args.get("execution_contract"), dict):
-            payload["execution_contract"] = dict(args["execution_contract"])
+        payload["command_intent"] = command_intent
+        if raw_contract_preserved:
+            payload["execution_contract"] = dict(raw_contract_preserved)
+        elif raw_contract:
+            payload["execution_contract_downgraded"] = True
         if tool_contract_recovery is not None:
             payload["tool_contract_recovery"] = tool_contract_recovery
         return payload
@@ -698,8 +706,24 @@ def _normalize_runtime_contract(
     task_contract: dict[str, object],
     frontier_state: dict[str, object],
     fallback_id: str,
+    command_intent: str = "",
 ):
     raw_value = value if isinstance(value, dict) else {}
+    if _intent_downgrades_artifact_contract(command_intent):
+        return normalize_execution_contract(
+            {
+                "id": str(raw_value.get("id") or fallback_id),
+                "role": "diagnostic",
+                "stage": "diagnostic",
+                "purpose": "diagnostic",
+                "proof_role": "negative_diagnostic" if command_intent == "diagnostic" else "none",
+                "acceptance_kind": "not_acceptance",
+                "expected_exit": {"mode": "any"},
+                "expected_artifacts": [],
+            },
+            task_contract=None,
+            frontier_state=None,
+        )
     has_explicit_contract = bool(raw_value)
     frontier_for_inference = (
         frontier_state
@@ -718,6 +742,17 @@ def _normalize_runtime_contract(
             frontier_state=frontier_for_inference,
         )
     return contract
+
+
+def _command_intent(args: dict[str, object]) -> str:
+    value = str(args.get("command_intent") or "").strip().lower()
+    if value in {"probe", "diagnostic", "build", "runtime", "verify", "finish_verifier"}:
+        return value
+    return ""
+
+
+def _intent_downgrades_artifact_contract(command_intent: str) -> bool:
+    return command_intent in {"probe", "diagnostic"}
 
 
 def _contract_from_payload(

@@ -5894,6 +5894,167 @@ def test_implement_v2_exec_no_contract_does_not_inherit_task_artifact_checks(tmp
     assert "diagnostic-ok" in payload["stdout"]
 
 
+def test_implement_v2_exec_probe_intent_downgrades_artifact_contract(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('probe-ok')"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "probe-with-overdeclared-contract",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "command_intent": "probe",
+                    "execution_contract": {
+                        "id": "contract:overdeclared-probe",
+                        "role": "verify",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_artifacts": [{"id": "missing", "kind": "file", "path": "missing.txt"}],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "probe evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert payload["command_intent"] == "probe"
+    assert payload["execution_contract_downgraded"] is True
+    assert payload["execution_contract_normalized"]["acceptance_kind"] == "not_acceptance"
+    assert payload["execution_contract_normalized"]["proof_role"] == "none"
+    assert payload["execution_contract_normalized"]["expected_artifacts"] == []
+    assert payload["artifact_evidence"] == []
+    assert "probe-ok" in payload["stdout"]
+
+
+def test_implement_v2_exec_probe_intent_downgrade_survives_poll(tmp_path) -> None:
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('probe-start', flush=True); time.sleep(0.2); print('probe-done', flush=True)",
+        ]
+    )
+    lane_attempt_id = "implement_v2:ws-1:task-1:exec"
+    command_run_id = _expected_command_run_id(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id="probe-yield",
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "probe-yield",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 0.01,
+                    "command_intent": "probe",
+                    "execution_contract": {
+                        "id": "contract:overdeclared-probe-yield",
+                        "role": "verify",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_artifacts": [{"id": "missing", "kind": "file", "path": "missing.txt"}],
+                    },
+                },
+            },
+            {
+                "provider_call_id": "probe-poll",
+                "tool_name": "poll_command",
+                "arguments": {"command_run_id": command_run_id, "wait_seconds": 1},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "probe evidence ready"},
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    first_payload = manifest["tool_results"][0]["content"][0]
+    poll_payload = manifest["tool_results"][1]["content"][0]
+
+    assert manifest["tool_results"][0]["status"] == "yielded"
+    assert manifest["tool_results"][1]["status"] == "completed"
+    assert first_payload["execution_contract_downgraded"] is True
+    assert poll_payload["execution_contract_downgraded"] is True
+    assert poll_payload["execution_contract_normalized"]["acceptance_kind"] == "not_acceptance"
+    assert poll_payload["execution_contract_normalized"]["expected_artifacts"] == []
+    assert poll_payload["artifact_evidence"] == []
+    assert "execution_contract" not in first_payload
+    assert "execution_contract" not in poll_payload
+
+
+def test_implement_v2_exec_plain_intent_does_not_downgrade_verifier_contract(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('verifier output without artifact')"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "plain-intent-verifier",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "intent": "diagnostic",
+                    "execution_contract": {
+                        "id": "contract:plain-intent-verifier",
+                        "role": "verify",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_artifacts": [{"id": "missing", "kind": "file", "path": "missing.txt"}],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "verifier evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert payload.get("execution_contract_downgraded") is not True
+    assert payload["execution_contract_normalized"]["acceptance_kind"] == "external_verifier"
+    assert payload["execution_contract_normalized"]["expected_artifacts"]
+    assert payload["artifact_evidence"][0]["status"] == "failed"
+
+
 def test_implement_v2_exec_accepts_stdout_expected_artifact_contract(tmp_path) -> None:
     command = shlex.join([sys.executable, "-c", "print('ELF 32-bit MSB executable')"])
 
