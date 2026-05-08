@@ -438,6 +438,12 @@ def run_live_json_implement_v2(
                 progress(f"implement_v2 turn #{turn_index}: prompt_render start")
             model_visible_tool_specs = _model_visible_tool_specs_for_turn(
                 lane_input,
+                active_work_todo_state=active_work_todo_state,
+                prior_tool_calls=tuple(tool_calls),
+                prior_tool_results=tuple(tool_results),
+            )
+            write_repair_lock_state = _write_repair_lock_state(
+                active_work_todo_state=active_work_todo_state,
                 prior_tool_calls=tuple(tool_calls),
                 prior_tool_results=tuple(tool_results),
             )
@@ -467,6 +473,7 @@ def run_live_json_implement_v2(
                 tool_specs=model_visible_tool_specs,
                 prewrite_write_tools_hidden=prewrite_write_tools_hidden,
                 prewrite_probe_readiness=prewrite_probe_readiness,
+                write_repair_lock_state=write_repair_lock_state,
                 history=tuple(prompt_history),
             )
             if progress:
@@ -696,6 +703,28 @@ def run_live_json_implement_v2(
                         executed_calls.append(capped_call)
                         current_results_list.append(block_result)
                         wall_blocked_tool_execution = True
+                        break
+                    repair_lock_block = _write_repair_lock_gate_result(
+                        capped_call,
+                        active_work_todo_state=active_work_todo_state,
+                        prior_tool_calls=tuple(tool_calls) + tuple(executed_calls),
+                        prior_tool_results=tuple(tool_results) + tuple(current_results_list),
+                    )
+                    if repair_lock_block is not None:
+                        executed_calls.append(capped_call)
+                        current_results_list.append(repair_lock_block)
+                        for skipped_call in current_calls[call_index + 1 :]:
+                            executed_calls.append(skipped_call)
+                            current_results_list.append(
+                                build_invalid_tool_result(
+                                    skipped_call,
+                                    reason=(
+                                        "blocked_by_write_repair_lock: "
+                                        f"{capped_call.tool_name}#{capped_call.provider_call_id} "
+                                        "must repair the failed write before more reads, probes, or verifiers"
+                                    ),
+                                )
+                            )
                         break
                     prewrite_block = _deep_runtime_prewrite_probe_gate_result(
                         capped_call,
@@ -3087,10 +3116,22 @@ def _deep_runtime_prewrite_probe_gate_result(
 def _model_visible_tool_specs_for_turn(
     lane_input: ImplementLaneInput,
     *,
+    active_work_todo_state: dict[str, object] | None = None,
     prior_tool_calls: tuple[object, ...],
     prior_tool_results: tuple[ToolResultEnvelope, ...],
 ) -> tuple[ImplementLaneToolSpec, ...]:
     specs = list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode") or "read_only")
+    repair_lock = _write_repair_lock_state(
+        active_work_todo_state=active_work_todo_state,
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+    )
+    if bool(repair_lock.get("locked")):
+        allowed_names = set(WRITE_TOOL_NAMES)
+        allowed_names.add("finish")
+        if bool(repair_lock.get("target_read_allowed")):
+            allowed_names.add("read_file")
+        specs = tuple(spec for spec in specs if spec.name in allowed_names)
     if _write_tools_visible_for_turn(
         lane_input,
         prior_tool_calls=prior_tool_calls,
@@ -3393,6 +3434,88 @@ def _has_completed_source_tree_mutation(results: tuple[ToolResultEnvelope, ...])
     )
 
 
+def _write_repair_lock_gate_result(
+    call: object,
+    *,
+    active_work_todo_state: dict[str, object],
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> ToolResultEnvelope | None:
+    lock = _write_repair_lock_state(
+        active_work_todo_state=active_work_todo_state,
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+    )
+    if not bool(lock.get("locked")):
+        return None
+    tool_name = str(getattr(call, "tool_name", "") or "").strip()
+    if tool_name in WRITE_TOOL_NAMES:
+        return None
+    target_path = str(lock.get("path") or "")
+    if tool_name == "read_file" and bool(lock.get("target_read_allowed")) and _write_paths_match(
+        _read_call_path(call), target_path
+    ):
+        return None
+    return build_invalid_tool_result(
+        call,
+        reason=(
+            "write_repair_lock_active: stale exact edit repair is pending for "
+            f"{target_path or 'the failed write target'}; "
+            f"post-failure target reads used {lock.get('target_read_count_after_failure', 0)}/1. "
+            "Apply a same-path write_file/edit_file/apply_patch repair before more reads, probes, or verifiers."
+        ),
+    )
+
+
+def _write_repair_lock_state(
+    *,
+    active_work_todo_state: dict[str, object] | None,
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    active_todo = active_work_todo_state if isinstance(active_work_todo_state, dict) else {}
+    repair = active_todo.get("write_repair") if isinstance(active_todo.get("write_repair"), dict) else {}
+    if not repair or repair.get("status") != "blocked" or repair.get("failure_kind") != "stale_exact_edit":
+        return {}
+    target_path = _frontier_clip_text(repair.get("path"), limit=240)
+    failed_provider_call_id = str(repair.get("provider_call_id") or "")
+    if not target_path:
+        return {}
+    after_failed_write = False if failed_provider_call_id else True
+    target_read_count = 0
+    for call, result in zip(prior_tool_calls, prior_tool_results):
+        provider_call_id = str(getattr(call, "provider_call_id", "") or result.provider_call_id or "")
+        if failed_provider_call_id and provider_call_id == failed_provider_call_id:
+            after_failed_write = True
+            continue
+        if not after_failed_write:
+            continue
+        tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
+        if tool_name in WRITE_TOOL_NAMES and result.status == "completed" and result.side_effects:
+            write_paths = _unique_write_paths((_write_call_path(call), *_write_result_paths(result)))
+            if any(_write_paths_match(path, target_path) for path in write_paths):
+                return {}
+        if tool_name == "read_file" and _write_paths_match(_read_call_path(call), target_path):
+            target_read_count += 1
+    return {
+        "schema_version": 1,
+        "locked": True,
+        "path": target_path,
+        "failure_kind": repair.get("failure_kind"),
+        "provider_call_id": failed_provider_call_id,
+        "target_read_count_after_failure": target_read_count,
+        "target_read_allowed": target_read_count <= 0,
+        "preferred_tool": "write_file" if bool(repair.get("path_previously_mutated_this_attempt")) else "apply_patch",
+    }
+
+
+def _read_call_path(call: object) -> str:
+    arguments = getattr(call, "arguments", {})
+    if not isinstance(arguments, dict):
+        return ""
+    return _frontier_clip_text(arguments.get("path"), limit=240)
+
+
 def _write_repair_from_trace(
     *,
     tool_calls: tuple[object, ...],
@@ -3431,6 +3554,7 @@ def _write_repair_from_trace(
             "path_previously_mutated_this_attempt": path_previously_mutated,
             "recent_failed_write_provider_call_ids": failed_ids[-3:],
             "reason": _frontier_clip_text(_write_failure_reason(result), limit=360),
+            "preferred_tool": "write_file" if path_previously_mutated else "apply_patch",
             "required_next_action": _write_repair_required_next_action(
                 path=path,
                 failure_kind=failure_kind,
@@ -4327,6 +4451,7 @@ def _live_json_prompt(
     tool_specs: tuple[ImplementLaneToolSpec, ...] | None = None,
     prewrite_write_tools_hidden: bool = False,
     prewrite_probe_readiness: dict[str, object] | None = None,
+    write_repair_lock_state: dict[str, object] | None = None,
     history: tuple[dict[str, object], ...],
 ) -> str:
     specs = tool_specs if tool_specs is not None else list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode"))
@@ -4357,13 +4482,25 @@ def _live_json_prompt(
             "oracle_refs": ["oracle:..."],
         },
     }
+    tool_surface_notes: list[str] = []
     if prewrite_write_tools_hidden:
         missing = _prewrite_missing_category_labels(prewrite_probe_readiness or {})
         missing_text = ", ".join(missing) if missing else "the required hard-runtime probe categories"
-        response_contract["tool_surface_note"] = (
+        tool_surface_notes.append(
             "write tools are temporarily hidden for this turn; gather cheap probes before writing. "
             f"Missing: {missing_text}."
         )
+    if write_repair_lock_state and bool(write_repair_lock_state.get("locked")):
+        target_path = _frontier_clip_text(write_repair_lock_state.get("path") or "the failed write target", limit=160)
+        read_count = int(write_repair_lock_state.get("target_read_count_after_failure") or 0)
+        preferred = _frontier_clip_text(write_repair_lock_state.get("preferred_tool") or "write tool", limit=80)
+        tool_surface_notes.append(
+            "write repair lock is active; repair "
+            f"{target_path} with {preferred}/edit_file/apply_patch before broad probes or verifiers. "
+            f"Same-target post-failure reads used {read_count}/1."
+        )
+    if tool_surface_notes:
+        response_contract["tool_surface_note"] = " ".join(tool_surface_notes)
     if hard_runtime_frontier_state and _model_frontier_update_enabled(lane_input):
         response_contract["frontier_state_update"] = {
             "optional": True,

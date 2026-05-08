@@ -270,6 +270,7 @@ def test_implement_v2_live_json_runtime_can_edit_verify_and_finish(tmp_path) -> 
                 "allowed_read_roots": [str(tmp_path)],
                 "allowed_write_roots": [str(tmp_path)],
                 "allow_shell": True,
+                "allow_verify": True,
                 "auto_approve_writes": True,
             },
         ),
@@ -474,6 +475,7 @@ def test_implement_v2_live_json_unrelated_write_does_not_account_for_shell_sourc
                 "allowed_read_roots": [str(tmp_path)],
                 "allowed_write_roots": [str(tmp_path)],
                 "allow_shell": True,
+                "allow_verify": True,
                 "auto_approve_writes": True,
             },
         ),
@@ -1936,6 +1938,245 @@ def test_implement_v2_active_work_todo_records_generated_file_write_repair(tmp_p
     assert "stale-edit" in repair["recent_failed_write_provider_call_ids"]
     assert "write_file overwrite" in repair["required_next_action"]
     assert "do not run verifier again until a write succeeds" in repair["required_next_action"]
+
+
+def test_implement_v2_write_repair_lock_blocks_repeated_target_reads_and_verifiers(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("function sys(){return 0}\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "attempt stale exact edit",
+            "tool_calls": [
+                {
+                    "id": "stale-edit",
+                    "name": "edit_file",
+                    "arguments": {
+                        "path": "vm.js",
+                        "old": "function missing(){",
+                        "new": "function sys(){let n=R[2]>>>0;",
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "one exact target read is allowed",
+            "tool_calls": [{"id": "read-current", "name": "read_file", "arguments": {"path": "vm.js"}}],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "second read and verifier are blocked until write repair",
+            "tool_calls": [
+                {"id": "read-again", "name": "read_file", "arguments": {"path": "vm.js"}},
+                {"id": "verify-too-soon", "name": "run_tests", "arguments": {"command": "node vm.js", "cwd": "."}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "blocked by repair lock"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Repair generated VM"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    read_current = next(item for item in tool_results if item["provider_call_id"] == "read-current")
+    read_again = next(item for item in tool_results if item["provider_call_id"] == "read-again")
+    verify_too_soon = next(item for item in tool_results if item["provider_call_id"] == "verify-too-soon")
+    repair = result.updated_lane_state["active_work_todo"]["write_repair"]
+
+    assert read_current["status"] == "completed"
+    assert read_again["status"] == "invalid"
+    assert "write_repair_lock_active" in read_again["content"][0]["reason"]
+    assert verify_too_soon["status"] == "invalid"
+    assert "blocked_by_write_repair_lock" in verify_too_soon["content"][0]["reason"]
+    assert repair["failure_kind"] == "stale_exact_edit"
+
+
+def test_implement_v2_write_repair_lock_allows_same_turn_write_then_verifier(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("function sys(){return 0}\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "attempt stale exact edit",
+            "tool_calls": [
+                {
+                    "id": "stale-edit",
+                    "name": "edit_file",
+                    "arguments": {
+                        "path": "vm.js",
+                        "old": "function missing(){",
+                        "new": "function sys(){let n=R[2]>>>0;",
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "one exact target read is allowed",
+            "tool_calls": [{"id": "read-current", "name": "read_file", "arguments": {"path": "vm.js"}}],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "repair write and verify",
+            "tool_calls": [
+                {
+                    "id": "overwrite-current",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "function sys(){let n=0;return n}\n"},
+                },
+                {"id": "verify-after-write", "name": "run_tests", "arguments": {"command": "test -f vm.js", "cwd": "."}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after verifier"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Repair generated VM"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    overwrite = next(item for item in tool_results if item["provider_call_id"] == "overwrite-current")
+    verify = next(item for item in tool_results if item["provider_call_id"] == "verify-after-write")
+
+    assert overwrite["status"] == "completed"
+    assert verify["status"] == "completed"
+    assert "write_repair" not in result.updated_lane_state["active_work_todo"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "function sys(){let n=0;return n}\n"
+
+
+def test_implement_v2_write_repair_lock_does_not_unlock_after_dry_run_write(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("function sys(){return 0}\n", encoding="utf-8")
+    outputs = [
+        {
+            "summary": "attempt stale exact edit",
+            "tool_calls": [
+                {
+                    "id": "stale-edit",
+                    "name": "edit_file",
+                    "arguments": {
+                        "path": "vm.js",
+                        "old": "function missing(){",
+                        "new": "function sys(){let n=R[2]>>>0;",
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "one exact target read is allowed",
+            "tool_calls": [{"id": "read-current", "name": "read_file", "arguments": {"path": "vm.js"}}],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "dry-run write must not unlock verifier",
+            "tool_calls": [
+                {
+                    "id": "dry-run-write",
+                    "name": "write_file",
+                    "arguments": {
+                        "path": "vm.js",
+                        "content": "function sys(){let n=0;return n}\n",
+                        "dry_run": True,
+                    },
+                },
+                {"id": "verify-after-dry-run", "name": "run_tests", "arguments": {"command": "test -f vm.js", "cwd": "."}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after dry-run"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Repair generated VM"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    dry_run_write = next(item for item in tool_results if item["provider_call_id"] == "dry-run-write")
+    verify = next(item for item in tool_results if item["provider_call_id"] == "verify-after-dry-run")
+
+    assert dry_run_write["status"] == "completed"
+    assert dry_run_write["side_effects"] == []
+    assert verify["status"] == "invalid"
+    assert "write_repair_lock_active" in verify["content"][0]["reason"]
+    assert result.updated_lane_state["active_work_todo"]["write_repair"]["failure_kind"] == "stale_exact_edit"
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "function sys(){return 0}\n"
 
 
 def test_implement_v2_active_work_todo_clears_write_repair_after_apply_patch_side_effect_path(tmp_path) -> None:
