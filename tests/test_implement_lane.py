@@ -5623,6 +5623,77 @@ def test_implement_v2_history_projects_terminal_output_to_tails_for_next_turn() 
     assert noisy_stderr not in json.dumps(visible)
 
 
+def test_implement_v2_history_projects_terminal_side_effects_for_next_turn() -> None:
+    noisy_preview = "first symbol\n" + ("large readelf output\n" * 500) + "final symbol\n"
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane-v2-1",
+        provider_call_id="call-probe",
+        mew_tool_call_id="lane-v2-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "command_run_id": "cmd-1",
+                "command": "readelf -s binary",
+                "output_ref": "lane-v2-1/cmd-1/output.log",
+                "status": "completed",
+                "exit_code": 0,
+                "timed_out": False,
+                "stdout": noisy_preview,
+                "stdout_tail": "final symbol\n",
+                "output_bytes": len(noisy_preview),
+            },
+        ),
+        content_refs=("implement-v2-exec://lane-v2-1/cmd-1/output",),
+        side_effects=(
+            {
+                "kind": "tool_run_record",
+                "record": {
+                    "record_id": "tool-run-record:call-probe:1:completed:abc",
+                    "command_run_id": "cmd-1",
+                    "provider_call_id": "call-probe",
+                    "status": "completed",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "duration_seconds": 0.12,
+                    "stdout_ref": "implement-v2-exec://lane-v2-1/cmd-1/stdout",
+                    "stderr_ref": "implement-v2-exec://lane-v2-1/cmd-1/stderr",
+                    "combined_output_ref": "implement-v2-exec://lane-v2-1/cmd-1/output",
+                    "stdout_preview": noisy_preview,
+                    "stderr_preview": "",
+                    "semantic_exit": {"ok": True, "category": "ok", "message": "any exit accepted"},
+                },
+            },
+            {
+                "kind": "failure_classification",
+                "record": {
+                    "classification_id": "failure:cmd-1",
+                    "phase": "unknown",
+                    "kind": "unknown_failure",
+                    "class": "unknown_failure",
+                    "summary": "no structured failure evidence",
+                    "required_next_probe": "",
+                },
+            },
+        ),
+    )
+
+    visible = _provider_visible_tool_result_for_history(result)
+    content = visible["content"]
+    serialized = json.dumps(visible)
+    side_effects = content["side_effects"]
+    tool_run_record = side_effects[0]["record"]
+
+    assert content["side_effects_projected"] is True
+    assert tool_run_record["command_run_id"] == "cmd-1"
+    assert tool_run_record["stdout_ref"] == "implement-v2-exec://lane-v2-1/cmd-1/stdout"
+    assert tool_run_record["semantic_exit"] == {"ok": True, "category": "ok"}
+    assert "stdout_preview" not in tool_run_record
+    assert "large readelf output" not in serialized
+    assert len(serialized) < 5000
+
+
 def test_implement_v2_history_projection_preserves_terminal_diagnostics_without_output() -> None:
     result = ToolResultEnvelope(
         lane_attempt_id="lane-v2-1",

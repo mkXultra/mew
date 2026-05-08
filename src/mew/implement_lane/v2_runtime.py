@@ -4487,7 +4487,134 @@ def _project_terminal_result_for_provider_history(content: dict[str, object]) ->
             "terminal stdout/stderr body omitted from next-turn history; "
             "use command_run_id/output_ref/read_command_output for full output"
         )
+    side_effects = projected.get("side_effects")
+    if isinstance(side_effects, list) and side_effects:
+        projected["side_effects"] = _project_terminal_side_effects_for_provider_history(side_effects)
+        projected["side_effects_projected"] = True
     return projected
+
+
+def _project_terminal_side_effects_for_provider_history(side_effects: list[object]) -> list[dict[str, object]]:
+    projected: list[dict[str, object]] = []
+    for effect in side_effects[:_PROVIDER_HISTORY_LIST_LIMIT]:
+        if not isinstance(effect, dict):
+            projected.append({"kind": _provider_scalar_text(effect, limit=80)})
+            continue
+        kind = _provider_scalar_text(effect.get("kind"), limit=80)
+        record = effect.get("record") if isinstance(effect.get("record"), dict) else {}
+        projected.append(
+            _drop_empty_frontier_values(
+                {
+                    "kind": kind,
+                    "record": _project_terminal_side_effect_record_for_provider_history(kind, record),
+                }
+            )
+        )
+    if len(side_effects) > _PROVIDER_HISTORY_LIST_LIMIT:
+        projected.append(
+            {
+                "kind": "history_list_truncated",
+                "omitted_items": len(side_effects) - _PROVIDER_HISTORY_LIST_LIMIT,
+            }
+        )
+    return projected
+
+
+def _project_terminal_side_effect_record_for_provider_history(
+    kind: str,
+    record: dict[str, object],
+) -> dict[str, object]:
+    if kind == "tool_run_record":
+        semantic_exit = record.get("semantic_exit") if isinstance(record.get("semantic_exit"), dict) else {}
+        return _drop_empty_frontier_values(
+            {
+                "record_id": record.get("record_id"),
+                "command_run_id": record.get("command_run_id"),
+                "provider_call_id": record.get("provider_call_id"),
+                "status": record.get("status"),
+                "exit_code": record.get("exit_code"),
+                "timed_out": record.get("timed_out"),
+                "interrupted": record.get("interrupted"),
+                "duration_seconds": record.get("duration_seconds"),
+                "stdout_ref": record.get("stdout_ref"),
+                "stderr_ref": record.get("stderr_ref"),
+                "combined_output_ref": record.get("combined_output_ref"),
+                "semantic_exit": _drop_empty_frontier_values(
+                    {
+                        "ok": semantic_exit.get("ok"),
+                        "category": semantic_exit.get("category"),
+                    }
+                ),
+            }
+        )
+    if kind == "command_run":
+        return _drop_empty_frontier_values(
+            {
+                "command_run_id": record.get("command_run_id"),
+                "status": record.get("status"),
+                "terminal_record_id": record.get("terminal_record_id"),
+                "record_count": len(record.get("record_ids") or []) if isinstance(record.get("record_ids"), list) else 0,
+            }
+        )
+    if kind == "verifier_evidence":
+        checks = record.get("checks") if isinstance(record.get("checks"), list) else []
+        missing = record.get("missing_evidence") if isinstance(record.get("missing_evidence"), list) else []
+        return _drop_empty_frontier_values(
+            {
+                "verifier_id": record.get("verifier_id"),
+                "verdict": record.get("verdict"),
+                "reason": _provider_scalar_text(record.get("reason"), limit=220),
+                "check_count": len(checks),
+                "missing_evidence_count": len(missing),
+            }
+        )
+    if kind == "failure_classification":
+        return _drop_empty_frontier_values(
+            {
+                "classification_id": record.get("classification_id"),
+                "phase": record.get("phase"),
+                "kind": record.get("kind"),
+                "class": record.get("class") or record.get("failure_class"),
+                "confidence": record.get("confidence"),
+                "summary": _provider_scalar_text(record.get("summary"), limit=220),
+                "required_next_probe": _provider_scalar_text(record.get("required_next_probe"), limit=240),
+            }
+        )
+    if kind == "structured_finish_gate":
+        reasons = record.get("reasons") if isinstance(record.get("reasons"), list) else []
+        return _drop_empty_frontier_values(
+            {
+                "blocked": record.get("blocked"),
+                "reasons": [
+                    _frontier_compact_mapping(reason) if isinstance(reason, dict) else _provider_scalar_text(reason, limit=160)
+                    for reason in reasons[:3]
+                ],
+                "evidence_ref_count": len(record.get("evidence_refs") or [])
+                if isinstance(record.get("evidence_refs"), list)
+                else 0,
+            }
+        )
+    if kind == "source_tree_mutation":
+        changes = record.get("changes") if isinstance(record.get("changes"), list) else []
+        return _drop_empty_frontier_values(
+            {
+                "command_run_id": record.get("command_run_id"),
+                "provider_call_id": record.get("provider_call_id"),
+                "changed_count": record.get("changed_count") or len(changes),
+                "paths": [
+                    _provider_scalar_text(change.get("path"), limit=180)
+                    for change in changes[:3]
+                    if isinstance(change, dict)
+                ],
+            }
+        )
+    return _drop_empty_frontier_values(
+        {
+            "id": record.get("id") or record.get("record_id") or record.get("command_run_id"),
+            "status": record.get("status"),
+            "summary": _provider_scalar_text(record.get("summary"), limit=220),
+        }
+    )
 
 
 def _project_terminal_payload_for_provider_history(payload: dict[str, object]) -> dict[str, object]:
