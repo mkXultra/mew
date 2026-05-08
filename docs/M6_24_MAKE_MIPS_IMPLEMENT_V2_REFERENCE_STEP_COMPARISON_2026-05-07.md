@@ -767,3 +767,56 @@ Current implication:
   become a compact next-patch frontier, so v2 moves from failure evidence to a
   focused patch without broad rediscovery or many small model-mediated runtime
   edits.
+
+## 2026-05-08 Repair-History Pre-Speed Diagnostic
+
+Latest current-head mew artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-repair-history-make-mips-step-shape-10min-20260508-1520/make-mips-interpreter__Mf9NJoB`
+
+Validation:
+
+- the first `1517` attempt is harness-invalid: Harbor command-template
+  formatting interpreted unescaped JSON guidance braces as placeholders;
+- exact replay of the valid `1520` artifact passes with `work_exit_code=1` and
+  external reward `0.0`;
+- terminal-bench replay dogfood passes with external reward `0.0`;
+- `m6_24-implement-v2-hard-runtime-progress-continuation-emulator` passes.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing/marker miss; frame existence/similarity pass |
+| mew implement_v2 `1423` | 0/1 | 26m57s Harbor | 35 model turns | 49 tool calls | turn 8 | no `/tmp/frame.bmp`; fragmented runtime patch loop exhausted before frame production |
+| mew implement_v2 `1520` | 0/1 | 11m16s Harbor / 600.033s mew wall | 15 model turns | 24 tool calls | turn 5 | wall budget exhausted; final closeout hides earlier actionable runtime/artifact frontier |
+
+Step delta:
+
+1. The bounded repair-history/context capsule section was injected as
+   `implement_v2_repair_history` with `945` dynamic chars and no raw
+   duplication in task-contract guidance.
+2. The hot path improved materially from `1423`: model turns dropped `35 -> 15`,
+   tool calls dropped `49 -> 24`, prompt chars dropped `5,576,901 ->
+   1,680,301`, and first write moved from turn `8` to turn `5`.
+3. The early shape now matches the intended sequence more closely: T1-T4 do
+   source/runtime frontier probes, T5 writes `vm.js`, then the lane runs focused
+   verifier/patch iterations instead of broad rediscovery.
+4. It still does not match Codex. Codex reaches its external failure shape in
+   `8` messages and about `416s`; mew spends the whole 600s lane wall budget
+   and still exits blocked.
+5. The latest closeout is wall-budget exhaustion, but earlier turns contained
+   actionable runtime/artifact frontier failures such as missing `/tmp/frame.bmp`.
+   The final killed/empty active-command state should not replace that prior
+   actionable frontier as the main reentry signal.
+
+Current implication:
+
+- Do not run broad measurement or another unchanged same-shape speed from this
+  artifact.
+- Do not add MIPS/DOOM-specific VM rules.
+- Next generic repair:
+  `wall_budget_closeout_prior_runtime_frontier_projection`.
+- The repair should preserve the latest actionable runtime/artifact frontier
+  when wall budget prevents another turn, so reentry sees the useful failure
+  rather than a generic wall timeout or killed verifier closeout.
+- After the repair, run focused UT/local replay/dogfood/emulator, review, and
+  one more 10 minute step-shape diagnostic before `speed_1` / `proof_5`.
