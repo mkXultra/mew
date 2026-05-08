@@ -10053,6 +10053,115 @@ class WorkSessionTests(unittest.TestCase):
             self.assertEqual(cleanup["artifacts"][0]["status"], "removed")
             self.assertFalse(frame_path.exists())
 
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_uses_raw_final_verifier_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.NamedTemporaryFile(
+            dir="/tmp",
+            delete=False,
+            prefix="mew-frame-",
+            suffix=".bmp",
+        ) as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+            artifacts = Path(tmp) / "artifacts"
+            v2_dir = artifacts / "implement_v2"
+            v2_dir.mkdir(parents=True)
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "prior-internal-frame-proof",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "command": f"node vm.js && test -s {frame_path}",
+                                        "cwd": "/app",
+                                        "exit_code": 0,
+                                        "stdout": f"first frame saved {frame_path}\n",
+                                        "execution_contract": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "final-verifier",
+                                            "expected_artifacts": [{"path": str(frame_path), "kind": "file"}],
+                                        },
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": str(frame_path),
+                                                "path": str(frame_path),
+                                                "kind": "file",
+                                                "status": "passed",
+                                                "pre_run_stat": {"exists": False, "path": str(frame_path)},
+                                                "post_run_stat": {"exists": True, "path": str(frame_path)},
+                                                "checks": [{"type": "exists", "passed": True}],
+                                            }
+                                        ],
+                                        "verifier_evidence": {"verdict": "pass"},
+                                    }
+                                ],
+                            },
+                            {
+                                "provider_call_id": "final-grounded-vm-verifier",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "command": f"rm -f {frame_path} && node vm.js",
+                                        "cwd": "/app",
+                                        "exit_code": 0,
+                                        "stdout": f"first frame saved {frame_path}\n",
+                                        "execution_contract": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "final-verifier",
+                                            "purpose": "fresh runtime verifier",
+                                            "expected_artifacts": [{"path": str(frame_path), "kind": "file"}],
+                                        },
+                                        "execution_contract_normalized": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "command",
+                                            "purpose": "generic_command",
+                                            "expected_artifacts": [{"path": str(frame_path), "kind": "file"}],
+                                        },
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": str(frame_path),
+                                                "path": str(frame_path),
+                                                "kind": "file",
+                                                "status": "passed",
+                                                "pre_run_stat": {"exists": True, "path": str(frame_path)},
+                                                "post_run_stat": {"exists": True, "path": str(frame_path)},
+                                                "checks": [{"type": "exists", "passed": True}],
+                                            }
+                                        ],
+                                        "verifier_evidence": {"verdict": "pass"},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(defer_verify=True, oneshot_artifacts=str(artifacts))
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(
+                args,
+                {},
+                task={
+                    "title": "runtime frame verifier",
+                    "description": f"Running vm.js writes {frame_path} during a fresh verifier run.",
+                },
+                work_report={"steps": []},
+            )
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"][0]["artifact"], str(frame_path))
+            self.assertEqual(cleanup["artifacts"][0]["source_tool_call_id"], "final-grounded-vm-verifier")
+            self.assertEqual(cleanup["artifacts"][0]["status"], "removed")
+            self.assertFalse(frame_path.exists())
+
     def test_work_oneshot_cleanup_deferred_runtime_artifacts_keeps_legitimate_tmp_deliverable(self):
         with tempfile.TemporaryDirectory() as tmp, tempfile.NamedTemporaryFile(
             dir="/tmp",

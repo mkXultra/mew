@@ -4796,25 +4796,53 @@ def _work_oneshot_implement_v2_manifest_path(args):
     return path if path.is_file() else None
 
 
-def _work_oneshot_manifest_final_verifier_contract(content):
-    contract = content.get("execution_contract_normalized")
+def _work_oneshot_contract_token(value):
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").casefold()).strip("_")
+
+
+def _work_oneshot_contract_expected_artifacts(contract):
     if not isinstance(contract, dict):
-        contract = content.get("execution_contract")
+        return False
+    artifacts = contract.get("expected_artifacts")
+    if isinstance(artifacts, list) and artifacts:
+        return True
+    for key in ("expected_artifact", "final_artifact", "output_artifact", "required_artifact"):
+        if contract.get(key):
+            return True
+    return False
+
+
+def _work_oneshot_single_manifest_final_verifier_contract(contract):
     if not isinstance(contract, dict):
         return False
     proof_role = str(contract.get("proof_role") or "").casefold()
     acceptance_kind = str(contract.get("acceptance_kind") or "").casefold()
-    stage = str(contract.get("stage") or "").casefold()
-    purpose = str(contract.get("purpose") or "").casefold()
+    stage = _work_oneshot_contract_token(contract.get("stage"))
+    purpose = _work_oneshot_contract_token(contract.get("purpose"))
     if acceptance_kind not in {"external_verifier", "candidate_final_proof"}:
         return False
     if proof_role not in {"verifier", "final_artifact", "custom_runtime_smoke", "default_smoke"}:
         return False
-    return stage in {"verification", "artifact_proof", "custom_runtime_smoke", "default_smoke"} or purpose in {
+    if stage in {"verification", "artifact_proof", "custom_runtime_smoke", "default_smoke", "final_verifier"}:
+        return True
+    if purpose in {
         "verification",
         "artifact_proof",
         "smoke",
-    }
+    }:
+        return True
+    return stage == "command" and _work_oneshot_contract_expected_artifacts(contract)
+
+
+def _work_oneshot_manifest_final_verifier_contract(content):
+    contracts = []
+    for key in ("execution_contract", "execution_contract_normalized"):
+        contract = content.get(key)
+        if isinstance(contract, dict):
+            contracts.append(contract)
+    if not contracts:
+        return False
+    return any(_work_oneshot_single_manifest_final_verifier_contract(contract) for contract in contracts)
 
 
 def _work_oneshot_manifest_runtime_fresh_context(task, content):
@@ -4903,7 +4931,9 @@ def _work_oneshot_manifest_tmp_artifacts_from_content(task, content):
             continue
         pre_run = item.get("pre_run_stat") if isinstance(item.get("pre_run_stat"), dict) else {}
         post_run = item.get("post_run_stat") if isinstance(item.get("post_run_stat"), dict) else {}
-        if pre_run.get("exists") is not False or post_run.get("exists") is not True:
+        pre_exists = pre_run.get("exists")
+        fresh_after_cleanup = pre_exists is True and _work_oneshot_manifest_cleanup_command(content.get("command"), path)
+        if (pre_exists is not False and not fresh_after_cleanup) or post_run.get("exists") is not True:
             continue
         if _work_oneshot_task_explicitly_requires_artifact(task, path):
             continue

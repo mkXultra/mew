@@ -663,3 +663,56 @@ Current implication:
 - If the next controlled run regresses to a mew-only structural miss, return to
   improvement mode. If it stays Codex-equivalent, this gap can stop blocking the
   broader M6.24 scoped queue.
+
+## 2026-05-08 Controlled Provider-History Speed1
+
+Latest controlled speed artifact:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-provider-history-make-mips-speed1-20260508-1035/make-mips-interpreter__ivvSGpn`
+
+Validation:
+
+- exact replay passes with `work_exit_code=1` and external reward `0.0`;
+- terminal-bench replay dogfood passes with external reward `0.0`;
+- structured replay mismatch count is `0`.
+
+| Agent | Score | Wall | Model turns / messages | Tool calls | First patch/write | Latest blocker |
+|---|---:|---:|---:|---:|---:|---|
+| Codex reference | 0/1 | 6m56s | 8 messages | 34 completed tool calls | 6m08s | stdout timing/marker miss; frame existence/similarity pass |
+| mew implement_v2 `1035` | 0/1 | 17m14s Harbor | 38 model turns | 32 tool calls | turn 7 | stale `/tmp/frame.bmp` handoff caused external verifier early-stop race |
+
+Step delta:
+
+1. The early implementation path is still reasonable: source/output-path probes
+   happen before `vm.js`, and the first write occurs at turn 7.
+2. Internal verifier commands later produce `/tmp/frame.bmp` and the required
+   Doom stdout markers.
+3. External verifier failure is worse than the `0819` diagnostic, but the root
+   is not a new VM-solving gap. A stale `/tmp/frame.bmp` from the internal
+   verifier exists before external pytest launches `node vm.js`.
+4. The external test sees the stale path immediately, while `vm.js` unlinks the
+   stale file at startup. Pytest then terminates the process before a fresh
+   frame and stdout marker are produced, so both stdout and frame tests fail.
+5. This should have been handled by `--defer-verify` stale runtime artifact
+   cleanup. The cleanup detector missed the implement_v2 proof manifest because
+   raw `stage=final-verifier` was ignored after normalized contract projection
+   became `stage=command` / `purpose=generic_command`.
+
+Repair selected after this diagnostic:
+
+- recognize raw and normalized implement_v2 contracts when detecting final
+  verifier-shaped commands for oneshot cleanup;
+- normalize hyphenated contract tokens such as `final-verifier`;
+- allow verifier-shaped `stage=command` contracts with expected artifacts to
+  trigger stale `/tmp` cleanup, still filtered by runtime-fresh context and
+  passed artifact evidence;
+- validate with focused oneshot cleanup tests, terminal-bench replay/dogfood
+  slice, and ruff before another controlled speed rerun.
+
+Current implication:
+
+- Do not run broad measurement yet.
+- Do not add MIPS/DOOM-specific VM fixes for this artifact.
+- After review/commit, rerun the same controlled `speed_1` shape. A material
+  improvement is either reward pass or movement back to the Codex-equivalent
+  stdout timing class with frame existence/similarity passing.
