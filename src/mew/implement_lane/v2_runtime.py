@@ -79,6 +79,7 @@ _PROVIDER_HISTORY_TERMINAL_DIAGNOSTIC_KEYS = (
     "failure_class",
     "diagnostic",
     "diagnostics",
+    "component_warnings",
     "validation_error",
     "blocked_reason",
 )

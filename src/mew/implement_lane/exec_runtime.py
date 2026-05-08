@@ -38,6 +38,15 @@ RESIDENT_MEW_LOOP_TEXT_RE = re.compile(
     r"(?:attach|chat|do|run|session|work)\b"
 )
 ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-])(/[A-Za-z0-9_./%+@:=~-]+)")
+SHELL_COMMAND_NOT_FOUND_RE = re.compile(
+    r"(?:^|\n)[^:\n]+:\d+:\s+command not found:\s*(?P<tool_zsh>[A-Za-z_][A-Za-z0-9_.+-]*)\b"
+    r"|(?:^|\n)(?:[^:\n]+:\s*)?command not found:\s*(?P<tool_after>[A-Za-z_][A-Za-z0-9_.+-]*)\b"
+    r"|(?:^|\n)(?:[^:\n]+:\s*)?(?:line\s+\d+:\s*)?(?P<tool>[A-Za-z_][A-Za-z0-9_.+-]*):\s+command not found\b"
+    r"|(?:^|\n)(?:[^:\n]+:\s*)?(?:\d+:\s*)?(?P<tool_alt>[A-Za-z_][A-Za-z0-9_.+-]*):\s+not found\b"
+    r"|\bexecutable not found:\s*(?P<tool_exec>[A-Za-z_][A-Za-z0-9_.+-]*)\b",
+    re.IGNORECASE,
+)
+SOURCE_FRONTIER_PROBE_TOOLS = frozenset({"rg", "fd", "ag", "ack", "grep", "find", "readelf", "objdump", "file", "nm"})
 ADVERTISED_ARTIFACT_BEFORE_RE = re.compile(
     r"(?:will\s+be\s+)?(?:saved|written|created|generated|produced|emitted|exported|dumped)"
     r"\s*(?:as|at|to|in|into|under|:)?\s*$"
@@ -423,6 +432,9 @@ class ImplementV2ManagedExecRuntime:
             status=status,
             observation_index=_next_tool_observation_index(metadata),
         )
+        component_warnings = _component_command_warnings(payload)
+        if component_warnings:
+            payload["component_warnings"] = component_warnings
         record = ToolRunRecord(
             record_id=record_id,
             command_run_id=command_run_id,
@@ -833,6 +845,59 @@ def _stream_outputs_from_payload(payload: dict[str, object], *, tool_run_record_
     }
 
 
+def _component_command_warnings(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Return non-terminal warnings for component failures hidden by shell orchestration."""
+
+    command = str(payload.get("command") or "")
+    stderr_output = "\n".join(
+        str(payload.get(key) or "")
+        for key in ("stderr", "stderr_tail")
+        if payload.get(key) not in (None, "")
+    )
+    stdout_output = "\n".join(
+        str(payload.get(key) or "") for key in ("stdout", "stdout_tail") if payload.get(key) not in (None, "")
+    )
+    output = stderr_output
+    if not output and "2>&1" in command:
+        output = stdout_output
+    if not output:
+        return []
+    masked_by_success = payload.get("exit_code") == 0
+    warnings: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for match in SHELL_COMMAND_NOT_FOUND_RE.finditer(output):
+        tool = str(
+            match.group("tool")
+            or match.group("tool_zsh")
+            or match.group("tool_after")
+            or match.group("tool_alt")
+            or match.group("tool_exec")
+            or ""
+        ).strip()
+        if not tool or tool in seen:
+            continue
+        seen.add(tool)
+        subclass = "source_frontier_probe_unavailable" if tool in SOURCE_FRONTIER_PROBE_TOOLS else "command_component_unavailable"
+        recommendation = (
+            "Treat the source frontier as incomplete; rerun the cheap probe with an available fallback "
+            "such as glob/search_text, grep -R, find, Python, or a preflighted tool before editing."
+            if subclass == "source_frontier_probe_unavailable"
+            else "Retry with an available exact tool or report the unavailable executable as the blocker."
+        )
+        warnings.append(
+            {
+                "kind": "command_component_warning",
+                "failure_class": "tool_availability_gap",
+                "failure_subclass": subclass,
+                "tool": tool,
+                "masked_by_success_exit": masked_by_success,
+                "command_had_shell_recovery": _has_shell_recovery_surface(command),
+                "recommended_next_action": recommendation,
+            }
+        )
+    return warnings
+
+
 def _execution_evidence_ref(*, lane_attempt_id: str, effect: dict[str, object]) -> str:
     kind = str(effect.get("kind") or "")
     record = effect.get("record")
@@ -970,6 +1035,11 @@ def _preserved_command_hash(command: object) -> str:
 
 def _has_unquoted_shell_surface(command: object) -> bool:
     return _has_unquoted_run_tests_shell_surface(command)
+
+
+def _has_shell_recovery_surface(command: object) -> bool:
+    features = _unquoted_run_tests_shell_surface_features(command)
+    return "and_or" in features or "semicolon" in features or "pipe" in features
 
 
 def _has_unquoted_run_tests_shell_surface(command: object) -> bool:

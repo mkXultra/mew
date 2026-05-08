@@ -4292,6 +4292,25 @@ def test_implement_v2_prompt_metrics_are_memory_light_by_default() -> None:
     assert by_id["implement_v2_lane_state"]["cache_hint"] == "dynamic"
 
 
+def test_implement_v2_active_coding_rhythm_requires_probe_fallbacks() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"objective": "inspect source cheaply"},
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    section = next(item for item in sections if item.id == "implement_v2_active_coding_rhythm")
+
+    assert "optional CLI such as rg" in section.content
+    assert "source frontier as incomplete" in section.content
+    assert "grep -R" in section.content
+    assert "Do not mask a missing probe with `|| true`" in section.content
+
+
 def test_implement_v2_prompt_explains_expected_artifact_contract() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
@@ -4365,6 +4384,7 @@ def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() ->
     assert "provided source" in by_id["implement_v2_hard_runtime_profile"].content
     assert "recursive source frontier pass" in by_id["implement_v2_hard_runtime_profile"].content
     assert "source-declared output paths" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "If the chosen search tool is unavailable" in by_id["implement_v2_hard_runtime_profile"].content
     assert "fresh verifier-shaped run" in by_id["implement_v2_hard_runtime_profile"].content
     assert "reference similarity" in by_id["implement_v2_hard_runtime_profile"].content
     assert "artifact ABI/ISA/endianness/entrypoint" in by_id["implement_v2_hard_runtime_profile"].content
@@ -6459,6 +6479,62 @@ def test_implement_v2_live_json_does_not_auto_poll_plain_runtime_expected_exit(t
 
     assert result.metrics["active_command_auto_poll_count"] == 0
     assert result.metrics["command_closeout_count"] == 1
+
+
+def test_implement_v2_exec_warns_when_shell_masks_missing_probe_tool(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime, _component_command_warnings
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    source_warning = _component_command_warnings(
+        {"command": "rg --files || true", "exit_code": 0, "stderr": "zsh:1: command not found: rg\n"}
+    )[0]
+    assert source_warning["failure_subclass"] == "source_frontier_probe_unavailable"
+    assert "source frontier as incomplete" in source_warning["recommended_next_action"]
+    sh_warning = _component_command_warnings(
+        {"command": "rg --files || true", "exit_code": 0, "stderr": "/bin/sh: 1: rg: not found\n"}
+    )[0]
+    assert sh_warning["tool"] == "rg"
+    assert sh_warning["failure_subclass"] == "source_frontier_probe_unavailable"
+    assert (
+        _component_command_warnings(
+            {"command": "grep -R 'command not found: rg' . || true", "exit_code": 0, "stdout": "file.txt:command not found: rg\n"}
+        )
+        == []
+    )
+
+    adapter = FakeProviderAdapter()
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path))
+    missing_tool = "rg_missing_for_mew_test_zz"
+    call = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": f"{missing_tool} --files || true",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+    )[0]
+
+    result = runtime.execute(call)
+    payload = result.content[0]
+    visible = _provider_visible_tool_result_for_history(result)
+    projected = visible["content"]["content"][0]
+
+    assert result.status == "completed"
+    assert payload["exit_code"] == 0
+    assert payload["component_warnings"][0]["failure_class"] == "tool_availability_gap"
+    assert payload["component_warnings"][0]["failure_subclass"] == "command_component_unavailable"
+    assert payload["component_warnings"][0]["tool"] == missing_tool
+    assert payload["component_warnings"][0]["masked_by_success_exit"] is True
+    assert payload["component_warnings"][0]["command_had_shell_recovery"] is True
+    assert projected["component_warnings"][0]["recommended_next_action"]
 
 
 def test_implement_v2_exec_rejects_concurrent_side_effecting_command(tmp_path) -> None:
