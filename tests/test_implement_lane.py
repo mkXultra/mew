@@ -14,6 +14,7 @@ from mew.implement_lane import (
     ImplementLaneProofManifest,
     ImplementLaneResult,
     ImplementLaneTranscriptEvent,
+    ToolCallEnvelope,
     ToolResultEnvelope,
     build_invalid_tool_result,
     build_implement_v2_prompt_sections,
@@ -42,6 +43,7 @@ from mew.implement_lane.v2_runtime import (
     _finish_acceptance_action,
     _finish_evidence_refs,
     _finish_gate_history,
+    _first_write_readiness_from_trace,
     _frontier_failure_payload,
     _hard_runtime_frontier_progress_signature,
     _hard_runtime_progress_continuation_signature,
@@ -848,6 +850,7 @@ def test_implement_v2_records_first_write_frontier_stall_after_missing_target_ti
     assert stall["failure_class"] == "first_write_frontier_stall"
     assert stall["target_path"] == "generated.js"
     assert "write_file/edit_file/apply_patch" in stall["required_next_action"]
+    assert "bounded run_command writer" in stall["required_next_action"]
 
 
 def test_implement_v2_clears_first_write_frontier_stall_after_successful_write(tmp_path) -> None:
@@ -958,8 +961,161 @@ def test_implement_v2_records_active_work_todo_first_write_due_after_probe_thres
     assert readiness["probe_count_before_first_write"] == 3
     assert readiness["target_paths"] == ["sample.py"]
     assert "write_file/edit_file/apply_patch" in readiness["required_next_action"]
+    assert "bounded run_command writer" in readiness["required_next_action"]
     assert result.metrics["first_write_due"] is True
     assert result.metrics["first_write_probe_count"] == 3
+
+
+def test_implement_v2_counts_shell_source_mutation_as_first_write(tmp_path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("print('hello')\n", encoding="utf-8")
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('sample.py').write_text('print(\"done\")\\n', encoding='utf-8')",
+        ]
+    )
+    outputs = [
+        {
+            "summary": "cheap source probes before first write",
+            "tool_calls": [
+                {"id": "probe-dir", "name": "inspect_dir", "arguments": {"path": "."}},
+                {"id": "probe-file", "name": "read_file", "arguments": {"path": "sample.py"}},
+                {"id": "probe-search", "name": "search_text", "arguments": {"query": "hello", "path": "."}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "write a large generated file through a bounded command writer",
+            "tool_calls": [
+                {
+                    "id": "shell-write-sample",
+                    "name": "run_command",
+                    "arguments": {"command": command, "cwd": ".", "timeout": 10},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after first source mutation"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["sample.py"], "plan_item": "Patch sample.py"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "first_write_probe_threshold": 3,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
+
+    assert target.read_text(encoding="utf-8") == 'print("done")\n'
+    assert readiness["status"] == "written"
+    assert readiness["first_write_due"] is False
+    assert readiness["first_write_attempt_tool"] == "run_command"
+    assert readiness["first_write_tool"] == "run_command"
+    assert readiness["first_write_latency_turns"] == 1
+    assert readiness["write_attempt_count"] == 1
+    assert result.metrics["write_evidence_count"] == 1
+
+
+def test_implement_v2_counts_polled_shell_source_mutation_as_first_write() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    active_work_todo = {
+        "id": "todo-1",
+        "status": "drafting",
+        "source": {"target_paths": ["generated.js"], "plan_item": "Generate runtime"},
+    }
+    calls = (
+        ToolCallEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider="test",
+            provider_call_id="call-start-writer",
+            mew_tool_call_id="mew-call-start-writer",
+            tool_name="run_command",
+            arguments={"command": "python - <<'PY'\nPY", "foreground_budget_seconds": 0.01},
+            turn_index=2,
+        ),
+        ToolCallEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider="test",
+            provider_call_id="call-poll-writer",
+            mew_tool_call_id="mew-call-poll-writer",
+            tool_name="poll_command",
+            arguments={"command_run_id": "command-1", "wait_seconds": 1},
+            turn_index=3,
+        ),
+    )
+    results = (
+        ToolResultEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider_call_id="call-start-writer",
+            mew_tool_call_id="mew-call-start-writer",
+            tool_name="run_command",
+            status="yielded",
+            side_effects=(
+                {
+                    "kind": "command_run",
+                    "record": {"command_run_id": "command-1", "status": "running"},
+                },
+            ),
+        ),
+        ToolResultEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider_call_id="call-poll-writer",
+            mew_tool_call_id="mew-call-poll-writer",
+            tool_name="poll_command",
+            status="completed",
+            side_effects=(
+                {
+                    "kind": "source_tree_mutation",
+                    "record": {
+                        "command_run_id": "command-1",
+                        "provider_call_id": "call-start-writer",
+                        "changed_count": 1,
+                        "changes": [{"path": "/workspace/generated.js", "change": "added"}],
+                    },
+                },
+            ),
+        ),
+    )
+
+    readiness = _first_write_readiness_from_trace(
+        active_work_todo,
+        tool_calls=calls,
+        tool_results=results,
+        probe_threshold=1,
+    )
+
+    assert readiness["status"] == "written"
+    assert readiness["first_write_due"] is False
+    assert readiness["first_write_attempt_tool"] == "poll_command"
+    assert readiness["first_write_tool"] == "poll_command"
+    assert readiness["first_write_attempt_provider_call_id"] == "call-poll-writer"
+    assert readiness["first_write_provider_call_id"] == "call-poll-writer"
+    assert readiness["write_attempt_count"] == 1
 
 
 def test_implement_v2_does_not_emit_first_write_due_without_active_work_todo(tmp_path) -> None:
@@ -1821,7 +1977,9 @@ def test_implement_v2_prompt_sections_include_active_coding_rhythm() -> None:
     assert "cheap probe -> coherent patch/edit -> verifier -> latest-failure repair" in section.content
     assert "at most one focused diagnostic/read turn" in section.content
     assert "write_file, edit_file, or apply_patch" in section.content
-    assert "run_command for probes, builds, runtime execution, and verification" in section.content
+    assert "bounded run_command writer" in section.content
+    assert "source-tree mutation" in section.content
+    assert "run_command otherwise for probes, builds, runtime execution, and verification" in section.content
 
 
 def test_implement_v2_prompt_sections_include_active_work_todo_readiness() -> None:

@@ -2847,10 +2847,11 @@ def _first_write_frontier_stall_from_live_results(
     if prior_observations <= 0:
         return {}
     target_path = str(missing.get("target_path") or "").strip()
+    mutation_tools = "write_file/edit_file/apply_patch, or a bounded run_command writer for a large generated file"
     required = (
-        f"create or update {target_path} with write_file/edit_file/apply_patch"
+        f"create or update {target_path} with {mutation_tools}"
         if target_path
-        else "make the first source mutation with write_file/edit_file/apply_patch"
+        else f"make the first source mutation with {mutation_tools}"
     )
     return {
         "failure_class": "first_write_frontier_stall",
@@ -3103,12 +3104,13 @@ def _first_write_readiness_from_trace(
     probe_call_ids: list[str] = []
     for call, result in zip(tool_calls, tool_results):
         tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
-        if tool_name in WRITE_TOOL_NAMES:
+        source_tree_mutation_write = bool(_source_tree_mutation_from_result(result))
+        if tool_name in WRITE_TOOL_NAMES or source_tree_mutation_write:
             if first_write_attempt_turn <= 0:
                 first_write_attempt_turn = int(getattr(call, "turn_index", 0) or 0)
                 first_write_attempt_call_id = str(getattr(call, "provider_call_id", "") or result.provider_call_id or "")
                 first_write_attempt_tool = tool_name
-            if result.status == "completed" and result.side_effects:
+            if result.status == "completed" and (result.side_effects or source_tree_mutation_write):
                 first_source_mutation_turn = int(getattr(call, "turn_index", 0) or 0)
                 first_source_mutation_call_id = str(
                     getattr(call, "provider_call_id", "") or result.provider_call_id or ""
@@ -3130,7 +3132,12 @@ def _first_write_readiness_from_trace(
         for call, result in zip(tool_calls, tool_results)
         if _is_first_write_probe_result(str(getattr(call, "tool_name", "") or result.tool_name or ""), result)
     )
-    write_count = sum(1 for call in tool_calls if str(getattr(call, "tool_name", "") or "") in WRITE_TOOL_NAMES)
+    write_count = sum(
+        1
+        for call, result in zip(tool_calls, tool_results)
+        if str(getattr(call, "tool_name", "") or result.tool_name or "") in WRITE_TOOL_NAMES
+        or bool(_source_tree_mutation_from_result(result))
+    )
     target_paths = _active_work_todo_target_paths(active_work_todo)
     first_write_due = first_source_mutation_turn <= 0 and probes_before_first_write >= max(1, int(probe_threshold))
     status = "written" if first_source_mutation_turn > 0 else ("due" if first_write_due else "not_due")
@@ -3162,7 +3169,8 @@ def _first_write_readiness_from_trace(
     if first_write_due:
         target_text = ", ".join(target_paths[:3]) if target_paths else "active_work_todo.source.target_paths"
         readiness["required_next_action"] = (
-            "make one scoped source mutation with write_file/edit_file/apply_patch "
+            "make one scoped source mutation with write_file/edit_file/apply_patch, "
+            "or a bounded run_command writer for a large generated file, "
             f"inside {target_text} before another broad search or verifier"
         )
     return _drop_empty_frontier_values(readiness)
@@ -3174,6 +3182,8 @@ def _is_first_write_probe_result(tool_name: str, result: ToolResultEnvelope) -> 
     if result.status not in {"completed", "failed", "invalid"}:
         return False
     if tool_name == "run_command":
+        if _source_tree_mutation_from_result(result):
+            return False
         payload = _first_result_payload(result)
         contract = _payload_execution_contract(payload)
         if _execution_contract_is_verifier_like(contract):
@@ -3962,7 +3972,8 @@ def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str
             + "First-write frontier stall: prior source/probe evidence is already available, but no "
             "source mutation happened before the model failure. Do not rediscover the same missing target "
             f"or run an external verifier first. Create or update {target} with write_file/edit_file/"
-            "apply_patch, then run one verifier-shaped command."
+            "apply_patch, or use one bounded run_command writer for a large generated file, then run "
+            "one verifier-shaped command."
             f"{required_hint}\n"
         )
     latest_failure = hard_runtime_frontier_state.get("latest_runtime_failure")
@@ -3983,8 +3994,9 @@ def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str
         + "Hard-runtime frontier continuation gate: continue from lane_hard_runtime_frontier instead of "
         "rediscovering the whole task. Inspect the producing substep/artifact path, make the smallest "
         "source/runtime repair, then run one verifier-shaped command tied to the expected runtime artifact. "
-        "If mutating source/config, prefer write_file/edit_file/apply_patch; keep run_command for build, "
-        "runtime, and verification."
+        "If mutating source/config, prefer write_file/edit_file/apply_patch; use a bounded run_command "
+        "writer only for large generated files where JSON tool-call payload size is the bottleneck; "
+        "keep run_command otherwise for build, runtime, and verification."
         f"{class_hint}{next_probe_hint}{verifier_hint}\n"
     )
 
@@ -4680,8 +4692,9 @@ def _unaccounted_source_tree_mutation_block(
         "invalid_evidence_refs": [],
         "continuation_prompt": (
             "A run_command changed source files. Account for that mutation before finishing: "
-            "either move the mutation through write_file/edit_file/apply_patch, or run one verifier-shaped "
-            "command that proves the mutated tree is correct and then cite that evidence."
+            "if it was an unintended shell mutation, move it through write_file/edit_file/apply_patch; "
+            "otherwise run one verifier-shaped command that proves the mutated tree is correct and then "
+            "cite that evidence."
         ),
     }
 
@@ -5740,7 +5753,12 @@ def _terminal_evidence_count(tool_results) -> int:
 
 
 def _write_evidence_count(tool_results) -> int:
-    return sum(1 for result in tool_results if result.tool_name in WRITE_TOOL_NAMES and bool(result.side_effects))
+    return sum(
+        1
+        for result in tool_results
+        if (result.tool_name in WRITE_TOOL_NAMES and bool(result.side_effects))
+        or bool(_source_tree_mutation_from_result(result))
+    )
 
 
 def _latest_acceptance_result_completed(tool_results) -> bool:
