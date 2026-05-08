@@ -4389,9 +4389,12 @@ def _project_terminal_payload_for_provider_history(payload: dict[str, object]) -
         projected[key] = projected_value
         if clipped:
             projected[f"{key}_history_truncated"] = True
-    structured_summary = _structured_execution_summary_for_provider_history(payload)
-    if structured_summary:
-        projected["structured_execution_evidence"] = structured_summary
+    latest_failure = _latest_actionable_failure_for_provider_history(payload)
+    if latest_failure:
+        projected["latest_failure"] = latest_failure
+    execution_digest = _execution_evidence_digest_for_provider_history(payload)
+    if execution_digest:
+        projected["execution_evidence_digest"] = execution_digest
     command = str(payload.get("command") or "")
     if command:
         projected["command_excerpt"] = _clip_provider_history_text(command, limit=900)[0]
@@ -4410,60 +4413,89 @@ def _project_terminal_payload_for_provider_history(payload: dict[str, object]) -
     return projected
 
 
-def _structured_execution_summary_for_provider_history(payload: dict[str, object]) -> dict[str, object]:
+def _latest_actionable_failure_for_provider_history(payload: dict[str, object]) -> dict[str, object]:
+    component_warnings = payload.get("component_warnings")
+    if isinstance(component_warnings, list):
+        for warning in component_warnings:
+            if not isinstance(warning, dict):
+                continue
+            warning_class = _provider_scalar_text(warning.get("failure_class"), limit=80)
+            next_action = _provider_scalar_text(warning.get("recommended_next_action"), limit=240)
+            if warning_class or next_action:
+                return _drop_empty_frontier_values(
+                    {
+                        "class": warning_class,
+                        "kind": _provider_scalar_text(warning.get("failure_subclass"), limit=120),
+                        "summary": _provider_scalar_text(warning.get("tool"), limit=120),
+                        "required_next_action": next_action,
+                    }
+                )
+    classification = payload.get("failure_classification")
+    if isinstance(classification, dict):
+        failure_class = _provider_scalar_text(
+            classification.get("class") or classification.get("failure_class"),
+            limit=80,
+        )
+        failure_kind = _provider_scalar_text(classification.get("kind"), limit=80)
+        summary = _provider_scalar_text(classification.get("summary"), limit=220)
+        next_action = _provider_scalar_text(classification.get("required_next_probe"), limit=240)
+        if failure_class and failure_class != "unknown_failure":
+            return _drop_empty_frontier_values(
+                {
+                    "phase": _provider_scalar_text(classification.get("phase"), limit=80),
+                    "kind": failure_kind,
+                    "class": failure_class,
+                    "confidence": _provider_scalar_text(classification.get("confidence"), limit=40),
+                    "summary": summary,
+                    "required_next_action": next_action,
+                }
+            )
+    return {}
+
+
+def _execution_evidence_digest_for_provider_history(payload: dict[str, object]) -> dict[str, object]:
     summary: dict[str, object] = {}
     tool_run = payload.get("tool_run_record")
     if isinstance(tool_run, dict):
         summary["tool_run_record"] = _drop_empty_frontier_values(
             {
-                "record_id": tool_run.get("record_id"),
                 "command_run_id": tool_run.get("command_run_id"),
-                "contract_id": tool_run.get("contract_id"),
                 "status": tool_run.get("status"),
+                "exit_code": tool_run.get("exit_code"),
+                "timed_out": tool_run.get("timed_out"),
                 "semantic_exit": tool_run.get("semantic_exit"),
             }
         )
     artifacts = payload.get("artifact_evidence")
     if isinstance(artifacts, list):
-        compact_artifacts = []
-        for artifact in artifacts[:_PROVIDER_HISTORY_LIST_LIMIT]:
+        artifact_misses = []
+        for artifact in artifacts:
             if not isinstance(artifact, dict):
                 continue
-            compact_artifacts.append(
+            status = str(artifact.get("status") or "")
+            if status in {"passed", "completed"}:
+                continue
+            artifact_misses.append(
                 _drop_empty_frontier_values(
                     {
-                        "evidence_id": artifact.get("evidence_id"),
                         "artifact_id": artifact.get("artifact_id"),
                         "status": artifact.get("status"),
                         "blocking": artifact.get("blocking"),
-                        "source": artifact.get("source"),
-                        "confidence": artifact.get("confidence"),
+                        "kind": artifact.get("kind"),
                         "path": artifact.get("path"),
                     }
                 )
             )
-        if compact_artifacts:
-            summary["artifact_evidence"] = compact_artifacts
+            if len(artifact_misses) >= 2:
+                break
+        if artifact_misses:
+            summary["artifact_miss"] = artifact_misses
     verifier = payload.get("verifier_evidence")
     if isinstance(verifier, dict):
         summary["verifier_evidence"] = _drop_empty_frontier_values(
             {
-                "verifier_id": verifier.get("verifier_id"),
-                "contract_id": verifier.get("contract_id"),
                 "verdict": verifier.get("verdict"),
                 "reason": verifier.get("reason"),
-            }
-        )
-    classification = payload.get("failure_classification")
-    if isinstance(classification, dict):
-        summary["failure_classification"] = _drop_empty_frontier_values(
-            {
-                "classification_id": classification.get("classification_id"),
-                "phase": classification.get("phase"),
-                "kind": classification.get("kind"),
-                "class": classification.get("class") or classification.get("failure_class"),
-                "summary": classification.get("summary"),
-                "required_next_probe": classification.get("required_next_probe"),
             }
         )
     finish_gate = payload.get("structured_finish_gate")
@@ -4472,10 +4504,18 @@ def _structured_execution_summary_for_provider_history(payload: dict[str, object
             {
                 "blocked": finish_gate.get("blocked"),
                 "reasons": finish_gate.get("reasons"),
-                "evidence_refs": finish_gate.get("evidence_refs"),
             }
         )
     return _drop_empty_frontier_values(summary)
+
+
+def _provider_scalar_text(value: object, *, limit: int) -> str:
+    if isinstance(value, (dict, list, tuple, set)):
+        return ""
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 def _compact_provider_visible_content_for_history(content: dict[str, object]) -> dict[str, object]:

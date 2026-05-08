@@ -7064,12 +7064,15 @@ def test_implement_v2_provider_history_surfaces_structured_evidence_summary(tmp_
     )
 
     history = _provider_visible_tool_result_for_history(tool_result)
-    structured = history["content"]["content"][0]["structured_execution_evidence"]
+    projected = history["content"]["content"][0]
 
-    assert structured["artifact_evidence"][0]["evidence_id"].startswith("artifact-evidence:frame:")
-    assert structured["failure_classification"]["class"] == "runtime_artifact_missing"
-    assert structured["structured_finish_gate"]["blocked"] is True
-    assert "stdout_stderr_body_omitted" not in structured
+    assert projected["latest_failure"]["class"] == "runtime_artifact_missing"
+    assert projected["latest_failure"]["required_next_action"]
+    assert projected["execution_evidence_digest"]["artifact_miss"][0]["artifact_id"] == "frame"
+    assert projected["execution_evidence_digest"]["structured_finish_gate"]["blocked"] is True
+    assert "structured_execution_evidence" not in projected
+    assert "evidence_refs" not in projected["execution_evidence_digest"]["structured_finish_gate"]
+    assert "stdout_stderr_body_omitted" not in projected["execution_evidence_digest"]
 
 
 def test_implement_v2_exec_contract_accepted_nonzero_exit_can_complete(tmp_path) -> None:
@@ -7411,6 +7414,8 @@ def test_implement_v2_exec_warns_when_shell_masks_missing_probe_tool(tmp_path) -
     assert payload["component_warnings"][0]["masked_by_success_exit"] is True
     assert payload["component_warnings"][0]["command_had_shell_recovery"] is True
     assert projected["component_warnings"][0]["recommended_next_action"]
+    assert projected["latest_failure"]["class"] == "tool_availability_gap"
+    assert projected["latest_failure"]["required_next_action"]
 
 
 def test_implement_v2_exec_rejects_concurrent_side_effecting_command(tmp_path) -> None:
