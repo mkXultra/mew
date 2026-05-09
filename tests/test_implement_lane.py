@@ -3989,6 +3989,256 @@ def test_implement_v2_live_json_blocks_same_turn_verifier_after_run_command_sour
     assert not side_effect.exists()
 
 
+def test_implement_v2_run_command_source_patch_misuse_detects_string_variable_paths(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
+    command = (
+        "node - <<'NODE'\n"
+        "const fs = require('fs');\n"
+        "const p = 'vm.js';\n"
+        "let s = fs.readFileSync(p, 'utf8');\n"
+        "fs.writeFileSync(p, s.replace('old', 'new'));\n"
+        "NODE\n"
+        "node --check vm.js"
+    )
+
+    outputs = [
+        {
+            "summary": "shell patch through a string path variable",
+            "tool_calls": [
+                {
+                    "id": "shell-patch",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "source patch misuse"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert result.status == "blocked"
+    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
+    assert payload["common_paths"] == ["vm.js"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+
+
+def test_implement_v2_run_command_source_patch_misuse_detects_reassigned_string_variable_paths(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
+    (tmp_path / "scratch.txt").write_text("scratch\n", encoding="utf-8")
+    command = (
+        "node - <<'NODE'\n"
+        "const fs = require('fs');\n"
+        "let p = 'scratch.txt';\n"
+        "p = 'vm.js';\n"
+        "let s = fs.readFileSync(p, 'utf8');\n"
+        "fs.writeFileSync(p, s.replace('old', 'new'));\n"
+        "NODE\n"
+        "node --check vm.js"
+    )
+
+    outputs = [
+        {
+            "summary": "shell patch through a reassigned string path variable",
+            "tool_calls": [
+                {
+                    "id": "shell-patch",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "source patch misuse"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert result.status == "blocked"
+    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
+    assert "vm.js" in payload["common_paths"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+
+
+def test_implement_v2_run_command_source_writer_variable_path_does_not_count_as_read(tmp_path) -> None:
+    command = (
+        f"{shlex.quote(sys.executable)} - <<'PY'\n"
+        "p = 'generated.py'\n"
+        "open(p, 'w').write('print(1)\\n')\n"
+        "PY"
+    )
+
+    outputs = [
+        {
+            "summary": "bounded source writer through a variable path",
+            "tool_calls": [
+                {
+                    "id": "shell-writer",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    first_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert first_result["status"] == "completed"
+    assert first_result["content"][0]["source_tree_mutations"][0]["changed_count"] == 1
+    assert first_result["content"][0]["source_tree_mutations"][0]["changes"][0]["path"].endswith("/generated.py")
+    assert (tmp_path / "generated.py").read_text(encoding="utf-8") == "print(1)\n"
+
+
+def test_implement_v2_run_command_source_patch_misuse_detects_open_default_read_with_keywords(
+    tmp_path,
+) -> None:
+    (tmp_path / "vm.py").write_text("print('old')\n", encoding="utf-8")
+    command = (
+        f"{shlex.quote(sys.executable)} - <<'PY'\n"
+        "p = 'vm.py'\n"
+        "s = open(p, encoding='utf-8').read()\n"
+        "open(p, mode='w', encoding='utf-8').write(s.replace('old', 'new'))\n"
+        "PY"
+    )
+
+    outputs = [
+        {
+            "summary": "shell patch through Python open default read mode",
+            "tool_calls": [
+                {
+                    "id": "shell-patch",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "source patch misuse"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert result.status == "blocked"
+    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
+    assert payload["common_paths"] == ["vm.py"]
+    assert (tmp_path / "vm.py").read_text(encoding="utf-8") == "print('old')\n"
+
+
 def test_implement_v2_model_turn_boundary_preserves_rendered_prompt_and_call_args(tmp_path) -> None:
     calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
     lane_input = ImplementLaneInput(
@@ -12053,6 +12303,97 @@ def test_implement_v2_keeps_normal_auto_poll_for_repeated_verifier_with_output(t
     assert second_payload["stdout_tail"].strip() == "booted"
     assert "hard_runtime_verifier_budget_adjustment" not in second_payload
     assert second_payload["reason"] == "implement_v2 verifier auto-poll budget exhausted before terminal evidence"
+
+
+def test_implement_v2_keeps_terminal_payload_from_short_repeated_verifier_poll(tmp_path) -> None:
+    calls = {"count": 0}
+    silent_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(5)",
+        ]
+    )
+    terminal_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "print('booted', flush=True)",
+        ]
+    )
+
+    def fake_model(*_args, **_kwargs):
+        calls["count"] += 1
+        attempt = calls["count"]
+        return {
+            "summary": f"run runtime verifier attempt {attempt}",
+            "tool_calls": [
+                {
+                    "provider_call_id": f"call-{attempt}",
+                    "tool_name": "run_command",
+                    "arguments": {
+                        "command": silent_command if attempt == 1 else terminal_command,
+                        "cwd": ".",
+                        "timeout": 10,
+                        "foreground_budget_seconds": 0.02,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verify",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "retry verifier"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Build the provided source project for an emulator runtime interpreter "
+                    "that must write frame.bmp."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "active_command_auto_poll_seconds": 0.2,
+                "hard_runtime_repeated_no_progress_auto_poll_seconds": 0.01,
+                "hard_runtime_verifier_no_progress_seconds": 0,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    second_payload = tool_results[1]["content"][0]
+
+    assert calls["count"] == 2
+    assert second_payload["status"] == "completed"
+    assert second_payload["stdout_tail"].strip() == "booted"
+    assert "hard_runtime_verifier_budget_adjustment" not in second_payload
 
 
 def test_implement_v2_fast_cancel_treats_unchanged_existing_artifact_as_no_progress(tmp_path) -> None:

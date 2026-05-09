@@ -1721,6 +1721,7 @@ def _source_like_mutation_paths(command: object) -> tuple[str, ...]:
         (
             r"\b(?:writefilesync|writeFileSync|write_text|write_bytes)\b",
             r"\bopen\s*\([^)]*,\s*['\"][^'\"]*[wax+]",
+            r"\bopen\s*\([^)]*,[^)]*\bmode\s*=\s*['\"][^'\"]*[wax+]",
         ),
     ):
         paths.extend(_shell_write_api_paths(text))
@@ -1872,6 +1873,7 @@ def _shell_write_api_paths(command: str) -> tuple[str, ...]:
             re.IGNORECASE,
         )
     ]
+    string_vars = _shell_string_variable_assignments(command)
     for match in re.finditer(
         r"\b(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:pathlib\.)?Path\s*\(\s*['\"](?P<path>[^'\"]+)['\"]\s*\)",
         command,
@@ -1880,6 +1882,15 @@ def _shell_write_api_paths(command: str) -> tuple[str, ...]:
         variable = re.escape(match.group("var"))
         if re.search(rf"\b{variable}\s*\.\s*write_(?:text|bytes)\s*\(", command, re.IGNORECASE):
             paths.append(match.group("path"))
+    for variable, variable_paths in string_vars.items():
+        escaped = re.escape(variable)
+        if re.search(
+            rf"(?:writefilesync|writeFileSync)\s*\(\s*{escaped}\b",
+            command,
+            re.IGNORECASE,
+        ):
+            paths.extend(variable_paths)
+    paths.extend(_python_open_variable_paths(command, string_vars, access="write"))
     paths.extend(
         match.group(1)
         for match in re.finditer(
@@ -1908,6 +1919,7 @@ def _shell_read_api_paths(command: str) -> tuple[str, ...]:
             re.IGNORECASE,
         )
     ]
+    string_vars = _shell_string_variable_assignments(command)
     for match in re.finditer(
         r"\b(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:pathlib\.)?Path\s*\(\s*['\"](?P<path>[^'\"]+)['\"]\s*\)",
         command,
@@ -1916,6 +1928,15 @@ def _shell_read_api_paths(command: str) -> tuple[str, ...]:
         variable = re.escape(match.group("var"))
         if re.search(rf"\b{variable}\s*\.\s*read_(?:text|bytes)\s*\(", command, re.IGNORECASE):
             paths.append(match.group("path"))
+    for variable, variable_paths in string_vars.items():
+        escaped = re.escape(variable)
+        if re.search(
+            rf"(?:readfilesync|readFileSync)\s*\(\s*{escaped}\b",
+            command,
+            re.IGNORECASE,
+        ):
+            paths.extend(variable_paths)
+    paths.extend(_python_open_variable_paths(command, string_vars, access="read"))
     paths.extend(
         match.group(1)
         for match in re.finditer(
@@ -1937,6 +1958,72 @@ def _shell_read_api_paths(command: str) -> tuple[str, ...]:
         )
     )
     return tuple(paths)
+
+
+def _shell_string_variable_assignments(command: str) -> dict[str, tuple[str, ...]]:
+    assignments: dict[str, list[str]] = {}
+    for match in re.finditer(
+        r"\b(?:const|let|var)?\s*(?P<var>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*['\"](?P<path>[^'\"]+)['\"]",
+        command,
+        re.IGNORECASE,
+    ):
+        variable = match.group("var")
+        path = match.group("path")
+        variable_paths = assignments.setdefault(variable, [])
+        if path not in variable_paths:
+            variable_paths.append(path)
+    return {variable: tuple(paths) for variable, paths in assignments.items()}
+
+
+def _python_open_variable_paths(
+    command: str,
+    assignments: dict[str, tuple[str, ...]],
+    *,
+    access: str,
+) -> tuple[str, ...]:
+    paths: list[str] = []
+    for variable, variable_paths in assignments.items():
+        escaped = re.escape(variable)
+        for match in re.finditer(rf"\bopen\s*\(\s*{escaped}\b(?P<rest>[^)]*)\)", command, re.IGNORECASE):
+            mode = _python_open_mode_from_rest(match.group("rest"))
+            if access == "write":
+                if _python_open_mode_can_write(mode):
+                    paths.extend(variable_paths)
+            elif _python_open_mode_can_read(mode):
+                paths.extend(variable_paths)
+    return tuple(paths)
+
+
+def _python_open_mode_from_rest(rest: str) -> str | None:
+    text = str(rest or "").strip()
+    if not text:
+        return None
+    if not text.startswith(","):
+        return None
+    text = text[1:].lstrip()
+    positional = re.match(r"['\"](?P<mode>[^'\"]*)['\"]", text)
+    if positional:
+        return positional.group("mode")
+    keyword = re.search(r"\bmode\s*=\s*['\"](?P<mode>[^'\"]*)['\"]", text)
+    if keyword:
+        return keyword.group("mode")
+    return None
+
+
+def _python_open_mode_can_read(mode: str | None) -> bool:
+    if mode is None:
+        return True
+    lowered = mode.casefold()
+    if "r" in lowered or "+" in lowered:
+        return True
+    return not any(char in lowered for char in ("w", "a", "x"))
+
+
+def _python_open_mode_can_write(mode: str | None) -> bool:
+    if mode is None:
+        return False
+    lowered = mode.casefold()
+    return any(char in lowered for char in ("w", "a", "x", "+"))
 
 
 def _shell_token_paths(command: str) -> tuple[str, ...]:

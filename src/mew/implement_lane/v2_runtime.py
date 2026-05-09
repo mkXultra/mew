@@ -1930,7 +1930,8 @@ def _auto_poll_yielded_verifier_commands(
     )
     if not yielded_verifier_results:
         return ()
-    budget = _active_command_auto_poll_budget_seconds(lane_input, run_started=run_started)
+    normal_budget = _active_command_auto_poll_budget_seconds(lane_input, run_started=run_started)
+    budget = normal_budget
     repeat_budget = _hard_runtime_repeated_no_progress_verifier_auto_poll_budget_seconds(
         lane_input,
         yielded_verifier_results,
@@ -1941,8 +1942,20 @@ def _auto_poll_yielded_verifier_commands(
     if budget <= 0:
         return ()
     payloads = exec_runtime.poll_active_commands(wait_seconds=budget)
-    if repeat_budget is not None:
-        payloads = _annotate_hard_runtime_repeated_no_progress_budget(payloads, repeat_budget=repeat_budget)
+    terminal_payloads = tuple(payload for payload in payloads if _is_terminal_auto_poll_payload(payload))
+    if terminal_payloads:
+        return terminal_payloads
+    if (
+        repeat_budget is not None
+        and payloads
+        and any(not _hard_runtime_verifier_payload_has_no_progress(payload, lane_input=lane_input) for payload in payloads)
+    ):
+        remaining_budget = max(0.0, normal_budget - budget)
+        if remaining_budget > 0:
+            follow_up_payloads = exec_runtime.poll_active_commands(wait_seconds=remaining_budget)
+            if follow_up_payloads:
+                payloads = follow_up_payloads
+        repeat_budget = None
     terminal_payloads = tuple(payload for payload in payloads if _is_terminal_auto_poll_payload(payload))
     if terminal_payloads:
         return terminal_payloads
