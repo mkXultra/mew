@@ -564,6 +564,61 @@ Validation:
 - `tests/test_dogfood.py` runtime finish-gate emulator and terminal-bench replay
   dogfood cases.
 
+### Fast Inner Loop: Phase Contract Before Live Step-Shape
+
+`step-check-10min` is an integration gate, not the default implementation
+feedback loop. Each HOT_PATH_COLLAPSE phase must have a fast contract check that
+can fail before Harbor, Terminal-Bench, or a long live LLM run is used.
+
+Target files:
+
+- `scripts/check_implement_v2_hot_path.py` or an equivalent `poe` task;
+- focused tests in `tests/test_implement_lane.py`, `tests/test_acceptance.py`,
+  and replay/dogfood test modules;
+- saved proof-artifact fixtures for the current failure family.
+
+Fastcheck order:
+
+1. Run the focused unit-test subset for the touched surface.
+2. Replay the latest saved artifact for the relevant failure family.
+3. Run prompt leak checks:
+   - no normal prompt `frontier_state_update`;
+   - no full proof/oracle/typed-evidence object in the normal prompt;
+   - active todo is projected as a compact card only.
+4. Run sidecar/projection checks:
+   - `hot_path_projection` and `resident_sidecar_state` metrics are present;
+   - sidecar total and per-turn growth are within the current phase cap;
+   - latest actionable failure is projected once per family.
+5. Run a micro next-action check when static/replay checks are not enough:
+   - use a saved intermediate history from `make-mips-interpreter`,
+     `build-cython-ext`, or another measured coding task;
+   - ask the model for the next tool call category only;
+   - classify the answer as `patch/edit`, `run_verifier`,
+     `inspect_latest_failure`, `cheap_probe`, or `invalid`;
+   - do not run Harbor for this check.
+
+Micro LLM checks are allowed because they are cheaper than a live Harbor
+diagnostic and catch prompt/projection mistakes that pure unit tests cannot
+observe. They must be fixture-backed and category-based; they must not assert a
+task-specific exact command as the only passing answer.
+
+Done when:
+
+- a single command can run the fast contract check for HOT_PATH_COLLAPSE;
+- the command prints the artifact paths it used and the metrics file it wrote;
+- a phase implementation cannot proceed to `step-check-10min` while focused UT,
+  replay, prompt leak, sidecar/projection, or required micro LLM checks are red;
+- failures explain which phase contract failed, not only that the benchmark
+  failed.
+
+Validation:
+
+- the fastcheck itself is covered by a small smoke test or documented fixture;
+- at least one saved failing artifact is caught by fastcheck before a live
+  10 minute diagnostic is run;
+- fastcheck does not require network access unless the optional micro LLM check
+  is explicitly enabled.
+
 ### Phase 6: Replay, Dogfood, Emulator, And Step-Shape Gate
 
 Target files:
@@ -573,16 +628,17 @@ Target files:
 
 Gate order:
 
-1. Focused unit tests for the changed surface.
-2. Exact replay of the latest relevant saved Harbor artifact.
-3. `mew dogfood --scenario m6_24-terminal-bench-replay` with explicit
+1. HOT_PATH_COLLAPSE fastcheck for the changed phase.
+2. Focused unit tests for any surface not covered by fastcheck.
+3. Exact replay of the latest relevant saved Harbor artifact.
+4. `mew dogfood --scenario m6_24-terminal-bench-replay` with explicit
    terminal-bench assertions for the artifact being validated.
-4. Runtime finish-gate emulator.
-5. Selected hard-runtime/source-frontier emulator, such as
+5. Runtime finish-gate emulator.
+6. Selected hard-runtime/source-frontier emulator, such as
    `m6_24-implement-v2-hard-runtime-progress-continuation-emulator` when the
    change affects runtime frontier projection.
-6. One same-shape 10 minute `make-mips-interpreter` step-shape diagnostic.
-7. Reference-step comparison against Codex and Claude Code traces.
+7. One same-shape 10 minute `make-mips-interpreter` step-shape diagnostic.
+8. Reference-step comparison against Codex and Claude Code traces.
 
 Done when:
 
@@ -609,9 +665,50 @@ Done when:
 
 Validation:
 
-- no broad measurement, `speed_1`, or `proof_5` until the above gate passes;
+- no broad measurement, `speed_1`, or `proof_5` until fastcheck and the above
+  Phase 6 gate pass;
 - update `docs/M6_24_DECISION_LEDGER.md` only after implementation evidence
   exists.
+
+## Close Gate
+
+HOT_PATH_COLLAPSE is not closed by a single green benchmark. It is closed only
+when the implementation can repeatedly prove that the model-visible coding loop
+is smaller and the resident guarantees still live in deterministic sidecars.
+
+Close prerequisites:
+
+1. Phase 0 through Phase 6 are explicitly marked implemented in
+   `ROADMAP_STATUS.md` or the current milestone status document, with links to
+   the commits and artifacts used for each phase.
+2. The fast inner loop command is the default pre-step-shape check for this
+   milestone and is documented in the milestone status.
+3. Normal prompts do not ask the model to author `frontier_state_update`.
+4. Normal prompts do not expose full proof manifests, oracle bundles, typed
+   evidence objects, or unbounded active todo/frontier state.
+5. `required_next_action` is re-derived from latest reducer inputs each turn; it
+   is not persisted hidden planner state.
+6. Sidecar metrics are green or explicitly accepted yellow, never red.
+7. Typed evidence finish safety is at least as strict as the legacy string
+   gates for covered false-completion families.
+8. Replay, dogfood, emulator, and micro next-action checks all pass for the
+   current target failure families.
+9. The 10 minute step-shape diagnostic is green or yellow and does not regress
+   first edit turn, first verifier turn, prompt bytes, or repeated same-family
+   loops against the Phase 0 baseline.
+10. Any remaining failure is recorded as either:
+    - implementation polish inside this design;
+    - a measured provider/tool-transport gap for a later milestone;
+    - or an explicit stop condition requiring redesign.
+
+Do not close if:
+
+- the latest repair added another normal-prompt frontier/todo/evidence object;
+- `step-check-10min` is the first detector for a bug that should be caught by
+  fastcheck, replay, dogfood, emulator, or micro next-action checks;
+- the phase status is inferred from benchmark score without contract evidence;
+- context compression would leave the next implementer unsure whether to add a
+  new structure or collapse an existing one.
 
 ## Test Plan
 
