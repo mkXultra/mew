@@ -11873,6 +11873,188 @@ def test_implement_v2_cancels_hard_runtime_verifier_after_auto_poll_budget_with_
     assert "producing substep" in payload["failure_classification"]["required_next_probe"]
 
 
+def test_implement_v2_shortens_repeated_silent_hard_runtime_verifier_auto_poll(tmp_path) -> None:
+    calls = {"count": 0}
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(5)",
+        ]
+    )
+
+    def fake_model(*_args, **_kwargs):
+        calls["count"] += 1
+        attempt = calls["count"]
+        return {
+            "summary": f"run silent runtime verifier attempt {attempt}",
+            "tool_calls": [
+                {
+                    "provider_call_id": f"call-{attempt}",
+                    "tool_name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 10,
+                        "foreground_budget_seconds": 0.02,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verify",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "retry verifier"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Build the provided source project for an emulator runtime interpreter "
+                    "that must write frame.bmp."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "active_command_auto_poll_seconds": 0.2,
+                "hard_runtime_repeated_no_progress_auto_poll_seconds": 0.01,
+                "hard_runtime_verifier_no_progress_seconds": 0,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    first_payload = tool_results[0]["content"][0]
+    second_payload = tool_results[1]["content"][0]
+
+    assert calls["count"] == 2
+    assert first_payload["status"] == "killed"
+    assert "hard_runtime_verifier_budget_adjustment" not in first_payload
+    assert second_payload["status"] == "killed"
+    assert second_payload["hard_runtime_verifier_budget_adjustment"] == {
+        "reason": "repeated_silent_runtime_artifact_verifier",
+        "auto_poll_seconds": 0.01,
+    }
+    assert second_payload["duration_seconds"] < first_payload["duration_seconds"]
+
+
+def test_implement_v2_keeps_normal_auto_poll_for_repeated_verifier_with_output(tmp_path) -> None:
+    calls = {"count": 0}
+    silent_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(5)",
+        ]
+    )
+    noisy_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; print('booted', flush=True); time.sleep(5)",
+        ]
+    )
+
+    def fake_model(*_args, **_kwargs):
+        calls["count"] += 1
+        attempt = calls["count"]
+        return {
+            "summary": f"run runtime verifier attempt {attempt}",
+            "tool_calls": [
+                {
+                    "provider_call_id": f"call-{attempt}",
+                    "tool_name": "run_command",
+                    "arguments": {
+                        "command": silent_command if attempt == 1 else noisy_command,
+                        "cwd": ".",
+                        "timeout": 10,
+                        "foreground_budget_seconds": 0.02,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verify",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "retry verifier"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Build the provided source project for an emulator runtime interpreter "
+                    "that must write frame.bmp."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "active_command_auto_poll_seconds": 0.2,
+                "hard_runtime_repeated_no_progress_auto_poll_seconds": 0.01,
+                "hard_runtime_verifier_no_progress_seconds": 0,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    second_payload = tool_results[1]["content"][0]
+
+    assert calls["count"] == 2
+    assert second_payload["status"] == "killed"
+    assert second_payload["stdout_tail"].strip() == "booted"
+    assert "hard_runtime_verifier_budget_adjustment" not in second_payload
+    assert second_payload["reason"] == "implement_v2 verifier auto-poll budget exhausted before terminal evidence"
+
+
 def test_implement_v2_fast_cancel_treats_unchanged_existing_artifact_as_no_progress(tmp_path) -> None:
     (tmp_path / "frame.bmp").write_text("stale", encoding="utf-8")
     command = shlex.join(

@@ -899,6 +899,7 @@ def run_live_json_implement_v2(
                 exec_runtime=exec_runtime,
                 lane_input=lane_input,
                 run_started=run_started,
+                prior_tool_results=tuple(tool_results),
             )
             if auto_poll_chunk:
                 auto_poll_payloads += auto_poll_chunk
@@ -1922,13 +1923,26 @@ def _auto_poll_yielded_verifier_commands(
     exec_runtime: ImplementV2ManagedExecRuntime,
     lane_input: ImplementLaneInput,
     run_started: float,
+    prior_tool_results: tuple[ToolResultEnvelope, ...] = (),
 ) -> tuple[dict[str, object], ...]:
-    if not any(_is_auto_pollable_yielded_verifier_result(result) for result in tool_results):
+    yielded_verifier_results = tuple(
+        result for result in tool_results if _is_auto_pollable_yielded_verifier_result(result)
+    )
+    if not yielded_verifier_results:
         return ()
     budget = _active_command_auto_poll_budget_seconds(lane_input, run_started=run_started)
+    repeat_budget = _hard_runtime_repeated_no_progress_verifier_auto_poll_budget_seconds(
+        lane_input,
+        yielded_verifier_results,
+        prior_tool_results=prior_tool_results,
+    )
+    if repeat_budget is not None:
+        budget = min(budget, repeat_budget)
     if budget <= 0:
         return ()
     payloads = exec_runtime.poll_active_commands(wait_seconds=budget)
+    if repeat_budget is not None:
+        payloads = _annotate_hard_runtime_repeated_no_progress_budget(payloads, repeat_budget=repeat_budget)
     terminal_payloads = tuple(payload for payload in payloads if _is_terminal_auto_poll_payload(payload))
     if terminal_payloads:
         return terminal_payloads
@@ -1936,16 +1950,125 @@ def _auto_poll_yielded_verifier_commands(
         if is_hard_runtime_artifact_task(lane_input.task_contract) and any(
             _hard_runtime_verifier_payload_has_no_progress(payload, lane_input=lane_input) for payload in payloads
         ):
-            return exec_runtime.cancel_active_commands(
-                reason=(
-                    "implement_v2 hard-runtime verifier had no observable output "
-                    "or expected-artifact progress after auto-poll budget"
-                )
+            return _annotate_hard_runtime_repeated_no_progress_budget(
+                exec_runtime.cancel_active_commands(
+                    reason=(
+                        "implement_v2 hard-runtime verifier had no observable output "
+                        "or expected-artifact progress after auto-poll budget"
+                    )
+                ),
+                repeat_budget=repeat_budget,
             )
-        return exec_runtime.cancel_active_commands(
-            reason="implement_v2 verifier auto-poll budget exhausted before terminal evidence"
+        return _annotate_hard_runtime_repeated_no_progress_budget(
+            exec_runtime.cancel_active_commands(
+                reason="implement_v2 verifier auto-poll budget exhausted before terminal evidence"
+            ),
+            repeat_budget=repeat_budget,
         )
     return ()
+
+
+def _annotate_hard_runtime_repeated_no_progress_budget(
+    payloads: tuple[dict[str, object], ...],
+    *,
+    repeat_budget: float | None,
+) -> tuple[dict[str, object], ...]:
+    if repeat_budget is None:
+        return payloads
+    return tuple(
+        {
+            **payload,
+            "hard_runtime_verifier_budget_adjustment": {
+                "reason": "repeated_silent_runtime_artifact_verifier",
+                "auto_poll_seconds": round(repeat_budget, 3),
+            },
+        }
+        for payload in payloads
+    )
+
+
+def _hard_runtime_repeated_no_progress_verifier_auto_poll_budget_seconds(
+    lane_input: ImplementLaneInput,
+    yielded_verifier_results: tuple[ToolResultEnvelope, ...],
+    *,
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> float | None:
+    if not is_hard_runtime_artifact_task(lane_input.task_contract):
+        return None
+    if not prior_tool_results:
+        return None
+    current_identities: set[str] = set()
+    for result in yielded_verifier_results:
+        payload = _first_result_payload(result)
+        if not _hard_runtime_verifier_payload_has_no_progress(payload, lane_input=lane_input):
+            continue
+        current_identities.update(_runtime_expected_artifact_identities(payload, lane_input))
+    if not current_identities:
+        return None
+    for prior in prior_tool_results:
+        payload = _first_result_payload(prior)
+        if not _is_silent_hard_runtime_artifact_no_progress_payload(payload):
+            continue
+        prior_identities = _runtime_failed_artifact_identities(payload, lane_input)
+        if current_identities.intersection(prior_identities):
+            return _hard_runtime_repeated_no_progress_auto_poll_seconds(lane_input)
+    return None
+
+
+def _runtime_expected_artifact_identities(
+    payload: dict[str, object],
+    lane_input: ImplementLaneInput,
+) -> frozenset[str]:
+    identities = []
+    for artifact in _expected_artifacts_from_payload(payload):
+        path = str(getattr(artifact, "path", "") or getattr(artifact, "target", {}).get("path", "") or "").strip()
+        try:
+            path = str(
+                _resolve_artifact_path(
+                    artifact,
+                    workspace=lane_input.workspace,
+                    allowed_roots=_allowed_read_roots(lane_input),
+                )
+            )
+        except (OSError, ValueError):
+            pass
+        identity = _frontier_artifact_identity(path)
+        if identity:
+            identities.append(identity)
+    return frozenset(identities)
+
+
+def _runtime_failed_artifact_identities(
+    payload: dict[str, object],
+    lane_input: ImplementLaneInput,
+) -> frozenset[str]:
+    identities = []
+    artifact_path = _runtime_artifact_failure_path(payload, None)
+    if artifact_path:
+        identities.append(_frontier_artifact_identity(artifact_path))
+    identities.extend(_runtime_expected_artifact_identities(payload, lane_input))
+    return frozenset(identity for identity in identities if identity)
+
+
+def _is_silent_hard_runtime_artifact_no_progress_payload(payload: dict[str, object]) -> bool:
+    reason = str(payload.get("reason") or "").strip().lower()
+    if "hard-runtime verifier had no observable output" not in reason:
+        return False
+    if _payload_has_observable_command_output(payload):
+        return False
+    structured = _structured_failure_classification(payload)
+    failure_class = str(structured.get("class") or structured.get("failure_class") or "").strip()
+    failure_kind = str(structured.get("kind") or "").strip()
+    return _structured_failure_is_runtime_artifact_missing(failure_class, failure_kind)
+
+
+def _hard_runtime_repeated_no_progress_auto_poll_seconds(lane_input: ImplementLaneInput) -> float:
+    configured = lane_input.lane_config.get("hard_runtime_repeated_no_progress_auto_poll_seconds")
+    try:
+        seconds = float(configured) if configured not in (None, "") else 5.0
+    except (TypeError, ValueError):
+        seconds = 5.0
+    return max(0.0, min(30.0, seconds))
 
 
 def _is_auto_pollable_yielded_verifier_result(result: ToolResultEnvelope) -> bool:
