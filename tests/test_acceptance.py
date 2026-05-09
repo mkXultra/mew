@@ -4,6 +4,7 @@ from mew.acceptance import (
     coerce_acceptance_checks,
     exact_command_example_requirements,
     extract_acceptance_constraints,
+    finish_continuation_prompt,
     implementation_contract_source_requirements,
     is_long_dependency_toolchain_build_task,
     is_model_inference_output_task,
@@ -539,6 +540,71 @@ def test_resolve_typed_finish_accepts_string_evidence_refs():
     )
 
     assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_accepts_command_run_id_alias_for_covering_events():
+    bundle = OracleBundle(
+        id="oracle:bundle:runtime-frame",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="execution_contract",
+            ),
+            OracleObligation(
+                id="oracle:contract:verify:verifier_pass",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="execution_contract",
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.bmp"},
+        refs=({"kind": "command_run", "id": "cmd:final-verifier"},),
+        contract_id="contract:verify",
+        command_run_id="cmd:final-verifier",
+    )
+    verifier_event = EvidenceEvent(
+        id="ev:verifier:final",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:verify"},
+        refs=({"kind": "command_run", "id": "cmd:final-verifier"},),
+        contract_id="contract:verify",
+        command_run_id="cmd:final-verifier",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=({"kind": "command_run", "id": "cmd:final-verifier"},),
+        ),
+        bundle,
+        (artifact_event, verifier_event),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_finish_continuation_prompt_points_visual_quality_to_task_verifiers():
+    prompt = finish_continuation_prompt(
+        [
+            "runtime visual artifact quality evidence ungrounded: artifact existence, "
+            "nonzero pixels, valid headers, or self-consistent dimensions are not enough"
+        ]
+    )
+
+    assert "task-provided verifier/test/reference artifacts" in prompt
+    assert "expected-output markers" in prompt
+    assert "Do not rely on artifact existence" in prompt
 
 
 def test_resolve_typed_finish_allows_latest_same_contract_verifier_pass_after_failure():

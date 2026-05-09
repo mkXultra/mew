@@ -342,11 +342,11 @@ reentry that assumes HOT_PATH_COLLAPSE is done as drift.
 |---|---|---|
 | Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist. `docs/M6_24_HOT_PATH_PHASE0_BASELINE.json` now records the required Phase 0 baseline fields, and `scripts/check_implement_v2_hot_path.py` uses baseline-relative sidecar caps by default. The `20260510-005032` artifact confirms the resident-sidecar compaction is effective: total `269,166` bytes and per-turn growth `29,907` bytes, both green against Phase 0 caps. Still partial until the next changed artifact also stays green/yellow without widening model-visible state. |
 | Phase 1 prompt collapse | partial | Default prompt no longer relies on normal-prompt `frontier_state_update`, and fastcheck checks for prompt leaks. Compact `active_work_todo` / evidence / frontier projection still needs repeated proof that it stays small and sidecar-backed. The `20260510-001638` diagnostic showed a generic hard-runtime task-contract gap: the model substituted a host-native source build for the requested supplied-runtime artifact path. The current repair belongs in the small hard-runtime prompt/profile contract, not a new frontier. |
-| Phase 2 latest actionable failure | incomplete/active | Projection/reducer code exists. Two consecutive `make-mips-interpreter` artifacts passed `latest_actionable_failure_shape` after raw structured failure projection and raw tool `failure_class` projection. The `20260510-014201` same-shape diagnostic exposed the next Phase 2 bug: failed runtime verifiers with concrete stdout/stderr were projected as artifact-primary, pushing the model toward synthetic artifact fallback instead of latest runtime-failure repair. The active repair is to keep terminal semantic runtime failures primary over secondary artifact misses, and to normalize `{"kind": "file"}` artifact checks as a real `kind` check. |
+| Phase 2 latest actionable failure | incomplete/active | Projection/reducer code exists and has moved through runtime-primary, concrete terminal-diagnostic, and killed/no-output projection repairs. The `20260510-064431` same-shape diagnostic confirms the latest failure is now concrete (`FileNotFoundError: ... doomgeneric/doomgeneric.h`) rather than generic killed/exit-code text. Remaining Phase 2 work is to keep this green after the finish-recovery repair and the next same-shape diagnostic, without adding task-specific MIPS/VM rules. |
 | Phase 3 sidecar-inferred execution contracts | incomplete | Execution-contract and sidecar concepts exist, but cheap-probe versus execution-contract separation is not fully proven. Do not treat probe evidence as finish/runtime proof without a phase-specific fastcheck pass. |
 | Phase 4 patch/edit as mutation boundary | partial | Source mutation, first-write readiness, post-write verifier gates, and `write_file content_lines` for large generated source exist. The `20260510-001638` diagnostic confirmed the first large `vm.js` write used `content_lines` and succeeded. Shell mutation, source-root tracking, and tool-result projection have still produced fixes, so this remains open until replay/tool-lab/fastcheck stop finding boundary bugs. |
-| Phase 5 finish cited evidence | partial | Typed-evidence acceptance and visual/runtime finish gates are substantially implemented. Legacy/string gates and sidecar merge behavior still act as guardrails; do not remove or close until typed evidence proves equivalent or stricter coverage. |
-| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The `20260510-005032` step-shape improved first edit to `121s` and kept the supplied runtime artifact path; the runtime-artifact plateau fingerprint repair then allowed the `20260510-011219` rerun to continue to `14` model turns with `runtime_artifact_failure_plateau={}` and green fastcheck. The auto-poll repair was committed in `9fb63c5`, but the `20260510-014201` same-shape rerun did not exercise it (`active_command_auto_poll_count=0`) because verifier commands exited quickly. The active gap moved back to Phase 2 evidence projection: runtime stderr/stdout must stay primary over secondary artifact misses. The close path remains: focused UT -> replay/dogfood/emulator -> HOT_PATH fastcheck -> one same-shape 10min step-shape -> reference-step comparison. |
+| Phase 5 finish cited evidence | active/partial | Typed-evidence acceptance and visual/runtime finish gates are substantially implemented. The `20260510-064431` diagnostic exposed a finish-recovery shape issue: a raw `command_run` id was invalid as a typed evidence ref, then the visual-quality blocker pushed the model toward a self-authored verifier instead of task-provided tests/reference/expected-output markers. The current reviewed repair resolves safe raw evidence aliases to typed events and tightens the visual-quality recovery prompt. Legacy/string gates remain guardrails; do not remove or close until typed evidence proves equivalent or stricter coverage. |
+| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The `20260510-064431` step-shape reached a real frame-producing verifier and preserved concrete latest-failure projection, but still scored `0.0` because external quality expectations were unmet and finish recovery selected a weak follow-up verifier. The close path remains: focused UT -> replay/dogfood/emulator/HOT_PATH fastcheck -> exactly one same-shape 10min step-shape -> reference-step comparison. |
 
 Phase implementation order:
 
@@ -363,15 +363,16 @@ Phase implementation order:
    should not be expanded while latest-actionable-failure projection is still
    unreliable.
 
-Immediate next action for this phase: commit the reviewed generic hard-runtime
-auto-poll repair. Codex-ultra review session
-`019e0d98-8276-7770-bb07-4e60f1d19117` approved it as managed-exec lifecycle
-behavior rather than task-specific logic, and focused/full implement-lane tests,
-HOT_PATH fastcheck, ruff, and diff-check pass. After the commit, run one same-
-shape `make-mips-interpreter` `step-check-10min` on current head and compare
-whether the final verifier reaches terminal/artifact evidence instead of the
-premature no-progress kill observed in `20260510-011219`. Do not run `speed_1`
-/ `proof_5` before that fresh step-shape comparison loop.
+Immediate next action for this phase: commit the reviewed finish-alias /
+visual-quality recovery repair. Codex-ultra review session
+`019e0ec7-1b58-7a52-8d7e-5620232d10b3` approved it as generic and not
+task-specific; focused acceptance/implement-lane/execution-evidence tests,
+combined acceptance+implement-lane tests, HOT_PATH fastcheck on `064431`, ruff,
+and diff-check pass. After the commit, run exactly one same-shape
+`make-mips-interpreter` `step-check-10min` on current head and compare whether
+finish recovery first inspects or runs task-provided oracle surfaces instead of
+inventing a weak artifact smoke. Do not run `speed_1` / `proof_5` before that
+fresh step-shape comparison loop.
 
 ## Historical Evidence
 

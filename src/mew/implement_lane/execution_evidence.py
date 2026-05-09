@@ -1330,7 +1330,6 @@ def resolve_typed_finish(
     if claim.outcome not in {"completed", "task_complete", "done", "success"}:
         return DoneDecision(decision="allow_complete", gate_source="typed_evidence")
     events = tuple(_evidence_event(event) for event in evidence_events)
-    event_by_id = {event.id: event for event in events}
     cited_ids = tuple(dict.fromkeys(_finish_claim_ref_ids(claim)))
     if not cited_ids:
         return _typed_block(
@@ -1338,14 +1337,15 @@ def resolve_typed_finish(
             message="Finish must cite typed evidence_refs for required oracle obligations.",
             missing_obligations=tuple(obligation.as_dict() for obligation in bundle.obligations if obligation.required),
         )
-    invalid = tuple({"id": event_id, "reason": "not_found"} for event_id in cited_ids if event_id not in event_by_id)
+    event_by_alias = _evidence_events_by_finish_ref_alias(events)
+    invalid = tuple({"id": event_id, "reason": "not_found"} for event_id in cited_ids if event_id not in event_by_alias)
     if invalid:
         return _typed_block(
             code="invalid_typed_evidence_ref",
             message="Finish cited typed evidence ids that do not exist.",
             invalid_evidence_refs=invalid,
         )
-    cited_events = tuple(event_by_id[event_id] for event_id in cited_ids)
+    cited_events = _resolve_cited_evidence_events(cited_ids, event_by_alias)
     failed_refs = tuple(_failed_event_ref(event) for event in cited_events if event.status in {"failed", "partial", "unknown"})
     if failed_refs:
         return _typed_block(
@@ -1373,6 +1373,75 @@ def resolve_typed_finish(
             failed_evidence_refs=tuple(failed),
         )
     return DoneDecision(decision="allow_complete", gate_source="typed_evidence")
+
+
+def _evidence_events_by_finish_ref_alias(events: tuple[EvidenceEvent, ...]) -> dict[str, tuple[EvidenceEvent, ...]]:
+    aliases: dict[str, list[EvidenceEvent]] = {}
+    for event in events:
+        for alias in _finish_ref_aliases_for_event(event):
+            aliases.setdefault(alias, []).append(event)
+    return {alias: tuple(_dedupe_events(items)) for alias, items in aliases.items()}
+
+
+def _resolve_cited_evidence_events(
+    cited_ids: tuple[str, ...],
+    event_by_alias: Mapping[str, tuple[EvidenceEvent, ...]],
+) -> tuple[EvidenceEvent, ...]:
+    resolved: list[EvidenceEvent] = []
+    seen: set[str] = set()
+    for cited_id in cited_ids:
+        for event in event_by_alias.get(cited_id, ()):
+            if event.id in seen:
+                continue
+            seen.add(event.id)
+            resolved.append(event)
+    return tuple(resolved)
+
+
+def _dedupe_events(events: list[EvidenceEvent]) -> list[EvidenceEvent]:
+    deduped: list[EvidenceEvent] = []
+    seen: set[str] = set()
+    for event in events:
+        if event.id in seen:
+            continue
+        seen.add(event.id)
+        deduped.append(event)
+    return deduped
+
+
+def _finish_ref_aliases_for_event(event: EvidenceEvent) -> tuple[str, ...]:
+    aliases = [event.id]
+    for value in (
+        event.command_run_id,
+        event.tool_run_record_id,
+        event.provider_call_id,
+        event.tool_call_id,
+        event.obligation_id,
+        event.oracle_id,
+    ):
+        alias = _safe_finish_ref_alias(value)
+        if alias:
+            aliases.append(alias)
+    for ref in event.refs:
+        if not isinstance(ref, Mapping):
+            continue
+        alias = _safe_finish_ref_alias(ref.get("id") or ref.get("evidence_id") or ref.get("ref"))
+        if alias:
+            aliases.append(alias)
+    return tuple(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def _safe_finish_ref_alias(value: object) -> str:
+    alias = str(value or "").strip()
+    if not alias:
+        return ""
+    if alias.startswith("ev:"):
+        return alias
+    if alias.isalpha() or alias.isdigit():
+        return ""
+    if not any(char in alias for char in (":", "/", "-", "_")):
+        return ""
+    return alias
 
 
 def recommend_finish_evidence_refs(

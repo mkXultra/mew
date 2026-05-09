@@ -3272,12 +3272,22 @@ def finish_continuation_prompt(blockers: list[object]) -> str:
     if not reasons:
         return ""
     bullets = "\n".join(f"- {reason}" for reason in reasons[:8])
+    next_action = (
+        "run the smallest read, diff, verifier, or artifact-smoke command that directly proves "
+        "the missing acceptance item, then cite its tool id in acceptance_checks evidence_refs or evidence text."
+    )
+    if any(finish_blocker_code(reason) == "runtime_visual_artifact_quality_evidence" for reason in reasons):
+        next_action = (
+            "first inspect task-provided verifier/test/reference artifacts or expected-output markers when available, "
+            "then run the smallest terminal command that checks those external expectations. Do not rely on artifact "
+            "existence, header validity, or size alone; cite the completed grounding tool in acceptance_checks "
+            "evidence_refs or evidence text."
+        )
     return (
         "Finish was blocked by the deterministic done gate. Continue the same task; "
         "do not mark task_done=true until each blocker is repaired with terminal tool evidence.\n"
         f"{bullets}\n"
-        "Next action: run the smallest read, diff, verifier, or artifact-smoke command that directly proves "
-        "the missing acceptance item, then cite its tool id in acceptance_checks evidence_refs or evidence text."
+        f"Next action: {next_action}"
     )
 
 
