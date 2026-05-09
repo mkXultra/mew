@@ -158,6 +158,44 @@ _SOURCE_OUTPUT_CONTRACT_CONTEXT_MARKERS = frozenset(
         "written",
     }
 )
+_SOURCE_OUTPUT_PROBE_PATH_HINTS = frozenset(
+    {
+        "artifact",
+        "bmp",
+        "canvas",
+        "draw",
+        "export",
+        "frame",
+        "image",
+        "img",
+        "output",
+        "paint",
+        "render",
+        "result",
+        "screen",
+        "snapshot",
+        "video",
+        "write",
+    }
+)
+_SOURCE_OUTPUT_PROBE_NEGATIVE_PATH_HINTS = frozenset(
+    {
+        "license",
+        "readme",
+        "changelog",
+        "copying",
+        "fixture",
+        "fixtures",
+        "expected",
+        "golden",
+        "snapshot",
+    }
+)
+_SOURCE_LOCATION_RE = re.compile(
+    r"(?P<path>(?:\.{0,2}/)?[A-Za-z0-9._@%+=:,~/-]+\."
+    r"(?:c|cc|cpp|cxx|h|hpp|hh|rs|go|py|js|ts|java|kt|swift|zig|s|asm|wat|json|ya?ml|toml))"
+    r"(?::\d+)?"
+)
 _HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT = 4
 _IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS = 0.001
 _IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS = (0.0,)
@@ -3396,12 +3434,27 @@ def _deep_runtime_prewrite_probe_gate_result(
         return None
     missing = _prewrite_missing_category_labels(readiness)
     missing_text = ", ".join(missing) if missing else "required hard-runtime probe categories"
+    missing_probe = _deep_runtime_prewrite_missing_probe(
+        lane_input=lane_input,
+        readiness=readiness,
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+    )
     target_paths = _active_work_todo_target_paths(active_work_todo_state) if active_work_todo_state else []
     if not target_paths:
         write_path = _write_call_path(call)
         if write_path:
             target_paths = [write_path]
     target_text = ", ".join(str(path) for path in target_paths[:3] if str(path).strip()) or "the target source"
+    next_probe_text = _frontier_clip_text(missing_probe.get("required_next_probe"), limit=400)
+    extra_content = dict(missing_probe)
+    if next_probe_text:
+        extra_content["latest_failure"] = {
+            "failure_class": "prewrite_probe_missing_coverage",
+            "failure_kind": str(missing_probe.get("failure_kind") or "deep_runtime_probe_missing"),
+            "summary": next_probe_text,
+            "required_next_probe": next_probe_text,
+        }
     return build_invalid_tool_result(
         call,
         reason=(
@@ -3411,8 +3464,186 @@ def _deep_runtime_prewrite_probe_gate_result(
             "For emulator/interpreter/runtime-artifact tasks, inspect source/output contract, binary layout, "
             "entry or symbols, host interfaces/hooks, and feature/disassembly/API shape "
             f"around {target_text} before writing."
+            + (f" Required next probe: {next_probe_text}." if next_probe_text else "")
         ),
+        extra_content=extra_content,
     )
+
+
+def _deep_runtime_prewrite_missing_probe(
+    *,
+    lane_input: ImplementLaneInput,
+    readiness: dict[str, object],
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    missing_categories = {str(category) for category in readiness.get("missing_categories") or ()}
+    if missing_categories != {"source_output_contract"}:
+        return {}
+    candidate = _source_output_contract_probe_candidate_from_trace(
+        lane_input=lane_input,
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+    )
+    if not candidate:
+        return {}
+    path = _frontier_clip_text(candidate.get("path"), limit=240)
+    if not path:
+        return {}
+    required_next_probe = f"read_file {path} to confirm the source-declared output artifact before writing"
+    return _drop_empty_frontier_values(
+        {
+            "failure_class": "prewrite_probe_missing_coverage",
+            "failure_subclass": "deep_runtime_source_output_contract_missing",
+            "failure_kind": "source_output_contract_missing",
+            "required_next_probe": required_next_probe,
+            "suggested_next_probe": {
+                "tool": "read_file",
+                "arguments": {"path": path},
+                "reason": "missing source/output contract before first source mutation",
+                "source_provider_call_id": candidate.get("provider_call_id"),
+                "source_tool": candidate.get("tool_name"),
+                "confidence": candidate.get("confidence") or "medium",
+            },
+        }
+    )
+
+
+def _source_output_contract_probe_candidate_from_trace(
+    *,
+    lane_input: ImplementLaneInput,
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    already_read = {
+        _frontier_artifact_identity(_workspace_relative_target_path(_read_call_path(call), workspace=lane_input.workspace))
+        for call, result in zip(prior_tool_calls, prior_tool_results)
+        if str(getattr(call, "tool_name", "") or result.tool_name or "") == "read_file" and result.status == "completed"
+    }
+    candidates: list[dict[str, object]] = []
+    for call, result in zip(prior_tool_calls, prior_tool_results):
+        if result.status != "completed":
+            continue
+        tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
+        if tool_name not in {"glob", "inspect_dir", "search_text", "run_command", "run_tests"}:
+            continue
+        payload = next((item for item in result.content if isinstance(item, dict)), {})
+        if not payload:
+            continue
+        context_text = _source_output_probe_context_text(tool_name, call, payload)
+        for path in _source_output_probe_paths_from_payload(tool_name, payload):
+            relative_path = _workspace_relative_target_path(path, workspace=lane_input.workspace)
+            normalized = _frontier_artifact_identity(relative_path)
+            if not normalized or normalized in already_read:
+                continue
+            score = _source_output_probe_candidate_score(normalized, context_text=context_text, tool_name=tool_name)
+            if score <= 0:
+                continue
+            candidates.append(
+                {
+                    "path": _frontier_clip_text(normalized, limit=240),
+                    "score": score,
+                    "provider_call_id": str(getattr(call, "provider_call_id", "") or result.provider_call_id or ""),
+                    "tool_name": tool_name,
+                    "confidence": "high" if score >= 6 else "medium",
+                }
+            )
+    if not candidates:
+        return {}
+    return max(candidates, key=lambda item: (int(item.get("score") or 0), -len(str(item.get("path") or ""))))
+
+
+def _source_output_probe_context_text(tool_name: str, call: object, payload: dict[str, object]) -> str:
+    arguments = getattr(call, "arguments", {})
+    argument_text = json.dumps(arguments, sort_keys=True, default=str) if isinstance(arguments, dict) else str(arguments)
+    chunks = [tool_name, argument_text]
+    for text, _source_label in _source_output_contract_texts(tool_name, payload):
+        chunks.append(text)
+    return "\n".join(chunks).casefold()
+
+
+def _source_output_probe_paths_from_payload(tool_name: str, payload: dict[str, object]) -> tuple[str, ...]:
+    paths: list[str] = []
+    for nested in _source_output_contract_payload_items(payload):
+        if tool_name == "glob":
+            for key in ("matches", "paths", "entries"):
+                paths.extend(_source_output_probe_paths_from_value(nested.get(key)))
+        elif tool_name == "inspect_dir":
+            base = str(nested.get("path") or "").strip()
+            for entry in _source_output_probe_paths_from_value(nested.get("entries")):
+                paths.append(str(PurePosixPath(base) / entry) if base and not PurePosixPath(entry).is_absolute() else entry)
+        elif tool_name == "search_text":
+            for key in ("matches", "snippets", "text", "summary"):
+                paths.extend(_source_output_probe_paths_from_value(nested.get(key)))
+        elif tool_name in {"run_command", "run_tests"}:
+            for key in ("stdout", "stdout_tail", "stderr", "stderr_tail", "summary"):
+                paths.extend(_source_output_probe_paths_from_value(nested.get(key)))
+    unique: list[str] = []
+    for path in paths:
+        clean = _source_output_probe_clean_path(path)
+        if clean and clean not in unique:
+            unique.append(clean)
+    return tuple(unique)
+
+
+def _source_output_probe_paths_from_value(value: object) -> tuple[str, ...]:
+    if value in (None, "", [], {}):
+        return ()
+    if isinstance(value, dict):
+        paths: list[str] = []
+        for key in ("path", "file", "filename", "name"):
+            if value.get(key):
+                paths.append(str(value.get(key)))
+        for key in ("text", "line", "content", "snippet", "match", "summary"):
+            paths.extend(_source_output_probe_paths_from_value(value.get(key)))
+        return tuple(paths)
+    if isinstance(value, (list, tuple)):
+        paths: list[str] = []
+        for item in value:
+            paths.extend(_source_output_probe_paths_from_value(item))
+        return tuple(paths)
+    text = str(value or "")
+    paths = [match.group("path") for match in _SOURCE_LOCATION_RE.finditer(text)]
+    if not paths and _shell_path_is_source_like(text):
+        paths.append(text)
+    return tuple(paths)
+
+
+def _source_output_probe_clean_path(path: object) -> str:
+    text = str(path or "").strip().strip("'\"`")
+    if not text:
+        return ""
+    text = re.sub(r":\d+(?::\d+)?$", "", text)
+    text = text.rstrip(",;:)]}")
+    if not text or text.startswith(("-", "$")):
+        return ""
+    if text.startswith(("/tmp/", "tmp/")):
+        return ""
+    return text
+
+
+def _source_output_probe_candidate_score(path: str, *, context_text: str, tool_name: str) -> int:
+    if not _shell_path_is_source_like(path):
+        return 0
+    lowered_path = path.casefold()
+    name = PurePosixPath(lowered_path).name
+    parts = set(PurePosixPath(lowered_path).parts)
+    score = 1
+    if any(hint in lowered_path for hint in _SOURCE_OUTPUT_PROBE_PATH_HINTS):
+        score += 4
+    if any(hint in context_text for hint in _SOURCE_OUTPUT_CONTRACT_CONTEXT_MARKERS):
+        score += 2
+    if any(part in {"src", "source", "lib", "include", "app", "apps"} for part in parts):
+        score += 1
+    if tool_name in {"glob", "inspect_dir", "search_text"}:
+        score += 3
+    if "/" in lowered_path:
+        score += 1
+    elif tool_name in {"run_command", "run_tests"}:
+        score -= 2
+    if any(hint in name or hint in parts for hint in _SOURCE_OUTPUT_PROBE_NEGATIVE_PATH_HINTS):
+        score -= 4
+    return score
 
 
 def _model_visible_tool_specs_for_turn(

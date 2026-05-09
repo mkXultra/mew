@@ -153,9 +153,17 @@ def validate_proof_manifest_write_safety(manifest) -> PairingValidationResult:
     )
 
 
-def build_invalid_tool_result(call: ToolCallEnvelope, *, reason: str) -> ToolResultEnvelope:
+def build_invalid_tool_result(
+    call: ToolCallEnvelope,
+    *,
+    reason: str,
+    extra_content: dict[str, object] | None = None,
+) -> ToolResultEnvelope:
     """Build the paired model-visible invalid result for a rejected call."""
 
+    content: dict[str, object] = {"reason": reason}
+    if extra_content:
+        content.update({str(key): value for key, value in extra_content.items() if value not in (None, "", [], {})})
     return ToolResultEnvelope(
         lane_attempt_id=call.lane_attempt_id,
         provider_call_id=call.provider_call_id,
@@ -163,7 +171,7 @@ def build_invalid_tool_result(call: ToolCallEnvelope, *, reason: str) -> ToolRes
         tool_name=call.tool_name,
         status="invalid",
         is_error=True,
-        content=({"reason": reason},),
+        content=(content,),
     )
 
 

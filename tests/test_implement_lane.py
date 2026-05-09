@@ -42,6 +42,7 @@ from mew.implement_lane.v2_runtime import (
     _call_model_turn,
     _command_has_verifier_surface,
     _deep_runtime_prewrite_probe_readiness,
+    _deep_runtime_prewrite_missing_probe,
     _finish_acceptance_action,
     _finish_evidence_refs,
     _finish_gate_history,
@@ -60,6 +61,7 @@ from mew.implement_lane.v2_runtime import (
     _render_prompt_history_json,
     _shell_command_may_mutate_source_tree,
     _source_output_contract_from_tool_results,
+    _source_output_contract_probe_candidate_from_trace,
     _source_mutation_roots,
     _terminal_failure_reaction_turn_limit,
     _typed_finish_evidence_refs,
@@ -1125,6 +1127,236 @@ def test_implement_v2_blocks_hard_runtime_write_before_deep_prewrite_probe_budge
     assert readiness["first_write_due"] is False
     assert readiness["first_write_attempt_tool"] == "write_file"
     assert "first_source_mutation_turn" not in readiness
+
+
+def test_implement_v2_prewrite_block_suggests_source_output_read_from_prior_glob(tmp_path) -> None:
+    (tmp_path / "doomgeneric_mips").write_bytes(b"\x7fELFfake")
+    source_dir = tmp_path / "doomgeneric" / "doomgeneric"
+    source_dir.mkdir(parents=True)
+    (source_dir / "doomgeneric_img.c").write_text("void DG_DrawFrame(void) {}\n", encoding="utf-8")
+    probe_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "print('file readelf ELF little endian main symbol syscall hook api "
+                "open read write opcode instruction')"
+            ),
+        ]
+    )
+    outputs = [
+        {
+            "summary": "find cheap source/runtime surfaces",
+            "tool_calls": [
+                {"id": "probe-sources", "name": "glob", "arguments": {"path": ".", "pattern": "doomgeneric/**/*"}},
+                {"id": "probe-binary", "name": "run_command", "arguments": {"command": probe_command, "cwd": "."}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "write before source output contract read",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "module.exports = {}\n"},
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "blocked before source output read"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-hard-runtime",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+            },
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+                "first_write_probe_threshold": 2,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    write_result = next(item for item in tool_results if item["provider_call_id"] == "write-vm")
+    payload = write_result["content"][0]
+
+    assert result.status == "blocked"
+    assert not (tmp_path / "vm.js").exists()
+    assert write_result["status"] == "invalid"
+    assert payload["failure_subclass"] == "deep_runtime_source_output_contract_missing"
+    assert payload["suggested_next_probe"]["tool"] == "read_file"
+    assert payload["suggested_next_probe"]["arguments"]["path"] == "doomgeneric/doomgeneric/doomgeneric_img.c"
+    assert "read_file doomgeneric/doomgeneric/doomgeneric_img.c" in payload["required_next_probe"]
+    assert payload["latest_failure"]["failure_kind"] == "source_output_contract_missing"
+
+
+def test_implement_v2_source_output_probe_candidate_reads_inspect_dir_entry_names(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+    )
+    call = ToolCallEnvelope(
+        lane_attempt_id="implement_v2:ws-1:task-hard-runtime:full",
+        provider="test",
+        provider_call_id="inspect-source-dir",
+        mew_tool_call_id="mew-inspect-source-dir",
+        tool_name="inspect_dir",
+        arguments={"path": "doomgeneric/doomgeneric"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "path": str(tmp_path / "doomgeneric" / "doomgeneric"),
+                "entries": [
+                    {"name": "LICENSE", "type": "file"},
+                    {"name": "doomgeneric_img.c", "type": "file"},
+                ],
+            },
+        ),
+    )
+
+    candidate = _source_output_contract_probe_candidate_from_trace(
+        lane_input=lane_input,
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+    )
+
+    assert candidate["path"] == "doomgeneric/doomgeneric/doomgeneric_img.c"
+    assert candidate["tool_name"] == "inspect_dir"
+
+
+def test_implement_v2_source_output_probe_candidate_prefers_concrete_glob_path_over_bare_symbol(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+    )
+    glob_call = ToolCallEnvelope(
+        lane_attempt_id="implement_v2:ws-1:task-hard-runtime:full",
+        provider="test",
+        provider_call_id="glob-source",
+        mew_tool_call_id="mew-glob-source",
+        tool_name="glob",
+        arguments={"path": ".", "pattern": "doomgeneric/**/*"},
+        turn_index=1,
+    )
+    shell_call = ToolCallEnvelope(
+        lane_attempt_id=glob_call.lane_attempt_id,
+        provider="test",
+        provider_call_id="strings-probe",
+        mew_tool_call_id="mew-strings-probe",
+        tool_name="run_command",
+        arguments={"command": "strings -a doomgeneric_mips | rg frame"},
+        turn_index=1,
+    )
+    glob_result = ToolResultEnvelope(
+        lane_attempt_id=glob_call.lane_attempt_id,
+        provider_call_id=glob_call.provider_call_id,
+        mew_tool_call_id=glob_call.mew_tool_call_id,
+        tool_name=glob_call.tool_name,
+        status="completed",
+        content=({"matches": [str(tmp_path / "doomgeneric" / "doomgeneric" / "doomgeneric_img.c")]},),
+    )
+    shell_result = ToolResultEnvelope(
+        lane_attempt_id=shell_call.lane_attempt_id,
+        provider_call_id=shell_call.provider_call_id,
+        mew_tool_call_id=shell_call.mew_tool_call_id,
+        tool_name=shell_call.tool_name,
+        status="completed",
+        content=({"stdout": "frame output symbol doomgeneric_img.c\n", "exit_code": 0},),
+    )
+
+    candidate = _source_output_contract_probe_candidate_from_trace(
+        lane_input=lane_input,
+        prior_tool_calls=(glob_call, shell_call),
+        prior_tool_results=(glob_result, shell_result),
+    )
+
+    assert candidate["path"] == "doomgeneric/doomgeneric/doomgeneric_img.c"
+    assert candidate["tool_name"] == "glob"
+
+
+def test_implement_v2_prewrite_missing_probe_waits_until_only_source_output_contract_missing(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+    )
+    call = ToolCallEnvelope(
+        lane_attempt_id="implement_v2:ws-1:task-hard-runtime:full",
+        provider="test",
+        provider_call_id="probe-sources",
+        mew_tool_call_id="mew-probe-sources",
+        tool_name="glob",
+        arguments={"path": ".", "pattern": "doomgeneric/**/*"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=({"matches": [str(tmp_path / "doomgeneric" / "doomgeneric" / "doomgeneric_img.c")]},),
+    )
+
+    missing_probe = _deep_runtime_prewrite_missing_probe(
+        lane_input=lane_input,
+        readiness={"missing_categories": ("source_output_contract", "runtime_binary_layout")},
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+    )
+
+    assert missing_probe == {}
 
 
 def test_implement_v2_allows_hard_runtime_write_after_more_probes_follow_blocked_write(tmp_path) -> None:
