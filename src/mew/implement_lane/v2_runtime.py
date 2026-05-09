@@ -830,6 +830,8 @@ def run_live_json_implement_v2(
                     if prewrite_block is not None:
                         executed_calls.append(capped_call)
                         current_results_list.append(prewrite_block)
+                        prewrite_payload = _first_result_payload(prewrite_block)
+                        prewrite_reason = _frontier_clip_text(prewrite_payload.get("reason"), limit=420)
                         for skipped_call in current_calls[call_index + 1 :]:
                             executed_calls.append(skipped_call)
                             current_results_list.append(
@@ -838,7 +840,8 @@ def run_live_json_implement_v2(
                                     reason=(
                                         "blocked_by_deep_runtime_prewrite_probe_gate: "
                                         f"{capped_call.tool_name}#{capped_call.provider_call_id} "
-                                        "must observe enough cheap source/runtime probes before source mutation"
+                                        "must satisfy the prewrite hard-runtime probe gate before source mutation"
+                                        + (f"; blocker: {prewrite_reason}" if prewrite_reason else "")
                                     ),
                                 )
                             )
@@ -3898,6 +3901,13 @@ def _deep_runtime_prewrite_probe_gate_result(
         return None
     missing = _prewrite_missing_category_labels(readiness)
     missing_text = ", ".join(missing) if missing else "required hard-runtime probe categories"
+    coverage_ready = not tuple(readiness.get("missing_categories") or ())
+    count_ready = probe_count >= threshold
+    reason_code = (
+        "deep_runtime_prewrite_probe_coverage_not_met"
+        if count_ready and not coverage_ready
+        else "deep_runtime_prewrite_probe_budget_not_met"
+    )
     missing_probe = _deep_runtime_prewrite_missing_probe(
         lane_input=lane_input,
         readiness=readiness,
@@ -3914,17 +3924,27 @@ def _deep_runtime_prewrite_probe_gate_result(
     extra_content = dict(missing_probe)
     if next_probe_text:
         extra_content["latest_failure"] = {
-            "failure_class": "prewrite_probe_missing_coverage",
+            "failure_class": reason_code,
             "failure_kind": str(missing_probe.get("failure_kind") or "deep_runtime_probe_missing"),
             "summary": next_probe_text,
             "required_next_probe": next_probe_text,
         }
+    if reason_code == "deep_runtime_prewrite_probe_coverage_not_met":
+        reason_detail = (
+            f"observed {probe_count}/{threshold} cheap source/runtime probes before first source mutation, "
+            f"but remaining required coverage is missing: {missing_text}. "
+            "Do not retry the source mutation until the missing coverage is observed."
+        )
+    else:
+        reason_detail = (
+            f"observed {probe_count}/{threshold} cheap source/runtime probes before first source mutation. "
+            f"Missing coverage: {missing_text}."
+        )
     return build_invalid_tool_result(
         call,
         reason=(
-            "deep_runtime_prewrite_probe_budget_not_met: "
-            f"observed {probe_count}/{threshold} cheap source/runtime probes before first source mutation. "
-            f"Missing coverage: {missing_text}. "
+            f"{reason_code}: "
+            f"{reason_detail} "
             "For emulator/interpreter/runtime-artifact tasks, inspect source/output contract, binary layout, "
             "entry or symbols, host interfaces/hooks, and feature/disassembly/API shape "
             f"around {target_text} before writing."
@@ -3941,33 +3961,122 @@ def _deep_runtime_prewrite_missing_probe(
     prior_tool_calls: tuple[object, ...],
     prior_tool_results: tuple[ToolResultEnvelope, ...],
 ) -> dict[str, object]:
-    missing_categories = {str(category) for category in readiness.get("missing_categories") or ()}
-    if missing_categories != {"source_output_contract"}:
+    missing_categories = tuple(str(category) for category in readiness.get("missing_categories") or ())
+    missing_category_set = set(missing_categories)
+    if not missing_categories:
         return {}
     candidate = _source_output_contract_probe_candidate_from_trace(
         lane_input=lane_input,
         prior_tool_calls=prior_tool_calls,
         prior_tool_results=prior_tool_results,
     )
-    if not candidate:
-        return {}
-    path = _frontier_clip_text(candidate.get("path"), limit=240)
-    if not path:
-        return {}
-    required_next_probe = f"read_file {path} to confirm the source-declared output artifact before writing"
+    if "source_output_contract" in missing_category_set and candidate:
+        path = _frontier_clip_text(candidate.get("path"), limit=240)
+        if path:
+            required_next_probe = f"read_file {path} to confirm the source-declared output artifact before writing"
+            return _drop_empty_frontier_values(
+                {
+                    "failure_class": "prewrite_probe_missing_coverage",
+                    "failure_subclass": "deep_runtime_source_output_contract_missing",
+                    "failure_kind": "source_output_contract_missing",
+                    "required_next_probe": required_next_probe,
+                    "suggested_next_probe": {
+                        "tool": "read_file",
+                        "arguments": {"path": path},
+                        "reason": "missing source/output contract before first source mutation",
+                        "source_provider_call_id": candidate.get("provider_call_id"),
+                        "source_tool": candidate.get("tool_name"),
+                        "confidence": candidate.get("confidence") or "medium",
+                    },
+                }
+            )
+    category = _first_deep_runtime_missing_probe_category(missing_categories)
+    return _deep_runtime_generic_missing_probe(category)
+
+
+def _first_deep_runtime_missing_probe_category(missing_categories: tuple[str, ...]) -> str:
+    for category in _DEEP_RUNTIME_PREWRITE_REQUIRED_CATEGORIES:
+        if category in missing_categories:
+            return category
+    return missing_categories[0] if missing_categories else ""
+
+
+def _deep_runtime_generic_missing_probe(category: str) -> dict[str, object]:
+    label = _DEEP_RUNTIME_PREWRITE_CATEGORY_LABELS.get(category, category)
+    if category == "source_output_contract":
+        required_next_probe = (
+            "run one focused read-only source probe that identifies the expected output artifact, "
+            "acceptance marker, or task-provided verifier target before writing"
+        )
+        suggested_tool = "search_text"
+        suggested_arguments = {
+            "query": "output|artifact|expected|verifier|save|write",
+            "path": ".",
+            "regex": True,
+        }
+    elif category == "runtime_binary_layout":
+        required_next_probe = (
+            "run one focused read-only binary layout probe such as file/readelf/objdump/llvm-readobj "
+            "on the runtime artifact before writing"
+        )
+        suggested_tool = "run_command"
+        suggested_arguments = {
+            "command": "find . -maxdepth 4 -type f -print0 | xargs -0 file | head -80",
+            "cwd": ".",
+        }
+    elif category == "entry_symbol_surface":
+        required_next_probe = (
+            "run one focused read-only entry/symbol probe such as nm/readelf -s/objdump -t "
+            "or inspect the declared entrypoint surface before writing"
+        )
+        suggested_tool = "run_command"
+        suggested_arguments = {
+            "command": (
+                "for f in $(find . -maxdepth 4 -type f | head -40); do "
+                "nm -an \"$f\" 2>/dev/null | head -80 && break; done"
+            ),
+            "cwd": ".",
+        }
+    elif category == "host_interface_surface":
+        required_next_probe = (
+            "run one focused read-only host-interface probe for imports/exports/syscalls/hooks/read/write/open "
+            "or source-level host API usage before writing"
+        )
+        suggested_tool = "search_text"
+        suggested_arguments = {
+            "query": "syscall|hook|api|import|export|open|read|write",
+            "path": ".",
+            "regex": True,
+        }
+    elif category == "implementation_feature_surface":
+        required_next_probe = (
+            "run one focused read-only implementation-feature probe for disassembly/opcodes/bytecode/API shape "
+            "or unsupported operation classes before writing"
+        )
+        suggested_tool = "run_command"
+        suggested_arguments = {
+            "command": (
+                "for f in $(find . -maxdepth 4 -type f | head -40); do "
+                "objdump -d \"$f\" 2>/dev/null | head -200 && break; done"
+            ),
+            "cwd": ".",
+        }
+    else:
+        required_next_probe = f"run one focused read-only probe that covers missing hard-runtime category: {label}"
+        suggested_tool = "run_command"
+        suggested_arguments = {"command": "find . -maxdepth 3 -type f | sort | head -120", "cwd": "."}
     return _drop_empty_frontier_values(
         {
             "failure_class": "prewrite_probe_missing_coverage",
-            "failure_subclass": "deep_runtime_source_output_contract_missing",
-            "failure_kind": "source_output_contract_missing",
+            "failure_subclass": f"deep_runtime_{category or 'unknown'}_missing",
+            "failure_kind": f"{category or 'deep_runtime'}_missing",
+            "missing_category": category,
             "required_next_probe": required_next_probe,
             "suggested_next_probe": {
-                "tool": "read_file",
-                "arguments": {"path": path},
-                "reason": "missing source/output contract before first source mutation",
-                "source_provider_call_id": candidate.get("provider_call_id"),
-                "source_tool": candidate.get("tool_name"),
-                "confidence": candidate.get("confidence") or "medium",
+                "tool": suggested_tool,
+                "arguments": suggested_arguments,
+                "reason": f"missing {label} before first source mutation",
+                "confidence": "medium",
             },
         }
     )
@@ -5181,6 +5290,7 @@ def _invalid_result_is_synthetic_non_observation(result: ToolResultEnvelope) -> 
             "blocked_by_deep_runtime_prewrite_probe_gate",
             "blocked_by_post_first_write_verifier_gate",
             "blocked_by_prior_failed_write_in_same_turn",
+            "deep_runtime_prewrite_probe_coverage_not_met",
             "deep_runtime_prewrite_probe_budget_not_met",
             "post_first_write_verifier_required",
         )

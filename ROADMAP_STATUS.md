@@ -342,11 +342,11 @@ reentry that assumes HOT_PATH_COLLAPSE is done as drift.
 |---|---|---|
 | Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist. `docs/M6_24_HOT_PATH_PHASE0_BASELINE.json` now records the required Phase 0 baseline fields, and `scripts/check_implement_v2_hot_path.py` uses baseline-relative sidecar caps by default. The `20260510-005032` artifact confirms the resident-sidecar compaction is effective: total `269,166` bytes and per-turn growth `29,907` bytes, both green against Phase 0 caps. Still partial until the next changed artifact also stays green/yellow without widening model-visible state. |
 | Phase 1 prompt collapse | partial | Default prompt no longer relies on normal-prompt `frontier_state_update`, and fastcheck checks for prompt leaks. Compact `active_work_todo` / evidence / frontier projection still needs repeated proof that it stays small and sidecar-backed. The `20260510-001638` diagnostic showed a generic hard-runtime task-contract gap: the model substituted a host-native source build for the requested supplied-runtime artifact path. The current repair belongs in the small hard-runtime prompt/profile contract, not a new frontier. |
-| Phase 2 latest actionable failure | incomplete/active | Projection/reducer code exists and has moved through runtime-primary, concrete terminal-diagnostic, and killed/no-output projection repairs. The `20260510-064431` same-shape diagnostic confirms the latest failure is now concrete (`FileNotFoundError: ... doomgeneric/doomgeneric.h`) rather than generic killed/exit-code text. Remaining Phase 2 work is to keep this green after the finish-recovery repair and the next same-shape diagnostic, without adding task-specific MIPS/VM rules. |
+| Phase 2 latest actionable failure | incomplete/monitor | Projection/reducer code exists and has moved through runtime-primary, concrete terminal-diagnostic, killed/no-output, and finish-recovery repairs. The `20260510-071112` same-shape diagnostic did not reach finish, so the latest-failure path was not the immediate blocker; keep Phase 2 monitored by HOT_PATH fastcheck and same-shape diagnostics, but do not add task-specific MIPS/VM rules. |
 | Phase 3 sidecar-inferred execution contracts | incomplete | Execution-contract and sidecar concepts exist, but cheap-probe versus execution-contract separation is not fully proven. Do not treat probe evidence as finish/runtime proof without a phase-specific fastcheck pass. |
-| Phase 4 patch/edit as mutation boundary | partial | Source mutation, first-write readiness, post-write verifier gates, and `write_file content_lines` for large generated source exist. The `20260510-001638` diagnostic confirmed the first large `vm.js` write used `content_lines` and succeeded. Shell mutation, source-root tracking, and tool-result projection have still produced fixes, so this remains open until replay/tool-lab/fastcheck stop finding boundary bugs. |
+| Phase 4 patch/edit as mutation boundary | active/partial | Source mutation, first-write readiness, post-write verifier gates, and `write_file content_lines` for large generated source exist. The `20260510-071112` diagnostic exposed a generic prewrite-gate projection bug: the gate reported `budget_not_met` even after probe count reached `9/8` because one required hard-runtime coverage category was still missing. The active repair separates count readiness from category coverage and surfaces the exact missing read-only probe before allowing first source mutation. |
 | Phase 5 finish cited evidence | active/partial | Typed-evidence acceptance and visual/runtime finish gates are substantially implemented. The `20260510-064431` diagnostic exposed a finish-recovery shape issue: a raw `command_run` id was invalid as a typed evidence ref, then the visual-quality blocker pushed the model toward a self-authored verifier instead of task-provided tests/reference/expected-output markers. The current reviewed repair resolves safe raw evidence aliases to typed events and tightens the visual-quality recovery prompt. Legacy/string gates remain guardrails; do not remove or close until typed evidence proves equivalent or stricter coverage. |
-| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The `20260510-064431` step-shape reached a real frame-producing verifier and preserved concrete latest-failure projection, but still scored `0.0` because external quality expectations were unmet and finish recovery selected a weak follow-up verifier. The close path remains: focused UT -> replay/dogfood/emulator/HOT_PATH fastcheck -> exactly one same-shape 10min step-shape -> reference-step comparison. |
+| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The `20260510-071112` step-shape improved prompt size (`~347k`) and turn count (`9`) and eliminated same-frontier broad cycling, but it wasted two turns retrying first source mutation because prewrite coverage was missing while probe-count budget was already met. The close path remains: focused UT -> HOT_PATH fastcheck -> exactly one same-shape 10min step-shape -> reference-step comparison. |
 
 Phase implementation order:
 
@@ -363,16 +363,20 @@ Phase implementation order:
    should not be expanded while latest-actionable-failure projection is still
    unreliable.
 
-Immediate next action for this phase: commit the reviewed finish-alias /
-visual-quality recovery repair. Codex-ultra review session
-`019e0ec7-1b58-7a52-8d7e-5620232d10b3` approved it as generic and not
-task-specific; focused acceptance/implement-lane/execution-evidence tests,
-combined acceptance+implement-lane tests, HOT_PATH fastcheck on `064431`, ruff,
-and diff-check pass. After the commit, run exactly one same-shape
-`make-mips-interpreter` `step-check-10min` on current head and compare whether
-finish recovery first inspects or runs task-provided oracle surfaces instead of
-inventing a weak artifact smoke. Do not run `speed_1` / `proof_5` before that
-fresh step-shape comparison loop.
+Immediate next action for this phase: commit the reviewed generic prewrite
+coverage-vs-budget projection repair exposed by
+`mew-make-mips-interpreter-step-check-10min-20260510-071112`. The repair does
+not add MIPS/VM solver logic. It makes count-met/category-missing gates report
+`deep_runtime_prewrite_probe_coverage_not_met`, includes a concrete generic
+required-next-probe for the missing hard-runtime category, and propagates that
+blocker to same-turn skipped verifier calls. Validation passed: full
+`tests/test_implement_lane.py` (`399 passed`), `tests/test_hot_path_fastcheck.py
+tests/test_execution_evidence.py tests/test_acceptance.py` (`210 passed`),
+focused prewrite tests (`27 passed`), HOT_PATH fastcheck on `071112`, scoped
+ruff, and diff-check. Codex-ultra review session
+`019e0ede-ab57-7011-8fee-2c6bdb04a9d3` returned `STATUS: APPROVE`. After the
+commit, run exactly one same-shape `make-mips-interpreter` `step-check-10min`.
+Do not run `speed_1` / `proof_5` before that fresh step-shape comparison loop.
 
 ## Historical Evidence
 

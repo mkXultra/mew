@@ -42,6 +42,7 @@ from mew.implement_lane.v2_runtime import (
     _call_model_turn,
     _command_has_verifier_surface,
     _deep_runtime_prewrite_probe_readiness,
+    _deep_runtime_prewrite_probe_gate_result,
     _deep_runtime_prewrite_missing_probe,
     _finish_acceptance_action,
     _finish_evidence_refs,
@@ -1370,7 +1371,7 @@ def test_implement_v2_source_output_probe_does_not_invent_path_from_search_locat
     assert candidate == {}
 
 
-def test_implement_v2_prewrite_missing_probe_waits_until_only_source_output_contract_missing(tmp_path) -> None:
+def test_implement_v2_prewrite_missing_probe_prefers_source_output_candidate_when_available(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-hard-runtime",
@@ -1407,7 +1408,41 @@ def test_implement_v2_prewrite_missing_probe_waits_until_only_source_output_cont
         prior_tool_results=(result,),
     )
 
-    assert missing_probe == {}
+    assert missing_probe["failure_kind"] == "source_output_contract_missing"
+    assert "read_file" in missing_probe["required_next_probe"]
+
+
+def test_implement_v2_prewrite_generic_search_suggestions_use_regex(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+    )
+
+    source_contract_probe = _deep_runtime_prewrite_missing_probe(
+        lane_input=lane_input,
+        readiness={"missing_categories": ("source_output_contract",)},
+        prior_tool_calls=(),
+        prior_tool_results=(),
+    )
+    host_interface_probe = _deep_runtime_prewrite_missing_probe(
+        lane_input=lane_input,
+        readiness={"missing_categories": ("host_interface_surface",)},
+        prior_tool_calls=(),
+        prior_tool_results=(),
+    )
+
+    for probe in (source_contract_probe, host_interface_probe):
+        suggestion = probe["suggested_next_probe"]
+        assert suggestion["tool"] == "search_text"
+        assert suggestion["arguments"]["regex"] is True
+        assert "|" in suggestion["arguments"]["query"]
 
 
 def test_implement_v2_allows_hard_runtime_write_after_more_probes_follow_blocked_write(tmp_path) -> None:
@@ -1745,6 +1780,85 @@ def test_implement_v2_keeps_write_tools_visible_after_many_shallow_source_probes
     assert readiness["first_write_due"] is False
     assert "runtime_binary_layout" in readiness["prewrite_probe_missing_categories"]
     assert "implementation_feature_surface" in readiness["prewrite_probe_missing_categories"]
+
+
+def test_implement_v2_prewrite_gate_reports_coverage_not_budget_when_count_met(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+    )
+    probe_calls = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-coverage",
+        turn_index=1,
+        calls=tuple(
+            {
+                "provider_call_id": f"probe-{index}",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": f"{shlex.quote(sys.executable)} -c \"open('src/{index}.c').read()\"",
+                    "cwd": ".",
+                },
+            }
+            for index in range(8)
+        ),
+    )
+    probe_results = tuple(
+        ToolResultEnvelope(
+            lane_attempt_id=call.lane_attempt_id,
+            provider_call_id=call.provider_call_id,
+            mew_tool_call_id=call.mew_tool_call_id,
+            tool_name=call.tool_name,
+            status="completed",
+            content=(
+                {
+                    "command": call.arguments["command"],
+                    "text": (
+                        'ELF machine ABI entry main symbol host hook api open read write '
+                        'fopen("/tmp/frame.bmp", "wb")'
+                    ),
+                    "stdout": (
+                        'ELF machine ABI entry main symbol host hook api open read write '
+                        'fopen("/tmp/frame.bmp", "wb")'
+                    ),
+                    "exit_code": 0,
+                },
+            ),
+        )
+        for call in probe_calls
+    )
+    write_call = ToolCallEnvelope(
+        lane_attempt_id="lane-v2-coverage",
+        provider="test",
+        provider_call_id="write-runtime",
+        mew_tool_call_id="mew-write-runtime",
+        tool_name="write_file",
+        arguments={"path": "vm.js", "content": "module.exports = {}\n"},
+        turn_index=2,
+    )
+
+    result = _deep_runtime_prewrite_probe_gate_result(
+        write_call,
+        lane_input=lane_input,
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
+        prior_tool_calls=tuple(probe_calls),
+        prior_tool_results=probe_results,
+        probe_threshold=8,
+    )
+
+    assert result is not None
+    reason = result.content[0]["reason"]
+    assert "deep_runtime_prewrite_probe_coverage_not_met" in reason
+    assert "observed 8/8" in reason
+    assert "deep_runtime_prewrite_probe_budget_not_met" not in reason
+    assert "Required next probe" in reason
+    assert "implementation-feature" in result.content[0]["failure_subclass"].replace("_", "-")
 
 
 def test_implement_v2_counts_shell_source_read_probe_toward_deep_runtime_categories() -> None:
