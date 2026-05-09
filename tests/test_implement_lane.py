@@ -4282,6 +4282,8 @@ def test_implement_v2_prompt_sections_include_active_coding_rhythm() -> None:
     assert "cheap probe -> coherent patch/edit -> verifier -> latest-failure repair" in section.content
     assert "at most one focused diagnostic/read turn" in section.content
     assert "write_file/edit_file/apply_patch paths by default" in section.content
+    assert "write_file content_lines" in section.content
+    assert "never minify generated source into one long line" in section.content
     assert "bounded run_command writer only as a fallback" in section.content
     assert "concrete write-tool payload, parser, or transport failure" in section.content
     assert "run_command otherwise for probes, builds, runtime execution, and verification" in section.content
@@ -16127,6 +16129,39 @@ def test_implement_v2_write_file_allows_large_multiline_source(tmp_path) -> None
     assert result.status == "analysis_ready"
     assert tool_result["status"] == "completed"
     assert target.read_text(encoding="utf-8") == multiline_source
+
+
+def test_implement_v2_write_file_accepts_content_lines_for_large_source(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+    content_lines = [f"const value{index} = {index};" for index in range(400)]
+    expected = "\n".join(content_lines) + "\n"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "vm.js",
+                    "content_lines": content_lines,
+                    "create": True,
+                    "apply": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "content_lines source applied"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert target.read_text(encoding="utf-8") == expected
 
 
 def test_implement_v2_write_file_allows_large_single_line_non_source(tmp_path) -> None:

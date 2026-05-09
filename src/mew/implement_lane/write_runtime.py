@@ -102,9 +102,10 @@ class ImplementV2WriteRuntime:
         denied = _denied_payload(call, approval=approval) if apply and not _approval_granted(approval) else None
         if denied is not None:
             return denied
+        content = _content_text(args)
         quality_failure = _source_mutation_quality_failure_payload(
             path,
-            args.get("content", ""),
+            content,
             operation="write_file",
             apply=apply,
             approval=approval,
@@ -113,7 +114,7 @@ class ImplementV2WriteRuntime:
             return quality_failure
         result = write_file(
             path,
-            args.get("content", ""),
+            content,
             self.allowed_write_roots,
             create=bool(args.get("create")),
             dry_run=not apply,
@@ -367,6 +368,18 @@ def _first_present(args: dict[str, object], *keys: str) -> object:
     for key in keys:
         if key in args and args.get(key) is not None:
             return args.get(key)
+    return ""
+
+
+def _content_text(args: dict[str, object], *, key: str = "content") -> str:
+    if key in args and args.get(key) is not None:
+        return str(args.get(key) or "")
+    lines = args.get(f"{key}_lines")
+    if isinstance(lines, list):
+        text = "\n".join(str(line) for line in lines)
+        if bool(args.get("trailing_newline", True)):
+            text += "\n"
+        return text
     return ""
 
 

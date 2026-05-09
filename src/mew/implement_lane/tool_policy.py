@@ -99,7 +99,11 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
     ImplementLaneToolSpec(
         name="write_file",
         access="write",
-        description="Write a file through the existing write substrate.",
+        description=(
+            "Write a file through the existing write substrate. Accepts content string or content_lines "
+            "array joined with newlines. For source files above a few KB, prefer content_lines so the "
+            "result stays readable and diagnosable; do not minify generated source into one long line."
+        ),
         approval_required=True,
         dry_run_supported=True,
     ),
