@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from mew.implement_lane.hot_path_fastcheck import run_hot_path_fastcheck
 
 
@@ -133,3 +135,87 @@ def test_hot_path_fastcheck_skips_live_micro_when_static_checks_fail(tmp_path):
 
     assert result["status"] == "fail"
     assert result["micro_next_action_refresh"]["mode"] == "skipped"
+
+
+def test_hot_path_fastcheck_uses_phase0_baseline_for_sidecar_caps(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    manifest_path = artifact / "implement_v2" / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["metrics"]["resident_sidecar_state"]["total_bytes"] = 900000
+    manifest["metrics"]["resident_sidecar_state"]["per_turn_growth_bytes"] = 50000
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "metrics": {
+                    "resident_sidecar_state": {
+                        "total_bytes": 800000,
+                        "per_turn_growth_bytes": 40000,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        baseline=baseline_path,
+        micro_next_action=tmp_path / "micro.json",
+        micro_model_callable=lambda _prompt: {"category": "patch/edit", "reason": "ready"},
+    )
+
+    assert result["status"] == "pass"
+    sidecar = [check for check in result["checks"] if check["name"] == "resident_sidecar_metrics"][0]
+    assert sidecar["details"]["cap_source"] == "phase0_baseline"
+    assert sidecar["details"]["total_band"] == "yellow"
+
+
+def test_hot_path_fastcheck_rejects_artifact_sidecar_cap_tampering(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    manifest_path = artifact / "implement_v2" / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["metrics"]["resident_sidecar_state"]["total_bytes"] = 1_100_000
+    manifest["metrics"]["resident_sidecar_state"]["per_turn_growth_bytes"] = 50_000
+    manifest["metrics"]["resident_sidecar_state"]["cap_bands"] = {
+        "yellow_total_ratio": 99.0,
+        "red_per_turn_growth_ratio": 99.0,
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "metrics": {
+                    "resident_sidecar_state": {
+                        "total_bytes": 800000,
+                        "per_turn_growth_bytes": 40000,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        baseline=baseline_path,
+        micro_next_action=tmp_path / "micro.json",
+        micro_model_callable=lambda _prompt: {"category": "patch/edit", "reason": "ready"},
+    )
+
+    assert result["status"] == "fail"
+    sidecar = [check for check in result["checks"] if check["name"] == "resident_sidecar_metrics"][0]
+    assert sidecar["details"]["max_total_bytes"] == 1_000_000
+    assert sidecar["details"]["total_band"] == "red"
+    assert result["micro_next_action_refresh"]["mode"] == "skipped"
+
+
+def test_hot_path_fastcheck_missing_configured_baseline_is_not_silent(tmp_path):
+    artifact = _write_artifact(tmp_path)
+
+    with pytest.raises(FileNotFoundError):
+        run_hot_path_fastcheck(artifact, baseline=tmp_path / "missing-baseline.json")

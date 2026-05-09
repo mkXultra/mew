@@ -340,13 +340,13 @@ reentry that assumes HOT_PATH_COLLAPSE is done as drift.
 
 | Phase | Status | Current evidence / remaining gap |
 |---|---|---|
-| Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist, and `scripts/check_implement_v2_hot_path.py` can read them. Baseline bands and stable baseline artifacts are still not fully operational as a close gate. |
+| Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist. `docs/M6_24_HOT_PATH_PHASE0_BASELINE.json` now records the required Phase 0 baseline fields, and `scripts/check_implement_v2_hot_path.py` uses baseline-relative sidecar caps by default. Still partial until at least one post-baseline artifact stays green/yellow without widening model-visible state. |
 | Phase 1 prompt collapse | partial | Default prompt no longer relies on normal-prompt `frontier_state_update`, and fastcheck checks for prompt leaks. Compact `active_work_todo` / evidence / frontier projection still needs repeated proof that it stays small and sidecar-backed. |
-| Phase 2 latest actionable failure | incomplete | Projection/reducer code exists, but recent repairs still found tool payload and evidence promotion misses. This phase is not stable until saved artifacts repeatedly pass latest-actionable-failure shape checks before live step-shape. |
+| Phase 2 latest actionable failure | incomplete | Projection/reducer code exists, and the current `make-mips-interpreter` artifact now passes `latest_actionable_failure_shape` after raw structured failure projection. This phase is not stable until saved artifacts repeatedly pass latest-actionable-failure shape checks before live step-shape. |
 | Phase 3 sidecar-inferred execution contracts | incomplete | Execution-contract and sidecar concepts exist, but cheap-probe versus execution-contract separation is not fully proven. Do not treat probe evidence as finish/runtime proof without a phase-specific fastcheck pass. |
 | Phase 4 patch/edit as mutation boundary | partial | Source mutation, first-write readiness, and post-write verifier gates exist. Shell mutation, source-root tracking, and tool-result projection have still produced fixes, so this remains open until replay/tool-lab/fastcheck stop finding boundary bugs. |
 | Phase 5 finish cited evidence | partial | Typed-evidence acceptance and visual/runtime finish gates are substantially implemented. Legacy/string gates and sidecar merge behavior still act as guardrails; do not remove or close until typed evidence proves equivalent or stricter coverage. |
-| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and was reviewed, but current saved artifacts can still fail static phase checks. The close path is: focused UT -> replay/dogfood/emulator -> HOT_PATH fastcheck -> one same-shape 10min step-shape -> reference-step comparison. |
+| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The close path remains: focused UT -> replay/dogfood/emulator -> HOT_PATH fastcheck -> one same-shape 10min step-shape -> reference-step comparison. |
 
 Phase implementation order:
 
@@ -363,9 +363,11 @@ Phase implementation order:
    should not be expanded while latest-actionable-failure projection is still
    unreliable.
 
-Immediate next action for this phase: use the new fastcheck on the current
-`make-mips-interpreter` artifact, reduce any red static check to a focused
-repair, and only then spend another same-shape 10 minute step-shape diagnostic.
+Immediate next action for this phase: after committing the baseline-aware
+fastcheck repair, run one same-shape 10 minute `make-mips-interpreter`
+step-shape diagnostic, then compare the step flow against the reference trace.
+If the new artifact fails HOT_PATH fastcheck, reduce that red contract to a
+focused repair before another live diagnostic.
 
 ## Historical Evidence
 

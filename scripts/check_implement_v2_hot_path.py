@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from mew.implement_lane.hot_path_fastcheck import (  # noqa: E402
+    DEFAULT_HOT_PATH_BASELINE_PATH,
     format_hot_path_fastcheck_text,
     run_hot_path_fastcheck,
 )
@@ -53,6 +54,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-active-todo-bytes", type=int, default=2048)
     parser.add_argument("--max-sidecar-total-bytes", type=int, default=262144)
     parser.add_argument("--max-sidecar-per-turn-growth-bytes", type=int, default=32768)
+    parser.add_argument(
+        "--baseline",
+        default=str(DEFAULT_HOT_PATH_BASELINE_PATH),
+        help="Phase 0 baseline JSON for relative sidecar caps; pass an empty string to use absolute caps",
+    )
+    parser.add_argument(
+        "--no-baseline",
+        action="store_true",
+        help="explicitly use absolute sidecar caps instead of the Phase 0 baseline",
+    )
     parser.add_argument("--report", help="write the full fastcheck JSON report")
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
     return parser
@@ -76,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
             max_active_todo_bytes=args.max_active_todo_bytes,
             max_sidecar_total_bytes=args.max_sidecar_total_bytes,
             max_sidecar_per_turn_growth_bytes=args.max_sidecar_per_turn_growth_bytes,
+            baseline="" if args.no_baseline else args.baseline,
         )
     except Exception as exc:  # noqa: BLE001 - command boundary should print the actionable failure.
         print(f"mew hot-path fastcheck: {exc}", file=sys.stderr)

@@ -30,6 +30,12 @@ from .tool_lab import resolve_implement_v2_manifest_path
 from .v2_runtime import _render_prompt_history_json
 
 HOT_PATH_FASTCHECK_SCHEMA_VERSION = 1
+DEFAULT_HOT_PATH_BASELINE_PATH = (
+    Path(__file__).resolve().parents[3] / "docs" / "M6_24_HOT_PATH_PHASE0_BASELINE.json"
+)
+PHASE0_GREEN_TOTAL_RATIO = 1.10
+PHASE0_YELLOW_TOTAL_RATIO = 1.25
+PHASE0_RED_PER_TURN_GROWTH_RATIO = 1.50
 NEXT_ACTION_CATEGORIES = (
     "patch/edit",
     "run_verifier",
@@ -71,6 +77,7 @@ def run_hot_path_fastcheck(
     max_active_todo_bytes: int = 2048,
     max_sidecar_total_bytes: int = 262144,
     max_sidecar_per_turn_growth_bytes: int = 32768,
+    baseline: object | None = None,
 ) -> dict[str, object]:
     """Run the M6.24 HOT_PATH_COLLAPSE fast contract checks.
 
@@ -91,6 +98,7 @@ def run_hot_path_fastcheck(
     checks: list[HotPathCheck] = []
     manifest = _load_manifest_json(manifest_path)
     history = _load_history_json(history_path)
+    baseline_data = _load_baseline_json(baseline)
     expected = _expected_micro_categories(expected_categories)
 
     checks.append(_check_manifest_lane(manifest))
@@ -99,6 +107,7 @@ def run_hot_path_fastcheck(
     checks.append(
         _check_sidecar_metrics(
             manifest,
+            baseline=baseline_data,
             max_total_bytes=max_sidecar_total_bytes,
             max_per_turn_growth_bytes=max_sidecar_per_turn_growth_bytes,
         )
@@ -149,6 +158,7 @@ def run_hot_path_fastcheck(
         "metrics": {
             "hot_path_projection": _safe_mapping((manifest.get("metrics") or {}).get("hot_path_projection")),
             "resident_sidecar_state": _safe_mapping((manifest.get("metrics") or {}).get("resident_sidecar_state")),
+            "baseline": baseline_data,
             "micro_next_action": {
                 "category": _micro_next_action_category(micro_fixture) if static_checks_pass else "",
                 "expected_categories": list(expected),
@@ -201,6 +211,18 @@ def _load_manifest_json(path: Path) -> dict[str, object]:
             if isinstance(item, dict):
                 return dict(item)
     raise ValueError(f"expected implement_v2 proof manifest object: {path}")
+
+
+def _load_baseline_json(path: object | None) -> dict[str, object]:
+    if path is None or str(path).strip() == "":
+        return {}
+    baseline_path = Path(str(path)).expanduser().resolve(strict=False)
+    if not baseline_path.is_file():
+        raise FileNotFoundError(f"hot-path baseline JSON not found: {baseline_path}")
+    data = _load_json(baseline_path)
+    if not isinstance(data, dict):
+        raise ValueError(f"expected hot-path baseline JSON object: {baseline_path}")
+    return dict(data)
 
 
 def _load_history_json(path: Path) -> list[dict[str, object]]:
@@ -540,6 +562,7 @@ def _check_prompt_leaks(manifest: dict[str, object], *, max_active_todo_bytes: i
 def _check_sidecar_metrics(
     manifest: dict[str, object],
     *,
+    baseline: dict[str, object],
     max_total_bytes: int,
     max_per_turn_growth_bytes: int,
 ) -> HotPathCheck:
@@ -547,8 +570,32 @@ def _check_sidecar_metrics(
     families = _safe_mapping(sidecar.get("families"))
     total_bytes = _nonnegative_int(sidecar.get("total_bytes"))
     per_turn_growth_bytes = _nonnegative_float(sidecar.get("per_turn_growth_bytes"))
+    cap_source = "absolute"
+    baseline_sidecar = _baseline_sidecar_metrics(baseline)
+    total_band = ""
+    per_turn_growth_band = ""
+    baseline_missing = bool(baseline) and not baseline_sidecar
+    if baseline_sidecar:
+        cap_source = "phase0_baseline"
+        baseline_total_bytes = _nonnegative_int(baseline_sidecar.get("total_bytes"))
+        baseline_growth_bytes = _nonnegative_float(baseline_sidecar.get("per_turn_growth_bytes"))
+        max_total_bytes = max(1, int(round(baseline_total_bytes * PHASE0_YELLOW_TOTAL_RATIO)))
+        max_per_turn_growth_bytes = max(1, int(round(baseline_growth_bytes * PHASE0_RED_PER_TURN_GROWTH_RATIO)))
+        total_band = _ratio_band(
+            total_bytes,
+            baseline_total_bytes,
+            green=PHASE0_GREEN_TOTAL_RATIO,
+            yellow=PHASE0_YELLOW_TOTAL_RATIO,
+        )
+        per_turn_growth_band = _ratio_band(
+            per_turn_growth_bytes,
+            baseline_growth_bytes,
+            green=1.0,
+            yellow=PHASE0_RED_PER_TURN_GROWTH_RATIO,
+        )
     ok = (
         sidecar.get("surface") == "resident_sidecar_state"
+        and not baseline_missing
         and 0 < total_bytes <= max_total_bytes
         and 0 < per_turn_growth_bytes <= max_per_turn_growth_bytes
         and bool(families)
@@ -564,8 +611,24 @@ def _check_sidecar_metrics(
             "per_turn_growth_bytes": per_turn_growth_bytes,
             "max_per_turn_growth_bytes": max_per_turn_growth_bytes,
             "families": sorted(str(key) for key in families),
+            "cap_source": cap_source,
+            "baseline_total_bytes": _nonnegative_int(baseline_sidecar.get("total_bytes")) if baseline_sidecar else 0,
+            "baseline_per_turn_growth_bytes": (
+                _nonnegative_float(baseline_sidecar.get("per_turn_growth_bytes")) if baseline_sidecar else 0.0
+            ),
+            "total_band": total_band,
+            "per_turn_growth_band": per_turn_growth_band,
+            "baseline_missing": baseline_missing,
         },
     )
+
+
+def _baseline_sidecar_metrics(baseline: dict[str, object]) -> dict[str, object]:
+    metrics = _safe_mapping(baseline.get("metrics"))
+    sidecar = _safe_mapping(metrics.get("resident_sidecar_state"))
+    if sidecar:
+        return sidecar
+    return _safe_mapping(baseline.get("resident_sidecar_state"))
 
 
 def _check_latest_actionable_failure_shape(history: list[dict[str, object]]) -> HotPathCheck:
@@ -721,6 +784,17 @@ def _nonnegative_float(value: object) -> float:
         return max(0.0, float(value or 0.0))
     except (TypeError, ValueError):
         return 0.0
+
+
+def _ratio_band(value: float, baseline: float, *, green: float, yellow: float) -> str:
+    if baseline <= 0:
+        return ""
+    ratio = value / baseline
+    if ratio <= green:
+        return "green"
+    if ratio <= yellow:
+        return "yellow"
+    return "red"
 
 
 def _check(name: str, ok: bool, message: str, details: dict[str, object]) -> HotPathCheck:
