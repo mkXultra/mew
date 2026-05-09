@@ -2490,7 +2490,13 @@ def _runtime_artifact_failure_plateau_state(
         artifact_path = _runtime_artifact_failure_path(payload, frontier_state)
         if not artifact_path:
             continue
-        signature = ("runtime_artifact_missing", "missing_artifact", _frontier_artifact_identity(artifact_path))
+        failure_summary = _frontier_failure_summary(payload)
+        signature = (
+            "runtime_artifact_missing",
+            "missing_artifact",
+            _frontier_artifact_identity(artifact_path),
+            _runtime_artifact_plateau_failure_identity(_runtime_artifact_plateau_failure_text(payload)),
+        )
         observations.append(
             (
                 signature,
@@ -2503,7 +2509,7 @@ def _runtime_artifact_failure_plateau_state(
                     "failure_kind": failure_kind or "missing_artifact",
                     "exit_code": payload.get("exit_code"),
                     "command_run_id": _frontier_clip_text(payload.get("command_run_id"), limit=160),
-                    "failure_summary": _frontier_failure_summary(payload),
+                    "failure_summary": failure_summary,
                     "required_next_probe": _frontier_clip_text(
                         structured.get("required_next_probe") or "Inspect the producing substep and artifact path.",
                         limit=360,
@@ -2539,6 +2545,31 @@ def _runtime_artifact_failure_plateau_state(
             ),
         }
     )
+
+
+def _runtime_artifact_plateau_failure_identity(value: object) -> str:
+    """Fingerprint the runtime failure behind a missing artifact plateau.
+
+    A missing output artifact is often only the final symptom. For runtime tasks,
+    moving from one execution error to a different execution error is progress
+    and must not be collapsed as a repeated artifact-missing loop.
+    """
+
+    text = _frontier_clip_text(value, limit=360).strip()
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+def _runtime_artifact_plateau_failure_text(payload: dict[str, object]) -> str:
+    for key in ("stderr_tail", "stderr", "stdout_tail", "stdout"):
+        text = str(payload.get(key) or "").strip()
+        if not text:
+            continue
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if lines:
+            return _frontier_clip_text("\n".join(lines[:8]), limit=720)
+    return _frontier_failure_summary(payload)
 
 
 def _structured_failure_is_runtime_artifact_missing(failure_class: str, failure_kind: str) -> bool:

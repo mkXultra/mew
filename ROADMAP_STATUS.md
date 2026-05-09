@@ -340,13 +340,13 @@ reentry that assumes HOT_PATH_COLLAPSE is done as drift.
 
 | Phase | Status | Current evidence / remaining gap |
 |---|---|---|
-| Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist. `docs/M6_24_HOT_PATH_PHASE0_BASELINE.json` now records the required Phase 0 baseline fields, and `scripts/check_implement_v2_hot_path.py` uses baseline-relative sidecar caps by default. The `20260510-001638` artifact exposed that metrics were counting full proof-artifact transcript/history/tool payload duplicates as resident state; current head compacts resident-sidecar metrics with hashes/previews while keeping full proof artifacts intact. Still partial until a fresh post-repair artifact stays green/yellow without widening model-visible state. |
+| Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist. `docs/M6_24_HOT_PATH_PHASE0_BASELINE.json` now records the required Phase 0 baseline fields, and `scripts/check_implement_v2_hot_path.py` uses baseline-relative sidecar caps by default. The `20260510-005032` artifact confirms the resident-sidecar compaction is effective: total `269,166` bytes and per-turn growth `29,907` bytes, both green against Phase 0 caps. Still partial until the next changed artifact also stays green/yellow without widening model-visible state. |
 | Phase 1 prompt collapse | partial | Default prompt no longer relies on normal-prompt `frontier_state_update`, and fastcheck checks for prompt leaks. Compact `active_work_todo` / evidence / frontier projection still needs repeated proof that it stays small and sidecar-backed. The `20260510-001638` diagnostic showed a generic hard-runtime task-contract gap: the model substituted a host-native source build for the requested supplied-runtime artifact path. The current repair belongs in the small hard-runtime prompt/profile contract, not a new frontier. |
 | Phase 2 latest actionable failure | incomplete | Projection/reducer code exists. Two consecutive `make-mips-interpreter` artifacts now pass `latest_actionable_failure_shape` after raw structured failure projection and raw tool `failure_class` projection. This phase is not stable until the next changed artifact also passes before live step-shape. |
 | Phase 3 sidecar-inferred execution contracts | incomplete | Execution-contract and sidecar concepts exist, but cheap-probe versus execution-contract separation is not fully proven. Do not treat probe evidence as finish/runtime proof without a phase-specific fastcheck pass. |
 | Phase 4 patch/edit as mutation boundary | partial | Source mutation, first-write readiness, post-write verifier gates, and `write_file content_lines` for large generated source exist. The `20260510-001638` diagnostic confirmed the first large `vm.js` write used `content_lines` and succeeded. Shell mutation, source-root tracking, and tool-result projection have still produced fixes, so this remains open until replay/tool-lab/fastcheck stop finding boundary bugs. |
 | Phase 5 finish cited evidence | partial | Typed-evidence acceptance and visual/runtime finish gates are substantially implemented. Legacy/string gates and sidecar merge behavior still act as guardrails; do not remove or close until typed evidence proves equivalent or stricter coverage. |
-| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The close path remains: focused UT -> replay/dogfood/emulator -> HOT_PATH fastcheck -> one same-shape 10min step-shape -> reference-step comparison. |
+| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The `20260510-005032` step-shape improved first edit to `121s` and kept the supplied runtime artifact path, but exposed that runtime-artifact plateau detection collapsed distinct runtime errors under the same missing `/tmp/frame.bmp` symptom. The close path remains: focused UT -> replay/dogfood/emulator -> HOT_PATH fastcheck -> one same-shape 10min step-shape -> reference-step comparison. |
 
 Phase implementation order:
 
@@ -363,12 +363,12 @@ Phase implementation order:
    should not be expanded while latest-actionable-failure projection is still
    unreliable.
 
-Immediate next action for this phase: commit the reviewed resident-sidecar
-metric compaction. Then run one same-shape `make-mips-interpreter`
-`step-check-10min` on current head to generate fresh Phase 0 metrics and check
-whether the loop keeps the supplied runtime artifact as the execution authority
-instead of compiling/running a host-native source fallback. Do not run
-`speed_1` / `proof_5` before that fresh step-shape comparison loop.
+Immediate next action for this phase: commit the reviewed runtime-artifact
+plateau fingerprint repair. Then run HOT_PATH fastcheck and one same-shape
+`make-mips-interpreter` `step-check-10min` on current head to check whether
+distinct runtime errors no longer prematurely close the repair loop as a
+same-shape missing-artifact plateau. Do not run `speed_1` / `proof_5` before
+that fresh step-shape comparison loop.
 
 ## Historical Evidence
 

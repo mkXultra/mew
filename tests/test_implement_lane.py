@@ -14493,6 +14493,96 @@ def test_implement_v2_blocks_repeated_runtime_artifact_failure_plateau(tmp_path)
     assert result.metrics["runtime_artifact_failure_plateau"]["repeat_count"] == 3
 
 
+def test_implement_v2_runtime_artifact_failure_plateau_does_not_collapse_distinct_runtime_errors(
+    tmp_path,
+) -> None:
+    (tmp_path / "vm.js").write_text("console.error('initial missing frame'); process.exit(1);\n", encoding="utf-8")
+    calls = {"count": 0}
+
+    def fake_model(*_args, **_kwargs):
+        calls["count"] += 1
+        attempt = calls["count"]
+        runtime_error = (
+            "Traceback (most recent call last):\nRuntimeError: unsupported op=0x11"
+            if attempt == 1
+            else "Traceback (most recent call last):\nRuntimeError: unsupported SPECIAL funct 10"
+        )
+        return {
+            "summary": f"attempt {attempt} moves to a different runtime error",
+            "tool_calls": [
+                {
+                    "id": f"write-vm-{attempt}",
+                    "name": "write_file",
+                    "arguments": {
+                        "path": "vm.js",
+                        "content": f"console.error({json.dumps(runtime_error)}); process.exit(1);\n",
+                        "apply": True,
+                        "create": True,
+                    },
+                },
+                {
+                    "id": f"verify-frame-{attempt}",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "node vm.js",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": f"contract:verify-frame-{attempt}",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue", "summary": "runtime error changed; keep repairing"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Implement a runtime interpreter so verifier writes frame.bmp.",
+                "max_wall_seconds": 600,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+                "runtime_artifact_failure_plateau_threshold": 2,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    assert calls["count"] == 2
+    assert result.metrics["runtime_artifact_failure_plateau"] == {}
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier") or {}
+    assert "runtime_artifact_failure_plateau" not in frontier
+
+
 def test_implement_v2_runtime_artifact_failure_plateau_resets_after_passing_artifact(tmp_path) -> None:
     outputs = [
         {
