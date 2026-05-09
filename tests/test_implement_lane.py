@@ -860,7 +860,7 @@ def test_implement_v2_records_first_write_frontier_stall_after_missing_target_ti
     assert stall["failure_class"] == "first_write_frontier_stall"
     assert stall["target_path"] == "generated.js"
     assert "write_file/edit_file/apply_patch" in stall["required_next_action"]
-    assert "bounded run_command writer" in stall["required_next_action"]
+    assert "bounded run_command writer only after" in stall["required_next_action"]
 
 
 def test_implement_v2_clears_first_write_frontier_stall_after_successful_write(tmp_path) -> None:
@@ -971,7 +971,7 @@ def test_implement_v2_records_active_work_todo_first_write_due_after_probe_thres
     assert readiness["probe_count_before_first_write"] == 3
     assert readiness["target_paths"] == ["sample.py"]
     assert "write_file/edit_file/apply_patch" in readiness["required_next_action"]
-    assert "bounded run_command writer" in readiness["required_next_action"]
+    assert "bounded run_command writer only after" in readiness["required_next_action"]
     assert result.metrics["first_write_due"] is True
     assert result.metrics["first_write_probe_count"] == 3
 
@@ -3133,9 +3133,9 @@ def test_implement_v2_prompt_sections_include_active_coding_rhythm() -> None:
     assert section.stability == "static"
     assert "cheap probe -> coherent patch/edit -> verifier -> latest-failure repair" in section.content
     assert "at most one focused diagnostic/read turn" in section.content
-    assert "write_file, edit_file, or apply_patch" in section.content
-    assert "bounded run_command writer" in section.content
-    assert "source-tree mutation" in section.content
+    assert "write_file/edit_file/apply_patch paths by default" in section.content
+    assert "bounded run_command writer only as a fallback" in section.content
+    assert "concrete write-tool payload, parser, or transport failure" in section.content
     assert "run_command otherwise for probes, builds, runtime execution, and verification" in section.content
 
 

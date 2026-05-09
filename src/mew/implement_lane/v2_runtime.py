@@ -3154,7 +3154,10 @@ def _first_write_frontier_stall_from_live_results(
     if prior_observations <= 0:
         return {}
     target_path = str(missing.get("target_path") or "").strip()
-    mutation_tools = "write_file/edit_file/apply_patch, or a bounded run_command writer for a large generated file"
+    mutation_tools = (
+        "write_file/edit_file/apply_patch by default; use a bounded run_command writer only after "
+        "a concrete write-tool payload, parser, or transport failure"
+    )
     required = (
         f"create or update {target_path} with {mutation_tools}"
         if target_path
@@ -4176,8 +4179,9 @@ def _first_write_readiness_from_trace(
     if first_write_due:
         target_text = ", ".join(target_paths[:3]) if target_paths else "active_work_todo.source.target_paths"
         readiness["required_next_action"] = (
-            "make one scoped source mutation with write_file/edit_file/apply_patch, "
-            "or a bounded run_command writer for a large generated file, "
+            "make one scoped source mutation with write_file/edit_file/apply_patch by default; "
+            "use a bounded run_command writer only after a concrete write-tool payload, parser, "
+            "or transport failure, "
             f"inside {target_text} before another broad search or verifier"
         )
     return _drop_empty_frontier_values(readiness)
@@ -5019,8 +5023,8 @@ def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str
             + "First-write frontier stall: prior source/probe evidence is already available, but no "
             "source mutation happened before the model failure. Do not rediscover the same missing target "
             f"or run an external verifier first. Create or update {target} with write_file/edit_file/"
-            "apply_patch, or use one bounded run_command writer for a large generated file, then run "
-            "one verifier-shaped command."
+            "apply_patch by default; use one bounded run_command writer only after a concrete "
+            "write-tool payload, parser, or transport failure, then run one verifier-shaped command."
             f"{required_hint}\n"
         )
     latest_failure = hard_runtime_frontier_state.get("latest_runtime_failure")
@@ -5041,8 +5045,8 @@ def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str
         + "Hard-runtime frontier continuation gate: continue from lane_hard_runtime_frontier instead of "
         "rediscovering the whole task. Inspect the producing substep/artifact path, make the smallest "
         "source/runtime repair, then run one verifier-shaped command tied to the expected runtime artifact. "
-        "If mutating source/config, prefer write_file/edit_file/apply_patch; use a bounded run_command "
-        "writer only for large generated files where JSON tool-call payload size is the bottleneck; "
+        "If mutating source/config, use write_file/edit_file/apply_patch by default; use a bounded "
+        "run_command writer only after a concrete write-tool payload, parser, or transport failure; "
         "keep run_command otherwise for build, runtime, and verification."
         f"{class_hint}{next_probe_hint}{verifier_hint}\n"
     )
