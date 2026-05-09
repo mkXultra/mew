@@ -163,7 +163,10 @@ class ImplementV2WriteRuntime:
             "recoverable": True,
             "path": str(path),
             "suggested_tool": "read_file/edit_file/apply_patch",
-            "suggested_next_action": "retry with an exact old string from nearest_existing_windows or read the target window",
+            "suggested_next_action": (
+                "retry with an exact old string from nearest_existing_windows; if more context is needed, "
+                "run the first suggested_recovery_calls read_file window instead of reading the whole file"
+            ),
         }
         if old_text:
             payload["old_string_preview"] = _clip_text(old_text, 240)
@@ -174,6 +177,7 @@ class ImplementV2WriteRuntime:
         windows = _nearest_existing_windows(current, old_text)
         if windows:
             payload["nearest_existing_windows"] = windows
+            payload["suggested_recovery_calls"] = _suggested_read_file_recovery_calls(path, windows)
         return payload
 
     def _apply_patch_recovery_payload(self, call: ToolCallEnvelope, *, reason: str) -> dict[str, object]:
@@ -203,8 +207,8 @@ class ImplementV2WriteRuntime:
             "path": str(path),
             "suggested_tool": "read_file/apply_patch/edit_file",
             "suggested_next_action": (
-                "retry with exact current source context from patch_anchor_windows "
-                "or read the target window before the next patch"
+                "retry with exact current source context from patch_anchor_windows; if more context is needed, "
+                "run the first suggested_recovery_calls read_file window instead of reading the whole file"
             ),
         }
         try:
@@ -232,6 +236,7 @@ class ImplementV2WriteRuntime:
                 break
         if windows:
             payload["patch_anchor_windows"] = windows
+            payload["suggested_recovery_calls"] = _suggested_patch_recovery_calls(path, windows)
         return payload
 
     def _apply_patch(self, call: ToolCallEnvelope) -> dict[str, object]:
@@ -426,6 +431,7 @@ def _nearest_existing_windows(current: str, old_text: str) -> list[dict[str, obj
             {
                 "start": start,
                 "end": end,
+                **_line_span_for_char_window(current, start, end),
                 "similarity": round(score, 3),
                 "text": _clip_text(snippet, 700),
             }
@@ -453,11 +459,58 @@ def _matching_existing_windows(current: str, old_text: str) -> list[dict[str, ob
             {
                 "start": start,
                 "end": end,
+                **_line_span_for_char_window(current, start, end),
                 "text": _clip_text(current[start:end], 700),
             }
         )
         search_from = index + max(1, len(old_text))
     return windows
+
+
+def _line_span_for_char_window(text: str, start: int, end: int) -> dict[str, int]:
+    bounded_start = max(0, min(start, len(text)))
+    bounded_end = max(bounded_start, min(end, len(text)))
+    line_start = text.count("\n", 0, bounded_start) + 1
+    line_end = text.count("\n", 0, bounded_end) + 1
+    return {"line_start": line_start, "line_end": max(line_start, line_end)}
+
+
+def _suggested_read_file_recovery_calls(path: Path, windows: list[dict[str, object]]) -> list[dict[str, object]]:
+    calls: list[dict[str, object]] = []
+    for window in windows[:2]:
+        try:
+            start = int(window.get("start") or 0)
+            end = int(window.get("end") or start)
+        except (TypeError, ValueError):
+            continue
+        offset = max(0, start - 240)
+        max_chars = max(800, min(2000, end - offset + 240))
+        call: dict[str, object] = {
+            "tool_name": "read_file",
+            "path": str(path),
+            "offset": offset,
+            "max_chars": max_chars,
+            "reason": "bounded patch anchor recovery; do not read the whole file",
+        }
+        line_start = window.get("line_start")
+        line_end = window.get("line_end")
+        if isinstance(line_start, int) and isinstance(line_end, int) and line_end >= line_start:
+            call["line_hint"] = {
+                "line_start": max(1, line_start - 20),
+                "line_count": min(120, line_end - line_start + 41),
+            }
+        calls.append(call)
+    return calls
+
+
+def _suggested_patch_recovery_calls(path: Path, windows: list[dict[str, object]]) -> list[dict[str, object]]:
+    candidate_windows: list[dict[str, object]] = []
+    for item in windows:
+        for key in ("nearest_existing_windows", "matching_existing_windows"):
+            nested = item.get(key)
+            if isinstance(nested, list):
+                candidate_windows.extend(window for window in nested if isinstance(window, dict))
+    return _suggested_read_file_recovery_calls(path, candidate_windows)
 
 
 def _hunk_index_from_reason(reason: str) -> int | None:

@@ -69,6 +69,7 @@ from mew.implement_lane.v2_runtime import (
     _typed_retired_legacy_blockers_for_bundle,
     _write_result_covers_source_tree_mutation,
 )
+from mew.read_tools import read_file
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
 
@@ -16784,6 +16785,18 @@ def test_implement_v2_edit_file_exact_miss_returns_nearest_existing_windows(tmp_
     assert payload["suggested_tool"] == "read_file/edit_file/apply_patch"
     assert payload["old_string_preview"] == "commonIdentifier missingCall rareWidget"
     assert "commonIdentifier actualCall rareWidget" in payload["nearest_existing_windows"][0]["text"]
+    assert payload["suggested_recovery_calls"][0]["tool_name"] == "read_file"
+    assert payload["suggested_recovery_calls"][0]["path"].endswith("worker.txt")
+    assert payload["suggested_recovery_calls"][0]["max_chars"] <= 2000
+    assert "whole file" in payload["suggested_recovery_calls"][0]["reason"]
+    assert "line_start" not in payload["suggested_recovery_calls"][0]
+    recovery_read = read_file(
+        payload["suggested_recovery_calls"][0]["path"],
+        [tmp_path],
+        offset=payload["suggested_recovery_calls"][0]["offset"],
+        max_chars=payload["suggested_recovery_calls"][0]["max_chars"],
+    )
+    assert "commonIdentifier actualCall rareWidget" in recovery_read["text"]
     assert target.read_text(encoding="utf-8").endswith("commonIdentifier actualCall rareWidget\n")
 
 
@@ -16872,6 +16885,17 @@ def test_implement_v2_apply_patch_exact_miss_returns_anchor_windows(tmp_path) ->
     assert payload["suggested_tool"] == "read_file/apply_patch/edit_file"
     assert payload["patch_anchor_windows"][0]["hunk_index"] == 1
     assert "actualCall" in payload["patch_anchor_windows"][0]["nearest_existing_windows"][0]["text"]
+    assert payload["suggested_recovery_calls"][0]["tool_name"] == "read_file"
+    assert payload["suggested_recovery_calls"][0]["path"].endswith("worker.txt")
+    assert payload["suggested_recovery_calls"][0]["max_chars"] <= 2000
+    assert "line_start" not in payload["suggested_recovery_calls"][0]
+    recovery_read = read_file(
+        payload["suggested_recovery_calls"][0]["path"],
+        [tmp_path],
+        offset=payload["suggested_recovery_calls"][0]["offset"],
+        max_chars=payload["suggested_recovery_calls"][0]["max_chars"],
+    )
+    assert "actualCall" in recovery_read["text"]
     assert target.read_text(encoding="utf-8").startswith("function actualCall")
 
 
@@ -16903,6 +16927,15 @@ def test_implement_v2_apply_patch_ambiguous_match_returns_matching_windows(tmp_p
     assert payload["failure_subclass"] == "patch_ambiguous_anchor"
     assert payload["patch_anchor_windows"][0]["hunk_index"] == 1
     assert len(payload["patch_anchor_windows"][0]["matching_existing_windows"]) == 2
+    assert payload["suggested_recovery_calls"][0]["tool_name"] == "read_file"
+    assert payload["suggested_recovery_calls"][0]["path"].endswith("worker.txt")
+    recovery_read = read_file(
+        payload["suggested_recovery_calls"][0]["path"],
+        [tmp_path],
+        offset=payload["suggested_recovery_calls"][0]["offset"],
+        max_chars=payload["suggested_recovery_calls"][0]["max_chars"],
+    )
+    assert "same();" in recovery_read["text"]
     assert "old text matched 2 times" in payload["reason"]
     assert target.read_text(encoding="utf-8") == "same();\nalpha();\nsame();\nbeta();\n"
 
