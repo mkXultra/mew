@@ -491,11 +491,6 @@ def run_live_json_implement_v2(
                 probe_threshold=_first_write_probe_threshold(lane_input),
                 source_mutation_roots=_source_mutation_roots(lane_input),
             )
-            prewrite_write_tools_hidden = _prewrite_write_tools_hidden_for_turn(
-                lane_input,
-                prior_tool_calls=tuple(tool_calls),
-                prior_tool_results=tuple(tool_results),
-            )
             prompt = _live_json_prompt(
                 lane_input,
                 lane_attempt_id=lane_attempt_id,
@@ -510,7 +505,6 @@ def run_live_json_implement_v2(
                 tool_contract_recovery_turn_limit=tool_contract_recovery_turn_limit,
                 tool_contract_recovery_instruction=tool_contract_recovery_instruction,
                 tool_specs=model_visible_tool_specs,
-                prewrite_write_tools_hidden=prewrite_write_tools_hidden,
                 prewrite_probe_readiness=prewrite_probe_readiness,
                 write_repair_lock_state=write_repair_lock_state,
                 history=tuple(prompt_history),
@@ -3407,49 +3401,7 @@ def _model_visible_tool_specs_for_turn(
         if bool(repair_lock.get("target_read_allowed")):
             allowed_names.add("read_file")
         specs = tuple(spec for spec in specs if spec.name in allowed_names)
-    if _write_tools_visible_for_turn(
-        lane_input,
-        prior_tool_calls=prior_tool_calls,
-        prior_tool_results=prior_tool_results,
-    ):
-        return specs
-    return tuple(spec for spec in specs if spec.access != "write")
-
-
-def _prewrite_write_tools_hidden_for_turn(
-    lane_input: ImplementLaneInput,
-    *,
-    prior_tool_calls: tuple[object, ...],
-    prior_tool_results: tuple[ToolResultEnvelope, ...],
-) -> bool:
-    specs = list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode") or "read_only")
-    if not any(spec.access == "write" for spec in specs):
-        return False
-    return not _write_tools_visible_for_turn(
-        lane_input,
-        prior_tool_calls=prior_tool_calls,
-        prior_tool_results=prior_tool_results,
-    )
-
-
-def _write_tools_visible_for_turn(
-    lane_input: ImplementLaneInput,
-    *,
-    prior_tool_calls: tuple[object, ...],
-    prior_tool_results: tuple[ToolResultEnvelope, ...],
-) -> bool:
-    if not is_deep_probe_hard_runtime_task(lane_input.task_contract):
-        return True
-    source_mutation_roots = _source_mutation_roots(lane_input)
-    if _has_completed_source_tree_mutation(prior_tool_results, source_mutation_roots=source_mutation_roots):
-        return True
-    readiness = _deep_runtime_prewrite_probe_readiness(
-        prior_tool_calls=prior_tool_calls,
-        prior_tool_results=prior_tool_results,
-        probe_threshold=_first_write_probe_threshold(lane_input),
-        source_mutation_roots=source_mutation_roots,
-    )
-    return bool(readiness.get("ready"))
+    return tuple(specs)
 
 
 def _deep_runtime_prewrite_probe_count(
@@ -5181,7 +5133,6 @@ def _live_json_prompt(
     tool_contract_recovery_turn_limit: int = 0,
     tool_contract_recovery_instruction: str = "",
     tool_specs: tuple[ImplementLaneToolSpec, ...] | None = None,
-    prewrite_write_tools_hidden: bool = False,
     prewrite_probe_readiness: dict[str, object] | None = None,
     write_repair_lock_state: dict[str, object] | None = None,
     history: tuple[dict[str, object], ...],
@@ -5215,13 +5166,6 @@ def _live_json_prompt(
         },
     }
     tool_surface_notes: list[str] = []
-    if prewrite_write_tools_hidden:
-        missing = _prewrite_missing_category_labels(prewrite_probe_readiness or {})
-        missing_text = ", ".join(missing) if missing else "the required hard-runtime probe categories"
-        tool_surface_notes.append(
-            "write tools are temporarily hidden for this turn; gather cheap probes before writing. "
-            f"Missing: {missing_text}."
-        )
     if write_repair_lock_state and bool(write_repair_lock_state.get("locked")):
         target_path = _frontier_clip_text(write_repair_lock_state.get("path") or "the failed write target", limit=160)
         read_count = int(write_repair_lock_state.get("target_read_count_after_failure") or 0)

@@ -55,7 +55,6 @@ from mew.implement_lane.v2_runtime import (
     _has_completed_source_tree_mutation,
     _live_json_prompt,
     _model_visible_tool_specs_for_turn,
-    _prewrite_write_tools_hidden_for_turn,
     _provider_visible_tool_call_for_history,
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
@@ -1364,7 +1363,7 @@ def test_implement_v2_shell_writer_source_like_path_detection_is_artifact_safe()
     assert not _shell_command_may_mutate_source_tree("printf frame > frame.txt && test -s frame.txt")
 
 
-def test_implement_v2_hides_write_tools_from_hard_runtime_prompt_before_probe_budget(tmp_path) -> None:
+def test_implement_v2_surfaces_write_tools_from_hard_runtime_prompt_before_probe_budget(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-hard-runtime",
@@ -1386,26 +1385,20 @@ def test_implement_v2_hides_write_tools_from_hard_runtime_prompt_before_probe_bu
         max_turns=8,
         base_max_turns=8,
         tool_specs=specs,
-        prewrite_write_tools_hidden=_prewrite_write_tools_hidden_for_turn(
-            lane_input,
-            prior_tool_calls=(),
-            prior_tool_results=(),
-        ),
         history=(),
     )
     response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
 
-    assert {spec.name for spec in specs}.isdisjoint({"write_file", "edit_file", "apply_patch"})
-    assert "write tools are temporarily hidden for this turn" in response_contract
-    assert "source/output contract" in response_contract
-    assert "write_file" not in response_contract
-    assert "edit_file" not in response_contract
-    assert "apply_patch" not in response_contract
+    assert {"write_file", "edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
+    assert "write tools are temporarily hidden for this turn" not in response_contract
+    assert "write_file" in response_contract
+    assert "edit_file" in response_contract
+    assert "apply_patch" in response_contract
     assert "finish" not in json.loads(response_contract)["tool_calls"][0]["name"]
     assert "run_command" in response_contract
 
 
-def test_implement_v2_keeps_write_tools_hidden_after_many_shallow_source_probes(tmp_path) -> None:
+def test_implement_v2_keeps_write_tools_visible_after_many_shallow_source_probes(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-hard-runtime",
@@ -1455,7 +1448,7 @@ def test_implement_v2_keeps_write_tools_hidden_after_many_shallow_source_probes(
         requires_deep_runtime_coverage=True,
     )
 
-    assert {"write_file", "edit_file", "apply_patch"}.isdisjoint({spec.name for spec in specs})
+    assert {"write_file", "edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
     assert readiness["probe_count_before_first_write"] == 8
     assert readiness["first_write_due"] is False
     assert "runtime_binary_layout" in readiness["prewrite_probe_missing_categories"]
@@ -1834,11 +1827,6 @@ def test_implement_v2_does_not_label_exec_mode_as_prewrite_hidden(tmp_path) -> N
         max_turns=8,
         base_max_turns=8,
         tool_specs=specs,
-        prewrite_write_tools_hidden=_prewrite_write_tools_hidden_for_turn(
-            lane_input,
-            prior_tool_calls=(),
-            prior_tool_results=(),
-        ),
         history=(),
     )
     response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
