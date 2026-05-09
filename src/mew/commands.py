@@ -15786,6 +15786,18 @@ def _tool_allowed_roots(args):
     roots = getattr(args, "root", None) or ["."]
     return roots
 
+def _tool_root_relative_path(path, args):
+    raw_path = Path(str(path or ".")).expanduser()
+    if raw_path.is_absolute():
+        return str(raw_path)
+    roots = _tool_allowed_roots(args)
+    if len(roots) != 1:
+        return str(raw_path)
+    root = Path(str(roots[0] or ".")).expanduser()
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    return str(root / raw_path)
+
 def _print_json_or_text(result, as_json, text):
     if as_json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -15794,7 +15806,7 @@ def _print_json_or_text(result, as_json, text):
 
 def cmd_tool_list(args):
     try:
-        result = inspect_dir(args.path, _tool_allowed_roots(args), limit=args.limit)
+        result = inspect_dir(_tool_root_relative_path(args.path, args), _tool_allowed_roots(args), limit=args.limit)
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
@@ -15804,7 +15816,7 @@ def cmd_tool_list(args):
 def cmd_tool_read(args):
     try:
         result = read_file(
-            args.path,
+            _tool_root_relative_path(args.path, args),
             _tool_allowed_roots(args),
             max_chars=args.max_chars,
             offset=args.offset,
@@ -15821,7 +15833,7 @@ def cmd_tool_search(args):
     try:
         result = search_text(
             args.query,
-            args.path,
+            _tool_root_relative_path(args.path, args),
             _tool_allowed_roots(args),
             max_matches=args.max_matches,
             context_lines=getattr(args, "context_lines", 3),
@@ -15837,7 +15849,7 @@ def cmd_tool_glob(args):
     try:
         result = glob_paths(
             args.pattern,
-            args.path,
+            _tool_root_relative_path(args.path, args),
             _tool_allowed_roots(args),
             max_matches=args.max_matches,
         )
@@ -15850,7 +15862,7 @@ def cmd_tool_glob(args):
 def cmd_tool_write(args):
     try:
         result = write_file(
-            args.path,
+            _tool_root_relative_path(args.path, args),
             args.content,
             _tool_allowed_roots(args),
             create=args.create,
@@ -15865,7 +15877,7 @@ def cmd_tool_write(args):
 def cmd_tool_edit(args):
     try:
         result = edit_file(
-            args.path,
+            _tool_root_relative_path(args.path, args),
             args.old,
             args.new,
             _tool_allowed_roots(args),

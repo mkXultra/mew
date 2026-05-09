@@ -435,6 +435,83 @@ class CommandTests(unittest.TestCase):
         self.assertFalse(outside.exists())
         self.assertIn("path literals outside tracked write roots", stderr.getvalue())
 
+    def test_tool_cli_relative_write_path_is_root_relative(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "tool",
+                        "write",
+                        "src/sample.txt",
+                        "--root",
+                        str(root),
+                        "--content",
+                        "alpha",
+                        "--create",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["written"])
+        self.assertEqual(Path(payload["path"]).name, "sample.txt")
+
+    def test_tool_cli_relative_read_search_glob_paths_are_root_relative(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "sample.txt").write_text("alpha needle beta", encoding="utf-8")
+
+            with redirect_stdout(StringIO()) as stdout:
+                read_code = main(["tool", "read", "src/sample.txt", "--root", str(root), "--json"])
+            read_payload = json.loads(stdout.getvalue())
+
+            with redirect_stdout(StringIO()) as stdout:
+                search_code = main(["tool", "search", "needle", ".", "--root", str(root), "--json"])
+            search_payload = json.loads(stdout.getvalue())
+
+            with redirect_stdout(StringIO()) as stdout:
+                glob_code = main(["tool", "glob", "*.txt", ".", "--root", str(root), "--json"])
+            glob_payload = json.loads(stdout.getvalue())
+
+        self.assertEqual(read_code, 0)
+        self.assertEqual(read_payload["text"], "alpha needle beta")
+        self.assertEqual(search_code, 0)
+        self.assertEqual(len(search_payload["matches"]), 1)
+        self.assertEqual(glob_code, 0)
+        self.assertEqual(len(glob_payload["matches"]), 1)
+
+    def test_tool_cli_relative_edit_path_is_root_relative(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            target = root / "src" / "sample.txt"
+            target.write_text("alpha needle beta", encoding="utf-8")
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "tool",
+                        "edit",
+                        "src/sample.txt",
+                        "--root",
+                        str(root),
+                        "--old",
+                        "needle",
+                        "--new",
+                        "NEEDLE",
+                        "--json",
+                    ]
+                )
+            edited_text = target.read_text(encoding="utf-8")
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["written"])
+        self.assertEqual(edited_text, "alpha NEEDLE beta")
+
     def test_task_add_json_stores_scope_target_paths(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
