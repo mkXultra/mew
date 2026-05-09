@@ -2738,6 +2738,296 @@ def test_implement_v2_write_repair_lock_allows_same_turn_write_then_verifier(tmp
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "function sys(){let n=0;return n}\n"
 
 
+def test_implement_v2_unreadable_source_write_projects_repair_guidance(tmp_path) -> None:
+    long_line = "const generated = '" + ("x" * 5000) + "';\n"
+    prompts: list[str] = []
+    outputs = [
+        {
+            "summary": "write generated source as one line",
+            "tool_calls": [
+                {
+                    "id": "write-one-line",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": long_line, "create": True},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "try verifier too early",
+            "tool_calls": [
+                {"id": "verify-too-early", "name": "run_tests", "arguments": {"command": "node vm.js", "cwd": "."}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "blocked by repair lock"},
+        },
+    ]
+
+    def fake_model(_backend, _auth, prompt, *_args, **_kwargs):
+        prompts.append(prompt)
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement generated runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    first_write = next(item for item in tool_results if item["provider_call_id"] == "write-one-line")
+    verifier = next(item for item in tool_results if item["provider_call_id"] == "verify-too-early")
+    repair = result.updated_lane_state["active_work_todo"]["write_repair"]
+
+    assert first_write["status"] == "failed"
+    assert first_write["content"][0]["failure_class"] == "source_mutation_unreadable_long_line"
+    assert verifier["status"] == "invalid"
+    assert "write_repair_lock_active" in verifier["content"][0]["reason"]
+    assert "readable multi-line code" in verifier["content"][0]["reason"]
+    assert repair["failure_kind"] == "source_mutation_unreadable_long_line"
+    assert repair["preferred_tool"] == "write_file"
+    assert "readable multi-line code" in repair["required_next_action"]
+    assert "source_mutation_unreadable_long_line" in prompts[1]
+    assert "readable multi-line code" in prompts[1]
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_implement_v2_unreadable_apply_patch_failure_preserves_target_path_for_lock(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.log('old');\n", encoding="utf-8")
+    long_line = "const generated = '" + ("x" * 5000) + "';\n"
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: vm.js\n"
+        "@@\n"
+        "-console.log('old');\n"
+        f"+{long_line}"
+        "*** End Patch\n"
+    )
+    outputs = [
+        {
+            "summary": "patch source as one line",
+            "tool_calls": [{"id": "patch-one-line", "name": "apply_patch", "arguments": {"patch": patch}}],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "try verifier too early",
+            "tool_calls": [
+                {"id": "verify-too-early", "name": "run_tests", "arguments": {"command": "node vm.js", "cwd": "."}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "blocked by repair lock"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Patch generated runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    patch_result = next(item for item in tool_results if item["provider_call_id"] == "patch-one-line")
+    verifier = next(item for item in tool_results if item["provider_call_id"] == "verify-too-early")
+    repair = result.updated_lane_state["active_work_todo"]["write_repair"]
+
+    assert patch_result["status"] == "failed"
+    assert repair["path"].endswith("/vm.js")
+    assert repair["preferred_tool"] == "apply_patch"
+    assert verifier["status"] == "invalid"
+    assert "source_mutation_unreadable_long_line repair is pending for" in verifier["content"][0]["reason"]
+    assert "vm.js" in verifier["content"][0]["reason"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old');\n"
+
+
+def test_implement_v2_unreadable_write_repair_survives_skipped_same_turn_write(tmp_path) -> None:
+    long_line = "const generated = '" + ("x" * 5000) + "';\n"
+    outputs = [
+        {
+            "summary": "write bad source and another write in same turn",
+            "tool_calls": [
+                {
+                    "id": "write-one-line",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": long_line, "create": True},
+                },
+                {
+                    "id": "write-other",
+                    "name": "write_file",
+                    "arguments": {"path": "other.js", "content": "console.log('other')\n", "create": True},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "try verifier too early",
+            "tool_calls": [
+                {"id": "verify-too-early", "name": "run_tests", "arguments": {"command": "node vm.js", "cwd": "."}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "blocked by repair lock"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement generated runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    first_write = next(item for item in tool_results if item["provider_call_id"] == "write-one-line")
+    skipped_write = next(item for item in tool_results if item["provider_call_id"] == "write-other")
+    verifier = next(item for item in tool_results if item["provider_call_id"] == "verify-too-early")
+    repair = result.updated_lane_state["active_work_todo"]["write_repair"]
+
+    assert first_write["status"] == "failed"
+    assert skipped_write["status"] == "invalid"
+    assert "blocked_by_prior_failed_write_in_same_turn" in skipped_write["content"][0]["reason"]
+    assert repair["failure_kind"] == "source_mutation_unreadable_long_line"
+    assert repair["path"] == "vm.js"
+    assert verifier["status"] == "invalid"
+    assert "source_mutation_unreadable_long_line repair is pending for vm.js" in verifier["content"][0]["reason"]
+    assert not (tmp_path / "vm.js").exists()
+    assert not (tmp_path / "other.js").exists()
+
+
+def test_implement_v2_unreadable_source_write_allows_same_target_multiline_repair(tmp_path) -> None:
+    long_line = "const generated = '" + ("x" * 5000) + "';\n"
+    multiline_source = "function run() {\n  return 0;\n}\nconsole.log(run());\n"
+    outputs = [
+        {
+            "summary": "write generated source as one line",
+            "tool_calls": [
+                {
+                    "id": "write-one-line",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": long_line, "create": True},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "rewrite generated source as multiline then verify",
+            "tool_calls": [
+                {
+                    "id": "write-multiline",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": multiline_source, "create": True},
+                },
+                {"id": "verify-after-repair", "name": "run_tests", "arguments": {"command": "node vm.js", "cwd": "."}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after verifier"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement generated runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    first_write = next(item for item in tool_results if item["provider_call_id"] == "write-one-line")
+    second_write = next(item for item in tool_results if item["provider_call_id"] == "write-multiline")
+    verifier = next(item for item in tool_results if item["provider_call_id"] == "verify-after-repair")
+
+    assert first_write["status"] == "failed"
+    assert second_write["status"] == "completed"
+    assert verifier["status"] == "completed"
+    assert "write_repair" not in result.updated_lane_state["active_work_todo"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == multiline_source
+
+
 def test_implement_v2_post_first_write_verifier_gate_blocks_probe_and_second_write(tmp_path) -> None:
     outputs = [
         {
