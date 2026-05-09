@@ -1498,7 +1498,8 @@ def test_implement_v2_counts_shell_source_read_probe_toward_deep_runtime_categor
     )
 
     assert readiness["probe_count"] == 1
-    assert "source_output_contract" in readiness["covered_categories"]
+    assert "source_output_contract" not in readiness["covered_categories"]
+    assert "source_output_contract" in readiness["missing_categories"]
     assert "entry_symbol_surface" in readiness["covered_categories"]
     assert "host_interface_surface" in readiness["covered_categories"]
     assert "implementation_feature_surface" in readiness["covered_categories"]
@@ -1542,7 +1543,7 @@ def test_implement_v2_does_not_treat_broad_find_as_source_output_contract() -> N
     assert "source_output_contract" in readiness["missing_categories"]
 
 
-def test_implement_v2_counts_shell_source_directory_probe_toward_source_output_contract() -> None:
+def test_implement_v2_counts_shell_source_output_path_toward_source_output_contract() -> None:
     lane_attempt_id = "implement_v2:ws-1:task-1:full"
     call = ToolCallEnvelope(
         lane_attempt_id=lane_attempt_id,
@@ -1562,7 +1563,10 @@ def test_implement_v2_counts_shell_source_directory_probe_toward_source_output_c
         content=(
             {
                 "command": call.arguments["command"],
-                "stdout": "src/runtime_backend.c:42:void draw_frame(void) { /* output frame artifact */ }\n",
+                "stdout": (
+                    'src/runtime_backend.c:42:void draw_frame(void) { FILE *fp = fopen("/tmp/frame.bmp", "wb"); '
+                    "fwrite(framebuffer, 1, len, fp); }\n"
+                ),
                 "exit_code": 0,
             },
         ),
@@ -1576,6 +1580,162 @@ def test_implement_v2_counts_shell_source_directory_probe_toward_source_output_c
 
     assert readiness["probe_count"] == 1
     assert "source_output_contract" in readiness["covered_categories"]
+
+
+def test_implement_v2_does_not_count_broad_source_search_as_output_contract() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    calls = (
+        ToolCallEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider="test",
+            provider_call_id="probe-dir-app",
+            mew_tool_call_id="mew-probe-dir-app",
+            tool_name="inspect_dir",
+            arguments={"path": "/app"},
+            turn_index=1,
+        ),
+        ToolCallEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider="test",
+            provider_call_id="probe-doom-source-files",
+            mew_tool_call_id="mew-probe-doom-source-files",
+            tool_name="glob",
+            arguments={"pattern": "/app/doomgeneric/**/*"},
+            turn_index=1,
+        ),
+        ToolCallEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider="test",
+            provider_call_id="probe-syscall-source",
+            mew_tool_call_id="mew-probe-syscall-source",
+            tool_name="search_text",
+            arguments={
+                "path": "/app/doomgeneric",
+                "pattern": "open|read|write|lseek|mmap|munmap|ioctl|gettimeofday|clock_gettime|fopen|fwrite",
+            },
+            turn_index=1,
+        ),
+    )
+    results = (
+        ToolResultEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider_call_id="probe-dir-app",
+            mew_tool_call_id="mew-probe-dir-app",
+            tool_name="inspect_dir",
+            status="completed",
+            content=({"path": "/app", "entries": ["doomgeneric", "README.md"]},),
+        ),
+        ToolResultEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider_call_id="probe-doom-source-files",
+            mew_tool_call_id="mew-probe-doom-source-files",
+            tool_name="glob",
+            status="completed",
+            content=({"matches": ["/app/doomgeneric/LICENSE", "/app/doomgeneric/doomgeneric.c"]},),
+        ),
+        ToolResultEnvelope(
+            lane_attempt_id=lane_attempt_id,
+            provider_call_id="probe-syscall-source",
+            mew_tool_call_id="mew-probe-syscall-source",
+            tool_name="search_text",
+            status="completed",
+            content=(
+                {
+                    "matches": [
+                        "/app/doomgeneric/LICENSE:100: You may copy and distribute verbatim copies.",
+                        "/app/doomgeneric/LICENSE:106: This license applies to source output distributions.",
+                    ],
+                    "summary": "Searched /app/doomgeneric; matches=50 (truncated)",
+                },
+            ),
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=calls,
+        prior_tool_results=results,
+        probe_threshold=3,
+    )
+
+    assert readiness["probe_count"] == 3
+    assert "source_output_contract" not in readiness["covered_categories"]
+    assert "source_output_contract" in readiness["missing_categories"]
+
+
+def test_implement_v2_does_not_count_search_location_path_as_output_contract() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-fixture-output",
+        mew_tool_call_id="mew-probe-fixture-output",
+        tool_name="search_text",
+        arguments={"path": "/app", "pattern": "output artifact"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "matches": [
+                    "/app/tests/fixtures/output.txt:1: expected output artifact fixture",
+                ],
+                "summary": "Searched /app; matches=1",
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert "source_output_contract" not in readiness["covered_categories"]
+    assert "source_output_contract" in readiness["missing_categories"]
+
+
+def test_implement_v2_does_not_count_search_snippet_path_field_as_output_contract() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-fixture-snippet",
+        mew_tool_call_id="mew-probe-fixture-snippet",
+        tool_name="search_text",
+        arguments={"path": "/app", "pattern": "output artifact"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "snippets": [
+                    {
+                        "path": "/app/tests/fixtures/output.txt",
+                        "line": "expected output artifact fixture",
+                    }
+                ],
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert "source_output_contract" not in readiness["covered_categories"]
+    assert "source_output_contract" in readiness["missing_categories"]
 
 
 def test_implement_v2_does_not_count_source_like_search_pattern_as_path_operand() -> None:
@@ -1737,7 +1897,17 @@ def test_implement_v2_reveals_write_tools_after_hard_runtime_probe_budget(tmp_pa
             mew_tool_call_id=call.mew_tool_call_id,
             tool_name=call.tool_name,
             status="completed",
-            content=({"content": json.dumps(call.arguments)},),
+            content=(
+                (
+                    {
+                        "matches": [
+                            'src/runtime.c:42:void draw_frame(void) { FILE *fp = fopen("/tmp/frame.bmp", "wb"); }'
+                        ],
+                    }
+                    if call.provider_call_id == "probe-output"
+                    else {"content": json.dumps(call.arguments)}
+                ),
+            ),
         )
         for call in calls
     )

@@ -3516,7 +3516,6 @@ def _deep_runtime_prewrite_probe_categories(
     command_text = argument_text if tool_name in {"run_command", "run_tests"} else ""
     output_text = result_text if tool_name == "read_command_output" else ""
     search_text = argument_text if tool_name == "search_text" else ""
-    source_intent_text = argument_text if tool_name in {"glob", "inspect_dir", "read_file", "search_text"} else ""
     source_shell_text = (
         f"{raw_command_text}\n{result_text}"
         if tool_name in {"run_command", "run_tests"} and _shell_command_reads_source_like_path(raw_command_text)
@@ -3524,18 +3523,8 @@ def _deep_runtime_prewrite_probe_categories(
     )
     probe_text = "\n".join(part for part in (command_text, output_text, search_text, source_shell_text) if part)
     categories: list[str] = []
-    if source_shell_text:
+    if _tool_result_has_source_output_contract(result):
         categories.append("source_output_contract")
-    if tool_name in {"glob", "inspect_dir", "read_file", "search_text"}:
-        if _text_matches_any(
-            source_intent_text,
-            (
-                r"\b(src|source|include|lib|app|main|test|tests)\b",
-                r"\.(?:c|cc|cpp|cxx|h|hpp|hh|rs|go|py|js|ts|java|kt|swift|zig|s|asm|wat|wasm)\b",
-                r"\b(output|artifact|frame|image|file|hook|api|contract|expected)\b",
-            ),
-        ):
-            categories.append("source_output_contract")
     if _text_matches_any(
         probe_text,
         (
@@ -4670,6 +4659,22 @@ def _source_output_contract_from_tool_results(
     return best
 
 
+def _tool_result_has_source_output_contract(result: ToolResultEnvelope) -> bool:
+    if result.tool_name not in {"read_file", "search_text", "run_command", "run_tests"}:
+        return False
+    payload = next((item for item in result.content if isinstance(item, dict)), {})
+    if not payload:
+        return False
+    raw_contract = payload.get("execution_contract")
+    contract = _payload_execution_contract(payload)
+    if isinstance(raw_contract, dict) and contract and _execution_contract_is_verifier_like(contract):
+        return False
+    for text, source_label in _source_output_contract_texts(result.tool_name, payload):
+        if _source_output_contract_candidates(text, source_label=source_label):
+            return True
+    return False
+
+
 def _source_output_contract_texts(tool_name: str, payload: dict[str, object]) -> tuple[tuple[str, str], ...]:
     texts: list[tuple[str, str]] = []
     if tool_name == "read_file":
@@ -4686,7 +4691,9 @@ def _source_output_contract_texts(tool_name: str, payload: dict[str, object]) ->
             for key in ("matches", "snippets", "text", "summary"):
                 value = nested.get(key)
                 if isinstance(value, list):
-                    serialized = "\n".join(str(item) for item in value)
+                    serialized = "\n".join(_source_output_contract_search_item_text(item) for item in value)
+                elif isinstance(value, dict):
+                    serialized = _source_output_contract_search_item_text(value)
                 else:
                     serialized = str(value or "")
                 if serialized.strip():
@@ -4698,6 +4705,17 @@ def _source_output_contract_texts(tool_name: str, payload: dict[str, object]) ->
             if value.strip():
                 texts.append((value, tool_name))
     return tuple(texts)
+
+
+def _source_output_contract_search_item_text(item: object) -> str:
+    if not isinstance(item, dict):
+        return str(item or "")
+    chunks = []
+    for key in ("text", "line", "content", "snippet", "match", "summary"):
+        value = item.get(key)
+        if value:
+            chunks.append(str(value))
+    return "\n".join(chunks)
 
 
 def _source_output_contract_payload_items(payload: dict[str, object]) -> tuple[dict[str, object], ...]:
@@ -4728,6 +4746,8 @@ def _source_output_contract_candidates(text: str, *, source_label: str) -> tuple
         path = match.group("path").strip()
         if not path or _is_verifier_scratch_artifact_id(path):
             continue
+        if _source_output_contract_path_is_search_location(text, match):
+            continue
         window = text[max(0, match.start() - 160) : min(len(text), match.end() + 160)]
         window_lower = window.casefold()
         marker_hits = sorted(marker for marker in _SOURCE_OUTPUT_CONTRACT_CONTEXT_MARKERS if marker in window_lower)
@@ -4755,6 +4775,11 @@ def _source_output_contract_candidates(text: str, *, source_label: str) -> tuple
             )
         )
     return tuple(candidates)
+
+
+def _source_output_contract_path_is_search_location(text: str, match: re.Match[str]) -> bool:
+    suffix = text[match.end() : match.end() + 16]
+    return bool(re.match(r":\d+(?::|-|$)", suffix))
 
 
 def _source_output_contract_kind(path: str) -> str:
