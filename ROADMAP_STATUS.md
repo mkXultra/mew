@@ -315,8 +315,9 @@ Done when:
 - the `implement_v2` HOT_PATH_COLLAPSE design has explicit Phase 0-6 evidence:
   before any same-shape 10 minute diagnostic, the HOT_PATH fastcheck passes
   focused UT, saved-artifact replay, prompt leak checks, sidecar/projection
-  checks, latest-actionable-failure shape checks, and any required
-  fixture-backed micro next-action check;
+  checks, latest-actionable-failure shape checks, and a required hash-bound
+  micro next-action check that reuses current fixture evidence or refreshes it
+  with one bounded live `auth.json` LLM call;
 - all 25 scoped `software-engineering,coding` tasks have mew results with
   `implement_v2` results, complete artifacts, and no unexplained Harbor runner
   errors;
@@ -358,9 +359,10 @@ Useful historical files:
    HOT_PATH fast inner loop from
    `docs/DESIGN_2026-05-08_M6_24_IMPLEMENT_V2_HOT_PATH_COLLAPSE.md` first:
    focused UT, saved-artifact replay, prompt leak checks, sidecar/projection
-   checks, latest-actionable-failure shape checks, and optional fixture-backed
-   micro next-action checks. Only after that fastcheck is green should the
-   session run one same-shape 10min step-shape proof with
+   checks, latest-actionable-failure shape checks, and a required hash-bound
+   micro next-action check that reuses current fixture evidence or refreshes it
+   with one bounded live `auth.json` LLM call. Only after that fastcheck is
+   green should the session run one same-shape 10min step-shape proof with
    `selected_lane=implement_v2`, `--max-wall-seconds 600`, complete artifact
    capture, and integration observation enabled when comparing to Codex steps.
 3. If the pre-speed gate is green and the 10min step-shape proof is Codex-like

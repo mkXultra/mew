@@ -589,7 +589,7 @@ Fastcheck order:
    - `hot_path_projection` and `resident_sidecar_state` metrics are present;
    - sidecar total and per-turn growth are within the current phase cap;
    - latest actionable failure is projected once per family.
-5. Run a micro next-action check when static/replay checks are not enough:
+5. Run a required micro next-action check:
    - use a saved intermediate history from `make-mips-interpreter`,
      `build-cython-ext`, or another measured coding task;
    - ask the model for the next tool call category only;
@@ -597,10 +597,15 @@ Fastcheck order:
      `inspect_latest_failure`, `cheap_probe`, or `invalid`;
    - do not run Harbor for this check.
 
-Micro LLM checks are allowed because they are cheaper than a live Harbor
+Micro LLM checks are required because they are cheaper than a live Harbor
 diagnostic and catch prompt/projection mistakes that pure unit tests cannot
-observe. They must be fixture-backed and category-based; they must not assert a
-task-specific exact command as the only passing answer.
+observe. They must be fixture-backed, hash-bound, and category-based; they must
+not assert a task-specific exact command as the only passing answer. A saved
+micro fixture is acceptable for the fast inner loop only when its prompt,
+projection, and model-context hashes still match. If the fixture is missing,
+stale, or explicitly refreshed, the fastcheck makes one bounded live LLM API
+call using `auth.json` and saves the response as the next fixture. The gate must
+fail if no current micro next-action evidence is available.
 
 Done when:
 
@@ -616,8 +621,9 @@ Validation:
 - the fastcheck itself is covered by a small smoke test or documented fixture;
 - at least one saved failing artifact is caught by fastcheck before a live
   10 minute diagnostic is run;
-- fastcheck does not require network access unless the optional micro LLM check
-  is explicitly enabled.
+- fastcheck reuses saved micro evidence without network access when hashes
+  match, but missing or stale evidence must trigger a bounded live micro LLM
+  refresh via `auth.json`; the refreshed response is saved as fixture evidence.
 
 ### Phase 6: Replay, Dogfood, Emulator, And Step-Shape Gate
 

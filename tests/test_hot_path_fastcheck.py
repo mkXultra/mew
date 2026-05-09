@@ -1,0 +1,135 @@
+import json
+from pathlib import Path
+
+from mew.implement_lane.hot_path_fastcheck import run_hot_path_fastcheck
+
+
+def _write_artifact(tmp_path: Path) -> Path:
+    artifact = tmp_path / "artifact"
+    implement_v2 = artifact / "implement_v2"
+    implement_v2.mkdir(parents=True)
+    manifest = {
+        "lane": "implement_v2",
+        "metrics": {
+            "hot_path_projection": {
+                "phase": "m6_24_hot_path_collapse_phase_0",
+                "normal_full_prompt_bytes": 1024,
+                "normal_full_prompt_bytes_total": 2048,
+                "provider_visible_tool_result_bytes": 128,
+                "normal_section_inventory": [
+                    {
+                        "id": "implement_v2_active_work_todo",
+                        "visibility": "ordinary",
+                        "bytes": 256,
+                    }
+                ],
+            },
+            "resident_sidecar_state": {
+                "surface": "resident_sidecar_state",
+                "total_bytes": 4096,
+                "per_turn_growth_bytes": 256,
+                "families": {"tool_results": 1},
+            },
+        },
+    }
+    history = [
+        {
+            "turn": 1,
+            "summary": "Probe source and prepare first patch.",
+            "tool_calls": [],
+            "tool_results": [],
+        }
+    ]
+    (implement_v2 / "proof-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (implement_v2 / "history.json").write_text(json.dumps(history), encoding="utf-8")
+    return artifact
+
+
+def test_hot_path_fastcheck_refreshes_and_reuses_micro_fixture(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    fixture_path = tmp_path / "micro.json"
+    calls = []
+
+    def fake_model(prompt):
+        calls.append(prompt)
+        return {
+            "category": "patch/edit",
+            "reason": "history has enough source evidence for first write",
+        }
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=fixture_path,
+        expected_categories=("patch/edit",),
+        micro_model_callable=fake_model,
+    )
+
+    assert result["status"] == "pass"
+    assert result["micro_next_action_refresh"]["mode"] == "refreshed"
+    assert fixture_path.is_file()
+    assert len(calls) == 1
+
+    def fail_if_called(prompt):
+        raise AssertionError(f"unexpected live call: {prompt[:80]}")
+
+    reused = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=fixture_path,
+        expected_categories=("patch/edit",),
+        micro_model_callable=fail_if_called,
+    )
+
+    assert reused["status"] == "pass"
+    assert reused["micro_next_action_refresh"]["mode"] == "reused"
+
+
+def test_hot_path_fastcheck_rejects_wrong_micro_category(tmp_path):
+    artifact = _write_artifact(tmp_path)
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        expected_categories=("patch/edit",),
+        micro_model_callable=lambda _prompt: {"category": "cheap_probe", "reason": "more reading"},
+    )
+
+    assert result["status"] == "fail"
+    micro = [check for check in result["checks"] if check["name"] == "micro_next_action"][0]
+    assert micro["status"] == "fail"
+
+
+def test_hot_path_fastcheck_rejects_model_supplied_unknown_category(tmp_path):
+    artifact = _write_artifact(tmp_path)
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        micro_model_callable=lambda _prompt: {
+            "category": "invented_category",
+            "expected_categories": ["invented_category"],
+        },
+    )
+
+    assert result["status"] == "fail"
+    assert result["metrics"]["micro_next_action"]["category"] == "invalid"
+
+
+def test_hot_path_fastcheck_skips_live_micro_when_static_checks_fail(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    manifest_path = artifact / "implement_v2" / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["metrics"]["resident_sidecar_state"]["total_bytes"] = 999999
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def fail_if_called(prompt):
+        raise AssertionError(f"unexpected live call: {prompt[:80]}")
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        micro_model_callable=fail_if_called,
+        max_sidecar_total_bytes=1024,
+    )
+
+    assert result["status"] == "fail"
+    assert result["micro_next_action_refresh"]["mode"] == "skipped"
