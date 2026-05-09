@@ -75,8 +75,8 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="run_tests",
         access="execute",
         description=(
-            "Run a verifier command through managed exec with nonterminal state. Optional "
-            "command_intent=probe|diagnostic marks cheap non-acceptance commands."
+            "Run a verifier command through managed exec with nonterminal state. Accepts command/cmd strings "
+            "or argv arrays. Optional command_intent=probe|diagnostic marks cheap non-acceptance commands."
         ),
         approval_required=True,
     ),

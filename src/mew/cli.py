@@ -92,6 +92,7 @@ from .commands import (
     cmd_tool_list,
     cmd_tool_read,
     cmd_tool_search,
+    cmd_tool_specs,
     cmd_tool_status,
     cmd_tool_test,
     cmd_tool_write,
@@ -1502,6 +1503,16 @@ def build_parser():
     tool_status_parser.add_argument("--cwd", default=".")
     tool_status_parser.add_argument("--json", action="store_true", help="print structured JSON")
     tool_status_parser.set_defaults(func=cmd_tool_status)
+
+    tool_specs_parser = tool_subparsers.add_parser("specs", help="list provider-neutral shared tool specs")
+    tool_specs_parser.add_argument(
+        "--mode",
+        default="full",
+        choices=("read_only", "plan", "exec", "write", "full", "implement", "implementation"),
+        help="tool visibility mode",
+    )
+    tool_specs_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_specs_parser.set_defaults(func=cmd_tool_specs)
 
     tool_list_parser = tool_subparsers.add_parser("list", help="list a directory under an allowed root")
     tool_list_parser.add_argument("path", nargs="?", default=".")

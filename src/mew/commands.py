@@ -15805,6 +15805,27 @@ def _print_json_or_text(result, as_json, text):
     else:
         print(text)
 
+def cmd_tool_specs(args):
+    from .implement_lane.tool_policy import list_v2_tool_specs_for_mode
+
+    specs = [spec.as_dict() for spec in list_v2_tool_specs_for_mode(args.mode)]
+    result = {
+        "schema_version": 1,
+        "mode": args.mode,
+        "tools": specs,
+    }
+    lines = [f"{args.mode}: {len(specs)} tool(s)"]
+    for spec in specs:
+        flags = []
+        if spec.get("approval_required"):
+            flags.append("approval")
+        if spec.get("dry_run_supported"):
+            flags.append("dry-run")
+        suffix = f" ({', '.join(flags)})" if flags else ""
+        lines.append(f"- {spec['name']} [{spec['access']}]{suffix}: {spec['description']}")
+    _print_json_or_text(result, args.json, "\n".join(lines))
+    return 0
+
 def cmd_tool_list(args):
     try:
         result = inspect_dir(_tool_root_relative_path(args.path, args), _tool_allowed_roots(args), limit=args.limit)

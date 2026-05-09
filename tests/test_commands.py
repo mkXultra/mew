@@ -8332,6 +8332,19 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "ToolKernel")
 
+    def test_tool_specs_lists_mode_scoped_shared_tool_surface(self):
+        with redirect_stdout(StringIO()) as stdout:
+            code = main(["tool", "specs", "--mode", "exec", "--json"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        tool_names = {tool["name"] for tool in payload["tools"]}
+        self.assertEqual(payload["mode"], "exec")
+        self.assertIn("run_tests", tool_names)
+        self.assertIn("run_command", tool_names)
+        self.assertIn("read_file", tool_names)
+        self.assertNotIn("write_file", tool_names)
+
     def test_tool_invoke_write_file_requires_explicit_approval_for_apply(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
