@@ -312,6 +312,11 @@ re-read the scope doc plus decision ledger first.
 
 Done when:
 
+- the `implement_v2` HOT_PATH_COLLAPSE design has explicit Phase 0-6 evidence:
+  before any same-shape 10 minute diagnostic, the HOT_PATH fastcheck passes
+  focused UT, saved-artifact replay, prompt leak checks, sidecar/projection
+  checks, latest-actionable-failure shape checks, and any required
+  fixture-backed micro next-action check;
 - all 25 scoped `software-engineering,coding` tasks have mew results with
   `implement_v2` results, complete artifacts, and no unexplained Harbor runner
   errors;
@@ -348,15 +353,16 @@ Useful historical files:
    `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`; `make-doom-for-mips` is
    recorded/deferred and should not pull the session into another same-shape
    proof loop.
-2. For the current generic `make-mips-interpreter` repair, run current-head
-   pre-speed using the M6.24 gate in
-   `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`: focused UT, replay,
-   terminal-bench replay dogfood, matching emulator, then a 10min step-shape
-   proof with `selected_lane=implement_v2`, `--max-wall-seconds 600`, complete
-   artifact capture, and integration observation enabled when comparing to
-   Codex steps. If that diagnostic misses the Codex-like shape, use
-   `docs/DESIGN_2026-05-07_M6_24_INTEGRATION_OBSERVABILITY.md` as the repair
-   map before spending full speed budget.
+2. For the current generic `make-mips-interpreter` repair, do not spend another
+   live `step-check-10min` as the first detector. Implement and run the
+   HOT_PATH fast inner loop from
+   `docs/DESIGN_2026-05-08_M6_24_IMPLEMENT_V2_HOT_PATH_COLLAPSE.md` first:
+   focused UT, saved-artifact replay, prompt leak checks, sidecar/projection
+   checks, latest-actionable-failure shape checks, and optional fixture-backed
+   micro next-action checks. Only after that fastcheck is green should the
+   session run one same-shape 10min step-shape proof with
+   `selected_lane=implement_v2`, `--max-wall-seconds 600`, complete artifact
+   capture, and integration observation enabled when comparing to Codex steps.
 3. If the pre-speed gate is green and the 10min step-shape proof is Codex-like
    enough, run exactly one same-shape `make-mips-interpreter
    selected_lane=implement_v2` speed_1 with task-correct cwd and complete
