@@ -89,6 +89,11 @@ from .implementation_lane_baseline import (
     summarize_implementation_lane_baseline,
 )
 from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+from .implement_lane.tool_lab import (
+    analyze_implement_v2_tool_lab_artifact,
+    format_implement_v2_tool_lab_text,
+    run_implement_v2_tool_lab_command,
+)
 from .long_build_substrate import (
     build_long_build_contract,
     execution_contract_continuation_policy,
@@ -15924,6 +15929,38 @@ def cmd_tool_git(args):
         return 1
     _print_json_or_text(result, args.json, format_command_record(result))
     return 0 if result.get("exit_code") == 0 else 1
+
+
+def cmd_implement_v2_tool_lab(args):
+    try:
+        if getattr(args, "command_text", None):
+            command_workspace = args.workspace or "."
+            result = run_implement_v2_tool_lab_command(
+                command=args.command_text,
+                workspace=command_workspace,
+                cwd=args.cwd,
+                allowed_read_roots=args.allow_read or [command_workspace],
+                allowed_write_roots=args.allow_write or [],
+                target_paths=args.target_path or [],
+                timeout=args.timeout,
+                command_intent=args.command_intent,
+                probe_threshold=args.probe_threshold,
+                requires_deep_runtime_coverage=args.requires_deep_runtime_coverage,
+            )
+        else:
+            result = analyze_implement_v2_tool_lab_artifact(
+                args.artifact,
+                workspace=args.workspace or "",
+                target_paths=args.target_path or [],
+                probe_threshold=args.probe_threshold,
+                requires_deep_runtime_coverage=args.requires_deep_runtime_coverage,
+            )
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, format_implement_v2_tool_lab_text(result))
+    return 0
+
 
 def resolved_task_cwd_text(task):
     cwd = Path((task or {}).get("cwd") or ".").expanduser()

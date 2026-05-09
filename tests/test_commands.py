@@ -81,6 +81,360 @@ class CommandTests(unittest.TestCase):
         self.assertIn("usage: mew task add", output)
         self.assertIn("create the task in ready status", output)
 
+    def test_implement_v2_tool_lab_artifact_reports_scratch_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "proof-manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "lane": "implement_v2",
+                        "lane_attempt_id": "implement_v2:tool-lab",
+                        "artifact_namespace": "implement-lane/implement_v2/tool-lab",
+                        "tool_calls": [],
+                        "tool_results": [
+                            {
+                                "schema_version": 1,
+                                "lane_attempt_id": "implement_v2:tool-lab",
+                                "provider_call_id": "probe",
+                                "mew_tool_call_id": "mew-probe",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "side_effects": [
+                                    {
+                                        "kind": "source_tree_mutation",
+                                        "record": {
+                                            "command_run_id": "cmd-probe",
+                                            "provider_call_id": "probe",
+                                            "changes": [
+                                                {
+                                                    "path": "/tmp/diag.txt",
+                                                    "change": "created",
+                                                    "after_size": 0,
+                                                }
+                                            ],
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                        "metrics": {"first_write_readiness": {"status": "written"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(["implement-v2", "tool-lab", "--artifact", str(manifest_path), "--json"])
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["source_tree_mutation_count"], 1)
+        self.assertEqual(payload["suspicious_source_tree_mutation_count"], 1)
+        self.assertEqual(payload["suspicious_source_tree_mutations"][0]["reason"], "scratch_tmp_path")
+
+    def test_implement_v2_tool_lab_relative_artifact_path_is_workspace_relative(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "proof-manifest.json"
+            workspace = Path(tmp) / "workspace"
+            workspace.mkdir()
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "lane": "implement_v2",
+                        "tool_calls": [],
+                        "tool_results": [
+                            {
+                                "schema_version": 1,
+                                "provider_call_id": "write",
+                                "mew_tool_call_id": "mew-write",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "side_effects": [
+                                    {
+                                        "kind": "source_tree_mutation",
+                                        "record": {
+                                            "command_run_id": "cmd-write",
+                                            "provider_call_id": "write",
+                                            "changes": [{"path": "src/app.py", "change": "modified"}],
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "implement-v2",
+                        "tool-lab",
+                        "--artifact",
+                        str(manifest_path),
+                        "--workspace",
+                        str(workspace),
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["source_tree_mutation_count"], 1)
+        self.assertEqual(payload["suspicious_source_tree_mutation_count"], 0)
+
+    def test_implement_v2_tool_lab_tmp_workspace_path_is_not_scratch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "proof-manifest.json"
+            workspace = Path(tmp) / "workspace"
+            workspace.mkdir()
+            changed_path = workspace / "sample.js"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "lane": "implement_v2",
+                        "tool_calls": [],
+                        "tool_results": [
+                            {
+                                "schema_version": 1,
+                                "provider_call_id": "write",
+                                "mew_tool_call_id": "mew-write",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "side_effects": [
+                                    {
+                                        "kind": "source_tree_mutation",
+                                        "record": {
+                                            "command_run_id": "cmd-write",
+                                            "provider_call_id": "write",
+                                            "changed_count": 1,
+                                            "changes": [{"path": str(changed_path), "change": "modified"}],
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "implement-v2",
+                        "tool-lab",
+                        "--artifact",
+                        str(manifest_path),
+                        "--workspace",
+                        str(workspace),
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["source_tree_mutation_count"], 1)
+        self.assertEqual(payload["suspicious_source_tree_mutation_count"], 0)
+
+    def test_implement_v2_tool_lab_recomputed_readiness_ignores_suspicious_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest_path = Path(tmp) / "proof-manifest.json"
+            workspace = Path(tmp) / "workspace"
+            workspace.mkdir()
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "lane": "implement_v2",
+                        "tool_calls": [],
+                        "tool_results": [
+                            {
+                                "schema_version": 1,
+                                "provider_call_id": "probe",
+                                "mew_tool_call_id": "mew-probe",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "side_effects": [
+                                    {
+                                        "kind": "source_tree_mutation",
+                                        "record": {
+                                            "command_run_id": "cmd-probe",
+                                            "provider_call_id": "probe",
+                                            "changed_count": 1,
+                                            "changes": [{"path": "/tmp/diag.txt", "change": "created"}],
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "implement-v2",
+                        "tool-lab",
+                        "--artifact",
+                        str(manifest_path),
+                        "--workspace",
+                        str(workspace),
+                        "--target-path",
+                        "src/foo.py",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["suspicious_source_tree_mutation_count"], 1)
+        self.assertNotEqual(payload["first_write_readiness"]["recomputed"]["status"], "written")
+
+    def test_implement_v2_tool_lab_command_recomputes_first_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "implement-v2",
+                        "tool-lab",
+                        "--command",
+                        "printf 'x' > sample.js",
+                        "--workspace",
+                        tmp,
+                        "--cwd",
+                        tmp,
+                        "--allow-read",
+                        tmp,
+                        "--allow-write",
+                        tmp,
+                        "--target-path",
+                        "sample.js",
+                        "--json",
+                    ]
+                )
+
+            payload = json.loads(stdout.getvalue())
+            written = Path(tmp) / "sample.js"
+            self.assertTrue(written.exists())
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["mode"], "command")
+        self.assertEqual(payload["source_tree_mutation_count"], 1)
+        self.assertEqual(payload["first_write_readiness"]["recomputed"]["status"], "written")
+        self.assertGreater(payload["provider_visible_tool_result_bytes"], 0)
+
+    def test_implement_v2_tool_lab_command_defaults_to_current_directory_workspace(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "implement-v2",
+                            "tool-lab",
+                            "--command",
+                            "printf 'x' > sample.js",
+                            "--target-path",
+                            "sample.js",
+                            "--json",
+                        ]
+                    )
+                payload = json.loads(stdout.getvalue())
+                written = Path(tmp) / "sample.js"
+                self.assertTrue(written.exists())
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["mode"], "command")
+        self.assertEqual(payload["source_tree_mutation_count"], 1)
+        self.assertEqual(payload["first_write_readiness"]["recomputed"]["status"], "written")
+
+    def test_implement_v2_tool_lab_command_refuses_untracked_write_redirection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside.js"
+            workspace.mkdir()
+            with redirect_stderr(StringIO()) as stderr:
+                code = main(
+                    [
+                        "implement-v2",
+                        "tool-lab",
+                        "--command",
+                        f"printf 'x' > {outside}",
+                        "--workspace",
+                        str(workspace),
+                        "--allow-write",
+                        str(workspace),
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 1)
+        self.assertFalse(outside.exists())
+        self.assertIn("outside tracked write roots", stderr.getvalue())
+
+    def test_implement_v2_tool_lab_command_refuses_untracked_absolute_path_literal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside.js"
+            workspace.mkdir()
+            with redirect_stderr(StringIO()) as stderr:
+                code = main(
+                    [
+                        "implement-v2",
+                        "tool-lab",
+                        "--command",
+                        f"printf 'x' | tee {outside}",
+                        "--workspace",
+                        str(workspace),
+                        "--allow-write",
+                        str(workspace),
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 1)
+        self.assertFalse(outside.exists())
+        self.assertIn("path literals outside tracked write roots", stderr.getvalue())
+
+    def test_implement_v2_tool_lab_command_refuses_relative_traversal_path_literal(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            outside = Path(tmp) / "outside.js"
+            workspace.mkdir()
+            os.chdir(workspace)
+            try:
+                with redirect_stderr(StringIO()) as stderr:
+                    code = main(
+                        [
+                            "implement-v2",
+                            "tool-lab",
+                            "--command",
+                            "printf 'x' | tee ../outside.js",
+                            "--workspace",
+                            str(workspace),
+                            "--allow-write",
+                            str(workspace),
+                            "--json",
+                        ]
+                    )
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(code, 1)
+        self.assertFalse(outside.exists())
+        self.assertIn("path literals outside tracked write roots", stderr.getvalue())
+
     def test_task_add_json_stores_scope_target_paths(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

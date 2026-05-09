@@ -41,6 +41,7 @@ from .commands import (
     cmd_focus,
     cmd_guidance_init,
     cmd_guidance_show,
+    cmd_implement_v2_tool_lab,
     cmd_journal,
     cmd_listen,
     cmd_log,
@@ -1575,6 +1576,71 @@ def build_parser():
             git_action_parser.add_argument("--limit", type=int, default=20, help="log entries for git log")
         git_action_parser.add_argument("--json", action="store_true", help="print structured JSON")
         git_action_parser.set_defaults(func=cmd_tool_git, git_action=git_action)
+
+    implement_v2_parser = subparsers.add_parser(
+        "implement-v2",
+        help="implement_v2 lane diagnostics",
+    )
+    implement_v2_subparsers = implement_v2_parser.add_subparsers(dest="implement_v2_command")
+    implement_v2_tool_lab_parser = implement_v2_subparsers.add_parser(
+        "tool-lab",
+        help="analyze implement_v2 tool-loop artifacts without an LLM call",
+    )
+    implement_v2_tool_lab_source = implement_v2_tool_lab_parser.add_mutually_exclusive_group(required=True)
+    implement_v2_tool_lab_source.add_argument(
+        "--artifact",
+        help="implement_v2 proof-manifest.json or an artifact directory containing it",
+    )
+    implement_v2_tool_lab_source.add_argument(
+        "--command",
+        dest="command_text",
+        help="execute one deterministic run_command through the v2 exec substrate",
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--workspace",
+        default="",
+        help="workspace root; defaults to current directory in command mode and is optional for artifact analysis",
+    )
+    implement_v2_tool_lab_parser.add_argument("--cwd", default=".", help="command cwd for command mode")
+    implement_v2_tool_lab_parser.add_argument(
+        "--allow-read",
+        action="append",
+        default=[],
+        help="allowed read root for command mode; defaults to workspace",
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--allow-write",
+        action="append",
+        default=[],
+        help=(
+            "tracked write/source-mutation root for command mode; defaults to workspace and rejects "
+            "absolute path literals outside these roots"
+        ),
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--target-path",
+        action="append",
+        default=[],
+        help="active work target path used to recompute first-write readiness",
+    )
+    implement_v2_tool_lab_parser.add_argument("--timeout", type=float, help="command timeout for command mode")
+    implement_v2_tool_lab_parser.add_argument(
+        "--command-intent",
+        default="probe",
+        help="command intent for command mode; default probe",
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--probe-threshold",
+        type=int,
+        help="first-write probe threshold when recomputing readiness",
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--requires-deep-runtime-coverage",
+        action="store_true",
+        help="use deep-runtime coverage readiness instead of probe count",
+    )
+    implement_v2_tool_lab_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    implement_v2_tool_lab_parser.set_defaults(func=cmd_implement_v2_tool_lab)
 
     self_improve_parser = subparsers.add_parser(
         "self-improve",
