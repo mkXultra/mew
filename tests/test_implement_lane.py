@@ -12357,6 +12357,105 @@ def test_implement_v2_frontier_prefers_structured_missing_runtime_artifact(tmp_p
     assert "producing substep" in runtime_failure["required_next_probe"]
 
 
+def test_implement_v2_frontier_retains_source_output_contract_over_model_artifact(tmp_path) -> None:
+    source_output = tmp_path / "expected-output.dat"
+    model_artifact = tmp_path / "generated.ppm"
+    outputs = [
+        {
+            "summary": "read source output contract",
+            "tool_calls": [
+                {
+                    "id": "source-output-probe",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf '%s\\n' "
+                            + shlex.quote(
+                                f'src/runtime.c:42: FILE *fp = fopen("{source_output}", "wb"); fwrite(buf, 1, n, fp);'
+                            )
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "source output path found"},
+        },
+        {
+            "summary": "run verifier with a conflicting model artifact contract",
+            "tool_calls": [
+                {
+                    "id": "conflicting-runtime-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": f"printf 'missing output artifact {model_artifact}\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:conflicting-model-artifact",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "zero"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "model-artifact",
+                                    "kind": "image",
+                                    "path": str(model_artifact),
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "wrong artifact missing"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Given provided source for a runtime interpreter, implement it so it writes "
+                    f"the /tmp-style output artifact {source_output}."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert frontier["source_output_contract"]["path"] == str(source_output)
+    assert frontier["final_artifact"]["path"] == str(source_output)
+    assert frontier["runtime_artifact_contract_mismatch"]["failure_class"] == "runtime_artifact_contract_mismatch"
+    assert frontier["runtime_artifact_contract_mismatch"]["model_declared_path"] == str(model_artifact)
+    assert str(source_output) in frontier["runtime_artifact_contract_mismatch"]["required_next_action"]
+
+
 def test_implement_v2_frontier_diagnostic_stream_miss_does_not_replace_runtime_failure(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {

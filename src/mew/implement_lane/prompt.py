@@ -439,6 +439,9 @@ def _active_work_hot_path_content(
 def _hard_runtime_frontier_hot_path_card(frontier: dict[str, object]) -> dict[str, object]:
     latest_failure = _frontier_latest_failure_card(frontier)
     final_artifact = frontier.get("final_artifact") if isinstance(frontier.get("final_artifact"), dict) else {}
+    source_output_contract = (
+        frontier.get("source_output_contract") if isinstance(frontier.get("source_output_contract"), dict) else {}
+    )
     verifier = (
         frontier.get("next_verifier_shaped_command")
         if isinstance(frontier.get("next_verifier_shaped_command"), dict)
@@ -456,6 +459,7 @@ def _hard_runtime_frontier_hot_path_card(frontier: dict[str, object]) -> dict[st
             "latest_failure": latest_failure,
             "required_next_action": _frontier_required_next_action(frontier),
             "final_artifact_path": _clip_text(final_artifact.get("path"), 120),
+            "source_output_contract_path": _clip_text(source_output_contract.get("path"), 120),
             "next_verifier": _drop_empty_dict_values(
                 {
                     "tool": _clip_text(verifier.get("tool"), 40),

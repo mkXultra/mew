@@ -126,6 +126,38 @@ _HARD_RUNTIME_FRONTIER_SCHEMA_VERSION = 1
 _FRONTIER_LIST_LIMIT = 8
 _FRONTIER_TEXT_LIMIT = 500
 _FRONTIER_COMMAND_TEXT_LIMIT = 1200
+_SOURCE_OUTPUT_CONTRACT_PATH_RE = re.compile(
+    r"(?P<path>(?:/[A-Za-z0-9._@%+=:,~-]+)+\."
+    r"(?:bmp|png|jpe?g|gif|ppm|pgm|pbm|json|csv|txt|log|dat|bin|out|wasm|pdf|html|xml))"
+)
+_SOURCE_OUTPUT_CONTRACT_CONTEXT_MARKERS = frozenset(
+    {
+        "artifact",
+        "create",
+        "created",
+        "export",
+        "frame",
+        "fopen",
+        "fwrite",
+        "generate",
+        "generated",
+        "image",
+        "open(",
+        "output",
+        "produce",
+        "produced",
+        "render",
+        "rendered",
+        "result",
+        "save",
+        "saved",
+        "saving",
+        "write",
+        "writefile",
+        "writes",
+        "written",
+    }
+)
 _HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT = 4
 _IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS = 0.001
 _IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS = (0.0,)
@@ -3046,8 +3078,32 @@ def _merge_hard_runtime_frontier_state(
     for key in ("build_target", "final_artifact", "next_verifier_shaped_command"):
         if isinstance(merged.get(key), dict):
             merged[key] = _resolve_frontier_mapping_refs(merged[key], registry)
-    for key, value in _frontier_state_from_execution_contracts(tool_results, registry).items():
+    contract_frontier_updates = _frontier_state_from_execution_contracts(tool_results, registry)
+    for key, value in contract_frontier_updates.items():
         merged[key] = value
+
+    source_output_contract = _source_output_contract_from_tool_results(tool_results, registry)
+    if source_output_contract:
+        existing_source = merged.get("source_output_contract")
+        if not isinstance(existing_source, dict) or _source_output_contract_confidence_rank(
+            source_output_contract
+        ) >= _source_output_contract_confidence_rank(existing_source):
+            merged["source_output_contract"] = _resolve_frontier_mapping_refs(source_output_contract, registry)
+    if "source_output_contract" in merged:
+        source_contract = (
+            merged.get("source_output_contract") if isinstance(merged.get("source_output_contract"), dict) else {}
+        )
+        final_artifact = merged.get("final_artifact") if isinstance(merged.get("final_artifact"), dict) else {}
+        drift = _runtime_artifact_contract_drift(source_contract, final_artifact)
+        if drift:
+            merged["runtime_artifact_contract_mismatch"] = drift
+            merged["final_artifact"] = _source_output_contract_as_final_artifact(source_contract)
+        else:
+            merged.pop("runtime_artifact_contract_mismatch", None)
+            if source_contract and not final_artifact:
+                merged["final_artifact"] = _source_output_contract_as_final_artifact(source_contract)
+    elif contract_frontier_updates:
+        merged.pop("runtime_artifact_contract_mismatch", None)
 
     contract_verifier = _latest_tool_contract_verifier_command(tool_results)
     if contract_verifier:
@@ -3087,6 +3143,8 @@ def _compact_hard_runtime_frontier_state(value: object) -> dict[str, object]:
         "latest_build_failure",
         "latest_runtime_failure",
         "legacy_runtime_marker_fallback",
+        "source_output_contract",
+        "runtime_artifact_contract_mismatch",
         "next_verifier_shaped_command",
         "first_write_frontier_stall",
     ):
@@ -4568,6 +4626,173 @@ def _frontier_build_target_from_contract(
             "artifact_path": _frontier_clip_text(artifact_path, limit=400),
         }
     )
+
+
+def _source_output_contract_from_tool_results(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    registry: dict[str, object],
+) -> dict[str, object]:
+    best: dict[str, object] = {}
+    best_score = -1
+    for result in tool_results:
+        if result.tool_name not in {"read_file", "search_text", "run_command", "run_tests"}:
+            continue
+        payload = next((item for item in result.content if isinstance(item, dict)), {})
+        if not payload:
+            continue
+        raw_contract = payload.get("execution_contract")
+        contract = _payload_execution_contract(payload)
+        if isinstance(raw_contract, dict) and contract and _execution_contract_is_verifier_like(contract):
+            continue
+        for text, source_label in _source_output_contract_texts(result.tool_name, payload):
+            for candidate in _source_output_contract_candidates(text, source_label=source_label):
+                score = int(candidate.get("_score") or 0)
+                if score <= best_score:
+                    continue
+                refs = _frontier_result_refs(result, registry)
+                candidate.pop("_score", None)
+                if refs:
+                    candidate["evidence_refs"] = refs
+                best = candidate
+                best_score = score
+    return best
+
+
+def _source_output_contract_texts(tool_name: str, payload: dict[str, object]) -> tuple[tuple[str, str], ...]:
+    texts: list[tuple[str, str]] = []
+    if tool_name == "read_file":
+        path = _frontier_clip_text(payload.get("path"), limit=240)
+        label = f"read_file:{path}" if path else "read_file"
+        for key in ("text", "summary"):
+            value = str(payload.get(key) or "")
+            if value.strip():
+                texts.append((value, label))
+        return tuple(texts)
+    if tool_name == "search_text":
+        for key in ("matches", "text", "summary"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                serialized = "\n".join(str(item) for item in value)
+            else:
+                serialized = str(value or "")
+            if serialized.strip():
+                texts.append((serialized, "search_text"))
+        return tuple(texts)
+    for key in ("stdout", "stdout_tail", "stderr", "stderr_tail", "summary"):
+        value = str(payload.get(key) or "")
+        if value.strip():
+            texts.append((value, tool_name))
+    return tuple(texts)
+
+
+def _source_output_contract_candidates(text: str, *, source_label: str) -> tuple[dict[str, object], ...]:
+    candidates: list[dict[str, object]] = []
+    for match in _SOURCE_OUTPUT_CONTRACT_PATH_RE.finditer(text or ""):
+        path = match.group("path").strip()
+        if not path or _is_verifier_scratch_artifact_id(path):
+            continue
+        window = text[max(0, match.start() - 160) : min(len(text), match.end() + 160)]
+        window_lower = window.casefold()
+        marker_hits = sorted(marker for marker in _SOURCE_OUTPUT_CONTRACT_CONTEXT_MARKERS if marker in window_lower)
+        if not marker_hits:
+            continue
+        score = 2 + min(len(marker_hits), 4)
+        if _artifact_id_is_visual_runtime_output(path):
+            score += 3
+        if source_label.startswith(("read_file", "search_text")):
+            score += 2
+        if any(token in window_lower for token in (".c:", ".cc:", ".cpp:", ".h:", "printf", "fopen", "writefile")):
+            score += 1
+        candidates.append(
+            _drop_empty_frontier_values(
+                {
+                    "path": _frontier_clip_text(path, limit=400),
+                    "kind": _source_output_contract_kind(path),
+                    "source": "source_or_probe_output",
+                    "confidence": "high" if score >= 6 else "medium",
+                    "source_label": _frontier_clip_text(source_label, limit=160),
+                    "evidence_excerpt": _frontier_clip_text(" ".join(window.split()), limit=240),
+                    "markers": marker_hits[:6],
+                    "_score": score,
+                }
+            )
+        )
+    return tuple(candidates)
+
+
+def _source_output_contract_kind(path: str) -> str:
+    lowered = path.casefold()
+    if lowered.endswith((".bmp", ".png", ".jpg", ".jpeg", ".gif", ".ppm", ".pgm", ".pbm")):
+        return "image"
+    if lowered.endswith((".json", ".csv", ".txt", ".log", ".html", ".xml")):
+        return "file"
+    if lowered.endswith((".bin", ".out", ".wasm")):
+        return "binary"
+    return "file"
+
+
+def _source_output_contract_confidence_rank(contract: dict[str, object]) -> int:
+    confidence = str(contract.get("confidence") or "").strip().lower()
+    return {"high": 3, "medium": 2, "low": 1}.get(confidence, 0)
+
+
+def _runtime_artifact_contract_drift(
+    source_contract: dict[str, object],
+    final_artifact: dict[str, object],
+) -> dict[str, object]:
+    source_path = _frontier_artifact_identity(source_contract.get("path"))
+    final_path = _frontier_artifact_identity(final_artifact.get("path"))
+    if not source_path or not final_path or _frontier_paths_are_compatible(source_path, final_path):
+        return {}
+    return _drop_empty_frontier_values(
+        {
+            "failure_class": "runtime_artifact_contract_mismatch",
+            "failure_kind": "artifact_contract_drift",
+            "failure_summary": (
+                f"model-declared runtime artifact {final_path} conflicts with source/task output artifact {source_path}"
+            ),
+            "required_next_action": (
+                f"Align implementation and verifier with source/task output artifact {source_path} before more runtime "
+                f"repair; do not continue with {final_path} unless new source evidence supersedes it."
+            ),
+            "source_output_path": source_path,
+            "model_declared_path": final_path,
+            "confidence": source_contract.get("confidence") or "medium",
+            "evidence_refs": source_contract.get("evidence_refs") or [],
+        }
+    )
+
+
+def _source_output_contract_as_final_artifact(source_contract: dict[str, object]) -> dict[str, object]:
+    return _drop_empty_frontier_values(
+        {
+            "path": _frontier_clip_text(source_contract.get("path"), limit=400),
+            "kind": _frontier_clip_text(source_contract.get("kind") or "file", limit=120),
+            "freshness": "must be created by final verifier-shaped command",
+            "source": "source_output_contract",
+            "confidence": _frontier_clip_text(source_contract.get("confidence"), limit=80),
+            "evidence_refs": source_contract.get("evidence_refs") or [],
+        }
+    )
+
+
+def _frontier_artifact_identity(value: object) -> str:
+    text = str(value or "").strip().strip("'\"")
+    if not text:
+        return ""
+    while text.startswith("./"):
+        text = text[2:]
+    return text.replace("\\", "/")
+
+
+def _frontier_paths_are_compatible(source_path: str, final_path: str) -> bool:
+    if source_path == final_path:
+        return True
+    source_name = PurePosixPath(source_path).name
+    final_name = PurePosixPath(final_path).name
+    if source_name and final_name and source_name == final_name and not final_path.startswith("/"):
+        return True
+    return False
 
 
 def _latest_runtime_frontier_failure(
