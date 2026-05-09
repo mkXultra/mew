@@ -1585,6 +1585,52 @@ def test_implement_v2_counts_shell_source_output_path_toward_source_output_contr
     assert "source_output_contract" in readiness["covered_categories"]
 
 
+def test_implement_v2_read_file_preserves_medium_source_body_for_source_output_contract(tmp_path) -> None:
+    source = tmp_path / "doomgeneric_img.c"
+    prefix = "/* BMP header and runtime scaffolding */\n" + ("int header_padding = 0;\n" * 320)
+    source.write_text(
+        prefix
+        + "\nvoid DG_DrawFrame(void) {\n"
+        + '    FILE *fp = fopen("/tmp/frame.bmp", "wb");\n'
+        + "    fwrite(framebuffer, 1, frame_bytes, fp);\n"
+        + "}\n",
+        encoding="utf-8",
+    )
+    call = ToolCallEnvelope(
+        lane_attempt_id="implement_v2:ws-1:task-1:full",
+        provider="test",
+        provider_call_id="read-img-source",
+        mew_tool_call_id="mew-read-img-source",
+        tool_name="read_file",
+        arguments={"path": str(source)},
+        turn_index=1,
+    )
+
+    result = read_runtime.execute_read_only_tool_call(
+        call,
+        workspace=tmp_path,
+        allowed_roots=(str(tmp_path),),
+        result_max_chars=12_000,
+    )
+    payload = result.content[0]
+    assert isinstance(payload, dict)
+    assert payload.get("text")
+    assert len(str(payload.get("text") or "")) > 7_000
+    assert "/tmp/frame.bmp" in str(payload.get("text") or "")
+    assert payload.get("mew_content_truncated") is not True
+    assert str(payload.get("summary") or "").count("\n") == 0
+    assert payload.get("summary_body_omitted") is True
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "source_output_contract" in readiness["covered_categories"]
+
+
 def test_implement_v2_does_not_count_broad_source_search_as_output_contract() -> None:
     lane_attempt_id = "implement_v2:ws-1:task-1:full"
     calls = (

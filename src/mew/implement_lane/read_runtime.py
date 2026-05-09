@@ -413,6 +413,7 @@ def _error_result(call: ToolCallEnvelope, *, status: str, reason: str) -> ToolRe
 
 
 def _clip_payload(payload: dict[str, object], *, max_chars: int) -> tuple[dict[str, object], bool]:
+    payload = _dedupe_summary_body(payload)
     text = json.dumps(payload, ensure_ascii=True, sort_keys=True)
     if len(text) <= max_chars:
         return dict(payload), False
@@ -432,6 +433,27 @@ def _clip_payload(payload: dict[str, object], *, max_chars: int) -> tuple[dict[s
             "truncated": True,
         }
     return clipped, True
+
+
+def _dedupe_summary_body(payload: dict[str, object]) -> dict[str, object]:
+    """Avoid clipping useful structured content because summary repeats it.
+
+    ``summarize_read_result`` intentionally includes a human-readable body, but
+    implement_v2 already exposes the structured ``text``/``matches``/``snippets``
+    fields. Keeping both can push medium-sized source files over the payload
+    budget and then the generic clipper truncates the source body to 1KB. The
+    model needs the source body more than a duplicate summary body.
+    """
+
+    summary = payload.get("summary")
+    if not isinstance(summary, str) or "\n" not in summary:
+        return payload
+    if not any(payload.get(key) for key in ("text", "matches", "snippets", "entries")):
+        return payload
+    compacted = dict(payload)
+    compacted["summary"] = summary.split("\n", 1)[0]
+    compacted["summary_body_omitted"] = True
+    return compacted
 
 
 def _content_refs_for_payload(
