@@ -111,9 +111,11 @@ def build_implement_v2_prompt_sections(
                 "file, or nm, either preflight it with command -v or include an available fallback in "
                 "the same cheap turn. If output says command not found or executable not found, treat "
                 "the source frontier as incomplete and retry with glob/search_text, grep -R, find, "
-                "Python, or another available fallback before the first edit. Do not mask a missing "
-                "probe with `|| true` unless the same command also runs a fallback that produces the "
-                "needed evidence."
+                "or another available fallback before the first edit. Use Python fallback only for "
+                "bounded non-recursive probes over explicit files or small artifacts; do not use "
+                "run_command to generate broad recursive source scanners such as os.walk/rglob/open "
+                "loops. Do not mask a missing probe with `|| true` unless the same command also runs "
+                "a fallback that produces the needed evidence."
             ),
             stability=STABILITY_STATIC,
             cache_policy=CACHE_POLICY_CACHEABLE,

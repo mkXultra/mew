@@ -334,6 +334,13 @@ class ImplementV2ManagedExecRuntime:
         )
         if patch_misuse is not None:
             raise ExecToolContractMisuse(patch_misuse)
+        exploration_misuse = _run_command_source_exploration_shell_surface_misuse(
+            command,
+            tool_name=call.tool_name,
+        )
+        if exploration_misuse is not None:
+            exploration_misuse["cwd"] = str(args.get("cwd") or ".")
+            raise ExecToolContractMisuse(exploration_misuse)
         cwd = _workspace_path(args.get("cwd") or ".", self.workspace)
         cwd = resolve_allowed_path(cwd, self.allowed_roots)
         if not cwd.is_dir():
@@ -1497,6 +1504,123 @@ def _run_command_source_patch_misuse(
         "read_paths": list(read_paths[:8]),
         "common_paths": list(common_paths[:8]),
     }
+
+
+def _run_command_source_exploration_shell_surface_misuse(
+    command: object,
+    *,
+    tool_name: str,
+) -> dict[str, object] | None:
+    if tool_name != "run_command":
+        return None
+    features = _source_exploration_shell_surface_features(command)
+    if not features:
+        return None
+    return {
+        "reason": (
+            "run_command must not replace native source exploration with a broad shell/Python "
+            "source scanner. Use glob/search_text/read_file for source discovery, or one bounded "
+            "grep/rg/sed probe over a specific path, then make a source mutation with "
+            "write_file/edit_file/apply_patch."
+        ),
+        "kind": "run_command_source_exploration_shell_surface",
+        "failure_class": "tool_contract_misuse",
+        "failure_subclass": "run_command_source_exploration_shell_surface",
+        "recoverable": True,
+        "recoverable_tool_contract_misuse": True,
+        "tool_contract_recovery_eligible": True,
+        "terminal_failure_reaction_eligible": False,
+        "features": features,
+        "preserved_command": str(command or ""),
+        "suggested_tool": "glob/search_text/read_file",
+        "suggested_use_shell": False,
+    }
+
+
+def _source_exploration_shell_surface_features(command: object) -> list[str]:
+    text = str(command or "")
+    if not text.strip():
+        return []
+    lowered = text.casefold()
+    features: list[str] = []
+
+    def add(feature: str) -> None:
+        if feature not in features:
+            features.append(feature)
+
+    python_command_re = (
+        r"(?:^|[;&|]\s*)(?:(?:\S*/)?env\s+)?(?:\S*/)?python(?:\d+(?:\.\d+)?)?\s+(?:-|-[A-Za-z]*c\b)"
+    )
+    if re.search(python_command_re, text):
+        add("python_shell_surface")
+    if "<<" in text and re.search(
+        r"(?:^|[;&|]\s*)(?:(?:\S*/)?env\s+)?(?:\S*/)?python(?:\d+(?:\.\d+)?)?\b", text
+    ):
+        add("python_heredoc")
+    recursive_patterns = (
+        r"\bos\.walk\s*\(",
+        r"\bPath\s*\([^)]*\)\s*\.\s*rglob\s*\(",
+        r"\bpathlib\.Path\s*\([^)]*\)\s*\.\s*rglob\s*\(",
+        r"\bglob\.glob\s*\([^)]*recursive\s*=\s*True",
+        r"\bfind\s+[^|;&]+(?:\s+-type\s+f|\s+-name\s+|\s+-regex\s+)",
+    )
+    if _text_matches_any(text, recursive_patterns):
+        add("recursive_source_walk")
+    source_walk_root = (
+        r"(?:\.|\.\/|/app|/workspace|/workspaces/[^'\"]*|"
+        r"(?:\.\/)?(?:src|source|tests?|include|lib|libs|app|apps|packages|doomgeneric)(?:\/[^'\"]*)?)"
+    )
+    workspace_recursive_patterns = (
+        rf"\bos\.walk\s*\(\s*['\"]{source_walk_root}['\"]",
+        rf"\bPath\s*\(\s*['\"]{source_walk_root}['\"]\s*\)\s*\.\s*rglob\s*\(",
+        rf"\bpathlib\.Path\s*\(\s*['\"]{source_walk_root}['\"]\s*\)\s*\.\s*rglob\s*\(",
+    )
+    if _text_matches_any(text, workspace_recursive_patterns):
+        add("workspace_recursive_walk")
+    source_read_patterns = (
+        r"\bopen\s*\([^)]*\)\s*\.\s*read\s*\(",
+        r"\bopen\s*\([^)]*['\"]r",
+        r"\bread_text\s*\(",
+        r"\bread_bytes\s*\(",
+        r"\breadlines\s*\(",
+    )
+    if _text_matches_any(text, source_read_patterns):
+        add("source_read_loop")
+    snippet_patterns = (
+        r"\bprint\s*\(",
+        r"\bsys\.stdout\.write\s*\(",
+        r"\bjson\.dump",
+    )
+    if _text_matches_any(text, snippet_patterns):
+        add("snippet_emission")
+    source_suffix_hits = re.findall(
+        r"\.(?:c|cc|cpp|cxx|h|hh|hpp|py|js|ts|tsx|jsx|rs|go|java|sh|mk|makefile)\b",
+        lowered,
+    )
+    if source_suffix_hits:
+        add("source_suffix_filter")
+    if len(source_suffix_hits) >= 2:
+        add("multiple_source_suffixes")
+    if len(text) > 2000:
+        add("large_inline_scanner")
+
+    broad_python_scan = (
+        ("python_shell_surface" in features or "python_heredoc" in features)
+        and "recursive_source_walk" in features
+        and (
+            ("source_read_loop" in features and "source_suffix_filter" in features)
+            or ("source_read_loop" in features and "workspace_recursive_walk" in features)
+            or "multiple_source_suffixes" in features
+        )
+    )
+    broad_find_scan = (
+        "recursive_source_walk" in features
+        and ("snippet_emission" in features or "multiple_source_suffixes" in features)
+        and (" xargs " in f" {lowered} " or " -exec " in lowered)
+    )
+    if broad_python_scan or broad_find_scan:
+        return features
+    return []
 
 
 def _raw_execution_contract_is_verifier_like(raw_contract: dict[str, object]) -> bool:

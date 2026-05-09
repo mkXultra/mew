@@ -6226,6 +6226,95 @@ def test_implement_v2_live_json_run_command_compound_mutation_does_not_spend_rea
     assert not (tmp_path / "vm.js").exists()
 
 
+def test_implement_v2_live_json_source_scanner_contract_recovery_prompts_native_reads(tmp_path) -> None:
+    (tmp_path / "vm.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    scanner = (
+        "python3 - <<'PY'\n"
+        "import os\n"
+        "for root, _dirs, files in os.walk('.'):\n"
+        "    for name in files:\n"
+        "        if name.endswith(('.c', '.h')):\n"
+        "            path = os.path.join(root, name)\n"
+        "            print(path, open(path).read()[:200])\n"
+        "PY"
+    )
+    outputs = [
+        {
+            "summary": "tries broad source scanner",
+            "tool_calls": [
+                {
+                    "id": "broad-source-scanner",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": scanner,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "uses native source window",
+            "tool_calls": [
+                {
+                    "id": "native-read",
+                    "name": "read_file",
+                    "arguments": {"path": "vm.c", "max_chars": 2000},
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "source grounded"},
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Inspect vm.c and patch if needed"},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state["proof_manifest"]
+    first_result = manifest["tool_results"][0]
+    payload = first_result["content"][0]
+
+    assert result.metrics["base_max_turns"] == 1
+    assert result.metrics["turn_budget_limit"] == 2
+    assert result.metrics["tool_contract_recovery_turns_used"] == 1
+    assert result.metrics["terminal_failure_reaction_turns_used"] == 0
+    assert first_result["status"] == "failed"
+    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
+    assert payload["suggested_tool"] == "glob/search_text/read_file"
+    assert "python_heredoc" in payload["features"]
+    assert "recursive_source_walk" in payload["features"]
+    assert "broad source scanner" in prompts[1]
+    assert "native glob/search_text/read_file" in prompts[1]
+    assert manifest["tool_results"][1]["tool_name"] == "read_file"
+    assert "int main" in str(manifest["tool_results"][1]["content"][0])
+
+
 def test_implement_v2_live_json_tool_contract_recovery_does_not_extend_after_later_success(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {
@@ -7348,6 +7437,8 @@ def test_implement_v2_active_coding_rhythm_requires_probe_fallbacks() -> None:
     assert "optional CLI such as rg" in section.content
     assert "source frontier as incomplete" in section.content
     assert "grep -R" in section.content
+    assert "Use Python fallback only for bounded non-recursive probes" in section.content
+    assert "do not use run_command to generate broad recursive source scanners" in section.content
     assert "Do not mask a missing probe with `|| true`" in section.content
 
 
@@ -11525,6 +11616,363 @@ def test_implement_v2_run_command_allows_write_only_source_writer_without_readba
 
     assert tool_result["status"] == "completed"
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
+
+
+def test_implement_v2_run_command_rejects_broad_python_source_scanner(tmp_path) -> None:
+    (tmp_path / "vm.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    command = (
+        "python3 - <<'PY'\n"
+        "import os\n"
+        "for root, _dirs, files in os.walk('.'):\n"
+        "    for name in files:\n"
+        "        if name.endswith(('.c', '.h', '.py')):\n"
+        "            path = os.path.join(root, name)\n"
+        "            print(path)\n"
+        "            print(open(path).read()[:500])\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "broad scanner rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert payload["kind"] == "run_command_source_exploration_shell_surface"
+    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
+    assert payload["tool_contract_recovery_eligible"] is True
+    assert payload["terminal_failure_reaction_eligible"] is False
+    assert payload["suggested_tool"] == "glob/search_text/read_file"
+    assert "python_heredoc" in payload["features"]
+    assert "recursive_source_walk" in payload["features"]
+    assert "source_read_loop" in payload["features"]
+
+
+def test_implement_v2_run_command_rejects_absolute_python_source_scanner(tmp_path) -> None:
+    (tmp_path / "vm.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    command = (
+        f"/usr/bin/env {shlex.quote(sys.executable)} - <<'PY'\n"
+        "import os\n"
+        "for root, _dirs, files in os.walk('.'):\n"
+        "    for name in files:\n"
+        "        if name.endswith(('.c', '.h')):\n"
+        "            print(open(os.path.join(root, name)).read()[:120])\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "absolute python scanner rejected"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
+    assert "python_shell_surface" in payload["features"]
+
+
+def test_implement_v2_run_command_rejects_source_scanner_even_with_verifier_contract(tmp_path) -> None:
+    (tmp_path / "vm.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    command = (
+        "python3 - <<'PY'\n"
+        "import os\n"
+        "for root, _dirs, files in os.walk('.'):\n"
+        "    for name in files:\n"
+        "        if name.endswith(('.c', '.h')):\n"
+        "            print(open(os.path.join(root, name)).read()[:120])\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "role": "verify",
+                        "stage": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "verifier-labeled source scanner rejected"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
+    assert payload["suggested_tool"] == "glob/search_text/read_file"
+
+
+def test_implement_v2_run_command_rejects_workspace_wide_python_content_scanner(tmp_path) -> None:
+    (tmp_path / "README").write_text("source-ish content\n", encoding="utf-8")
+    command = (
+        "python3 - <<'PY'\n"
+        "import os\n"
+        "for root, _dirs, files in os.walk('.'):\n"
+        "    for name in files:\n"
+        "        path = os.path.join(root, name)\n"
+        "        print(path, open(path, errors='ignore').read()[:500])\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "workspace scanner rejected"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
+    assert "workspace_recursive_walk" in payload["features"]
+
+
+def test_implement_v2_run_command_rejects_source_root_python_content_scanner(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "README").write_text("source-ish content\n", encoding="utf-8")
+    command = (
+        "python3 - <<'PY'\n"
+        "import os\n"
+        "for root, _dirs, files in os.walk('src'):\n"
+        "    for name in files:\n"
+        "        path = os.path.join(root, name)\n"
+        "        print(path, open(path, errors='ignore').read()[:500])\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "source root scanner rejected"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
+    assert "workspace_recursive_walk" in payload["features"]
+
+
+def test_implement_v2_run_command_allows_bounded_python_file_probe(tmp_path) -> None:
+    (tmp_path / "vm.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; print('main' in Path('vm.c').read_text(encoding='utf-8'))",
+        ]
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "bounded source probe allowed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert "True" in tool_result["content"][0]["stdout"]
+
+
+def test_implement_v2_run_command_allows_recursive_artifact_verifier_probe(tmp_path) -> None:
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "frame.bmp").write_bytes(b"BMdata")
+    command = (
+        "python3 - <<'PY'\n"
+        "import os\n"
+        "for root, _dirs, files in os.walk('out'):\n"
+        "    for name in files:\n"
+        "        if name.endswith('.bmp'):\n"
+        "            print(os.path.join(root, name))\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "role": "verify",
+                        "stage": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "artifact verifier allowed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert "out/frame.bmp" in tool_result["content"][0]["stdout"]
+
+
+def test_implement_v2_run_command_allows_recursive_artifact_verifier_content_probe(tmp_path) -> None:
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "frame.bmp").write_bytes(b"BMdata")
+    command = (
+        "python3 - <<'PY'\n"
+        "import os\n"
+        "for root, _dirs, files in os.walk('out'):\n"
+        "    for name in files:\n"
+        "        if name.endswith('.bmp'):\n"
+        "            path = os.path.join(root, name)\n"
+        "            print(path, open(path, 'rb').read(2))\n"
+        "PY"
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "role": "verify",
+                        "stage": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "artifact content verifier allowed"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert "b'BM'" in tool_result["content"][0]["stdout"]
 
 
 @pytest.mark.parametrize(

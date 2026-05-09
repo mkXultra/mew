@@ -2380,9 +2380,7 @@ def _should_extend_for_tool_contract_recovery(
         return False
     if _has_real_terminal_failure_result(tool_results):
         return False
-    if not bool(lane_input.lane_config.get("allow_shell")):
-        return False
-    if not _v2_tool_available(lane_input, "run_command"):
+    if not _tool_contract_recovery_tools_available(lane_input, result):
         return False
     remaining_wall = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
     if remaining_wall is None:
@@ -2438,22 +2436,46 @@ def _is_tool_contract_misuse_result(result: ToolResultEnvelope) -> bool:
 
 
 def _is_tool_contract_recovery_result(result: ToolResultEnvelope) -> bool:
-    if result.tool_name != "run_tests" or result.status not in {"failed", "interrupted"}:
+    if result.tool_name not in {"run_command", "run_tests"} or result.status not in {"failed", "interrupted"}:
         return False
     for item in result.content:
         if not isinstance(item, dict):
             continue
-        if (
-            item.get("failure_class") == "tool_contract_misuse"
-            and item.get("failure_subclass") == "run_tests_shell_surface"
-            and item.get("recoverable_tool_contract_misuse") is True
-            and item.get("tool_contract_recovery_eligible") is True
-            and item.get("terminal_failure_reaction_eligible") is False
-            and item.get("preserved_command")
-            and item.get("suggested_tool") == "run_command"
-            and item.get("suggested_use_shell") is True
-        ):
+        if _tool_contract_recovery_payload_supported(result.tool_name, item):
             return True
+    return False
+
+
+def _tool_contract_recovery_payload_supported(tool_name: str, payload: dict[str, object]) -> bool:
+    if not (
+        payload.get("failure_class") == "tool_contract_misuse"
+        and payload.get("recoverable_tool_contract_misuse") is True
+        and payload.get("tool_contract_recovery_eligible") is True
+        and payload.get("terminal_failure_reaction_eligible") is False
+        and payload.get("preserved_command")
+    ):
+        return False
+    failure_subclass = str(payload.get("failure_subclass") or "")
+    if failure_subclass == "run_tests_shell_surface":
+        return tool_name == "run_tests" and payload.get("suggested_tool") == "run_command" and (
+            payload.get("suggested_use_shell") is True
+        )
+    if failure_subclass == "run_command_source_exploration_shell_surface":
+        return tool_name == "run_command" and payload.get("suggested_tool") == "glob/search_text/read_file"
+    return False
+
+
+def _tool_contract_recovery_tools_available(lane_input: ImplementLaneInput, result: ToolResultEnvelope) -> bool:
+    payload = next((item for item in result.content if isinstance(item, dict)), {})
+    failure_subclass = str(payload.get("failure_subclass") or "")
+    if failure_subclass == "run_tests_shell_surface":
+        return (
+            bool(lane_input.lane_config.get("allow_shell"))
+            and _v2_tool_available(lane_input, "run_command")
+            and result.tool_name == "run_tests"
+        )
+    if failure_subclass == "run_command_source_exploration_shell_surface":
+        return any(_v2_tool_available(lane_input, tool) for tool in ("glob", "search_text", "read_file"))
     return False
 
 
@@ -2463,6 +2485,17 @@ def _tool_contract_recovery_instruction(result: ToolResultEnvelope | None) -> st
     if not command:
         return ""
     cwd = str(payload.get("cwd") or ".")
+    if str(payload.get("failure_subclass") or "") == "run_command_source_exploration_shell_surface":
+        return (
+            "Tool-contract recovery turn: the last action failed because run_command was used as a "
+            "broad source scanner. Do not rerun or rewrite that scanner. Use native glob/search_text/"
+            "read_file, or one bounded grep/rg/sed probe over a specific path, to ground the exact "
+            "source window. Then make one coherent write_file/edit_file/apply_patch source mutation "
+            "and run a verifier. If the needed source window cannot be grounded safely, finish blocked "
+            "with the exact blocker.\n"
+            f"cwd: {cwd}\n"
+            f"rejected_command: {command}\n"
+        )
     return (
         "Tool-contract recovery turn: the last action failed only because run_tests is argv-only. "
         "Re-run the exact preserved command with run_command/use_shell=true from the same cwd and keep the same "
@@ -5090,6 +5123,8 @@ def _latest_tool_contract_verifier_command(tool_results: tuple[ToolResultEnvelop
         payload = next((item for item in result.content if isinstance(item, dict)), {})
         if not payload:
             continue
+        if str(payload.get("failure_subclass") or "") == "run_command_source_exploration_shell_surface":
+            continue
         recovery = payload.get("tool_contract_recovery") if isinstance(payload.get("tool_contract_recovery"), dict) else {}
         if not recovery and not _is_tool_contract_recovery_result(result):
             continue
@@ -5499,6 +5534,7 @@ def _same_turn_write_failure_blocks_remaining_calls(result: ToolResultEnvelope) 
         return False
     payload = _first_result_payload(result)
     return str(payload.get("failure_subclass") or "") in {
+        "run_command_source_exploration_shell_surface",
         "run_command_source_mutation_verifier_compound",
         "run_command_source_patch_shell_surface",
         "run_tests_source_mutation",

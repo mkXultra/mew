@@ -67,7 +67,8 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         description=(
             "Run a command through managed exec with nonterminal state. Accepts command/cmd strings or argv arrays; "
             "compound shell strings are run as shell scripts. Optional command_intent=probe|diagnostic marks cheap "
-            "non-acceptance commands."
+            "non-acceptance commands. Do not use run_command for broad recursive source exploration; use "
+            "glob/search_text/read_file for source discovery and reserve shell probes for bounded commands."
         ),
         approval_required=True,
     ),
