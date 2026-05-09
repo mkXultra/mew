@@ -132,6 +132,8 @@ def _execute_read_only_payload(
             query = include_pattern
             include_pattern = None
             regex = regex or _search_query_looks_regex(query)
+        elif query is not None:
+            regex = regex or _search_query_looks_regex(query)
         payload = search_text(
             query or "",
             _workspace_path(args.get("path") or ".", workspace),
@@ -393,7 +395,9 @@ def _search_query_looks_regex(value: object) -> bool:
     text = str(value or "")
     if not text:
         return False
-    return any(token in text for token in ("|", ".*", "\\b", "[", "]", "(", ")", "+", "?"))
+    if any(token in text for token in ("|", ".*", "\\b", "\\d", "\\s", "\\w")):
+        return True
+    return bool(re.search(r"\[[^\]]+\]|\((?:[^)]*\|[^)]*|[^)]*[?+*][^)]*)\)", text))
 
 
 def _error_result(call: ToolCallEnvelope, *, status: str, reason: str) -> ToolResultEnvelope:

@@ -7971,6 +7971,64 @@ def test_implement_v2_search_text_treats_lone_regex_pattern_as_query_alias(tmp_p
     assert any("/tmp/frame.bmp" in match for match in payload["matches"])
 
 
+def test_implement_v2_search_text_auto_regexes_regex_like_query(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.c").write_text(
+        "void DG_DrawFrame(void) {}\nFILE *fp = fopen(\"/tmp/frame.bmp\", \"wb\");\nfwrite(buf, 1, n, fp);\n",
+        encoding="utf-8",
+    )
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "search_text",
+                "arguments": {"path": ".", "query": "DG_DrawFrame|fopen|fwrite", "regex": False},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "regex search evidence ready"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["regex"] is True
+    assert any("DG_DrawFrame" in match for match in payload["matches"])
+    assert any("/tmp/frame.bmp" in match for match in payload["matches"])
+
+
+def test_implement_v2_search_text_keeps_plain_plus_query_fixed_string(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.txt").write_text("C++ runtime notes\n", encoding="utf-8")
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "search_text",
+                "arguments": {"path": ".", "query": "C++"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "literal search evidence ready"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["regex"] is False
+    assert payload["matches"] == [f"{tmp_path}/src/main.txt:1:C++ runtime notes"]
+
+
 def test_implement_v2_glob_accepts_absolute_glob_in_path_argument(tmp_path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
