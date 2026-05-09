@@ -50,6 +50,7 @@ from mew.implement_lane.v2_runtime import (
     _first_write_readiness_from_trace,
     _frontier_evidence_registry,
     _frontier_failure_payload,
+    _frontier_state_from_execution_contracts,
     _hard_runtime_frontier_progress_signature,
     _hard_runtime_progress_continuation_signature,
     _hard_runtime_progress_continuation_turn_limit,
@@ -10872,6 +10873,91 @@ def test_implement_v2_exec_missing_expected_artifact_blocks_result(tmp_path) -> 
     assert payload["structured_finish_gate"]["blocked"] is True
 
 
+def test_implement_v2_exec_runs_when_expected_artifact_is_outside_allowed_roots(tmp_path) -> None:
+    outside = tmp_path.parent / "outside-frame.bmp"
+    command = shlex.join([sys.executable, "-c", "import sys; print('runtime-ran'); sys.exit(7)"])
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            persisted_lane_state={
+                "lane_hard_runtime_frontier": {
+                    "final_artifact": {"path": str(outside), "kind": "file"},
+                }
+            },
+            lane_config={
+                "mode": "exec",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "outside-artifact-verifier",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "use_shell": True,
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "execution_contract": {
+                        "id": "contract:runtime-outside-artifact",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_exit": {"mode": "zero"},
+                        "expected_artifacts": [
+                            {
+                                "id": "frame",
+                                "kind": "file",
+                                "path": str(outside),
+                                "freshness": "created_after_run_start",
+                                "checks": [{"type": "exists", "severity": "blocking"}],
+                            }
+                        ],
+                    },
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "runtime evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert payload["exit_code"] == 7
+    assert "runtime-ran" in payload["stdout"]
+    assert payload["execution_contract_normalized"]["expected_artifacts"] == []
+    assert payload["artifact_evidence"] == []
+    assert payload["unchecked_expected_artifacts"][0]["path"] == str(outside)
+    assert "outside allowed roots" in payload["unchecked_expected_artifacts"][0]["reason"]
+    assert payload["failure_classification"]["class"] == "runtime_failure"
+
+    projected = _provider_visible_tool_result_for_history(
+        ToolResultEnvelope(
+            lane_attempt_id="lane",
+            provider_call_id="outside-artifact-verifier",
+            mew_tool_call_id="tool-1",
+            tool_name="run_command",
+            status=tool_result["status"],
+            is_error=tool_result["is_error"],
+            content=tuple(tool_result["content"]),
+            content_refs=tuple(tool_result["content_refs"]),
+            evidence_refs=tuple(tool_result["evidence_refs"]),
+            side_effects=tuple(tool_result["side_effects"]),
+        )
+    )["content"]["content"][0]
+    unchecked = projected["execution_evidence_digest"]["unchecked_expected_artifacts"][0]
+    assert unchecked["path"] == str(outside)
+    assert "shell-level verifier assertion" in unchecked["required_next_action"]
+
+
 def test_implement_v2_exec_blocks_runtime_advertised_artifact_path_mismatch(tmp_path) -> None:
     external_path = tmp_path / "external" / "frame.bmp"
     result = run_fake_exec_implement_v2(
@@ -16044,6 +16130,58 @@ def test_implement_v2_frontier_retains_source_output_contract_over_model_artifac
     assert frontier["runtime_artifact_contract_mismatch"]["failure_class"] == "runtime_artifact_contract_mismatch"
     assert frontier["runtime_artifact_contract_mismatch"]["model_declared_path"] == str(model_artifact)
     assert str(source_output) in frontier["runtime_artifact_contract_mismatch"]["required_next_action"]
+
+
+def test_implement_v2_frontier_does_not_rehydrate_raw_unchecked_expected_artifact() -> None:
+    artifact = {"id": "frame", "kind": "file", "path": "/freebsd.png"}
+    raw_aliases = (
+        {"expected_artifacts": [artifact]},
+        {"expected_artifact": artifact},
+        {"final_artifact": artifact},
+        {"artifacts": [artifact]},
+    )
+    for raw_alias in raw_aliases:
+        result = ToolResultEnvelope(
+            lane_attempt_id="lane",
+            provider_call_id="outside-artifact-verifier",
+            mew_tool_call_id="tool-1",
+            tool_name="run_command",
+            status="failed",
+            content=(
+                {
+                    "execution_contract": {
+                        "id": "contract:runtime-outside-artifact",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        **raw_alias,
+                    },
+                    "execution_contract_normalized": {
+                        "id": "contract:runtime-outside-artifact",
+                        "role": "runtime",
+                        "stage": "verification",
+                        "purpose": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_artifacts": [],
+                    },
+                    "unchecked_expected_artifacts": [
+                        {
+                            "id": "frame",
+                            "path": "/freebsd.png",
+                            "reason": "artifact path is outside allowed roots",
+                        }
+                    ],
+                },
+            ),
+        )
+
+        registry = _frontier_evidence_registry((result,), artifact_namespace="proof-artifacts/test")
+        frontier = _frontier_state_from_execution_contracts((result,), registry)
+
+        assert "final_artifact" not in frontier
 
 
 def test_implement_v2_frontier_reads_source_output_contract_from_nested_tool_payload(tmp_path) -> None:

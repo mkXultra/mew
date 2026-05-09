@@ -1243,3 +1243,49 @@ passed, `git diff --check` passed, and the hot-path fastcheck on the
 dry-run mutation fixes; after the regression tests and fixes it returned
 `STATUS: APPROVE`. Next step: run exactly one same-shape 10 minute diagnostic
 for `make-mips-interpreter` before considering `speed_1` / `proof_5`.
+
+Out-of-root artifact verifier preflight diagnostic 2026-05-10 JST:
+
+The same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260510-044554` still scored
+`0/1`. The no-output verifier recovery was no longer the primary blocker. The
+new generic blocker was `OutOfRootArtifactVerifierPreflight`: source/output
+contract extraction promoted `/freebsd.png` to `final_artifact`, and every
+verifier-shaped command that relied on internal `expected_artifacts` failed
+before execution with `artifact path is outside allowed roots: /freebsd.png;
+allowed=/app, /etc/apt, /tmp`. This prevented mew from observing the actual VM
+runtime behavior and pushed the model into repeated diagnostic commands and
+nearby task-specific output mirroring.
+
+Decision: do not add a `/freebsd.png` or root-output special case. Internal
+artifact checks are only valid for paths inside allowed roots. For absolute
+task/source-declared artifacts outside those roots, implement_v2 should still
+run the command, drop the uncheckable path from internal `expected_artifacts`,
+record `unchecked_expected_artifacts`, and tell the model to use a shell-level
+verifier assertion or an allowed-root artifact check. This keeps runtime
+evidence observable while preserving the allowed-root safety boundary. After
+the repair, rerun focused UT/fastcheck and codex-ultra review before one more
+same-shape 10 minute diagnostic.
+
+Out-of-root artifact verifier preflight repair result 2026-05-10 JST:
+
+Implemented the generic repair. `exec_runtime` now filters uncheckable
+expected artifacts from the normalized internal checker contract, records
+`unchecked_expected_artifacts`, and keeps command execution live so stdout,
+stderr, exit code, and runtime failures remain observable. Direct
+`artifact_checks` APIs still reject outside-root paths; the repair does not
+widen allowed roots. `execution_contract_normalized` is authoritative when
+rebuilding terminal contracts, so raw `expected_artifacts`, `expected_artifact`,
+`final_artifact`, `artifacts`, `task_contract`, or persisted
+`frontier_state.final_artifact` cannot rehydrate a dropped outside-root
+artifact. Provider-visible history now includes the unchecked artifact warning
+and a shell-level verifier guidance.
+
+Validation: `tests/test_implement_lane.py` passed (`384 passed`), scoped ruff
+passed, `git diff --check` passed, and the hot-path fastcheck on the
+`20260510-044554` artifact passed. codex-ultra review session
+`019e0e58-82ac-7a10-8cc6-d30fa06e65cb` requested three rounds of fixes for raw
+contract and frontier-state rehydration; after the regression tests and fixes
+it returned `STATUS: APPROVE`. Next step: run exactly one same-shape 10 minute
+diagnostic for `make-mips-interpreter` before considering `speed_1` /
+`proof_5`.

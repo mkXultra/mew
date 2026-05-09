@@ -5353,6 +5353,8 @@ def _frontier_expected_artifact_from_contract(
         or _first_contract_list_item(contract.get("expected_artifacts"))
         or _first_contract_list_item(contract.get("artifacts"))
     )
+    if not raw_artifact:
+        return {}
     if isinstance(raw_artifact, dict):
         path = (
             raw_artifact.get("path")
@@ -5424,12 +5426,16 @@ def _payload_execution_contract(payload: dict[str, object]) -> dict[str, object]
     raw_contract = raw if isinstance(raw, dict) else {}
     normalized = payload.get("execution_contract_normalized")
     normalized_contract = normalized if isinstance(normalized, dict) else {}
-    merged = {**normalized_contract, **raw_contract}
+    merged = {**raw_contract, **normalized_contract}
     if not merged:
         return {}
     contract = normalize_execution_contract(merged).as_dict()
+    raw_artifact_alias_keys = {"expected_artifact", "final_artifact", "artifacts", "expected_artifacts"}
+    suppress_raw_artifact_aliases = bool(payload.get("unchecked_expected_artifacts")) and bool(normalized_contract)
     for source in (normalized_contract, raw_contract):
         for key, value in source.items():
+            if source is raw_contract and suppress_raw_artifact_aliases and key in raw_artifact_alias_keys:
+                continue
             if key not in contract:
                 contract[key] = value
     return contract
@@ -7185,6 +7191,27 @@ def _execution_evidence_digest_for_provider_history(payload: dict[str, object]) 
                 break
         if artifact_misses:
             summary["artifact_miss"] = artifact_misses
+    unchecked_artifacts = payload.get("unchecked_expected_artifacts")
+    if isinstance(unchecked_artifacts, list):
+        unchecked = []
+        for artifact in unchecked_artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            unchecked.append(
+                _drop_empty_frontier_values(
+                    {
+                        "artifact_id": artifact.get("id"),
+                        "path": artifact.get("path"),
+                        "kind": artifact.get("kind"),
+                        "reason": artifact.get("reason"),
+                        "required_next_action": artifact.get("required_next_action"),
+                    }
+                )
+            )
+            if len(unchecked) >= 2:
+                break
+        if unchecked:
+            summary["unchecked_expected_artifacts"] = unchecked
     verifier = payload.get("verifier_evidence")
     if isinstance(verifier, dict):
         summary["verifier_evidence"] = _drop_empty_frontier_values(

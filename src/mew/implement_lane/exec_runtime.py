@@ -355,6 +355,11 @@ class ImplementV2ManagedExecRuntime:
             fallback_id=f"contract:{command_run_id}",
             command_intent=command_intent,
         )
+        normalized_contract, unchecked_expected_artifacts = _drop_uncheckable_expected_artifacts(
+            normalized_contract,
+            workspace=self.workspace,
+            allowed_roots=self.allowed_roots,
+        )
         raw_contract_preserved = raw_contract if not _intent_downgrades_artifact_contract(command_intent) else {}
         pre_run_artifact_stats = {}
         if normalized_contract.expected_artifacts:
@@ -391,6 +396,7 @@ class ImplementV2ManagedExecRuntime:
             "pre_run_source_tree_snapshot": pre_run_source_tree_snapshot,
             "started_epoch": started_epoch,
             "tool_run_record_ids": [],
+            **({"unchecked_expected_artifacts": list(unchecked_expected_artifacts)} if unchecked_expected_artifacts else {}),
             **({"execution_contract": dict(raw_contract_preserved)} if raw_contract_preserved else {}),
             **({"execution_contract_downgraded": True} if raw_contract and not raw_contract_preserved else {}),
             **({"tool_contract_recovery": dict(tool_contract_recovery)} if tool_contract_recovery is not None else {}),
@@ -405,6 +411,8 @@ class ImplementV2ManagedExecRuntime:
         payload["effective_tool_name"] = effective_tool_name
         payload["command_source"] = command_source
         payload["command_intent"] = command_intent
+        if unchecked_expected_artifacts:
+            payload["unchecked_expected_artifacts"] = list(unchecked_expected_artifacts)
         if raw_contract_preserved:
             payload["execution_contract"] = dict(raw_contract_preserved)
         elif raw_contract:
@@ -1051,16 +1059,17 @@ def _contract_from_payload(
     normalized = payload.get("execution_contract_normalized") or metadata.get("execution_contract_normalized")
     raw = payload.get("execution_contract") or metadata.get("execution_contract")
     contract_input: dict[str, object] = {}
-    if isinstance(normalized, dict):
-        contract_input.update(normalized)
     if isinstance(raw, dict):
         contract_input.update(raw)
+    if isinstance(normalized, dict):
+        contract_input.update(normalized)
     if contract_input:
         has_raw_contract = isinstance(raw, dict) and bool(raw)
+        use_inference = has_raw_contract and not isinstance(normalized, dict)
         return normalize_execution_contract(
             contract_input,
-            task_contract=task_contract if has_raw_contract else None,
-            frontier_state=frontier_state if has_raw_contract else None,
+            task_contract=task_contract if use_inference else None,
+            frontier_state=frontier_state if use_inference else None,
         )
     return _normalize_runtime_contract(
         {},
@@ -1068,6 +1077,60 @@ def _contract_from_payload(
         frontier_state=frontier_state,
         fallback_id=fallback_id,
     )
+
+
+def _drop_uncheckable_expected_artifacts(
+    contract: ExecutionContract,
+    *,
+    workspace: Path,
+    allowed_roots: tuple[str, ...] | list[str],
+) -> tuple[ExecutionContract, tuple[dict[str, object], ...]]:
+    checkable: list[ExpectedArtifact] = []
+    unchecked: list[dict[str, object]] = []
+    for artifact in contract.expected_artifacts:
+        reason = _uncheckable_artifact_reason(artifact, workspace=workspace, allowed_roots=allowed_roots)
+        if reason:
+            unchecked.append(
+                {
+                    "id": artifact.id,
+                    "path": artifact.path or artifact.target.get("path") or "",
+                    "kind": artifact.kind,
+                    "source": artifact.source,
+                    "reason": reason,
+                    "required_next_action": (
+                        "The command may still run, but mew cannot perform internal artifact checks for this path. "
+                        "Use a shell-level verifier assertion or write/check an artifact inside the allowed roots."
+                    ),
+                }
+            )
+        else:
+            checkable.append(artifact)
+    if not unchecked:
+        return contract, ()
+    return replace(contract, expected_artifacts=tuple(checkable)), tuple(unchecked)
+
+
+def _uncheckable_artifact_reason(
+    artifact: ExpectedArtifact,
+    *,
+    workspace: Path,
+    allowed_roots: tuple[str, ...] | list[str],
+) -> str:
+    target_type = str(artifact.target.get("type") or "")
+    if not target_type and artifact.kind in {"stdout", "stderr"}:
+        target_type = "stream"
+    if target_type and target_type != "path":
+        return ""
+    raw_path = str(artifact.path or artifact.target.get("path") or "").strip()
+    if not raw_path:
+        return ""
+    candidate = Path(raw_path).expanduser()
+    if not candidate.is_absolute():
+        candidate = workspace / candidate
+    if _path_allowed_by_roots(str(candidate), allowed_roots):
+        return ""
+    allowed = ", ".join(str(Path(str(root)).expanduser().resolve(strict=False)) for root in allowed_roots)
+    return f"artifact path is outside allowed roots: {candidate.resolve(strict=False)}; allowed={allowed}"
 
 
 def _next_tool_observation_index(metadata: dict[str, object]) -> int:
