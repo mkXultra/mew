@@ -3647,6 +3647,7 @@ def _merge_hard_runtime_frontier_state(
             passed_artifact_identities=passed_runtime_artifacts,
             latest_passed_artifact_identities=latest_passed_runtime_artifacts,
         )
+    _annotate_no_output_verifier_recovery(merged, tool_results)
 
     merged["schema_version"] = _HARD_RUNTIME_FRONTIER_SCHEMA_VERSION
     status = str(merged.get("status") or "active").strip().lower()
@@ -5790,7 +5791,7 @@ def _latest_runtime_frontier_failure(
         if contract and not _execution_contract_updates_hard_runtime_frontier(contract):
             continue
         key = _frontier_failure_key_from_payload(payload)
-        failure = _frontier_failure_payload(payload)
+        failure = _frontier_failure_payload(payload, provider_call_id=result.provider_call_id)
         if _is_low_signal_active_command_closeout_failure(payload):
             low_signal_closeout = low_signal_closeout or (key, failure)
             continue
@@ -5852,12 +5853,14 @@ def _frontier_failure_key_from_payload(payload: dict[str, object]) -> str:
     return "latest_runtime_failure"
 
 
-def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
+def _frontier_failure_payload(payload: dict[str, object], *, provider_call_id: str = "") -> dict[str, object]:
     structured = _structured_failure_classification(payload)
     contract = _payload_execution_contract(payload)
     evidence_text = _frontier_failure_evidence_text(payload)
     failure = {
+        "provider_call_id": _frontier_clip_text(provider_call_id, limit=160),
         "command_run_id": _frontier_clip_text(payload.get("command_run_id"), limit=160),
+        "terminal_status": _frontier_clip_text(payload.get("status"), limit=120),
         "exit_code": payload.get("exit_code"),
         "stdout_tail": _frontier_clip_text(payload.get("stdout_tail") or payload.get("stdout")),
         "stderr_tail": _frontier_clip_text(payload.get("stderr_tail") or payload.get("stderr")),
@@ -5877,6 +5880,14 @@ def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
                 structured.get("required_next_probe"),
                 limit=400,
             )
+        if _is_no_output_interrupted_runtime_artifact_missing_payload(payload, structured=structured):
+            artifact_path = _runtime_artifact_failure_path(payload, {})
+            failure["recovery_mode"] = "no_output_verifier_recovery"
+            failure["required_next_action"] = _no_output_verifier_recovery_action(
+                artifact_path=artifact_path,
+                post_failure_probe_count=0,
+                post_failure_mutation_count=0,
+            )
         evidence_refs = structured.get("evidence_refs")
         if isinstance(evidence_refs, list):
             failure["evidence_refs"] = _frontier_compact_value(evidence_refs, key="evidence_refs")
@@ -5892,6 +5903,170 @@ def _frontier_failure_payload(payload: dict[str, object]) -> dict[str, object]:
     if payload.get("output_ref"):
         failure["output_ref"] = _frontier_clip_text(payload.get("output_ref"), limit=240)
     return _drop_empty_frontier_values(failure)
+
+
+def _annotate_no_output_verifier_recovery(
+    frontier_state: dict[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> None:
+    runtime_failure = frontier_state.get("latest_runtime_failure")
+    if not isinstance(runtime_failure, dict):
+        return
+    if str(runtime_failure.get("recovery_mode") or "") != "no_output_verifier_recovery":
+        return
+    provider_call_id = str(runtime_failure.get("provider_call_id") or "").strip()
+    if not provider_call_id:
+        return
+    anchor_in_current_results = _tool_results_contain_provider_call(tool_results, provider_call_id=provider_call_id)
+    after_failure = (
+        _tool_results_after_provider_call(tool_results, provider_call_id=provider_call_id)
+        if anchor_in_current_results
+        else tuple(tool_results)
+    )
+    prior_probe_count = 0 if anchor_in_current_results else _safe_int(runtime_failure.get("post_failure_probe_count"))
+    prior_mutation_count = (
+        0 if anchor_in_current_results else _safe_int(runtime_failure.get("post_failure_mutation_count"))
+    )
+    probe_count = max(prior_probe_count, _post_failure_recovery_probe_count(after_failure))
+    mutation_count = max(prior_mutation_count, _post_failure_source_mutation_count(after_failure))
+    artifact_path = _runtime_artifact_failure_path_from_frontier(runtime_failure, frontier_state)
+    runtime_failure["post_failure_probe_count"] = probe_count
+    runtime_failure["post_failure_mutation_count"] = mutation_count
+    runtime_failure["required_next_action"] = _no_output_verifier_recovery_action(
+        artifact_path=artifact_path,
+        post_failure_probe_count=probe_count,
+        post_failure_mutation_count=mutation_count,
+    )
+    frontier_state["latest_runtime_failure"] = _drop_empty_frontier_values(runtime_failure)
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _tool_results_contain_provider_call(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    provider_call_id: str,
+) -> bool:
+    return any(str(result.provider_call_id or "") == provider_call_id for result in tool_results)
+
+
+def _tool_results_after_provider_call(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    provider_call_id: str,
+) -> tuple[ToolResultEnvelope, ...]:
+    if not provider_call_id:
+        return ()
+    after: list[ToolResultEnvelope] = []
+    seen = False
+    for result in tool_results:
+        if seen:
+            after.append(result)
+            continue
+        if str(result.provider_call_id or "") == provider_call_id:
+            seen = True
+    return tuple(after)
+
+
+def _post_failure_recovery_probe_count(tool_results: tuple[ToolResultEnvelope, ...]) -> int:
+    probe_tools = {"glob", "inspect_dir", "read_command_output", "read_file", "search_text"}
+    return sum(1 for result in tool_results if result.status == "completed" and result.tool_name in probe_tools)
+
+
+def _post_failure_source_mutation_count(tool_results: tuple[ToolResultEnvelope, ...]) -> int:
+    return sum(1 for result in tool_results if result.status == "completed" and _result_has_real_mutation_effect(result))
+
+
+def _result_has_real_mutation_effect(result: ToolResultEnvelope) -> bool:
+    if _source_tree_mutation_from_result(result):
+        return True
+    for effect in result.side_effects or ():
+        if not isinstance(effect, dict):
+            continue
+        if effect.get("kind") == "file_write" and effect.get("written") is True and effect.get("dry_run") is not True:
+            return True
+    return False
+
+
+def _runtime_artifact_failure_path_from_frontier(
+    runtime_failure: dict[str, object],
+    frontier_state: dict[str, object],
+) -> str:
+    for value in (
+        runtime_failure.get("artifact_path"),
+        runtime_failure.get("path"),
+    ):
+        path = _frontier_artifact_identity(value)
+        if path:
+            return path
+    final_artifact = frontier_state.get("final_artifact")
+    if isinstance(final_artifact, dict):
+        path = _frontier_artifact_identity(final_artifact.get("path"))
+        if path:
+            return path
+    return ""
+
+
+def _is_no_output_interrupted_runtime_artifact_missing_payload(
+    payload: dict[str, object],
+    *,
+    structured: dict[str, object] | None = None,
+) -> bool:
+    classification = structured or _structured_failure_classification(payload)
+    failure_class = str(classification.get("class") or classification.get("failure_class") or "").strip()
+    failure_kind = str(classification.get("kind") or "").strip()
+    if not _structured_failure_is_runtime_artifact_missing(failure_class, failure_kind):
+        return False
+    status = str(payload.get("status") or "").strip().lower()
+    raw_secondary = classification.get("secondary_kinds") or payload.get("secondary_kinds") or []
+    secondary = {str(item or "").strip().lower() for item in raw_secondary} if isinstance(raw_secondary, list) else set()
+    interrupted = (
+        status in {"interrupted", "killed", "orphaned", "timed_out"}
+        or bool(payload.get("interrupted"))
+        or "interrupted" in secondary
+        or "killed" in secondary
+    )
+    if not interrupted:
+        return False
+    if payload.get("exit_code") is not None:
+        return False
+    for key in ("stdout", "stdout_tail", "stderr", "stderr_tail"):
+        if str(payload.get(key) or "").strip():
+            return False
+    try:
+        return int(payload.get("output_bytes") or 0) <= 0
+    except (TypeError, ValueError):
+        return True
+
+
+def _no_output_verifier_recovery_action(
+    *,
+    artifact_path: str,
+    post_failure_probe_count: int,
+    post_failure_mutation_count: int,
+) -> str:
+    artifact = f" for {artifact_path}" if artifact_path else ""
+    if post_failure_mutation_count > 0:
+        return (
+            f"Run one verifier-shaped command tied to the expected runtime artifact{artifact}; do not continue "
+            "source exploration before observing the mutation."
+        )
+    if post_failure_probe_count > 0:
+        return (
+            "Patch/edit the producer or runtime path using latest inspection evidence"
+            f"{artifact}, or finish blocked if no producer path is identifiable. Do not broad-search or rebuild "
+            "before mutation/verifier."
+        )
+    return (
+        f"Run one scoped producer/artifact diagnostic for the missing expected artifact{artifact}; "
+        "use targeted read/search or command-output inspection tied to the verifier/producer path. "
+        "Do not broad-search or rebuild first."
+    )
 
 
 def _structured_failure_classification(payload: dict[str, object]) -> dict[str, object]:

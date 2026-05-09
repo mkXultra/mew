@@ -47,7 +47,7 @@ _ORDINARY_RESIDENT_SUMMARY_BYTE_CAP = 1536
 _ACTIVE_WORK_CARD_BYTE_CAP = 640
 _REPAIR_HISTORY_CARD_BYTE_CAP = 256
 _HARD_RUNTIME_PROFILE_BYTE_CAP = 760
-_HARD_RUNTIME_FRONTIER_CARD_BYTE_CAP = 416
+_HARD_RUNTIME_FRONTIER_CARD_BYTE_CAP = 768
 
 
 def build_implement_v2_prompt_sections(
@@ -583,6 +583,8 @@ def _frontier_latest_failure_card(frontier: dict[str, object]) -> dict[str, obje
                         or failure.get("required_next_probe"),
                         140,
                     ),
+                    "recovery_mode": _clip_text(failure.get("recovery_mode"), 80),
+                    "post_failure_probe_count": _safe_numeric(failure.get("post_failure_probe_count")),
                 }
             )
     return {}

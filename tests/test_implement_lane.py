@@ -56,6 +56,7 @@ from mew.implement_lane.v2_runtime import (
     _has_completed_source_tree_mutation,
     _live_json_prompt,
     _model_visible_tool_specs_for_turn,
+    _post_failure_source_mutation_count,
     _provider_visible_tool_call_for_history,
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
@@ -12121,6 +12122,234 @@ def test_implement_v2_cancels_hard_runtime_verifier_after_auto_poll_budget_with_
     assert payload["failure_classification"]["kind"] == "missing_artifact"
     assert "interrupted" in payload["failure_classification"]["secondary_kinds"]
     assert "producing substep" in payload["failure_classification"]["required_next_probe"]
+
+
+def test_implement_v2_no_output_verifier_recovery_collapses_after_source_probe(tmp_path) -> None:
+    (tmp_path / "producer.c").write_text(
+        'void DG_DrawFrame(void) { /* writes /tmp/frame.bmp from framebuffer */ }\n',
+        encoding="utf-8",
+    )
+    silent_command = shlex.join([sys.executable, "-c", "import time; time.sleep(5)"])
+    outputs = [
+        {
+            "summary": "run silent runtime verifier",
+            "tool_calls": [
+                {
+                    "id": "silent-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": silent_command,
+                        "cwd": ".",
+                        "timeout": 10,
+                        "foreground_budget_seconds": 0.02,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "observe verifier result"},
+        },
+        {
+            "summary": "inspect the producer surface once",
+            "tool_calls": [
+                {
+                    "id": "search-producer",
+                    "name": "search_text",
+                    "arguments": {
+                        "path": ".",
+                        "query": "DG_DrawFrame|frame.bmp",
+                        "regex": True,
+                        "context_lines": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "producer surface inspected"},
+        },
+        {
+            "summary": "stop after checking recovery prompt",
+            "finish": {"outcome": "blocked", "summary": "test stops before mutation"},
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Implement a runtime interpreter so the verifier writes frame.bmp.",
+                "max_wall_seconds": 600,
+            },
+            lane_config={
+                "mode": "full",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "active_command_auto_poll_seconds": 0.01,
+                "hard_runtime_verifier_no_progress_seconds": 0,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+    latest_failure = frontier["latest_runtime_failure"]
+
+    assert latest_failure["recovery_mode"] == "no_output_verifier_recovery"
+    assert latest_failure["post_failure_probe_count"] == 1
+    assert "Run one scoped producer/artifact diagnostic" in prompts[1]
+    assert "Patch/edit the producer or runtime path" in prompts[2]
+    assert "Do not broad-search" in prompts[2]
+
+
+def test_implement_v2_no_output_verifier_recovery_counts_current_run_after_persisted_failure(tmp_path) -> None:
+    (tmp_path / "producer.c").write_text(
+        'void DG_DrawFrame(void) { /* writes /tmp/frame.bmp from framebuffer */ }\n',
+        encoding="utf-8",
+    )
+    persisted_frontier = {
+        "status": "blocked",
+        "final_artifact": {"path": "frame.bmp", "kind": "file", "status": "failed", "blocking": True},
+        "latest_runtime_failure": {
+            "provider_call_id": "old-verifier",
+            "terminal_status": "killed",
+            "failure_class": "runtime_artifact_missing",
+            "failure_kind": "missing_artifact",
+            "failure_phase": "runtime",
+            "recovery_mode": "no_output_verifier_recovery",
+            "required_next_action": "Run one scoped producer/artifact diagnostic for frame.bmp.",
+        },
+    }
+    outputs = [
+        {
+            "summary": "inspect the producer surface after a persisted verifier failure",
+            "tool_calls": [
+                {
+                    "id": "search-producer",
+                    "name": "search_text",
+                    "arguments": {
+                        "path": ".",
+                        "query": "DG_DrawFrame|frame.bmp",
+                        "regex": True,
+                        "context_lines": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "producer surface inspected"},
+        },
+        {
+            "summary": "stop after checking persisted recovery prompt",
+            "finish": {"outcome": "blocked", "summary": "test stops before mutation"},
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Implement a runtime interpreter so the verifier writes frame.bmp.",
+                "max_wall_seconds": 600,
+            },
+            persisted_lane_state={"lane_hard_runtime_frontier": persisted_frontier},
+            lane_config={
+                "mode": "full",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    latest_failure = result.updated_lane_state["lane_hard_runtime_frontier"]["latest_runtime_failure"]
+
+    assert "Run one scoped producer/artifact diagnostic" in prompts[0]
+    assert latest_failure["post_failure_probe_count"] == 1
+    assert "Patch/edit the producer or runtime path" in prompts[1]
+
+
+def test_implement_v2_post_failure_mutation_count_requires_real_side_effect() -> None:
+    dry_run_write = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="dry-run-write",
+        mew_tool_call_id="tool-1",
+        tool_name="write_file",
+        status="completed",
+        content=({"path": "vm.js", "written": False, "dry_run": True},),
+        side_effects=(),
+    )
+    real_write = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="real-write",
+        mew_tool_call_id="tool-2",
+        tool_name="write_file",
+        status="completed",
+        content=({"path": "vm.js", "written": True, "dry_run": False},),
+        side_effects=(
+            {
+                "kind": "file_write",
+                "path": "vm.js",
+                "written": True,
+                "dry_run": False,
+            },
+        ),
+    )
+    shell_mutation = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="shell-write",
+        mew_tool_call_id="tool-3",
+        tool_name="run_command",
+        status="completed",
+        content=({"status": "completed"},),
+        side_effects=(
+            {
+                "kind": "source_tree_mutation",
+                "record": {"changed_count": 1, "changes": [{"path": "vm.js"}]},
+            },
+        ),
+    )
+
+    assert _post_failure_source_mutation_count((dry_run_write,)) == 0
+    assert _post_failure_source_mutation_count((real_write,)) == 1
+    assert _post_failure_source_mutation_count((shell_mutation,)) == 1
 
 
 def test_implement_v2_shortens_repeated_silent_hard_runtime_verifier_auto_poll(tmp_path) -> None:

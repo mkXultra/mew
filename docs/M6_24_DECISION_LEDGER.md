@@ -1197,3 +1197,49 @@ an existing long line as unchanged context. The guard applies to `write_file`,
 approval/dry-run semantics safe. After this repair, rerun the same 10 minute
 diagnostic and check whether the failed verifier output no longer contains a
 huge generated source line.
+
+No-output verifier recovery diagnostic 2026-05-10 JST:
+
+The same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260510-040919` still scored
+`0/1`, but the previous masked shell source-patch failure was gone. The new
+generic blocker was `NoOutputVerifierRecovery`: the hard-runtime verifier was
+auto-polled, terminalized as `interrupted/killed`, produced no stdout/stderr,
+and missed the required runtime artifact. mew then spent follow-up turns on
+broad producer searches and hit `model_timeout`, even though the exact saved
+state contained enough evidence for the micro next-action check to choose
+`patch/edit`.
+
+Decision: keep broad measurement paused and repair implement_v2's generic
+recovery card for no-output interrupted verifiers. A
+`runtime_artifact_missing` failure from an empty interrupted verifier should
+remain sticky in `lane_hard_runtime_frontier`. Before any post-failure source
+inspection, the card should require exactly one scoped producer/artifact
+diagnostic. After one or more completed read/search/inspect probes and before
+any source mutation, it should collapse to `patch/edit the producer/runtime
+path or finish blocked`, not another broad source search or rebuild. After a
+mutation, it should require one verifier-shaped command tied to the expected
+artifact. This is a generic latest-failure handoff repair, not a MIPS/Doom
+solver. Validation order remains focused UT/replay/fastcheck, codex-ultra
+review, then one same-shape 10 minute diagnostic before `speed_1` / `proof_5`.
+
+No-output verifier recovery repair result 2026-05-10 JST:
+
+Implemented the generic recovery card. `latest_runtime_failure` now records
+`provider_call_id`, terminal status, `recovery_mode=no_output_verifier_recovery`,
+post-failure probe count, and post-failure mutation count. If the failed
+provider call came from a persisted frontier rather than the current run, mew
+treats current results as post-failure evidence without double-counting across
+repeated merges. Mutation count now requires a real side effect (`file_write`
+with `written=true` and not dry-run, or structured `source_tree_mutation`);
+dry-run write previews do not advance the recovery stage. The hard-runtime
+frontier card cap was raised enough to keep this compact recovery card visible
+instead of replacing it with a truncation marker.
+
+Validation: `tests/test_implement_lane.py` passed (`382 passed`), scoped ruff
+passed, `git diff --check` passed, and the hot-path fastcheck on the
+`20260510-040919` artifact passed. codex-ultra review session
+`019e0e3d-907e-71a0-8b76-7513c8e32ba6` first requested persisted-frontier and
+dry-run mutation fixes; after the regression tests and fixes it returned
+`STATUS: APPROVE`. Next step: run exactly one same-shape 10 minute diagnostic
+for `make-mips-interpreter` before considering `speed_1` / `proof_5`.
