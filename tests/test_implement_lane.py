@@ -10996,6 +10996,115 @@ def test_implement_v2_prompt_history_keeps_different_artifact_failures() -> None
     assert rendered[1]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "log miss"
 
 
+def test_implement_v2_prompt_history_projects_raw_structured_failure_classification() -> None:
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "raw full-history terminal failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-run-verifier",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "is_error": True,
+                    "content": {
+                        "content": [
+                            {
+                                "command_run_id": "cmd-1",
+                                "output_ref": "out-1",
+                                "artifact_evidence": [
+                                    {
+                                        "artifact_id": "/tmp/frame.bmp",
+                                        "path": "/tmp/frame.bmp",
+                                        "status": "failed",
+                                        "blocking": True,
+                                    }
+                                ],
+                                "failure_classification": {
+                                    "phase": "runtime",
+                                    "kind": "missing_artifact",
+                                    "class": "runtime_artifact_missing",
+                                    "confidence": "high",
+                                    "summary": "required artifact /tmp/frame.bmp failed structured checks",
+                                    "required_next_probe": "Inspect the producer path.",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+    latest_failure = rendered[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]
+
+    assert latest_failure["class"] == "runtime_artifact_missing"
+    assert latest_failure["kind"] == "missing_artifact"
+    assert latest_failure["required_next_action"] == "Inspect the producer path."
+
+
+def test_implement_v2_prompt_history_collapses_raw_same_artifact_failures() -> None:
+    def raw_failure(summary: str) -> dict[str, object]:
+        return {
+            "command_run_id": "cmd",
+            "output_ref": "out",
+            "artifact_evidence": [
+                {
+                    "artifact_id": "/tmp/frame.bmp",
+                    "path": "/tmp/frame.bmp",
+                    "status": "failed",
+                    "blocking": True,
+                }
+            ],
+            "failure_classification": {
+                "phase": "runtime",
+                "kind": "missing_artifact",
+                "class": "runtime_artifact_missing",
+                "confidence": "high",
+                "summary": summary,
+                "required_next_probe": "Inspect the producer path.",
+            },
+        }
+
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "old raw failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-old",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {"content": [raw_failure("old frame artifact miss")]},
+                }
+            ],
+        },
+        {
+            "turn": 2,
+            "summary": "new raw failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-new",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {"content": [raw_failure("new frame artifact miss")]},
+                }
+            ],
+        },
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+    first_result = rendered[0]["tool_results"][0]
+    second_item = rendered[1]["tool_results"][0]["content"]["content"][0]
+
+    assert "latest_failures" not in first_result
+    assert second_item["latest_failure"]["summary"] == "new frame artifact miss"
+
+
 def test_implement_v2_terminal_projection_summarizes_long_line_streams() -> None:
     long_line = "x" * 1200
     result = ToolResultEnvelope(

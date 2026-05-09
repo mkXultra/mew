@@ -8358,6 +8358,10 @@ def _project_prompt_history_for_next_turn(prompt_history: list[dict[str, object]
             if not isinstance(items, list):
                 continue
             for item_index, item in enumerate(items):
+                if isinstance(item, dict) and not isinstance(item.get("latest_failure"), dict):
+                    latest_failure = _provider_history_latest_failure(item)
+                    if latest_failure:
+                        item["latest_failure"] = latest_failure
                 family = _provider_latest_failure_family(item)
                 if not family:
                     continue
@@ -8471,19 +8475,28 @@ def _latest_failures_from_provider_history_content(content: dict[str, object]) -
     for item in items:
         if not isinstance(item, dict):
             continue
-        latest_failure = item.get("latest_failure")
-        if isinstance(latest_failure, dict) and latest_failure:
+        latest_failure = _provider_history_latest_failure(item)
+        if latest_failure:
             failures.append(_frontier_compact_mapping(latest_failure))
         if len(failures) >= 2:
             break
     return failures
 
 
+def _provider_history_latest_failure(item: object) -> dict[str, object]:
+    if not isinstance(item, dict):
+        return {}
+    latest_failure = item.get("latest_failure")
+    if isinstance(latest_failure, dict) and latest_failure:
+        return dict(latest_failure)
+    return _latest_actionable_failure_for_provider_history(item)
+
+
 def _provider_latest_failure_family(item: object) -> str:
     if not isinstance(item, dict):
         return ""
-    latest_failure = item.get("latest_failure")
-    if not isinstance(latest_failure, dict):
+    latest_failure = _provider_history_latest_failure(item)
+    if not latest_failure:
         return ""
     failure_class = str(latest_failure.get("class") or latest_failure.get("failure_class") or "").strip()
     failure_kind = str(latest_failure.get("kind") or "").strip()
@@ -8507,6 +8520,17 @@ def _provider_latest_failure_identity(item: dict[str, object]) -> str:
                 path = str(artifact.get("path") or "").strip()
                 if artifact_id or path:
                     return f"artifact:{artifact_id}:{path}"
+    artifact_evidence = item.get("artifact_evidence")
+    if isinstance(artifact_evidence, list):
+        for artifact in artifact_evidence:
+            if not isinstance(artifact, dict):
+                continue
+            if artifact.get("status") in {"passed", "completed"} or artifact.get("blocking") is False:
+                continue
+            artifact_id = str(artifact.get("artifact_id") or "").strip()
+            path = str(artifact.get("path") or "").strip()
+            if artifact_id or path:
+                return f"artifact:{artifact_id}:{path}"
     latest_failure = item.get("latest_failure")
     if isinstance(latest_failure, dict):
         summary = str(latest_failure.get("summary") or "").strip()
