@@ -114,6 +114,30 @@ def test_normalize_execution_contract_keeps_shorthand_check_values() -> None:
     assert artifact.checks[1]["pattern"] == "function\\s+run"
 
 
+def test_normalize_execution_contract_treats_artifact_kind_values_as_kind_checks() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:file",
+            "expected_artifacts": [
+                {
+                    "path": "frame.bmp",
+                    "kind": "file",
+                    "checks": [
+                        {"kind": "file"},
+                        {"kind": "non_empty"},
+                    ],
+                }
+            ],
+        }
+    )
+
+    artifact = contract.expected_artifacts[0]
+
+    assert artifact.checks[0]["type"] == "kind"
+    assert artifact.checks[0]["expected"] == "file"
+    assert artifact.checks[1]["type"] == "non_empty"
+
+
 def test_normalize_execution_contract_ignores_empty_shorthand_check_values() -> None:
     contract = normalize_execution_contract(
         {
@@ -880,4 +904,39 @@ def test_terminal_runtime_failure_with_output_stays_primary_over_failed_artifact
     assert classification.failure_class == "runtime_failure"
     assert classification.kind == "interrupted"
     assert classification.summary == "tool run tool-run-record:1 ended with interrupted"
+    assert classification.required_next_probe == ""
+
+
+def test_terminal_failed_runtime_failure_with_output_stays_primary_over_failed_artifact() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:1",
+            "role": "runtime",
+            "expected_exit": {"mode": "zero"},
+            "expected_artifacts": [{"id": "frame", "path": "/tmp/frame.bmp", "source": "model_declared"}],
+        }
+    )
+    record = ToolRunRecord(
+        record_id="tool-run-record:1",
+        command_run_id="command-run:1",
+        status="failed",
+        exit_code=1,
+        stderr_preview="segv read32 0x00000000",
+    )
+    artifact = ArtifactEvidence(
+        evidence_id="artifact-evidence:frame",
+        artifact_id="frame",
+        command_run_id="command-run:1",
+        tool_run_record_id="tool-run-record:1",
+        status="failed",
+        blocking=True,
+    )
+
+    classification = classify_execution_failure(record, [artifact], None, contract)
+
+    assert classification.failure_class == "runtime_failure"
+    assert classification.kind == "nonzero_exit"
+    assert classification.summary == "exit code 1"
+    assert classification.secondary_classes == ("runtime_artifact_missing",)
+    assert classification.secondary_kinds == ("missing_artifact",)
     assert classification.required_next_probe == ""

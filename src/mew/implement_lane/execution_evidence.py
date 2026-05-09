@@ -988,6 +988,31 @@ def classify_execution_failure(
         )
 
     failed_artifact = _primary_failed_artifact(artifacts, normalized_contract)
+    if run is not None and _terminal_semantic_failure_should_stay_primary(
+        run,
+        failed_artifact,
+        normalized_contract,
+    ):
+        semantic_exit = semantic_exit_from_run(run, normalized_contract)
+        if failed_artifact is not None:
+            evidence_refs.append({"kind": "artifact_evidence", "id": failed_artifact.evidence_id})
+            secondary_classes.append(_failure_class_for_artifact(failed_artifact, normalized_contract))
+            secondary_kinds.append(
+                "partial_evidence"
+                if failed_artifact.status == "partial"
+                else ("stale_artifact" if _artifact_is_stale(failed_artifact) else "missing_artifact")
+            )
+        return _classification(
+            contract_id=normalized_contract.id,
+            phase=_phase_for_record(run, normalized_contract),
+            kind=_kind_from_semantic_exit(semantic_exit),
+            failure_class=_failure_class_for_semantic_role(_role_for_record(run, normalized_contract)),
+            confidence="high",
+            summary=str(semantic_exit.get("message") or "semantic exit failed"),
+            secondary_classes=tuple(dict.fromkeys(secondary_classes)),
+            secondary_kinds=tuple(dict.fromkeys(secondary_kinds)),
+            evidence_refs=tuple(evidence_refs),
+        )
     if failed_artifact is not None:
         evidence_refs.append({"kind": "artifact_evidence", "id": failed_artifact.evidence_id})
         if run is not None:
@@ -1542,12 +1567,19 @@ def _normalize_artifact_checks(value: object) -> tuple[dict[str, Any], ...]:
                 check["pattern"] = check["value"]
             elif "expected" in check:
                 check["pattern"] = check["expected"]
+        elif check_type == "kind" and "expected" not in check:
+            explicit_kind = _enum_text(check.get("kind"))
+            if explicit_kind in ARTIFACT_KINDS:
+                check["expected"] = explicit_kind
+            elif "value" in check:
+                check["expected"] = check["value"]
         checks.append(check)
     return tuple(checks)
 
 
 def _normalize_artifact_check_type(check: Mapping[str, Any]) -> str:
-    explicit = _enum_text(check.get("type") or check.get("kind") or check.get("check"))
+    explicit_type = _enum_text(check.get("type") or check.get("check"))
+    explicit_kind = _enum_text(check.get("kind"))
     aliases = {
         "contains": "text_contains",
         "text": "text_contains",
@@ -1556,8 +1588,11 @@ def _normalize_artifact_check_type(check: Mapping[str, Any]) -> str:
         "matches": "regex",
         "regexp": "regex",
     }
-    if explicit:
-        return aliases.get(explicit, explicit)
+    if explicit_type:
+        return aliases.get(explicit_type, explicit_type)
+    if explicit_kind:
+        normalized = aliases.get(explicit_kind, explicit_kind)
+        return "kind" if normalized in ARTIFACT_KINDS else normalized
     for shorthand in ("non_empty", "text_contains", "regex", "json_schema", "kind", "size_between", "mtime_after", "exists"):
         if shorthand in check:
             return shorthand
@@ -2347,6 +2382,23 @@ def _terminal_failure_should_defer_to_artifact(
     if role in {"runtime", "verify"}:
         return True
     return artifact_phase in {"runtime", "verification"}
+
+
+def _terminal_semantic_failure_should_stay_primary(
+    run: ToolRunRecord,
+    failed_artifact: ArtifactEvidence | None,
+    contract: ExecutionContract,
+) -> bool:
+    if failed_artifact is None:
+        return False
+    if run.status not in TERMINAL_TOOL_STATUSES:
+        return False
+    semantic_exit = semantic_exit_from_run(run, contract)
+    if bool(semantic_exit.get("ok")):
+        return False
+    if str(semantic_exit.get("category") or "") == "unknown":
+        return False
+    return bool(run.stdout_preview.strip() or run.stderr_preview.strip())
 
 
 def _role_for_record(run: ToolRunRecord, contract: ExecutionContract) -> Role:

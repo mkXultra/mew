@@ -15422,7 +15422,8 @@ def test_implement_v2_frontier_diagnostic_stream_miss_does_not_replace_runtime_f
     frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
 
     assert frontier["final_artifact"]["path"].endswith("frame.bmp")
-    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_artifact_missing"
+    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_failure"
+    assert frontier["latest_runtime_failure"]["failure_kind"] == "nonzero_exit"
     assert "latest_build_failure" not in frontier
 
 
@@ -15522,8 +15523,8 @@ def test_implement_v2_frontier_closeout_kill_preserves_prior_runtime_failure(tmp
     runtime_failure = frontier["latest_runtime_failure"]
 
     assert result.metrics["orphaned_command_cleanup_count"] == 1
-    assert runtime_failure["failure_class"] == "runtime_artifact_missing"
-    assert runtime_failure["failure_kind"] == "missing_artifact"
+    assert runtime_failure["failure_class"] == "runtime_failure"
+    assert runtime_failure["failure_kind"] == "nonzero_exit"
     assert "NO_FRAME" in runtime_failure["stdout_tail"]
     assert "killed" not in runtime_failure["failure_summary"]
     assert "latest_build_failure" not in frontier
@@ -15601,7 +15602,8 @@ def test_implement_v2_frontier_final_artifact_uses_blocking_runtime_artifact(tmp
     assert frontier["final_artifact"]["path"].endswith("/frame.bmp")
     assert frontier["final_artifact"]["blocking"] is True
     assert "latest_build_failure" not in frontier
-    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_artifact_missing"
+    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_failure"
+    assert frontier["latest_runtime_failure"]["failure_kind"] == "nonzero_exit"
     assert "BMP_MISSING" in frontier["latest_runtime_failure"]["stdout_tail"]
 
 
