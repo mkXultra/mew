@@ -123,6 +123,8 @@ _PROVIDER_HISTORY_TERMINAL_DIAGNOSTIC_KEYS = (
     "validation_error",
     "blocked_reason",
 )
+_FINAL_VERIFIER_CLOSEOUT_TRIGGER_SECONDS = 12.0
+_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
 _HARD_RUNTIME_FRONTIER_SCHEMA_VERSION = 1
 _FRONTIER_LIST_LIMIT = 8
 _FRONTIER_TEXT_LIMIT = 500
@@ -367,6 +369,9 @@ def run_live_json_implement_v2(
     cleanup_payloads: tuple[dict[str, object], ...] = ()
     closeout_payloads: tuple[dict[str, object], ...] = ()
     auto_poll_payloads: tuple[dict[str, object], ...] = ()
+    final_verifier_closeout_count = 0
+    final_verifier_closeout_reason = ""
+    last_final_verifier_closeout_turn_id = ""
     finish_gate_decision: dict[str, object] = {}
     finish_gate_block_count = 0
     wall_timeout: dict[str, object] = {}
@@ -513,6 +518,104 @@ def run_live_json_implement_v2(
                 finish_arguments = {
                     "outcome": "blocked",
                     "summary": "implement_v2 wall-clock budget exhausted before finish",
+                }
+                break
+            pending_final_verifier_closeout = _latest_source_mutation_without_later_verifier(
+                tuple(tool_calls),
+                tuple(tool_results),
+                source_mutation_roots=_source_mutation_roots(lane_input),
+            )
+            if _should_closeout_final_verifier_before_model_turn(
+                lane_input,
+                run_started=run_started,
+                next_model_timeout_seconds=model_timeout_seconds,
+                pending_mutation=pending_final_verifier_closeout,
+            ):
+                closeout_turn_index = turn_index + 1
+                turn_id = f"turn-{closeout_turn_index}-final-verifier-closeout"
+                last_final_verifier_closeout_turn_id = turn_id
+                final_verifier_closeout_reason = (
+                    "final verifier closeout selected before low-budget model turn after latest source mutation"
+                )
+                closeout_budget = _final_verifier_closeout_budget_seconds(lane_input, run_started=run_started)
+                if closeout_budget < _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS:
+                    finish_arguments = {
+                        "outcome": "blocked",
+                        "summary": (
+                            "final verifier required after latest source mutation, but wall-clock budget "
+                            "was exhausted before a verifier could run"
+                        ),
+                        "failure_class": "final_verifier_closeout_budget_exhausted",
+                        "latest_source_mutation": dict(pending_final_verifier_closeout),
+                    }
+                    break
+                if progress:
+                    progress(
+                        "implement_v2 running deterministic final-verifier closeout "
+                        f"timeout_seconds={round(closeout_budget, 3)}"
+                    )
+                closeout_call = _final_verifier_closeout_call(
+                    lane_input,
+                    lane_attempt_id=lane_attempt_id,
+                    turn_index=closeout_turn_index,
+                    timeout_seconds=closeout_budget,
+                    pending_mutation=pending_final_verifier_closeout,
+                )
+                closeout_result = _execute_exec_or_read_tool(
+                    closeout_call,
+                    lane_input=lane_input,
+                    exec_runtime=exec_runtime,
+                )
+                if closeout_result.status == "yielded":
+                    closeout_chunk, cleanup_chunk = _closeout_active_commands(
+                        exec_runtime,
+                        lane_input=lane_input,
+                        run_started=run_started,
+                    )
+                    closeout_payloads += closeout_chunk
+                    cleanup_payloads += cleanup_chunk
+                    (closeout_result,) = _project_command_closeouts(
+                        (closeout_result,),
+                        closeout_payloads=closeout_chunk,
+                        cleanup_payloads=cleanup_chunk,
+                        exec_runtime=exec_runtime,
+                    )
+                final_verifier_closeout_count += 1
+                tool_calls.append(closeout_call)
+                tool_results.append(closeout_result)
+                transcript.extend(
+                    adapter.transcript_events_for_turn(
+                        lane=IMPLEMENT_V2_LANE,
+                        lane_attempt_id=lane_attempt_id,
+                        turn_id=turn_id,
+                        text=final_verifier_closeout_reason,
+                        tool_calls=(closeout_call,),
+                    )
+                )
+                transcript.extend(
+                    _tool_result_transcript_events(
+                        lane_attempt_id=lane_attempt_id,
+                        turn_id=turn_id,
+                        tool_results=(closeout_result,),
+                    )
+                )
+                history_entry, prompt_history_entry = _final_verifier_closeout_history_entry(
+                    turn_index=closeout_turn_index,
+                    call=closeout_call,
+                    result=closeout_result,
+                    reason=final_verifier_closeout_reason,
+                )
+                history.append(history_entry)
+                prompt_history.append(prompt_history_entry)
+                finish_arguments = {
+                    "outcome": "continue",
+                    "summary": (
+                        "final verifier closeout ran after latest source mutation; "
+                        f"verifier status={closeout_result.status}"
+                    ),
+                    "completion_source": "deterministic_final_verifier_closeout",
+                    "latest_source_mutation": dict(pending_final_verifier_closeout),
+                    "final_verifier_provider_call_id": closeout_call.provider_call_id,
                 }
                 break
             turn_index += 1
@@ -1182,7 +1285,7 @@ def run_live_json_implement_v2(
                 adapter.finish_event_for_turn(
                     lane=IMPLEMENT_V2_LANE,
                     lane_attempt_id=lane_attempt_id,
-                    turn_id=f"turn-{model_turns}-auto-final-verifier",
+                    turn_id=last_final_verifier_closeout_turn_id or f"turn-{model_turns}-auto-final-verifier",
                     finish_arguments=finish_arguments,
                 )
             )
@@ -1274,6 +1377,8 @@ def run_live_json_implement_v2(
             "command_closeout_count": len(closeout_payloads),
             "active_command_auto_poll_count": len(auto_poll_payloads),
             "active_command_auto_poll_terminal_count": _terminal_auto_poll_payload_count(auto_poll_payloads),
+            "final_verifier_closeout_count": final_verifier_closeout_count,
+            "final_verifier_closeout_reason": final_verifier_closeout_reason,
             "orphaned_command_cleanup_count": len(cleanup_payloads),
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
@@ -1365,6 +1470,8 @@ def run_live_json_implement_v2(
             "command_closeout_count": len(closeout_payloads),
             "active_command_auto_poll_count": len(auto_poll_payloads),
             "active_command_auto_poll_terminal_count": _terminal_auto_poll_payload_count(auto_poll_payloads),
+            "final_verifier_closeout_count": final_verifier_closeout_count,
+            "final_verifier_closeout_reason": final_verifier_closeout_reason,
             "orphaned_command_cleanup_count": len(cleanup_payloads),
         },
         transcript=tuple(transcript),
@@ -1918,6 +2025,160 @@ def _closeout_active_commands(
         return (), cleanup_payloads
     closeout_payloads = exec_runtime.finalize_active_commands(timeout_seconds=budget)
     return closeout_payloads, ()
+
+
+def _configured_final_verifier_command(lane_input: ImplementLaneInput) -> str:
+    for source in (lane_input.lane_config, lane_input.task_contract):
+        command = str(source.get("verify_command") or "").strip()
+        if command:
+            return command
+    return ""
+
+
+def _latest_source_mutation_without_later_verifier(
+    tool_calls: tuple[object, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    source_mutation_roots: tuple[str, ...],
+) -> dict[str, object]:
+    latest_mutation: dict[str, object] = {}
+    latest_verifier_index = 0
+    for index, (call, result) in enumerate(zip(tool_calls, tool_results), start=1):
+        if _result_is_configured_verifier_step(result):
+            latest_verifier_index = index
+        if (
+            result.status == "completed"
+            and _write_result_has_source_root_side_effect(result, source_mutation_roots=source_mutation_roots)
+        ):
+            latest_mutation = {
+                "result_index": index,
+                "provider_call_id": str(getattr(call, "provider_call_id", "") or result.provider_call_id or ""),
+                "tool_name": str(getattr(call, "tool_name", "") or result.tool_name or ""),
+                "path": _write_call_path(call) or next(iter(_write_result_paths(result)), ""),
+                "turn_index": int(getattr(call, "turn_index", 0) or 0),
+                "latest_verifier_index": latest_verifier_index,
+            }
+    if not latest_mutation:
+        return {}
+    if int(latest_mutation.get("result_index") or 0) <= latest_verifier_index:
+        return {}
+    return latest_mutation
+
+
+def _result_is_configured_verifier_step(result: ToolResultEnvelope) -> bool:
+    if result.tool_name not in EXEC_TOOL_NAMES:
+        return False
+    if result.status not in {"completed", "failed", "interrupted", "invalid"}:
+        return False
+    if not _result_has_terminal_command_evidence(result):
+        return False
+    if result.tool_name == "run_tests":
+        return True
+    payload = _first_result_payload(result)
+    contract = _payload_execution_contract(payload)
+    return bool(contract and _execution_contract_is_verifier_like(contract)) or bool(
+        _command_has_verifier_surface(_result_command_text(result))
+    )
+
+
+def _final_verifier_closeout_budget_seconds(lane_input: ImplementLaneInput, *, run_started: float) -> float:
+    remaining = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    if remaining is None:
+        remaining = float(lane_input.lane_config.get("final_verifier_closeout_seconds") or 60.0)
+    configured = lane_input.lane_config.get("final_verifier_closeout_seconds")
+    if configured not in (None, ""):
+        try:
+            remaining = min(remaining, max(0.0, float(configured)))
+        except (TypeError, ValueError):
+            return 0.0
+    return max(0.0, min(3600.0, remaining))
+
+
+def _should_closeout_final_verifier_before_model_turn(
+    lane_input: ImplementLaneInput,
+    *,
+    run_started: float,
+    next_model_timeout_seconds: float,
+    pending_mutation: dict[str, object],
+) -> bool:
+    if not pending_mutation:
+        return False
+    if not bool(lane_input.lane_config.get("allow_verify")):
+        return False
+    if not bool(lane_input.lane_config.get("allow_shell")):
+        return False
+    if not _v2_tool_available(lane_input, "run_command"):
+        return False
+    if not _configured_final_verifier_command(lane_input):
+        return False
+    trigger = lane_input.lane_config.get("final_verifier_closeout_trigger_seconds")
+    try:
+        trigger_seconds = float(trigger) if trigger not in (None, "") else _FINAL_VERIFIER_CLOSEOUT_TRIGGER_SECONDS
+    except (TypeError, ValueError):
+        trigger_seconds = _FINAL_VERIFIER_CLOSEOUT_TRIGGER_SECONDS
+    remaining = _remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    low_remaining_wall = remaining is not None and remaining <= trigger_seconds
+    return low_remaining_wall and next_model_timeout_seconds <= trigger_seconds
+
+
+def _final_verifier_closeout_call(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    turn_index: int,
+    timeout_seconds: float,
+    pending_mutation: dict[str, object],
+) -> ToolCallEnvelope:
+    command = _configured_final_verifier_command(lane_input)
+    timeout_seconds = max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds)
+    return ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="model_json",
+        provider_call_id=f"call-final-verifier-closeout-{turn_index:03d}",
+        mew_tool_call_id=f"{lane_attempt_id}:tool:{turn_index}:final-verifier-closeout",
+        tool_name="run_command",
+        turn_index=turn_index,
+        sequence_index=1,
+        arguments={
+            "command": command,
+            "cwd": ".",
+            "use_shell": True,
+            "timeout": round(timeout_seconds, 3),
+            "foreground_budget_seconds": round(timeout_seconds, 3),
+            "execution_contract": {
+                "role": "runtime",
+                "stage": "final-verifier",
+                "purpose": "verify the latest source mutation before closeout",
+                "proof_role": "verifier",
+                "acceptance_kind": "external_verifier",
+                "expected_exit": 0,
+                "latest_source_mutation_provider_call_id": pending_mutation.get("provider_call_id") or "",
+                "latest_source_mutation_path": pending_mutation.get("path") or "",
+            },
+        },
+    )
+
+
+def _final_verifier_closeout_history_entry(
+    *,
+    turn_index: int,
+    call: ToolCallEnvelope,
+    result: ToolResultEnvelope,
+    reason: str,
+) -> tuple[dict[str, object], dict[str, object]]:
+    history_entry = {
+        "turn": turn_index,
+        "summary": reason,
+        "tool_calls": [call.as_dict()],
+        "tool_results": [_full_tool_result_for_history(result)],
+    }
+    prompt_history_entry = {
+        "turn": turn_index,
+        "summary": reason,
+        "tool_calls": [_provider_visible_tool_call_for_history(call)],
+        "tool_results": [_provider_visible_tool_result_for_history(result)],
+    }
+    return history_entry, prompt_history_entry
 
 
 def _auto_poll_yielded_verifier_commands(

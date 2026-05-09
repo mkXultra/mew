@@ -4154,6 +4154,95 @@ def test_implement_v2_does_not_classify_tmp_artifact_missing_read_as_first_write
     assert "lane_hard_runtime_frontier" not in result.updated_lane_state
 
 
+def test_implement_v2_runs_configured_final_verifier_closeout_before_low_budget_model_turn(tmp_path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("print('old')\n", encoding="utf-8")
+    verify_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; "
+                "assert Path('sample.py').read_text(encoding='utf-8') == \"print('done')\\n\"; "
+                "Path('ok.txt').write_text('ok', encoding='utf-8')"
+            ),
+        ]
+    )
+    model_calls = 0
+
+    def fake_model(*_args, **_kwargs):
+        nonlocal model_calls
+        model_calls += 1
+        if model_calls > 1:
+            raise ModelBackendError("request timed out")
+        return {
+            "summary": "write the implementation, then let deterministic closeout verify when budget is low",
+            "tool_calls": [
+                {
+                    "id": "write-sample",
+                    "name": "write_file",
+                    "arguments": {"path": "sample.py", "content": "print('done')\n"},
+                },
+                {
+                    "id": "diagnostic-after-write",
+                    "name": "run_command",
+                    "arguments": {"command": "printf 'diagnostic\\n'", "cwd": ".", "use_shell": True},
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Patch sample.py and verify ok.txt exists.",
+                "verify_command": verify_command,
+                "expected_artifacts": [{"path": "ok.txt", "kind": "file"}],
+                "max_wall_seconds": 10,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "auto_approve_writes": True,
+                "verify_command": verify_command,
+                "final_verifier_closeout_trigger_seconds": 10,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        timeout=5,
+        max_turns=2,
+    )
+
+    manifest = result.updated_lane_state["proof_manifest"]
+    verifier_result = manifest["tool_results"][-1]
+
+    assert model_calls == 1
+    assert result.status == "completed"
+    assert result.metrics["completion_credit"] is True
+    assert result.metrics["model_turns"] == 1
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert verifier_result["provider_call_id"] == "call-final-verifier-closeout-002"
+    assert verifier_result["status"] == "completed"
+    assert (tmp_path / "ok.txt").read_text(encoding="utf-8") == "ok"
+    assert result.updated_lane_state["finish"]["completion_source"] == "structured_final_verifier_pass"
+    assert any(
+        event.kind == "finish"
+        and event.turn_id == "turn-2-final-verifier-closeout"
+        and event.payload["finish_arguments"]["completion_source"] == "structured_final_verifier_pass"
+        for event in result.transcript
+    )
+
+
 def test_implement_v2_live_json_accept_edits_preserves_explicit_dry_run(tmp_path) -> None:
     target = tmp_path / "preview.txt"
     outputs = [
