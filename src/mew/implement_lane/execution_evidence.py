@@ -1529,12 +1529,16 @@ def _normalize_artifact_checks(value: object) -> tuple[dict[str, Any], ...]:
         check_type = _normalize_artifact_check_type(check)
         check["type"] = check_type
         if check_type == "text_contains" and "text" not in check:
-            if "value" in check:
+            if check.get("text_contains") is not None and not isinstance(check.get("text_contains"), bool):
+                check["text"] = check["text_contains"]
+            elif "value" in check:
                 check["text"] = check["value"]
             elif "expected" in check:
                 check["text"] = check["expected"]
         elif check_type == "regex" and "pattern" not in check:
-            if "value" in check:
+            if check.get("regex") is not None and not isinstance(check.get("regex"), bool):
+                check["pattern"] = check["regex"]
+            elif "value" in check:
                 check["pattern"] = check["value"]
             elif "expected" in check:
                 check["pattern"] = check["expected"]

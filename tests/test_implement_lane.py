@@ -8957,7 +8957,7 @@ def test_implement_v2_exec_attaches_structured_artifact_evidence(tmp_path) -> No
                                 "freshness": "created_after_run_start",
                                 "checks": [
                                     {"type": "exists", "severity": "blocking"},
-                                    {"type": "text_contains", "text": "artifact-ok", "severity": "blocking"},
+                                    {"text_contains": "artifact-ok", "severity": "blocking"},
                                 ],
                             }
                         ],

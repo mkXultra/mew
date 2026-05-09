@@ -90,6 +90,57 @@ def test_normalize_execution_contract_accepts_stdout_target_and_check_aliases() 
     assert artifact.checks[1]["text"] == "ELF"
 
 
+def test_normalize_execution_contract_keeps_shorthand_check_values() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:file",
+            "expected_artifacts": [
+                {
+                    "path": "vm.js",
+                    "checks": [
+                        {"text_contains": "class VM"},
+                        {"regex": "function\\s+run"},
+                    ],
+                }
+            ],
+        }
+    )
+
+    artifact = contract.expected_artifacts[0]
+
+    assert artifact.checks[0]["type"] == "text_contains"
+    assert artifact.checks[0]["text"] == "class VM"
+    assert artifact.checks[1]["type"] == "regex"
+    assert artifact.checks[1]["pattern"] == "function\\s+run"
+
+
+def test_normalize_execution_contract_ignores_empty_shorthand_check_values() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:file",
+            "expected_artifacts": [
+                {
+                    "path": "vm.js",
+                    "checks": [
+                        {"text_contains": None, "value": "class VM"},
+                        {"regex": None, "expected": "function\\s+run"},
+                        {"text_contains": True, "expected": "literal fallback"},
+                    ],
+                }
+            ],
+        }
+    )
+
+    artifact = contract.expected_artifacts[0]
+
+    assert artifact.checks[0]["type"] == "text_contains"
+    assert artifact.checks[0]["text"] == "class VM"
+    assert artifact.checks[1]["type"] == "regex"
+    assert artifact.checks[1]["pattern"] == "function\\s+run"
+    assert artifact.checks[2]["type"] == "text_contains"
+    assert artifact.checks[2]["text"] == "literal fallback"
+
+
 def test_build_oracle_bundle_keeps_latest_completion_contract_for_same_artifact_target() -> None:
     bundle = build_oracle_bundle(
         task_contract={},
