@@ -299,7 +299,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-k", type=int)
     parser.add_argument("-n", type=int)
     parser.add_argument("-m", "--model", default="gpt-5.5")
-    parser.add_argument("--model-timeout", type=int, default=300)
+    parser.add_argument("--model-timeout", type=int, default=600)
     parser.add_argument("--max-steps", type=int, default=30)
     parser.add_argument("--timeout-seconds", type=int)
     parser.add_argument("--timeout-reserve-seconds", type=int)

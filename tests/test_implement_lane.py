@@ -7767,6 +7767,63 @@ def test_implement_v2_search_text_treats_lone_pattern_as_query_alias(tmp_path) -
     assert any("DG_DrawFrame" in match for match in tool_result["content"][0]["matches"])
 
 
+def test_implement_v2_glob_accepts_absolute_glob_in_path_argument(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "glob",
+                "arguments": {"path": f"{tmp_path}/**/*.c"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "glob evidence ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "completed"
+    assert tool_result["is_error"] is False
+    assert any(str(match.get("path")).endswith("src/main.c") for match in tool_result["content"][0]["matches"])
+
+
+def test_implement_v2_glob_path_alias_still_rejects_outside_workspace(tmp_path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "secret.c").write_text("int secret(void) { return 1; }\n", encoding="utf-8")
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "glob",
+                "arguments": {"path": f"{outside}/**/*.c"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "outside glob rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert tool_result["status"] == "failed"
+    assert tool_result["is_error"] is True
+    assert "outside allowed read roots" in tool_result["content"][0]["reason"]
+
+
 def test_implement_v2_read_only_finish_cannot_claim_completed(tmp_path) -> None:
     (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
 

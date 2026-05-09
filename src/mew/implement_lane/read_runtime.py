@@ -138,9 +138,13 @@ def _execute_read_only_payload(
         payload["summary"] = summarize_read_result("search_text", payload)
         return payload
     if tool == "glob":
+        pattern = args.get("pattern") or ""
+        path = args.get("path") or "."
+        if (pattern is None or not str(pattern).strip()) and _looks_like_glob_path(path):
+            path, pattern = _split_glob_path_argument(path, workspace=workspace)
         payload = glob_paths(
-            args.get("pattern") or "",
-            _workspace_path(args.get("path") or ".", workspace),
+            pattern,
+            _workspace_path(path or ".", workspace),
             allowed_roots,
             max_matches=_bounded_int(args.get("max_matches"), 100, 1, 500),
         )
@@ -165,6 +169,53 @@ def _workspace_path(path: object, workspace: object) -> str:
     if requested.is_absolute():
         return str(requested)
     return str((Path(str(workspace or ".")).expanduser() / requested).resolve(strict=False))
+
+
+def _looks_like_glob_path(path: object) -> bool:
+    text = str(path or "")
+    return any(marker in text for marker in ("*", "?", "["))
+
+
+def _split_glob_path_argument(path: object, *, workspace: object) -> tuple[str, str]:
+    """Accept provider calls that put the glob expression in ``path``.
+
+    The model-facing surface describes ``glob`` as workspace path discovery, and
+    provider turns sometimes send ``{"path": "/workspace/**/*"}`` instead of a
+    separate ``pattern``.  Keep the actual read tool strict by translating that
+    shape to ``path=/workspace`` plus a relative pattern.
+    """
+
+    raw = str(path or ".").strip() or "."
+    requested = Path(raw).expanduser()
+    parts = requested.parts
+    glob_index = next(
+        (
+            index
+            for index, part in enumerate(parts)
+            if any(marker in part for marker in ("*", "?", "["))
+        ),
+        None,
+    )
+    if glob_index is None:
+        return raw, ""
+    base_parts = parts[:glob_index]
+    pattern_parts = parts[glob_index:]
+    if not base_parts:
+        base = "."
+    elif base_parts == (requested.anchor,):
+        base = requested.anchor
+    else:
+        base = str(Path(*base_parts))
+    pattern = str(Path(*pattern_parts)) if pattern_parts else "*"
+    if requested.is_absolute():
+        workspace_path = Path(str(workspace or ".")).expanduser().resolve(strict=False)
+        try:
+            base_path = Path(base).expanduser().resolve(strict=False)
+            if base_path == workspace_path or base_path.is_relative_to(workspace_path):
+                base = str(base_path)
+        except OSError:
+            pass
+    return base, pattern
 
 
 def _allowed_roots(*, workspace: object, allowed_roots: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
