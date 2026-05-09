@@ -15,6 +15,37 @@ PROTECTED_WRITE_PATHS = frozenset({"ROADMAP.md", "ROADMAP_STATUS.md", "SIDE_PROJ
 PROTECTED_WRITE_PREFIXES = (".codex/skills/", ".github/workflows/")
 _EDIT_RECOVERY_FILE_CHAR_CAP = 1_000_000
 _EDIT_RECOVERY_OLD_TEXT_CHAR_CAP = 4096
+_SOURCE_MUTATION_LINE_GUARD_MIN_CHARS = 4000
+_SOURCE_MUTATION_MAX_LINE_CHARS = 2400
+_SOURCE_MUTATION_EXTENSIONS = frozenset(
+    {
+        ".bash",
+        ".c",
+        ".cc",
+        ".cjs",
+        ".cpp",
+        ".cs",
+        ".go",
+        ".h",
+        ".hpp",
+        ".java",
+        ".js",
+        ".jsx",
+        ".kt",
+        ".lua",
+        ".mjs",
+        ".php",
+        ".py",
+        ".rb",
+        ".rs",
+        ".scala",
+        ".sh",
+        ".swift",
+        ".ts",
+        ".tsx",
+        ".zsh",
+    }
+)
 
 
 class ImplementV2WriteRuntime:
@@ -71,6 +102,15 @@ class ImplementV2WriteRuntime:
         denied = _denied_payload(call, approval=approval) if apply and not _approval_granted(approval) else None
         if denied is not None:
             return denied
+        quality_failure = _source_mutation_quality_failure_payload(
+            path,
+            args.get("content", ""),
+            operation="write_file",
+            apply=apply,
+            approval=approval,
+        )
+        if quality_failure is not None:
+            return quality_failure
         result = write_file(
             path,
             args.get("content", ""),
@@ -91,6 +131,15 @@ class ImplementV2WriteRuntime:
             return denied
         old_text = _first_present(args, "old", "old_string", "old_text")
         new_text = _first_present(args, "new", "new_string", "new_text")
+        quality_failure = _source_mutation_quality_failure_payload(
+            path,
+            _changed_new_text_for_line_guard(old_text, new_text),
+            operation="edit_file",
+            apply=apply,
+            approval=approval,
+        )
+        if quality_failure is not None:
+            return quality_failure
         result = edit_file(
             path,
             old_text,
@@ -196,6 +245,15 @@ class ImplementV2WriteRuntime:
         patch_path = str(_workspace_path(patch_args["path"], self.workspace))
         patch_lexical_path = str(_workspace_lexical_path(patch_args["path"], self.workspace))
         patch_operation = str(patch_args.get("operation") or "update_file")
+        quality_failure = _patch_source_mutation_quality_failure_payload(
+            patch_path,
+            patch_args,
+            operation="apply_patch",
+            apply=apply,
+            approval=approval,
+        )
+        if quality_failure is not None:
+            return quality_failure
         if patch_operation == "add_file":
             if Path(patch_lexical_path).exists() or Path(patch_lexical_path).is_symlink():
                 raise ValueError(f"apply_patch add file target already exists: {patch_args['path']}")
@@ -468,6 +526,108 @@ def _denied_payload(call: ToolCallEnvelope, *, approval: dict[str, object]) -> d
             "provider-supplied approval arguments are ignored"
         ),
     }
+
+
+def _source_mutation_quality_failure_payload(
+    path: object,
+    content: object,
+    *,
+    operation: str,
+    apply: bool,
+    approval: dict[str, object] | None,
+) -> dict[str, object] | None:
+    text = str(content or "")
+    path_text = str(path or "")
+    if not _source_path_needs_line_guard(path_text, text):
+        return None
+    lines = text.splitlines() or [text]
+    line_number, longest_line = max(enumerate(lines, start=1), key=lambda item: len(item[1]))
+    if len(longest_line) <= _SOURCE_MUTATION_MAX_LINE_CHARS:
+        return None
+    return {
+        "operation": operation,
+        "mew_status": "failed",
+        "dry_run": True,
+        "written": False,
+        "changed": False,
+        "apply_requested": bool(apply),
+        "approval_status": str((approval or {}).get("status") or ("approved" if apply else "not_required_for_dry_run")),
+        "approval_source": str((approval or {}).get("source") or ("external_write_approval" if apply else "")),
+        "approval_id": str((approval or {}).get("approval_id") or ""),
+        "failure_class": "source_mutation_unreadable_long_line",
+        "failure_subclass": "source_mutation_single_line_diagnostic_risk",
+        "recoverable": True,
+        "path": path_text,
+        "reason": (
+            f"{operation} would create a {len(longest_line)} character line in source file {path_text}; "
+            "rewrite the source mutation as readable multi-line code before verification"
+        ),
+        "line_number": line_number,
+        "line_chars": len(longest_line),
+        "max_line_chars": _SOURCE_MUTATION_MAX_LINE_CHARS,
+        "content_chars": len(text),
+        "suggested_tool": "write_file/edit_file/apply_patch",
+        "suggested_next_action": (
+            "rewrite source mutations as readable multi-line code before verification; "
+            "single-line generated source causes poor diagnostics and fragile follow-up edits"
+        ),
+    }
+
+
+def _changed_new_text_for_line_guard(old_text: object, new_text: object) -> str:
+    old_lines = str(old_text or "").splitlines()
+    new_lines = str(new_text or "").splitlines()
+    if not old_lines:
+        return str(new_text or "")
+    matcher = difflib.SequenceMatcher(None, old_lines, new_lines)
+    changed_lines: list[str] = []
+    for tag, _old_start, _old_end, new_start, new_end in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changed_lines.extend(new_lines[new_start:new_end])
+    return "\n".join(changed_lines)
+
+
+def _patch_source_mutation_quality_failure_payload(
+    path: object,
+    patch_args: dict[str, object],
+    *,
+    operation: str,
+    apply: bool,
+    approval: dict[str, object] | None,
+) -> dict[str, object] | None:
+    patch_operation = str(patch_args.get("operation") or "")
+    if patch_operation == "delete_file":
+        return None
+    if patch_operation == "add_file":
+        return _source_mutation_quality_failure_payload(
+            path,
+            patch_args.get("content", ""),
+            operation=operation,
+            apply=apply,
+            approval=approval,
+        )
+    edits = patch_args.get("edits") if isinstance(patch_args.get("edits"), list) else []
+    for edit in edits:
+        if not isinstance(edit, dict):
+            continue
+        failure = _source_mutation_quality_failure_payload(
+            path,
+            _changed_new_text_for_line_guard(edit.get("old", ""), edit.get("new", "")),
+            operation=operation,
+            apply=apply,
+            approval=approval,
+        )
+        if failure is not None:
+            return failure
+    return None
+
+
+def _source_path_needs_line_guard(path: str, text: str) -> bool:
+    if len(text) < _SOURCE_MUTATION_LINE_GUARD_MIN_CHARS:
+        return False
+    suffix = Path(path).suffix.lower()
+    return suffix in _SOURCE_MUTATION_EXTENSIONS
 
 
 def _write_payload(

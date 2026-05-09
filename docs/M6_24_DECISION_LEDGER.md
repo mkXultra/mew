@@ -1149,3 +1149,29 @@ and latest-failure digests. Full history, proof artifacts, replay state, typed
 evidence, and resident sidecar state remain the source of truth. After this
 repair, run focused tests, codex-ultra review, and one more 10 minute same-shape
 diagnostic before `speed_1` / `proof_5`.
+
+Latest-one-turn compaction diagnostic 2026-05-09 JST:
+
+Commit `5f91df1` reduced model-visible hot-path weight but did not pass the
+task. The diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260509-200159` scored `0/1`.
+Compared with `20260509-193553`, prompt chars dropped from `787k` to `318k`,
+model turns dropped from `17` to `9`, edit count dropped from `9` to `2`, and
+the first verifier stayed immediate after first write (`273s`). Model elapsed
+remained high at roughly `598s`, so prompt compaction helped shape but did not
+solve implementation quality or repair latency.
+
+New generic blocker: the first `/app/vm.js` was generated as a very large
+single-line JavaScript file. When `node vm.js` failed, Node printed that entire
+line in the diagnostic output, turning the next repair turn into source-dump
+parsing instead of latest-failure repair. This is not MIPS-specific; it is a
+source-mutation quality issue that can affect any generated code file.
+
+Decision: add a generic implement_v2 write guard for code-like source paths.
+Reject large source mutations that introduce a line above the readability cap,
+while allowing large multiline source and allowing small edits that merely keep
+an existing long line as unchanged context. The guard applies to `write_file`,
+`edit_file`, and `apply_patch`, returns structured recovery guidance, and keeps
+approval/dry-run semantics safe. After this repair, rerun the same 10 minute
+diagnostic and check whether the failed verifier output no longer contains a
+huge generated source line.

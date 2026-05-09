@@ -14948,6 +14948,254 @@ def test_implement_v2_write_file_approved_apply_records_mutation_evidence(tmp_pa
     assert tool_result["side_effects"][0]["approval_id"] == "approval-1"
 
 
+def test_implement_v2_write_file_rejects_large_single_line_source(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+    single_line_source = "const fs = require('fs');" + ("x" * 5000)
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "vm.js",
+                    "content": single_line_source,
+                    "create": True,
+                    "apply": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "single-line source rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert payload["failure_class"] == "source_mutation_unreadable_long_line"
+    assert payload["line_chars"] > payload["max_line_chars"]
+    assert "readable multi-line code" in payload["suggested_next_action"]
+    assert not target.exists()
+
+
+def test_implement_v2_write_file_allows_large_multiline_source(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+    multiline_source = "\n".join(f"const value{index} = {index};" for index in range(400)) + "\n"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "vm.js",
+                    "content": multiline_source,
+                    "create": True,
+                    "apply": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "multiline source applied"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert target.read_text(encoding="utf-8") == multiline_source
+
+
+def test_implement_v2_write_file_allows_large_single_line_non_source(tmp_path) -> None:
+    target = tmp_path / "data.txt"
+    one_line_data = "x" * 5000
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "data.txt",
+                    "content": one_line_data,
+                    "create": True,
+                    "apply": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "large data line applied"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert target.read_text(encoding="utf-8") == one_line_data
+
+
+def test_implement_v2_edit_file_rejects_new_large_single_line_source(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+    target.write_text("console.log('old');\n", encoding="utf-8")
+    long_line = "const generated = '" + ("x" * 5000) + "';\n"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "edit_file",
+                "arguments": {
+                    "path": "vm.js",
+                    "old_string": "console.log('old');\n",
+                    "new_string": long_line,
+                    "apply": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "single-line edit rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert payload["failure_class"] == "source_mutation_unreadable_long_line"
+    assert payload["reason"]
+    assert target.read_text(encoding="utf-8") == "console.log('old');\n"
+
+
+def test_implement_v2_edit_file_allows_unchanged_large_line_context(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+    long_line = "const fixture = '" + ("x" * 5000) + "';\n"
+    old_text = long_line + "console.log('old');\n"
+    new_text = long_line + "console.log('new');\n"
+    target.write_text(old_text, encoding="utf-8")
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "edit_file",
+                "arguments": {
+                    "path": "vm.js",
+                    "old_string": old_text,
+                    "new_string": new_text,
+                    "apply": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "small edit with long context applied"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert target.read_text(encoding="utf-8") == new_text
+
+
+def test_implement_v2_apply_patch_rejects_new_large_single_line_source(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+    target.write_text("console.log('old');\n", encoding="utf-8")
+    long_line = "const generated = '" + ("x" * 5000) + "';\n"
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: vm.js\n"
+        "@@\n"
+        "-console.log('old');\n"
+        f"+{long_line}"
+        "*** End Patch\n"
+    )
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "apply_patch",
+                "arguments": {"patch": patch, "apply": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "single-line patch rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert payload["failure_class"] == "source_mutation_unreadable_long_line"
+    assert target.read_text(encoding="utf-8") == "console.log('old');\n"
+
+
+def test_implement_v2_apply_patch_allows_unchanged_large_line_context(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+    long_line = "const fixture = '" + ("x" * 5000) + "';\n"
+    old_text = long_line + "console.log('old');\n"
+    new_text = long_line + "console.log('new');\n"
+    target.write_text(old_text, encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: vm.js\n"
+        "@@\n"
+        f" {long_line}"
+        "-console.log('old');\n"
+        "+console.log('new');\n"
+        "*** End Patch\n"
+    )
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "apply_patch",
+                "arguments": {"patch": patch, "apply": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "small patch with long context applied"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert target.read_text(encoding="utf-8") == new_text
+
+
 def test_implement_v2_write_file_provider_self_approval_is_ignored(tmp_path) -> None:
     target = tmp_path / "out.txt"
 
