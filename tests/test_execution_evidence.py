@@ -764,3 +764,69 @@ def test_artifact_primary_keeps_semantic_exit_as_secondary_kind() -> None:
     assert classification.failure_class == "runtime_artifact_missing"
     assert classification.secondary_classes == ("runtime_failure",)
     assert classification.secondary_kinds == ("nonzero_exit",)
+
+
+def test_silent_terminal_runtime_failure_defers_to_failed_artifact() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:1",
+            "role": "runtime",
+            "expected_exit": {"mode": "zero"},
+            "expected_artifacts": [{"id": "frame", "path": "/tmp/frame.bmp", "source": "model_declared"}],
+        }
+    )
+    record = ToolRunRecord(
+        record_id="tool-run-record:1",
+        command_run_id="command-run:1",
+        status="interrupted",
+        interrupted=True,
+    )
+    artifact = ArtifactEvidence(
+        evidence_id="artifact-evidence:frame",
+        artifact_id="frame",
+        command_run_id="command-run:1",
+        tool_run_record_id="tool-run-record:1",
+        status="failed",
+        blocking=True,
+    )
+
+    classification = classify_execution_failure(record, [artifact], None, contract)
+
+    assert classification.failure_class == "runtime_artifact_missing"
+    assert classification.kind == "missing_artifact"
+    assert classification.secondary_classes == ("runtime_failure",)
+    assert classification.secondary_kinds == ("interrupted",)
+    assert "producing substep" in classification.required_next_probe
+
+
+def test_terminal_runtime_failure_with_output_stays_primary_over_failed_artifact() -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:1",
+            "role": "runtime",
+            "expected_exit": {"mode": "zero"},
+            "expected_artifacts": [{"id": "frame", "path": "/tmp/frame.bmp", "source": "model_declared"}],
+        }
+    )
+    record = ToolRunRecord(
+        record_id="tool-run-record:1",
+        command_run_id="command-run:1",
+        status="interrupted",
+        interrupted=True,
+        stderr_preview="unsupported opcode 0x1f",
+    )
+    artifact = ArtifactEvidence(
+        evidence_id="artifact-evidence:frame",
+        artifact_id="frame",
+        command_run_id="command-run:1",
+        tool_run_record_id="tool-run-record:1",
+        status="failed",
+        blocking=True,
+    )
+
+    classification = classify_execution_failure(record, [artifact], None, contract)
+
+    assert classification.failure_class == "runtime_failure"
+    assert classification.kind == "interrupted"
+    assert classification.summary == "tool run tool-run-record:1 ended with interrupted"
+    assert classification.required_next_probe == ""

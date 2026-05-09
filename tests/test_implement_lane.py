@@ -1138,7 +1138,8 @@ def test_implement_v2_allows_hard_runtime_write_after_more_probes_follow_blocked
             "-c",
             (
                 "print('file readelf -s objdump -d ELF little endian main symbol "
-                "syscall hook api open read write opcode instruction output frame')"
+                "syscall hook api open read write opcode instruction output frame "
+                "fopen(\"/tmp/frame.bmp\", \"wb\")')"
             ),
         ]
     )
@@ -10216,6 +10217,10 @@ def test_implement_v2_fast_cancels_hard_runtime_verifier_with_no_output_or_artif
         payload["reason"]
         == "implement_v2 hard-runtime verifier had no observable output or expected-artifact progress after foreground budget"
     )
+    assert payload["failure_classification"]["class"] == "runtime_artifact_missing"
+    assert payload["failure_classification"]["kind"] == "missing_artifact"
+    assert "interrupted" in payload["failure_classification"]["secondary_kinds"]
+    assert "producing substep" in payload["failure_classification"]["required_next_probe"]
 
 
 def test_implement_v2_fast_cancel_treats_unchanged_existing_artifact_as_no_progress(tmp_path) -> None:

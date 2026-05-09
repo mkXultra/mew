@@ -935,7 +935,12 @@ def classify_execution_failure(
                 evidence_refs=tuple(evidence_refs),
             )
         status_kind = _failure_kind_from_terminal_status(run.status)
-        if status_kind is not None:
+        terminal_artifact_failure = _primary_failed_artifact(artifacts, normalized_contract)
+        if status_kind is not None and not _terminal_failure_should_defer_to_artifact(
+            run,
+            terminal_artifact_failure,
+            normalized_contract,
+        ):
             return _classification(
                 contract_id=normalized_contract.id,
                 phase=_phase_for_record(run, normalized_contract),
@@ -2320,6 +2325,24 @@ def _failure_kind_from_terminal_status(status: str) -> FailureKind | None:
     if status == "killed":
         return "killed"
     return None
+
+
+def _terminal_failure_should_defer_to_artifact(
+    run: ToolRunRecord,
+    failed_artifact: ArtifactEvidence | None,
+    contract: ExecutionContract,
+) -> bool:
+    if failed_artifact is None:
+        return False
+    if run.status not in {"killed", "timed_out", "interrupted"}:
+        return False
+    if run.stdout_preview.strip() or run.stderr_preview.strip():
+        return False
+    role = _role_for_record(run, contract)
+    artifact_phase = _phase_for_artifact(failed_artifact, contract)
+    if role in {"runtime", "verify"}:
+        return True
+    return artifact_phase in {"runtime", "verification"}
 
 
 def _role_for_record(run: ToolRunRecord, contract: ExecutionContract) -> Role:
