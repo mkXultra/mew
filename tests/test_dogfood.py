@@ -134,6 +134,8 @@ class DogfoodTests(unittest.TestCase):
                 "runtime_artifact_missing",
                 "--terminal-bench-assert-structured-replay-mismatch-count",
                 "7",
+                "--terminal-bench-assert-source-output-contract-path",
+                "/tmp/frame.bmp",
                 "--json",
             ]
         )
@@ -149,6 +151,7 @@ class DogfoodTests(unittest.TestCase):
         self.assertEqual(args.terminal_bench_assert_next_action_contains, "compiled/native source frontier")
         self.assertEqual(args.terminal_bench_assert_structured_failure_class, "runtime_artifact_missing")
         self.assertEqual(args.terminal_bench_assert_structured_replay_mismatch_count, 7)
+        self.assertEqual(args.terminal_bench_assert_source_output_contract_path, "/tmp/frame.bmp")
 
     def test_cli_dogfood_m2_task_shape_choices(self):
         parser = build_parser()

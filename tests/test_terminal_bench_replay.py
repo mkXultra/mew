@@ -468,6 +468,67 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertEqual(payload["status"], "pass")
             self.assertEqual(payload["trial_count"], 1)
 
+    def test_cli_replay_terminal_bench_json_asserts_source_output_contract_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_external_artifact_mismatch_fixture(tmp)
+            manifest_path = (
+                Path(job_dir)
+                / "make-mips-interpreter__v2externalartifact"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+                / "proof-manifest.json"
+            )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["tool_results"].insert(
+                0,
+                {
+                    "provider_call_id": "read-runtime-source",
+                    "tool_name": "read_file",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "mew_status": "completed",
+                            "content": [
+                                {
+                                    "path": "src/runtime.c",
+                                    "text": (
+                                        'void render(void) { FILE *fp = fopen("/tmp/frame.bmp", "wb"); '
+                                        "fwrite(buf, 1, n, fp); }"
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            parser = build_parser()
+            args = parser.parse_args(
+                [
+                    "replay",
+                    "terminal-bench",
+                    "--job-dir",
+                    str(job_dir),
+                    "--task",
+                    "make-mips-interpreter",
+                    "--assert-source-output-contract-path",
+                    "/tmp/frame.bmp",
+                    "--json",
+                ]
+            )
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = args.func(args)
+
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(payload["status"], "pass")
+            check_names = {check["name"] for check in payload["checks"]}
+            self.assertIn("source_output_contract_path", check_names)
+
     def test_replay_terminal_bench_job_accepts_implement_v2_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_implement_v2_replay_fixture(tmp)
@@ -535,6 +596,55 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertNotIn("/tmp/vmout.txt", current_v2["passed_structured_artifacts"])
             self.assertIn("/tmp/frame.bmp", next_action)
             self.assertIn("external verifier expected runtime artifact", next_action)
+
+    def test_replay_terminal_bench_job_asserts_source_output_contract_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_external_artifact_mismatch_fixture(tmp)
+            manifest_path = (
+                Path(job_dir)
+                / "make-mips-interpreter__v2externalartifact"
+                / "agent"
+                / "terminal-bench-harbor-smoke"
+                / "unknown-task"
+                / "implement_v2"
+                / "proof-manifest.json"
+            )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["tool_results"].insert(
+                0,
+                {
+                    "provider_call_id": "read-runtime-source",
+                    "tool_name": "read_file",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "mew_status": "completed",
+                            "content": [
+                                {
+                                    "path": "src/runtime.c",
+                                    "text": (
+                                        'void render(void) { FILE *fp = fopen("/tmp/frame.bmp", "wb"); '
+                                        "fwrite(buf, 1, n, fp); }"
+                                    ),
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            replay = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={
+                    "source_output_contract_path": "/tmp/frame.bmp",
+                },
+            )
+            current_v2 = replay["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(replay["status"], "pass")
+            self.assertEqual(current_v2["source_output_contract_path"], "/tmp/frame.bmp")
 
     def test_replay_terminal_bench_job_routes_runtime_producer_blocked_before_path_alignment(self):
         with tempfile.TemporaryDirectory() as tmp:

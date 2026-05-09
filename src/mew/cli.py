@@ -949,6 +949,10 @@ def build_parser():
         help="for terminal-bench replay dogfood, require structured replay mismatch count",
     )
     dogfood_parser.add_argument(
+        "--terminal-bench-assert-source-output-contract-path",
+        help="for terminal-bench replay dogfood, require implement_v2 source_output_contract.path",
+    )
+    dogfood_parser.add_argument(
         "--m2-task-shape",
         choices=M2_COMPARATIVE_TASK_SHAPES,
         help="for m2-comparative, set task_shape.selected for this paired run",
@@ -1115,6 +1119,10 @@ def build_parser():
         "--assert-structured-replay-mismatch-count",
         type=int,
         help="require stored-vs-recomputed structured failure classification mismatch count",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-source-output-contract-path",
+        help="require implement_v2 source_output_contract.path to equal this value",
     )
     terminal_bench_replay.add_argument("--json", action="store_true", help="print structured JSON")
     terminal_bench_replay.set_defaults(func=cmd_replay)

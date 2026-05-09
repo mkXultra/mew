@@ -78,14 +78,19 @@ Improvement phase requirements:
       `speed_1`.
    Fix any UT/replay/dogfood/emulator failure before spending live benchmark
    budget.
-10. After any live `speed_1` or `proof_5` miss, do not edit code directly from
+10. After one same-shape live diagnostic exposes a deterministic projection,
+    reducer, frontier, contract, or tool-result extraction bug, reduce it to a
+    focused UT plus `mew replay terminal-bench` / dogfood assertion before
+    another live `step-check-10min`. Live step-check is for discovery and
+    step-shape validation, not the only regression detector.
+11. After any live `speed_1` or `proof_5` miss, do not edit code directly from
     the live Harbor output. First reproduce the exact saved artifact through
     `mew replay terminal-bench` and `mew dogfood --scenario
     m6_24-terminal-bench-replay` with assertions matching the classified
     failure. If dogfood cannot express the current failure shape, fix dogfood
     instrumentation first; then record the reproduced failure before selecting
     the repair.
-11. During `implement_v2` hot-path tuning, every improvement implementation must
+12. During `implement_v2` hot-path tuning, every improvement implementation must
     be followed by a step analysis before another live `speed_1` or `proof_5`.
     Compare the new mew artifact against the relevant Codex/Claude Code
     reference trace and decide whether the loop moved toward cheap probe ->

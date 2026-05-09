@@ -7,6 +7,8 @@ from .implement_lane.execution_evidence import (
     derive_verifier_evidence,
     normalize_execution_contract,
 )
+from .implement_lane.types import ToolResultEnvelope
+from .implement_lane.v2_runtime import _frontier_evidence_registry, _source_output_contract_from_tool_results
 from .timeutil import now_iso
 from .work_session import build_work_session_resume
 
@@ -224,7 +226,21 @@ def _implement_v2_replay_summary(report_path, report):
     if not isinstance(history, list):
         history = []
     tool_results = manifest.get("tool_results") if isinstance(manifest.get("tool_results"), list) else []
+    replayed_source_output_contract = _implement_v2_replay_source_output_contract(
+        tool_results,
+        artifact_namespace=str(artifact_dir or Path(report_path).parent),
+    )
     updated_lane_state = result.get("updated_lane_state") if isinstance(result.get("updated_lane_state"), dict) else {}
+    hard_runtime_frontier = (
+        updated_lane_state.get("lane_hard_runtime_frontier")
+        if isinstance(updated_lane_state.get("lane_hard_runtime_frontier"), dict)
+        else {}
+    )
+    stored_source_output_contract = (
+        hard_runtime_frontier.get("source_output_contract")
+        if isinstance(hard_runtime_frontier.get("source_output_contract"), dict)
+        else {}
+    )
     model_error = _implement_v2_model_error_from_report(report, history=history, metrics=metrics, manifest=manifest)
     if not history and not tool_results and not model_error:
         return {}
@@ -284,6 +300,8 @@ def _implement_v2_replay_summary(report_path, report):
         "external_verifier_missing_artifacts": external_verifier_missing_artifacts,
         "passed_structured_artifacts": passed_structured_artifacts,
         "external_expected_artifact_missing": external_expected_artifact_missing,
+        "source_output_contract_path": str(replayed_source_output_contract.get("path") or ""),
+        "stored_source_output_contract_path": str(stored_source_output_contract.get("path") or ""),
         "post_run_cleanup_present": bool((report.get("post_run_cleanup") or _primary_resume(report).get("post_run_cleanup") or {})),
         "legacy_runtime_marker_fallback": legacy_marker_fallback,
         "hard_runtime_frontier_present": isinstance(updated_lane_state.get("lane_hard_runtime_frontier"), dict)
@@ -306,6 +324,48 @@ def _external_verifier_expected_artifacts(trial_dir):
             if path not in artifacts:
                 artifacts.append(path)
     return artifacts[:12]
+
+
+def _implement_v2_replay_source_output_contract(tool_results, *, artifact_namespace):
+    envelopes = []
+    for index, result in enumerate(tool_results or []):
+        if not isinstance(result, dict):
+            continue
+        tool_name = str(result.get("tool_name") or "")
+        if tool_name not in {"read_file", "search_text", "run_command", "run_tests"}:
+            continue
+        status = str(result.get("status") or "completed")
+        if status not in {"completed", "failed", "denied", "invalid", "interrupted", "running", "yielded"}:
+            status = "failed"
+        content = result.get("content")
+        if isinstance(content, list):
+            content_items = tuple(content)
+        elif isinstance(content, tuple):
+            content_items = content
+        elif content is None:
+            content_items = ()
+        else:
+            content_items = (content,)
+        provider_call_id = str(result.get("provider_call_id") or result.get("id") or f"tool-result-{index}")
+        content_refs = result.get("content_refs")
+        evidence_refs = result.get("evidence_refs")
+        envelopes.append(
+            ToolResultEnvelope(
+                lane_attempt_id=str(result.get("lane_attempt_id") or "terminal-bench-replay"),
+                provider_call_id=provider_call_id,
+                mew_tool_call_id=str(result.get("mew_tool_call_id") or provider_call_id),
+                tool_name=tool_name,
+                status=status,
+                is_error=bool(result.get("is_error")),
+                content=content_items,
+                content_refs=tuple(str(item) for item in content_refs) if isinstance(content_refs, list) else (),
+                evidence_refs=tuple(str(item) for item in evidence_refs) if isinstance(evidence_refs, list) else (),
+            )
+        )
+    if not envelopes:
+        return {}
+    registry = _frontier_evidence_registry(tuple(envelopes), artifact_namespace=str(artifact_namespace))
+    return _source_output_contract_from_tool_results(tuple(envelopes), registry)
 
 
 def _external_verifier_missing_artifacts(trial_dir):
@@ -1505,6 +1565,10 @@ def _check_assertions(entry, assertions):
     if expected is not None:
         observed = (structured_replay or {}).get("mismatch_count") if isinstance(structured_replay, dict) else None
         add("structured_replay_mismatch_count", observed == expected, observed, expected)
+    expected = assertions.get("source_output_contract_path")
+    if expected:
+        observed = current_v2.get("source_output_contract_path") if isinstance(current_v2, dict) else ""
+        add("source_output_contract_path", observed == expected, observed, expected)
     current_frontier = ((entry.get("current") or {}).get("active_compatibility_frontier") or {})
     expected = assertions.get("frontier_signature")
     if expected:

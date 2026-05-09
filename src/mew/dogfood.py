@@ -16426,6 +16426,7 @@ def _m6_24_terminal_bench_replay_assertions(
     next_action_contains=None,
     structured_failure_class=None,
     structured_replay_mismatch_count=None,
+    source_output_contract_path=None,
 ):
     if job_dir:
         assertions = {}
@@ -16454,6 +16455,8 @@ def _m6_24_terminal_bench_replay_assertions(
         assertions["structured_failure_class"] = structured_failure_class
     if structured_replay_mismatch_count is not None:
         assertions["structured_replay_mismatch_count"] = structured_replay_mismatch_count
+    if source_output_contract_path:
+        assertions["source_output_contract_path"] = source_output_contract_path
     return assertions
 
 
@@ -16471,6 +16474,7 @@ def run_m6_24_terminal_bench_replay_scenario(
     next_action_contains=None,
     structured_failure_class=None,
     structured_replay_mismatch_count=None,
+    source_output_contract_path=None,
 ):
     checks = []
     commands = []
@@ -16486,6 +16490,7 @@ def run_m6_24_terminal_bench_replay_scenario(
         next_action_contains=next_action_contains,
         structured_failure_class=structured_failure_class,
         structured_replay_mismatch_count=structured_replay_mismatch_count,
+        source_output_contract_path=source_output_contract_path,
     )
     replay = replay_terminal_bench_job(
         source,
@@ -16525,6 +16530,9 @@ def run_m6_24_terminal_bench_replay_scenario(
         "current_long_build": current_long,
         "structured_execution_replay": (
             ((first_trial.get("current") or {}).get("implement_v2") or {}).get("structured_execution_replay") or {}
+        ),
+        "source_output_contract_path": (
+            ((first_trial.get("current") or {}).get("implement_v2") or {}).get("source_output_contract_path") or ""
         ),
     }
     return report
@@ -18742,6 +18750,11 @@ def run_dogfood_scenario(args):
                     structured_replay_mismatch_count=getattr(
                         args,
                         "terminal_bench_assert_structured_replay_mismatch_count",
+                        None,
+                    ),
+                    source_output_contract_path=getattr(
+                        args,
+                        "terminal_bench_assert_source_output_contract_path",
                         None,
                     ),
                 )

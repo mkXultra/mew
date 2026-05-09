@@ -15545,6 +15545,8 @@ def cmd_replay(args):
         assertions["structured_failure_class"] = args.assert_structured_failure_class
     if getattr(args, "assert_structured_replay_mismatch_count", None) is not None:
         assertions["structured_replay_mismatch_count"] = args.assert_structured_replay_mismatch_count
+    if getattr(args, "assert_source_output_contract_path", None):
+        assertions["source_output_contract_path"] = args.assert_source_output_contract_path
     report = replay_terminal_bench_job(
         args.job_dir,
         task=getattr(args, "task", None),
