@@ -43,6 +43,7 @@ from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLane
 from .types import ToolCallEnvelope
 from .types import ToolResultEnvelope
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
+from ..tool_kernel import ToolKernel, ToolKernelConfig
 
 _COMPLETED_FINISH_OUTCOMES = {"completed", "task_complete", "done", "success"}
 _FINAL_VERIFIER_COMMAND_TOOL_NAMES = frozenset({"run_command", "run_tests", "poll_command"})
@@ -2478,21 +2479,15 @@ def _execute_write_exec_or_read_tool(
     exec_runtime: ImplementV2ManagedExecRuntime,
     write_runtime: ImplementV2WriteRuntime,
 ):
-    if call.tool_name in WRITE_TOOL_NAMES:
-        return write_runtime.execute(call)
-    if call.tool_name in EXEC_TOOL_NAMES:
-        return build_invalid_tool_result(
-            call,
-            reason=(
-                f"{call.tool_name} is not available in implement_v2 write mode; "
-                "use exec mode for managed command execution and keep write mode mutation-gated"
-            ),
-        )
-    return execute_read_only_tool_call(
-        call,
-        workspace=lane_input.workspace,
-        allowed_roots=_allowed_read_roots(lane_input),
+    kernel = _tool_kernel_for_lane(
+        lane_input,
+        mode="write",
+        exec_runtime=exec_runtime,
+        write_runtime=write_runtime,
+        allow_verify=False,
+        allow_shell=False,
     )
+    return kernel.execute(call)
 
 
 def _execute_exec_or_read_tool(
@@ -2501,13 +2496,14 @@ def _execute_exec_or_read_tool(
     lane_input: ImplementLaneInput,
     exec_runtime: ImplementV2ManagedExecRuntime,
 ):
-    if call.tool_name in EXEC_TOOL_NAMES:
-        return exec_runtime.execute(call)
-    return execute_read_only_tool_call(
-        call,
-        workspace=lane_input.workspace,
-        allowed_roots=_allowed_read_roots(lane_input),
+    kernel = _tool_kernel_for_lane(
+        lane_input,
+        mode="exec",
+        exec_runtime=exec_runtime,
+        allow_verify=True,
+        allow_shell=True,
     )
+    return kernel.execute(call)
 
 
 def _execute_live_json_tool(
@@ -2517,25 +2513,45 @@ def _execute_live_json_tool(
     exec_runtime: ImplementV2ManagedExecRuntime,
     write_runtime: ImplementV2WriteRuntime,
 ):
-    if not _v2_tool_available(lane_input, call.tool_name):
-        return build_invalid_tool_result(
-            call,
-            reason=f"{call.tool_name} is not available in implement_v2 {str(lane_input.lane_config.get('mode') or 'full')} mode",
-        )
-    if call.tool_name in WRITE_TOOL_NAMES:
-        if not _allowed_write_roots(lane_input):
-            return build_invalid_tool_result(call, reason="write tools are disabled; pass --allow-write PATH")
-        return write_runtime.execute(call)
-    if call.tool_name in EXEC_TOOL_NAMES:
-        if call.tool_name == "run_tests" and not bool(lane_input.lane_config.get("allow_verify")):
-            return build_invalid_tool_result(call, reason="run_tests is disabled; pass --allow-verify")
-        if call.tool_name == "run_command" and not bool(lane_input.lane_config.get("allow_shell")):
-            return build_invalid_tool_result(call, reason="run_command is disabled; pass --allow-shell")
-        return exec_runtime.execute(call)
-    return execute_read_only_tool_call(
-        call,
-        workspace=lane_input.workspace,
-        allowed_roots=_allowed_read_roots(lane_input),
+    kernel = _tool_kernel_for_lane(
+        lane_input,
+        mode=str(lane_input.lane_config.get("mode") or "full"),
+        exec_runtime=exec_runtime,
+        write_runtime=write_runtime,
+        allow_verify=bool(lane_input.lane_config.get("allow_verify")),
+        allow_shell=bool(lane_input.lane_config.get("allow_shell")),
+    )
+    return kernel.execute(call)
+
+
+def _tool_kernel_for_lane(
+    lane_input: ImplementLaneInput,
+    *,
+    mode: str,
+    exec_runtime: ImplementV2ManagedExecRuntime,
+    write_runtime: ImplementV2WriteRuntime | None = None,
+    allow_verify: bool,
+    allow_shell: bool,
+) -> ToolKernel:
+    return ToolKernel(
+        ToolKernelConfig(
+            workspace=lane_input.workspace,
+            mode=mode,
+            allowed_read_roots=_allowed_read_roots(lane_input),
+            allowed_write_roots=_allowed_write_roots(lane_input),
+            approved_write_calls=_approved_write_calls(lane_input),
+            allow_shell=allow_shell,
+            allow_verify=allow_verify,
+            allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
+            run_command_available=_v2_tool_available(lane_input, "run_command"),
+            route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
+            task_contract=lane_input.task_contract,
+            frontier_state=_initial_hard_runtime_frontier_state(lane_input),
+            source_mutation_roots=_source_mutation_roots(lane_input),
+            surface_label="implement_v2",
+        ),
+        exec_runtime=exec_runtime,
+        write_runtime=write_runtime,
     )
 
 

@@ -8289,6 +8289,109 @@ class CommandTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_tool_invoke_read_file_returns_tool_result_envelope(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                Path("notes.md").write_text("hello from shared kernel", encoding="utf-8")
+
+                with redirect_stdout(StringIO()) as stdout:
+                    code = main(
+                        [
+                            "tool",
+                            "invoke",
+                            "read_file",
+                            "--arguments",
+                            '{"path":"notes.md"}',
+                            "--workspace",
+                            ".",
+                            "--allow-read",
+                            ".",
+                            "--json",
+                        ]
+                    )
+
+                self.assertEqual(code, 0)
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["tool_name"], "read_file")
+                self.assertEqual(payload["status"], "completed")
+                self.assertIn("hello from shared kernel", payload["content"][0]["text"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_tool_kernel_direct_import_has_no_implement_lane_cycle(self):
+        result = subprocess.run(
+            [sys.executable, "-c", "from mew.tool_kernel import ToolKernel; print(ToolKernel.__name__)"],
+            cwd=str(Path(__file__).resolve().parents[1]),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "ToolKernel")
+
+    def test_tool_invoke_write_file_requires_explicit_approval_for_apply(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "notes.md"
+            args = [
+                "tool",
+                "invoke",
+                "write_file",
+                "--arguments",
+                json.dumps({"path": "notes.md", "content": "hello\n", "create": True, "apply": True}),
+                "--workspace",
+                str(root),
+                "--allow-write",
+                str(root),
+                "--json",
+            ]
+
+            with redirect_stdout(StringIO()) as stdout:
+                denied_code = main(args)
+            denied = json.loads(stdout.getvalue())
+            exists_after_denied = target.exists()
+            with redirect_stdout(StringIO()) as stdout:
+                approved_code = main([*args, "--approve"])
+            approved = json.loads(stdout.getvalue())
+            exists_after_approved = target.exists()
+
+        self.assertEqual(denied_code, 1)
+        self.assertEqual(denied["status"], "denied")
+        self.assertFalse(exists_after_denied)
+        self.assertEqual(approved_code, 0)
+        self.assertEqual(approved["status"], "completed")
+        self.assertEqual(approved["side_effects"][0]["kind"], "file_write")
+        self.assertTrue(exists_after_approved)
+
+    def test_tool_invoke_run_command_uses_shared_exec_kernel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "tool",
+                        "invoke",
+                        "run_command",
+                        "--arguments",
+                        '{"command":"printf ok","cwd":".","timeout":5,"foreground_budget_seconds":1}',
+                        "--workspace",
+                        str(root),
+                        "--allow-read",
+                        str(root),
+                        "--allow-shell",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["tool_name"], "run_command")
+        self.assertEqual(payload["status"], "completed")
+        self.assertEqual(payload["content"][0]["stdout"], "ok")
+
     def test_tool_read_refuses_sensitive_file(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

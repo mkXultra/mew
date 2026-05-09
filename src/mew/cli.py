@@ -88,6 +88,7 @@ from .commands import (
     cmd_tool_git,
     cmd_tool_edit,
     cmd_tool_glob,
+    cmd_tool_invoke,
     cmd_tool_list,
     cmd_tool_read,
     cmd_tool_search,
@@ -1576,6 +1577,38 @@ def build_parser():
             git_action_parser.add_argument("--limit", type=int, default=20, help="log entries for git log")
         git_action_parser.add_argument("--json", action="store_true", help="print structured JSON")
         git_action_parser.set_defaults(func=cmd_tool_git, git_action=git_action)
+
+    tool_invoke_parser = tool_subparsers.add_parser(
+        "invoke",
+        help="invoke the shared model-facing tool kernel from the CLI",
+    )
+    tool_invoke_parser.add_argument("tool_name", help="provider-neutral tool name, e.g. read_file or run_command")
+    tool_invoke_parser.add_argument(
+        "--arguments",
+        default="{}",
+        help="JSON object passed as tool arguments",
+    )
+    tool_invoke_parser.add_argument("--arguments-file", help="read JSON tool arguments from a file")
+    tool_invoke_parser.add_argument("--workspace", default=".", help="workspace root for relative paths")
+    tool_invoke_parser.add_argument(
+        "--mode",
+        default="full",
+        choices=("read_only", "plan", "exec", "write", "full", "implement", "implementation"),
+        help="tool visibility mode",
+    )
+    tool_invoke_parser.add_argument("--allow-read", action="append", default=[], help="allowed read root")
+    tool_invoke_parser.add_argument("--allow-write", action="append", default=[], help="allowed write root")
+    tool_invoke_parser.add_argument("--source-root", action="append", default=[], help="source mutation root")
+    tool_invoke_parser.add_argument("--allow-shell", action="store_true", help="enable run_command")
+    tool_invoke_parser.add_argument("--allow-verify", action="store_true", help="enable run_tests")
+    tool_invoke_parser.add_argument("--approve", action="store_true", help="approve this one write apply call")
+    tool_invoke_parser.add_argument(
+        "--allow-governance-writes",
+        action="store_true",
+        help="allow writes to roadmap/skill/governance paths",
+    )
+    tool_invoke_parser.add_argument("--json", action="store_true", help="print ToolResultEnvelope JSON")
+    tool_invoke_parser.set_defaults(func=cmd_tool_invoke)
 
     implement_v2_parser = subparsers.add_parser(
         "implement-v2",

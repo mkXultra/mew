@@ -258,6 +258,7 @@ from .tasks import (
 from .thoughts import format_thought_entry
 from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_git_tool
+from .tool_kernel import ToolKernel, ToolKernelConfig, make_tool_call_envelope
 from .validation import format_validation_issues, validate_state, validation_errors
 from .write_tools import edit_file, restore_write_snapshot, snapshot_write_path, summarize_write_result, write_file
 from .work_lanes import IMPLEMENT_V2_LANE
@@ -15941,6 +15942,81 @@ def cmd_tool_git(args):
         return 1
     _print_json_or_text(result, args.json, format_command_record(result))
     return 0 if result.get("exit_code") == 0 else 1
+
+
+def _tool_invoke_arguments(args) -> dict[str, object]:
+    if getattr(args, "arguments_file", None):
+        raw_text = Path(args.arguments_file).read_text(encoding="utf-8")
+    else:
+        raw_text = getattr(args, "arguments", None) or "{}"
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--arguments must be valid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("--arguments must decode to a JSON object")
+    return dict(parsed)
+
+
+def cmd_tool_invoke(args):
+    try:
+        arguments = _tool_invoke_arguments(args)
+    except (OSError, ValueError) as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    provider_call_id = "call-cli"
+    mew_tool_call_id = "tool-cli"
+    approved_write_calls = ()
+    if getattr(args, "approve", False):
+        approved_write_calls = (
+            {
+                "provider_call_id": provider_call_id,
+                "mew_tool_call_id": mew_tool_call_id,
+                "status": "approved",
+                "approval_id": "mew-tool-cli-approval",
+                "source": "mew_tool_cli",
+            },
+        )
+    kernel = ToolKernel(
+        ToolKernelConfig(
+            workspace=args.workspace,
+            mode=args.mode,
+            allowed_read_roots=tuple(args.allow_read or ()),
+            allowed_write_roots=tuple(args.allow_write or ()),
+            approved_write_calls=approved_write_calls,
+            allow_shell=bool(args.allow_shell),
+            allow_verify=bool(args.allow_verify),
+            allow_governance_writes=bool(args.allow_governance_writes),
+            source_mutation_roots=tuple(args.source_root or ()),
+        )
+    )
+    call = make_tool_call_envelope(
+        args.tool_name,
+        arguments,
+        provider_call_id=provider_call_id,
+        mew_tool_call_id=mew_tool_call_id,
+    )
+    result = kernel.execute(call)
+    payload = result.as_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(_format_tool_result_envelope(payload))
+    return 0 if result.status in {"completed", "yielded"} and not result.is_error else 1
+
+
+def _format_tool_result_envelope(payload: dict[str, object]) -> str:
+    status = payload.get("status")
+    tool_name = payload.get("tool_name")
+    content = payload.get("content")
+    summary = ""
+    if isinstance(content, list) and content and isinstance(content[0], dict):
+        first = content[0]
+        summary = str(first.get("summary") or first.get("reason") or first.get("error") or "")
+    lines = [f"{tool_name}: {status}"]
+    if summary:
+        lines.append(summary)
+    return "\n".join(lines)
 
 
 def cmd_implement_v2_tool_lab(args):
