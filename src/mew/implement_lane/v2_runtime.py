@@ -456,6 +456,7 @@ def run_live_json_implement_v2(
                 prior_tool_calls=tuple(tool_calls),
                 prior_tool_results=tuple(tool_results),
                 probe_threshold=_first_write_probe_threshold(lane_input),
+                source_mutation_roots=_source_mutation_roots(lane_input),
             )
             prewrite_write_tools_hidden = _prewrite_write_tools_hidden_for_turn(
                 lane_input,
@@ -1055,6 +1056,7 @@ def run_live_json_implement_v2(
         tool_results=tuple(tool_results),
         probe_threshold=_first_write_probe_threshold(lane_input),
         requires_deep_runtime_coverage=is_deep_probe_hard_runtime_task(lane_input.task_contract),
+        source_mutation_roots=_source_mutation_roots(lane_input),
     )
     if active_work_todo_state:
         active_work_todo_state = _merge_active_work_todo_first_write_readiness(
@@ -1063,6 +1065,7 @@ def run_live_json_implement_v2(
             tool_results=tuple(tool_results),
             probe_threshold=_first_write_probe_threshold(lane_input),
             requires_deep_runtime_coverage=is_deep_probe_hard_runtime_task(lane_input.task_contract),
+            source_mutation_roots=_source_mutation_roots(lane_input),
         )
     integration_observation = _integration_observation_summary(
         lane_input,
@@ -2648,7 +2651,24 @@ def _allowed_write_roots(lane_input: ImplementLaneInput) -> tuple[str, ...]:
 
 
 def _source_mutation_roots(lane_input: ImplementLaneInput) -> tuple[str, ...]:
-    return _allowed_write_roots(lane_input) or (lane_input.workspace,)
+    raw_roots = lane_input.lane_config.get("source_mutation_roots")
+    if isinstance(raw_roots, (list, tuple)):
+        roots = tuple(
+            _source_root_path(root, workspace=lane_input.workspace)
+            for root in raw_roots
+            if str(root or "").strip()
+        )
+        if roots:
+            return roots
+    return (_source_root_path(".", workspace=lane_input.workspace),)
+
+
+def _source_root_path(path: object, *, workspace: object) -> str:
+    workspace_path = Path(str(workspace or ".")).expanduser().resolve(strict=False)
+    candidate = Path(str(path or ".")).expanduser()
+    if not candidate.is_absolute():
+        candidate = workspace_path / candidate
+    return str(candidate.resolve(strict=False))
 
 
 def _approved_write_calls(lane_input: ImplementLaneInput) -> tuple[object, ...]:
@@ -2903,6 +2923,7 @@ def _merge_active_work_todo_first_write_readiness(
     tool_results: tuple[ToolResultEnvelope, ...],
     probe_threshold: int,
     requires_deep_runtime_coverage: bool = False,
+    source_mutation_roots: tuple[str, ...] = (),
 ) -> dict[str, object]:
     active_todo = _compact_active_work_todo_state(existing)
     if not active_todo:
@@ -2913,6 +2934,7 @@ def _merge_active_work_todo_first_write_readiness(
         tool_results=tool_results,
         probe_threshold=probe_threshold,
         requires_deep_runtime_coverage=requires_deep_runtime_coverage,
+        source_mutation_roots=source_mutation_roots,
     )
     write_repair = _write_repair_from_trace(tool_calls=tool_calls, tool_results=tool_results)
     if write_repair:
@@ -3251,17 +3273,20 @@ def _deep_runtime_prewrite_probe_gate_result(
         return None
     if not _is_deep_runtime_prewrite_source_mutation_attempt(call):
         return None
-    if _has_completed_source_tree_mutation(prior_tool_results):
+    source_mutation_roots = _source_mutation_roots(lane_input)
+    if _has_completed_source_tree_mutation(prior_tool_results, source_mutation_roots=source_mutation_roots):
         return None
     threshold = max(1, int(probe_threshold))
     probe_count = _deep_runtime_prewrite_probe_count(
         prior_tool_calls=prior_tool_calls,
         prior_tool_results=prior_tool_results,
+        source_mutation_roots=source_mutation_roots,
     )
     readiness = _deep_runtime_prewrite_probe_readiness(
         prior_tool_calls=prior_tool_calls,
         prior_tool_results=prior_tool_results,
         probe_threshold=threshold,
+        source_mutation_roots=source_mutation_roots,
     )
     if bool(readiness.get("ready")):
         return None
@@ -3338,12 +3363,14 @@ def _write_tools_visible_for_turn(
 ) -> bool:
     if not is_deep_probe_hard_runtime_task(lane_input.task_contract):
         return True
-    if _has_completed_source_tree_mutation(prior_tool_results):
+    source_mutation_roots = _source_mutation_roots(lane_input)
+    if _has_completed_source_tree_mutation(prior_tool_results, source_mutation_roots=source_mutation_roots):
         return True
     readiness = _deep_runtime_prewrite_probe_readiness(
         prior_tool_calls=prior_tool_calls,
         prior_tool_results=prior_tool_results,
         probe_threshold=_first_write_probe_threshold(lane_input),
+        source_mutation_roots=source_mutation_roots,
     )
     return bool(readiness.get("ready"))
 
@@ -3352,10 +3379,11 @@ def _deep_runtime_prewrite_probe_count(
     *,
     prior_tool_calls: tuple[object, ...],
     prior_tool_results: tuple[ToolResultEnvelope, ...],
+    source_mutation_roots: tuple[str, ...] = (),
 ) -> int:
     count = 0
     for call, result in zip(prior_tool_calls, prior_tool_results):
-        if _has_completed_source_tree_mutation((result,)):
+        if _has_completed_source_tree_mutation((result,), source_mutation_roots=source_mutation_roots):
             break
         tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
         if _is_first_write_probe_result(tool_name, result):
@@ -3368,12 +3396,13 @@ def _deep_runtime_prewrite_probe_readiness(
     prior_tool_calls: tuple[object, ...],
     prior_tool_results: tuple[ToolResultEnvelope, ...],
     probe_threshold: int,
+    source_mutation_roots: tuple[str, ...] = (),
 ) -> dict[str, object]:
     threshold = max(1, int(probe_threshold))
     categories: dict[str, list[str]] = {name: [] for name in _DEEP_RUNTIME_PREWRITE_REQUIRED_CATEGORIES}
     probe_count = 0
     for call, result in zip(prior_tool_calls, prior_tool_results):
-        if _has_completed_source_tree_mutation((result,)):
+        if _has_completed_source_tree_mutation((result,), source_mutation_roots=source_mutation_roots):
             break
         tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
         if not _is_first_write_probe_result(tool_name, result):
@@ -3749,12 +3778,73 @@ def _prewrite_missing_category_labels(readiness: dict[str, object]) -> tuple[str
     return tuple(labels)
 
 
-def _has_completed_source_tree_mutation(results: tuple[ToolResultEnvelope, ...]) -> bool:
+def _normalized_source_mutation_roots(source_mutation_roots: tuple[str, ...]) -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for raw in source_mutation_roots:
+        if not str(raw or "").strip():
+            continue
+        roots.append(Path(str(raw)).expanduser().resolve(strict=False))
+    deduped: list[Path] = []
+    for root in roots:
+        if root not in deduped:
+            deduped.append(root)
+    return tuple(deduped)
+
+
+def _path_under_any_root(path: str, roots: tuple[Path, ...]) -> bool:
+    if not path or not roots:
+        return False
+    try:
+        candidate = Path(path).expanduser().resolve(strict=False)
+    except OSError:
+        return False
+    for root in roots:
+        if candidate == root:
+            return True
+        try:
+            candidate.relative_to(root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _write_result_has_source_root_side_effect(
+    result: ToolResultEnvelope,
+    *,
+    source_mutation_roots: tuple[str, ...],
+) -> bool:
+    if result.tool_name not in WRITE_TOOL_NAMES:
+        return False
+    roots = _normalized_source_mutation_roots(source_mutation_roots)
+    if not roots:
+        return False
+    return any(_path_under_any_root(path, roots) for path in _write_result_source_side_effect_paths(result))
+
+
+def _write_result_source_side_effect_paths(result: ToolResultEnvelope) -> tuple[str, ...]:
+    paths: list[str] = []
+    for effect in result.side_effects or ():
+        if not isinstance(effect, dict) or effect.get("kind") != "file_write":
+            continue
+        if effect.get("written") is not True or effect.get("dry_run") is True:
+            continue
+        path = _frontier_clip_text(effect.get("path"), limit=240)
+        if path:
+            paths.append(path)
+    return tuple(paths)
+
+
+def _has_completed_source_tree_mutation(
+    results: tuple[ToolResultEnvelope, ...],
+    *,
+    source_mutation_roots: tuple[str, ...] = (),
+) -> bool:
     return any(
         result.status == "completed"
         and (
             bool(_source_tree_mutation_from_result(result))
-            or (result.tool_name in WRITE_TOOL_NAMES and bool(result.side_effects))
+            or _write_result_has_source_root_side_effect(result, source_mutation_roots=source_mutation_roots)
         )
         for result in results
     )
@@ -3970,6 +4060,7 @@ def _first_write_readiness_from_trace(
     tool_results: tuple[ToolResultEnvelope, ...],
     probe_threshold: int,
     requires_deep_runtime_coverage: bool = False,
+    source_mutation_roots: tuple[str, ...] = (),
 ) -> dict[str, object]:
     if not active_work_todo:
         return {}
@@ -3983,7 +4074,10 @@ def _first_write_readiness_from_trace(
     probe_call_ids: list[str] = []
     for call, result in zip(tool_calls, tool_results):
         tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
-        source_tree_mutation_write = bool(_source_tree_mutation_from_result(result))
+        source_tree_mutation_write = bool(_source_tree_mutation_from_result(result)) or (
+            result.status == "completed"
+            and _write_result_has_source_root_side_effect(result, source_mutation_roots=source_mutation_roots)
+        )
         source_tree_mutation_attempt = tool_name in WRITE_TOOL_NAMES or _is_deep_runtime_prewrite_source_mutation_attempt(
             call
         )
@@ -3992,7 +4086,7 @@ def _first_write_readiness_from_trace(
                 first_write_attempt_turn = int(getattr(call, "turn_index", 0) or 0)
                 first_write_attempt_call_id = str(getattr(call, "provider_call_id", "") or result.provider_call_id or "")
                 first_write_attempt_tool = tool_name
-            if result.status == "completed" and (result.side_effects or source_tree_mutation_write):
+            if result.status == "completed" and source_tree_mutation_write:
                 first_source_mutation_turn = int(getattr(call, "turn_index", 0) or 0)
                 first_source_mutation_call_id = str(
                     getattr(call, "provider_call_id", "") or result.provider_call_id or ""
@@ -4017,12 +4111,17 @@ def _first_write_readiness_from_trace(
         for call, result in zip(tool_calls, tool_results)
         if _is_deep_runtime_prewrite_source_mutation_attempt(call)
         or bool(_source_tree_mutation_from_result(result))
+        or (
+            result.status == "completed"
+            and _write_result_has_source_root_side_effect(result, source_mutation_roots=source_mutation_roots)
+        )
     )
     target_paths = _active_work_todo_target_paths(active_work_todo)
     prewrite_readiness = _deep_runtime_prewrite_probe_readiness(
         prior_tool_calls=tool_calls,
         prior_tool_results=tool_results,
         probe_threshold=probe_threshold,
+        source_mutation_roots=source_mutation_roots,
     )
     count_ready = probes_before_first_write >= max(1, int(probe_threshold))
     coverage_ready = bool(prewrite_readiness.get("ready"))

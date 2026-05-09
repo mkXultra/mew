@@ -1613,9 +1613,15 @@ def build_parser():
         action="append",
         default=[],
         help=(
-            "tracked write/source-mutation root for command mode; defaults to workspace and rejects "
+            "allowed shell write root for command mode; defaults to workspace and rejects "
             "absolute path literals outside these roots"
         ),
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--source-root",
+        action="append",
+        default=[],
+        help="source mutation tracking/trust root; command mode defaults to workspace",
     )
     implement_v2_tool_lab_parser.add_argument(
         "--target-path",

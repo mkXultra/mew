@@ -15953,6 +15953,7 @@ def cmd_implement_v2_tool_lab(args):
                 cwd=args.cwd,
                 allowed_read_roots=args.allow_read or [command_workspace],
                 allowed_write_roots=args.allow_write or [],
+                source_mutation_roots=args.source_root or [],
                 target_paths=args.target_path or [],
                 timeout=args.timeout,
                 command_intent=args.command_intent,
@@ -15963,6 +15964,7 @@ def cmd_implement_v2_tool_lab(args):
             result = analyze_implement_v2_tool_lab_artifact(
                 args.artifact,
                 workspace=args.workspace or "",
+                source_mutation_roots=args.source_root or [],
                 target_paths=args.target_path or [],
                 probe_threshold=args.probe_threshold,
                 requires_deep_runtime_coverage=args.requires_deep_runtime_coverage,

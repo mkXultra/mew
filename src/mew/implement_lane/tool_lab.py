@@ -32,6 +32,7 @@ def analyze_implement_v2_tool_lab_artifact(
     path: object,
     *,
     workspace: object = "",
+    source_mutation_roots: tuple[str, ...] | list[str] = (),
     target_paths: tuple[str, ...] | list[str] = (),
     probe_threshold: int | None = None,
     requires_deep_runtime_coverage: bool = False,
@@ -44,6 +45,7 @@ def analyze_implement_v2_tool_lab_artifact(
         manifest,
         manifest_path=str(manifest_path),
         workspace=workspace,
+        source_mutation_roots=tuple(source_mutation_roots),
         target_paths=tuple(target_paths),
         probe_threshold=probe_threshold,
         requires_deep_runtime_coverage=requires_deep_runtime_coverage,
@@ -57,6 +59,7 @@ def run_implement_v2_tool_lab_command(
     cwd: object = ".",
     allowed_read_roots: tuple[str, ...] | list[str] = (),
     allowed_write_roots: tuple[str, ...] | list[str] = (),
+    source_mutation_roots: tuple[str, ...] | list[str] = (),
     target_paths: tuple[str, ...] | list[str] = (),
     timeout: float | None = None,
     command_intent: str = "probe",
@@ -68,6 +71,10 @@ def run_implement_v2_tool_lab_command(
     workspace_path = Path(str(workspace or ".")).expanduser().resolve(strict=False)
     read_roots = tuple(str(root) for root in (allowed_read_roots or [str(workspace_path)]))
     write_roots = tuple(str(root) for root in (allowed_write_roots or [str(workspace_path)]))
+    source_roots = _effective_source_mutation_roots(
+        workspace=workspace_path,
+        source_mutation_roots=tuple(source_mutation_roots),
+    )
     scope_error = _tool_lab_command_scope_error(
         command,
         workspace_path=workspace_path,
@@ -85,6 +92,7 @@ def run_implement_v2_tool_lab_command(
             "mode": "exec",
             "allowed_read_roots": list(read_roots),
             "allowed_write_roots": list(write_roots),
+            "source_mutation_roots": list(source_roots),
             "allow_shell": True,
             "first_write_probe_threshold": int(probe_threshold or 3),
         },
@@ -112,6 +120,7 @@ def run_implement_v2_tool_lab_command(
         manifest,
         manifest_path="",
         workspace=workspace,
+        source_mutation_roots=source_roots,
         target_paths=tuple(target_paths),
         probe_threshold=probe_threshold,
         requires_deep_runtime_coverage=requires_deep_runtime_coverage,
@@ -133,6 +142,7 @@ def analyze_implement_v2_tool_lab_manifest(
     *,
     manifest_path: str = "",
     workspace: object = "",
+    source_mutation_roots: tuple[str, ...] | list[str] = (),
     target_paths: tuple[str, ...] | list[str] = (),
     probe_threshold: int | None = None,
     requires_deep_runtime_coverage: bool = False,
@@ -140,8 +150,16 @@ def analyze_implement_v2_tool_lab_manifest(
     tool_calls = tuple(_tool_call_from_dict(item) for item in _list_of_dicts(manifest.get("tool_calls")))
     tool_results = tuple(_tool_result_from_dict(item) for item in _list_of_dicts(manifest.get("tool_results")))
     metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    source_roots = _effective_source_mutation_roots(
+        workspace=workspace,
+        source_mutation_roots=tuple(source_mutation_roots),
+    )
     mutations = _collect_source_tree_mutations(tool_results)
-    suspicious = _suspicious_source_tree_mutations(mutations, workspace=workspace)
+    suspicious = _suspicious_source_tree_mutations(
+        mutations,
+        workspace=workspace,
+        source_mutation_roots=source_roots,
+    )
     observed_readiness = dict(metrics.get("first_write_readiness") or {}) if isinstance(metrics, dict) else {}
     recomputed_readiness: dict[str, object] = {}
     if target_paths:
@@ -153,6 +171,7 @@ def analyze_implement_v2_tool_lab_manifest(
         trusted_tool_results = _tool_results_with_trusted_source_mutations(
             tool_results,
             workspace=workspace,
+            source_mutation_roots=source_roots,
             target_paths=tuple(target_paths),
         )
         recomputed_readiness = _first_write_readiness_from_trace(
@@ -161,6 +180,7 @@ def analyze_implement_v2_tool_lab_manifest(
             tool_results=trusted_tool_results,
             probe_threshold=int(probe_threshold or observed_readiness.get("probe_threshold") or 3),
             requires_deep_runtime_coverage=requires_deep_runtime_coverage,
+            source_mutation_roots=source_roots,
         )
     hot_path = metrics.get("hot_path_projection") if isinstance(metrics, dict) else {}
     provider_visible_bytes = hot_path.get("provider_visible_tool_result_bytes") if isinstance(hot_path, dict) else None
@@ -325,15 +345,22 @@ def _tool_results_with_trusted_source_mutations(
     results: tuple[ToolResultEnvelope, ...],
     *,
     workspace: object,
+    source_mutation_roots: tuple[str, ...],
     target_paths: tuple[str, ...],
 ) -> tuple[ToolResultEnvelope, ...]:
     return tuple(
         replace(
             result,
-            content=_content_with_trusted_source_mutations(result.content, workspace=workspace, target_paths=target_paths),
+            content=_content_with_trusted_source_mutations(
+                result.content,
+                workspace=workspace,
+                source_mutation_roots=source_mutation_roots,
+                target_paths=target_paths,
+            ),
             side_effects=_side_effects_with_trusted_source_mutations(
                 result.side_effects,
                 workspace=workspace,
+                source_mutation_roots=source_mutation_roots,
                 target_paths=target_paths,
             ),
         )
@@ -345,6 +372,7 @@ def _side_effects_with_trusted_source_mutations(
     effects: tuple[dict[str, object], ...],
     *,
     workspace: object,
+    source_mutation_roots: tuple[str, ...],
     target_paths: tuple[str, ...],
 ) -> tuple[dict[str, object], ...]:
     trusted: list[dict[str, object]] = []
@@ -352,7 +380,12 @@ def _side_effects_with_trusted_source_mutations(
         if effect.get("kind") != "source_tree_mutation" or not isinstance(effect.get("record"), dict):
             trusted.append(dict(effect))
             continue
-        record = _trusted_source_mutation_record(dict(effect["record"]), workspace=workspace, target_paths=target_paths)
+        record = _trusted_source_mutation_record(
+            dict(effect["record"]),
+            workspace=workspace,
+            source_mutation_roots=source_mutation_roots,
+            target_paths=target_paths,
+        )
         if record:
             trusted.append({**effect, "record": record})
     return tuple(trusted)
@@ -362,6 +395,7 @@ def _content_with_trusted_source_mutations(
     content_items: tuple[object, ...],
     *,
     workspace: object,
+    source_mutation_roots: tuple[str, ...],
     target_paths: tuple[str, ...],
 ) -> tuple[object, ...]:
     trusted_items: list[object] = []
@@ -373,7 +407,12 @@ def _content_with_trusted_source_mutations(
         trusted_records = []
         for record in copied.get("source_tree_mutations") or []:
             if isinstance(record, dict):
-                trusted_record = _trusted_source_mutation_record(record, workspace=workspace, target_paths=target_paths)
+                trusted_record = _trusted_source_mutation_record(
+                    record,
+                    workspace=workspace,
+                    source_mutation_roots=source_mutation_roots,
+                    target_paths=target_paths,
+                )
                 if trusted_record:
                     trusted_records.append(trusted_record)
         copied["source_tree_mutations"] = trusted_records
@@ -385,21 +424,34 @@ def _trusted_source_mutation_record(
     record: dict[str, object],
     *,
     workspace: object,
+    source_mutation_roots: tuple[str, ...],
     target_paths: tuple[str, ...],
 ) -> dict[str, object]:
     changes = [
         change
         for change in _list_of_dicts(record.get("changes"))
-        if _trusted_source_mutation_path(str(change.get("path") or ""), workspace=workspace, target_paths=target_paths)
+        if _trusted_source_mutation_path(
+            str(change.get("path") or ""),
+            workspace=workspace,
+            source_mutation_roots=source_mutation_roots,
+            target_paths=target_paths,
+        )
     ]
     if not changes:
         return {}
     return {**record, "changed_count": len(changes), "changes": changes}
 
 
-def _trusted_source_mutation_path(path: str, *, workspace: object, target_paths: tuple[str, ...]) -> bool:
-    workspace_path = Path(str(workspace)).expanduser().resolve(strict=False) if str(workspace or "").strip() else None
-    if _suspicious_mutation_reason(path, workspace_path=workspace_path):
+def _trusted_source_mutation_path(
+    path: str,
+    *,
+    workspace: object,
+    source_mutation_roots: tuple[str, ...],
+    target_paths: tuple[str, ...],
+) -> bool:
+    trusted_roots = _trusted_mutation_roots(workspace=workspace, source_mutation_roots=source_mutation_roots)
+    workspace_path = trusted_roots[0] if trusted_roots else None
+    if _suspicious_mutation_reason(path, trusted_roots=trusted_roots):
         return False
     if not target_paths:
         return True
@@ -411,28 +463,61 @@ def _suspicious_source_tree_mutations(
     mutations: list[dict[str, object]],
     *,
     workspace: object,
+    source_mutation_roots: tuple[str, ...],
 ) -> list[dict[str, object]]:
-    workspace_path = Path(str(workspace)).expanduser().resolve(strict=False) if str(workspace or "").strip() else None
+    trusted_roots = _trusted_mutation_roots(workspace=workspace, source_mutation_roots=source_mutation_roots)
     suspicious: list[dict[str, object]] = []
     for mutation in mutations:
         path = str(mutation.get("path") or "")
-        reason = _suspicious_mutation_reason(path, workspace_path=workspace_path)
+        reason = _suspicious_mutation_reason(path, trusted_roots=trusted_roots)
         if not reason:
             continue
         suspicious.append({**mutation, "reason": reason})
     return suspicious
 
 
-def _suspicious_mutation_reason(path: str, *, workspace_path: Path | None) -> str:
+def _trusted_mutation_roots(*, workspace: object, source_mutation_roots: tuple[str, ...]) -> tuple[Path, ...]:
+    return tuple(Path(root).expanduser().resolve(strict=False) for root in _effective_source_mutation_roots(
+        workspace=workspace,
+        source_mutation_roots=source_mutation_roots,
+    ))
+
+
+def _effective_source_mutation_roots(
+    *,
+    workspace: object,
+    source_mutation_roots: tuple[str, ...],
+) -> tuple[str, ...]:
+    workspace_path = (
+        Path(str(workspace)).expanduser().resolve(strict=False)
+        if str(workspace or "").strip()
+        else None
+    )
+    raw_roots = tuple(str(root) for root in source_mutation_roots if str(root or "").strip())
+    if not raw_roots and workspace_path is not None:
+        raw_roots = (str(workspace_path),)
+    roots: list[str] = []
+    for raw in raw_roots:
+        candidate = Path(raw).expanduser()
+        if not candidate.is_absolute() and workspace_path is not None:
+            candidate = workspace_path / candidate
+        resolved = str(candidate.resolve(strict=False))
+        if resolved not in roots:
+            roots.append(resolved)
+    return tuple(roots)
+
+
+def _suspicious_mutation_reason(path: str, *, trusted_roots: tuple[Path, ...]) -> str:
     normalized = str(path or "").strip()
     if not normalized:
         return "empty_path"
-    if workspace_path is not None:
+    workspace_path = trusted_roots[0] if trusted_roots else None
+    if trusted_roots:
         try:
             candidate = _candidate_path(normalized, workspace_path=workspace_path)
         except OSError:
             return ""
-        if candidate != workspace_path and not _is_relative_to(candidate, workspace_path):
+        if not any(candidate == root or _is_relative_to(candidate, root) for root in trusted_roots):
             return "outside_workspace"
         candidate_text = str(candidate).casefold()
         if "/.mew/" in candidate_text or candidate_text.endswith("/.mew"):

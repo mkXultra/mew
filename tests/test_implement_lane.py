@@ -51,6 +51,7 @@ from mew.implement_lane.v2_runtime import (
     _hard_runtime_frontier_progress_signature,
     _hard_runtime_progress_continuation_signature,
     _hard_runtime_progress_continuation_turn_limit,
+    _has_completed_source_tree_mutation,
     _live_json_prompt,
     _model_visible_tool_specs_for_turn,
     _prewrite_write_tools_hidden_for_turn,
@@ -58,6 +59,7 @@ from mew.implement_lane.v2_runtime import (
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
     _shell_command_may_mutate_source_tree,
+    _source_mutation_roots,
     _terminal_failure_reaction_turn_limit,
     _typed_finish_evidence_refs,
     _typed_retired_legacy_blockers_for_bundle,
@@ -10661,6 +10663,320 @@ def test_implement_v2_run_command_allows_bounded_source_writer_without_verifier_
     assert tool_result["status"] == "completed"
     assert payload["source_tree_mutations"][0]["changed_count"] == 1
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log(1)\n"
+
+
+def test_implement_v2_source_mutation_roots_default_to_workspace_not_all_write_roots(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    scratch = tmp_path / "scratch"
+    workspace.mkdir()
+    scratch.mkdir()
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            f"from pathlib import Path; Path({str(scratch / 'diag.txt')!r}).write_text('diag', encoding='utf-8')",
+        ]
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={
+                "mode": "exec",
+                "allow_shell": True,
+                "allowed_read_roots": [str(workspace), str(scratch)],
+                "allowed_write_roots": [str(workspace), str(scratch)],
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": str(workspace),
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "scratch diagnostic written"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert (scratch / "diag.txt").read_text(encoding="utf-8") == "diag"
+    assert payload["source_tree_mutations"] == []
+    assert not any(effect["kind"] == "source_tree_mutation" for effect in tool_result["side_effects"])
+
+
+def test_implement_v2_write_tool_scratch_side_effect_is_not_source_mutation(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    scratch = tmp_path / "scratch"
+    workspace.mkdir()
+    scratch.mkdir()
+    scratch_file = scratch / "diag.txt"
+    call = ToolCallEnvelope(
+        lane_attempt_id="attempt-1",
+        provider="fake",
+        provider_call_id="call-write-scratch",
+        mew_tool_call_id="tool-write-scratch",
+        tool_name="write_file",
+        arguments={"path": str(scratch_file), "content": "diag", "apply": True},
+        turn_index=2,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=({"path": str(scratch_file), "written": True},),
+        side_effects=(
+            {
+                "kind": "file_write",
+                "operation": "write_file",
+                "path": str(scratch_file),
+                "written": True,
+            },
+        ),
+    )
+
+    readiness = _first_write_readiness_from_trace(
+        {"id": "todo-1", "source": {"target_paths": ["vm.js"]}},
+        tool_calls=(call,),
+        tool_results=(result,),
+        probe_threshold=1,
+        source_mutation_roots=(str(workspace),),
+    )
+
+    assert readiness["status"] == "not_due"
+    assert readiness["first_write_attempt_tool"] == "write_file"
+    assert readiness.get("first_write_tool") in (None, "")
+    assert readiness["write_attempt_count"] == 1
+    assert not _has_completed_source_tree_mutation((result,), source_mutation_roots=(str(workspace),))
+
+
+def test_implement_v2_write_tool_workspace_side_effect_is_source_mutation(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source_file = workspace / "vm.js"
+    call = ToolCallEnvelope(
+        lane_attempt_id="attempt-1",
+        provider="fake",
+        provider_call_id="call-write-source",
+        mew_tool_call_id="tool-write-source",
+        tool_name="write_file",
+        arguments={"path": str(source_file), "content": "source", "apply": True},
+        turn_index=2,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=({"path": str(source_file), "written": True},),
+        side_effects=(
+            {
+                "kind": "file_write",
+                "operation": "write_file",
+                "path": str(source_file),
+                "written": True,
+            },
+        ),
+    )
+
+    readiness = _first_write_readiness_from_trace(
+        {"id": "todo-1", "source": {"target_paths": ["vm.js"]}},
+        tool_calls=(call,),
+        tool_results=(result,),
+        probe_threshold=1,
+        source_mutation_roots=(str(workspace),),
+    )
+
+    assert readiness["status"] == "written"
+    assert readiness["first_write_tool"] == "write_file"
+    assert readiness["write_attempt_count"] == 1
+    assert _has_completed_source_tree_mutation((result,), source_mutation_roots=(str(workspace),))
+
+
+def test_implement_v2_write_tool_dry_run_content_path_is_not_source_mutation(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source_file = workspace / "vm.js"
+    call = ToolCallEnvelope(
+        lane_attempt_id="attempt-1",
+        provider="fake",
+        provider_call_id="call-dry-run-source",
+        mew_tool_call_id="tool-dry-run-source",
+        tool_name="write_file",
+        arguments={"path": str(source_file), "content": "source"},
+        turn_index=2,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=({"path": str(source_file), "written": False, "dry_run": True},),
+        side_effects=(),
+    )
+
+    readiness = _first_write_readiness_from_trace(
+        {"id": "todo-1", "source": {"target_paths": ["vm.js"]}},
+        tool_calls=(call,),
+        tool_results=(result,),
+        probe_threshold=1,
+        source_mutation_roots=(str(workspace),),
+    )
+
+    assert readiness["status"] == "not_due"
+    assert readiness["first_write_attempt_tool"] == "write_file"
+    assert readiness.get("first_write_tool") in (None, "")
+    assert not _has_completed_source_tree_mutation((result,), source_mutation_roots=(str(workspace),))
+
+
+def test_implement_v2_relative_source_mutation_roots_resolve_from_workspace(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    source_root = workspace / "src"
+    source_root.mkdir(parents=True)
+    source_file = source_root / "vm.js"
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(workspace),
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"source_mutation_roots": ["src"]},
+    )
+    call = ToolCallEnvelope(
+        lane_attempt_id="attempt-1",
+        provider="fake",
+        provider_call_id="call-write-source",
+        mew_tool_call_id="tool-write-source",
+        tool_name="write_file",
+        arguments={"path": str(source_file), "content": "source", "apply": True},
+        turn_index=2,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=({"path": str(source_file), "written": True},),
+        side_effects=(
+            {
+                "kind": "file_write",
+                "operation": "write_file",
+                "path": str(source_file),
+                "written": True,
+            },
+        ),
+    )
+
+    roots = _source_mutation_roots(lane_input)
+    readiness = _first_write_readiness_from_trace(
+        {"id": "todo-1", "source": {"target_paths": ["src/vm.js"]}},
+        tool_calls=(call,),
+        tool_results=(result,),
+        probe_threshold=1,
+        source_mutation_roots=roots,
+    )
+
+    assert roots == (str(source_root.resolve(strict=False)),)
+    assert readiness["status"] == "written"
+    assert _has_completed_source_tree_mutation((result,), source_mutation_roots=roots)
+
+
+def test_implement_v2_default_source_mutation_root_resolves_relative_workspace(tmp_path, monkeypatch) -> None:
+    project = tmp_path / "project"
+    workspace = project / "workspace"
+    workspace.mkdir(parents=True)
+    source_file = workspace / "vm.js"
+    monkeypatch.chdir(project)
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="workspace",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={},
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-write-source",
+        mew_tool_call_id="tool-write-source",
+        tool_name="write_file",
+        status="completed",
+        content=({"path": str(source_file), "written": True},),
+        side_effects=(
+            {
+                "kind": "file_write",
+                "operation": "write_file",
+                "path": str(source_file),
+                "written": True,
+            },
+        ),
+    )
+
+    roots = _source_mutation_roots(lane_input)
+
+    assert roots == (str(workspace.resolve(strict=False)),)
+    assert _has_completed_source_tree_mutation((result,), source_mutation_roots=roots)
+
+
+def test_implement_v2_explicit_source_mutation_roots_track_non_workspace_source(tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    generated_source = tmp_path / "generated-source"
+    workspace.mkdir()
+    generated_source.mkdir()
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            f"from pathlib import Path; Path({str(generated_source / 'vm.js')!r}).write_text('source', encoding='utf-8')",
+        ]
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={
+                "mode": "exec",
+                "allow_shell": True,
+                "allowed_read_roots": [str(workspace), str(generated_source)],
+                "allowed_write_roots": [str(workspace), str(generated_source)],
+                "source_mutation_roots": [str(generated_source)],
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": str(workspace),
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "external source written"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert payload["source_tree_mutations"][0]["changed_count"] == 1
+    assert payload["source_tree_mutations"][0]["changes"][0]["path"].endswith("/vm.js")
 
 
 def test_implement_v2_run_command_rejects_same_path_source_patch_shell_surface(tmp_path) -> None:

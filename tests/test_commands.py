@@ -435,6 +435,147 @@ class CommandTests(unittest.TestCase):
         self.assertFalse(outside.exists())
         self.assertIn("path literals outside tracked write roots", stderr.getvalue())
 
+    def test_implement_v2_tool_lab_command_write_root_is_not_source_root_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            scratch = Path(tmp) / "scratch"
+            workspace.mkdir()
+            scratch.mkdir()
+            scratch_file = scratch / "diag.txt"
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "implement-v2",
+                        "tool-lab",
+                        "--command",
+                        f"printf 'diag' > {scratch_file}",
+                        "--workspace",
+                        str(workspace),
+                        "--cwd",
+                        str(workspace),
+                        "--allow-read",
+                        str(workspace),
+                        "--allow-read",
+                        str(scratch),
+                        "--allow-write",
+                        str(workspace),
+                        "--allow-write",
+                        str(scratch),
+                        "--target-path",
+                        "vm.js",
+                        "--json",
+                    ]
+                )
+            scratch_exists = scratch_file.exists()
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(scratch_exists)
+        self.assertEqual(payload["source_tree_mutation_count"], 0)
+        self.assertNotEqual(payload["first_write_readiness"]["recomputed"]["status"], "written")
+
+    def test_implement_v2_tool_lab_command_source_root_tracks_explicit_non_workspace_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            generated_source = Path(tmp) / "generated-source"
+            workspace.mkdir()
+            generated_source.mkdir()
+            target = generated_source / "vm.js"
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "implement-v2",
+                        "tool-lab",
+                        "--command",
+                        f"printf 'source' > {target}",
+                        "--workspace",
+                        str(workspace),
+                        "--cwd",
+                        str(workspace),
+                        "--allow-read",
+                        str(workspace),
+                        "--allow-read",
+                        str(generated_source),
+                        "--allow-write",
+                        str(workspace),
+                        "--allow-write",
+                        str(generated_source),
+                        "--source-root",
+                        str(generated_source),
+                        "--target-path",
+                        str(target),
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["source_tree_mutation_count"], 1)
+        self.assertEqual(payload["suspicious_source_tree_mutation_count"], 0)
+        self.assertEqual(payload["first_write_readiness"]["recomputed"]["status"], "written")
+
+    def test_implement_v2_tool_lab_artifact_defaults_source_root_to_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "workspace"
+            workspace.mkdir()
+            source_file = workspace / "vm.js"
+            manifest_path = Path(tmp) / "proof-manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "tool_calls": [
+                            {
+                                "lane_attempt_id": "attempt-1",
+                                "provider": "fake",
+                                "provider_call_id": "call-write-source",
+                                "mew_tool_call_id": "tool-write-source",
+                                "turn_index": 2,
+                                "tool_name": "write_file",
+                                "arguments": {"path": str(source_file), "content": "source", "apply": True},
+                            }
+                        ],
+                        "tool_results": [
+                            {
+                                "lane_attempt_id": "attempt-1",
+                                "provider_call_id": "call-write-source",
+                                "mew_tool_call_id": "tool-write-source",
+                                "tool_name": "write_file",
+                                "status": "completed",
+                                "content": [{"path": str(source_file), "written": True}],
+                                "side_effects": [
+                                    {
+                                        "kind": "file_write",
+                                        "operation": "write_file",
+                                        "path": str(source_file),
+                                        "written": True,
+                                    }
+                                ],
+                            }
+                        ],
+                        "metrics": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "implement-v2",
+                        "tool-lab",
+                        "--artifact",
+                        str(manifest_path),
+                        "--workspace",
+                        str(workspace),
+                        "--target-path",
+                        "vm.js",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["first_write_readiness"]["recomputed"]["status"], "written")
+
     def test_tool_cli_relative_write_path_is_root_relative(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
