@@ -718,6 +718,13 @@ class ManagedCommandRunner:
             raise RuntimeError("no managed command is active")
         return key, self.handles[key]
 
+    def has_handle(self, command_run_id=""):
+        try:
+            self._get_handle(command_run_id)
+        except RuntimeError:
+            return False
+        return True
+
     def _drop_finalized(self, key, handle):
         if handle.finalized:
             self.handles.pop(key, None)

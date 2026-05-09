@@ -422,6 +422,8 @@ class ImplementV2ManagedExecRuntime:
     def _cancel_command(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
         command_run_id = _required_command_run_id(args)
+        if not self.runner.has_handle(command_run_id):
+            raise ValueError(f"unknown command_run_id: {command_run_id}")
         payload = self.runner.cancel(
             reason=str(args.get("reason") or "cancelled"),
             command_run_id=command_run_id,

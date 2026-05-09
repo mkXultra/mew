@@ -8440,6 +8440,34 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(payload["content"][0]["command_source"], "command_argv")
         self.assertIn("test-ok", payload["content"][0]["stdout"])
 
+    def test_tool_invoke_cancel_unknown_command_is_concise(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "tool",
+                        "invoke",
+                        "cancel_command",
+                        "--arguments",
+                        '{"command_run_id":"missing"}',
+                        "--workspace",
+                        str(root),
+                        "--allow-read",
+                        str(root),
+                        "--allow-shell",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 1)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["tool_name"], "cancel_command")
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(payload["content"][0]["reason"], "unknown command_run_id: missing")
+        self.assertEqual(payload["side_effects"], [])
+
     def test_tool_read_refuses_sensitive_file(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

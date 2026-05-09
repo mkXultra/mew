@@ -10304,6 +10304,32 @@ def test_implement_v2_exec_cancel_yielded_command_is_interrupted(tmp_path) -> No
     assert cancel_result.is_error is True
 
 
+def test_implement_v2_exec_cancel_unknown_command_is_concise(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path), max_active=1)
+    cancel_call = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "cancel_command",
+                "arguments": {"command_run_id": "missing"},
+            },
+        ),
+    )[0]
+
+    cancel_result = runtime.execute(cancel_call)
+
+    assert cancel_result.status == "failed"
+    assert cancel_result.is_error is True
+    assert cancel_result.content[0]["reason"] == "unknown command_run_id: missing"
+    assert cancel_result.side_effects == ()
+
+
 def test_implement_v2_exec_rejects_resident_mew_loop_command(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
