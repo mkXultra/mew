@@ -11615,7 +11615,91 @@ def test_implement_v2_live_json_auto_poll_cancels_nonterminal_verifier_without_e
     assert payload["command_run_id"]
 
 
-def test_implement_v2_fast_cancels_hard_runtime_verifier_with_no_output_or_artifact(tmp_path) -> None:
+def test_implement_v2_hard_runtime_auto_poll_allows_silent_artifact_progress(tmp_path) -> None:
+    calls = {"count": 0}
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(0.05); open('frame.bmp', 'w', encoding='utf-8').write('frame')",
+        ]
+    )
+
+    def fake_model(*_args, **_kwargs):
+        calls["count"] += 1
+        return {
+            "summary": "run silent runtime verifier",
+            "tool_calls": [
+                {
+                    "provider_call_id": "call-1",
+                    "tool_name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 10,
+                        "foreground_budget_seconds": 0.001,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verify",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "analysis_ready", "summary": "verifier observed"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "Build the provided source project for an emulator runtime interpreter "
+                    "that must write frame.bmp."
+                )
+            },
+            lane_config={
+                "mode": "full",
+                "allow_shell": True,
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "active_command_auto_poll_seconds": 1,
+                "hard_runtime_verifier_no_progress_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert calls["count"] == 1
+    assert result.metrics["model_turns"] == 1
+    assert result.metrics["active_command_auto_poll_count"] == 1
+    assert result.metrics["active_command_auto_poll_terminal_count"] == 1
+    assert tool_result["status"] == "completed"
+    assert payload["status"] == "completed"
+    assert (tmp_path / "frame.bmp").read_text(encoding="utf-8") == "frame"
+
+
+def test_implement_v2_cancels_hard_runtime_verifier_after_auto_poll_budget_with_no_output_or_artifact(tmp_path) -> None:
     calls = {"count": 0}
     command = shlex.join(
         [
@@ -11678,7 +11762,7 @@ def test_implement_v2_fast_cancels_hard_runtime_verifier_with_no_output_or_artif
                 "allow_shell": True,
                 "allowed_read_roots": [str(tmp_path)],
                 "allowed_write_roots": [str(tmp_path)],
-                "active_command_auto_poll_seconds": 1,
+                "active_command_auto_poll_seconds": 0.01,
                 "hard_runtime_verifier_no_progress_seconds": 0,
             },
         ),
@@ -11699,7 +11783,7 @@ def test_implement_v2_fast_cancels_hard_runtime_verifier_with_no_output_or_artif
     assert payload["status"] == "killed"
     assert (
         payload["reason"]
-        == "implement_v2 hard-runtime verifier had no observable output or expected-artifact progress after foreground budget"
+        == "implement_v2 hard-runtime verifier had no observable output or expected-artifact progress after auto-poll budget"
     )
     assert payload["failure_classification"]["class"] == "runtime_artifact_missing"
     assert payload["failure_classification"]["kind"] == "missing_artifact"
@@ -11769,7 +11853,7 @@ def test_implement_v2_fast_cancel_treats_unchanged_existing_artifact_as_no_progr
                 "allow_shell": True,
                 "allowed_read_roots": [str(tmp_path)],
                 "allowed_write_roots": [str(tmp_path)],
-                "active_command_auto_poll_seconds": 1,
+                "active_command_auto_poll_seconds": 0.01,
                 "hard_runtime_verifier_no_progress_seconds": 0,
             },
         ),
@@ -11783,7 +11867,7 @@ def test_implement_v2_fast_cancel_treats_unchanged_existing_artifact_as_no_progr
     assert payload["status"] == "killed"
     assert (
         payload["reason"]
-        == "implement_v2 hard-runtime verifier had no observable output or expected-artifact progress after foreground budget"
+        == "implement_v2 hard-runtime verifier had no observable output or expected-artifact progress after auto-poll budget"
     )
 
 

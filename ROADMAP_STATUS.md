@@ -346,7 +346,7 @@ reentry that assumes HOT_PATH_COLLAPSE is done as drift.
 | Phase 3 sidecar-inferred execution contracts | incomplete | Execution-contract and sidecar concepts exist, but cheap-probe versus execution-contract separation is not fully proven. Do not treat probe evidence as finish/runtime proof without a phase-specific fastcheck pass. |
 | Phase 4 patch/edit as mutation boundary | partial | Source mutation, first-write readiness, post-write verifier gates, and `write_file content_lines` for large generated source exist. The `20260510-001638` diagnostic confirmed the first large `vm.js` write used `content_lines` and succeeded. Shell mutation, source-root tracking, and tool-result projection have still produced fixes, so this remains open until replay/tool-lab/fastcheck stop finding boundary bugs. |
 | Phase 5 finish cited evidence | partial | Typed-evidence acceptance and visual/runtime finish gates are substantially implemented. Legacy/string gates and sidecar merge behavior still act as guardrails; do not remove or close until typed evidence proves equivalent or stricter coverage. |
-| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The `20260510-005032` step-shape improved first edit to `121s` and kept the supplied runtime artifact path, but exposed that runtime-artifact plateau detection collapsed distinct runtime errors under the same missing `/tmp/frame.bmp` symptom. The close path remains: focused UT -> replay/dogfood/emulator -> HOT_PATH fastcheck -> one same-shape 10min step-shape -> reference-step comparison. |
+| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The `20260510-005032` step-shape improved first edit to `121s` and kept the supplied runtime artifact path; the runtime-artifact plateau fingerprint repair then allowed the `20260510-011219` rerun to continue to `14` model turns with `runtime_artifact_failure_plateau={}` and green fastcheck. The new generic gap is managed-exec behavior: hard-runtime verifier commands with exact expected artifacts were killed after foreground/no-output observation instead of using the auto-poll budget like Codex-style yielded command handling. The close path remains: focused UT -> replay/dogfood/emulator -> HOT_PATH fastcheck -> one same-shape 10min step-shape -> reference-step comparison. |
 
 Phase implementation order:
 
@@ -363,12 +363,15 @@ Phase implementation order:
    should not be expanded while latest-actionable-failure projection is still
    unreliable.
 
-Immediate next action for this phase: commit the reviewed runtime-artifact
-plateau fingerprint repair. Then run HOT_PATH fastcheck and one same-shape
-`make-mips-interpreter` `step-check-10min` on current head to check whether
-distinct runtime errors no longer prematurely close the repair loop as a
-same-shape missing-artifact plateau. Do not run `speed_1` / `proof_5` before
-that fresh step-shape comparison loop.
+Immediate next action for this phase: commit the reviewed generic hard-runtime
+auto-poll repair. Codex-ultra review session
+`019e0d98-8276-7770-bb07-4e60f1d19117` approved it as managed-exec lifecycle
+behavior rather than task-specific logic, and focused/full implement-lane tests,
+HOT_PATH fastcheck, ruff, and diff-check pass. After the commit, run one same-
+shape `make-mips-interpreter` `step-check-10min` on current head and compare
+whether the final verifier reaches terminal/artifact evidence instead of the
+premature no-progress kill observed in `20260510-011219`. Do not run `speed_1`
+/ `proof_5` before that fresh step-shape comparison loop.
 
 ## Historical Evidence
 

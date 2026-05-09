@@ -1922,23 +1922,20 @@ def _auto_poll_yielded_verifier_commands(
     budget = _active_command_auto_poll_budget_seconds(lane_input, run_started=run_started)
     if budget <= 0:
         return ()
-    if _should_fast_cancel_no_progress_hard_runtime_verifier(tool_results, lane_input=lane_input):
-        immediate_payloads = exec_runtime.poll_active_commands(wait_seconds=0)
-        terminal_payloads = tuple(payload for payload in immediate_payloads if _is_terminal_auto_poll_payload(payload))
-        if terminal_payloads:
-            return terminal_payloads
-        if any(_hard_runtime_verifier_payload_has_no_progress(payload, lane_input=lane_input) for payload in immediate_payloads):
-            return exec_runtime.cancel_active_commands(
-                reason=(
-                    "implement_v2 hard-runtime verifier had no observable output "
-                    "or expected-artifact progress after foreground budget"
-                )
-            )
     payloads = exec_runtime.poll_active_commands(wait_seconds=budget)
     terminal_payloads = tuple(payload for payload in payloads if _is_terminal_auto_poll_payload(payload))
     if terminal_payloads:
         return terminal_payloads
     if payloads:
+        if is_hard_runtime_artifact_task(lane_input.task_contract) and any(
+            _hard_runtime_verifier_payload_has_no_progress(payload, lane_input=lane_input) for payload in payloads
+        ):
+            return exec_runtime.cancel_active_commands(
+                reason=(
+                    "implement_v2 hard-runtime verifier had no observable output "
+                    "or expected-artifact progress after auto-poll budget"
+                )
+            )
         return exec_runtime.cancel_active_commands(
             reason="implement_v2 verifier auto-poll budget exhausted before terminal evidence"
         )
@@ -1974,30 +1971,6 @@ def _first_result_payload(result: ToolResultEnvelope) -> dict[str, object]:
         if isinstance(item, dict):
             return item
     return {}
-
-
-def _should_fast_cancel_no_progress_hard_runtime_verifier(
-    tool_results: tuple[ToolResultEnvelope, ...],
-    *,
-    lane_input: ImplementLaneInput,
-) -> bool:
-    if not is_hard_runtime_artifact_task(lane_input.task_contract):
-        return False
-    return any(
-        _is_auto_pollable_yielded_verifier_result(result)
-        and _hard_runtime_verifier_payload_is_no_progress_candidate(_first_result_payload(result), lane_input=lane_input)
-        for result in tool_results
-    )
-
-
-def _hard_runtime_verifier_payload_is_no_progress_candidate(
-    payload: dict[str, object],
-    *,
-    lane_input: ImplementLaneInput,
-) -> bool:
-    if not _hard_runtime_verifier_payload_is_silent_after_threshold(payload, lane_input=lane_input):
-        return False
-    return bool(_expected_artifacts_from_payload(payload))
 
 
 def _hard_runtime_verifier_payload_has_no_progress(
