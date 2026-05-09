@@ -59,6 +59,7 @@ from mew.implement_lane.v2_runtime import (
     _provider_visible_tool_call_for_history,
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
+    _resident_sidecar_state_metrics,
     _shell_command_may_mutate_source_tree,
     _source_output_contract_from_tool_results,
     _source_output_contract_probe_candidate_from_trace,
@@ -4565,6 +4566,83 @@ def test_implement_v2_integration_observation_summary_is_state_safe_by_default(t
     }
     assert not (artifact_dir / "implement_v2" / "integration-observation.json").exists()
     assert all(not path.endswith("integration-observation.json") for path in result.proof_artifacts)
+
+
+def test_implement_v2_resident_sidecar_metrics_compact_large_tool_payloads() -> None:
+    large_lines = [f"const value{index} = {index};" for index in range(1200)]
+    huge_stdout = "Program output line\n" + ("x" * 120_000)
+    call = ToolCallEnvelope(
+        lane_attempt_id="attempt-1",
+        provider="model_json",
+        provider_call_id="call-write-large-source",
+        mew_tool_call_id="tool-1",
+        tool_name="write_file",
+        arguments={"path": "vm.js", "content_lines": large_lines},
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run-huge-output",
+        mew_tool_call_id="tool-2",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "stdout": huge_stdout,
+                "stderr": huge_stdout,
+                "pre_run_source_tree_snapshot": {
+                    "files": {f"/app/src/file{index}.c": {"size": index} for index in range(300)}
+                },
+            },
+        ),
+    )
+    transcript_event = ImplementLaneTranscriptEvent(
+        kind="tool_call",
+        lane=IMPLEMENT_V2_LANE,
+        turn_id="turn-1",
+        event_id="event-1",
+        payload={"tool_calls": [call.as_dict()], "raw": huge_stdout},
+    )
+    history = [
+        {
+            "turn": 1,
+            "summary": huge_stdout,
+            "tool_calls": [call.as_dict()],
+            "tool_results": [result.as_dict()],
+        }
+    ]
+
+    metrics = _resident_sidecar_state_metrics(
+        transcript=(transcript_event,),
+        history=tuple(history),
+        tool_calls=(call,),
+        tool_results=(result,),
+        active_work_todo_state={},
+        hard_runtime_frontier_state={},
+        model_turn_observations=(),
+        model_turns=1,
+    )
+
+    assert metrics["surface"] == "resident_sidecar_state"
+    assert metrics["families"]["transcript_history"] < 30_000
+    assert metrics["families"]["tool_call_result"] < 30_000
+    assert metrics["total_bytes"] < 80_000
+
+    history[0]["model_error"] = {"message": huge_stdout}
+    with_error = _resident_sidecar_state_metrics(
+        transcript=(transcript_event,),
+        history=tuple(history),
+        tool_calls=(call,),
+        tool_results=(result,),
+        active_work_todo_state={},
+        hard_runtime_frontier_state={},
+        model_turn_observations=(),
+        model_turns=1,
+    )
+
+    assert with_error["families"]["transcript_history"] > metrics["families"]["transcript_history"]
+    assert with_error["families"]["transcript_history"] < 40_000
 
 
 def test_implement_v2_integration_observation_detail_sidecar_is_explicit_and_ref_backed(tmp_path) -> None:

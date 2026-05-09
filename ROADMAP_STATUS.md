@@ -340,7 +340,7 @@ reentry that assumes HOT_PATH_COLLAPSE is done as drift.
 
 | Phase | Status | Current evidence / remaining gap |
 |---|---|---|
-| Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist. `docs/M6_24_HOT_PATH_PHASE0_BASELINE.json` now records the required Phase 0 baseline fields, and `scripts/check_implement_v2_hot_path.py` uses baseline-relative sidecar caps by default. Still partial until at least one post-baseline artifact stays green/yellow without widening model-visible state. |
+| Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist. `docs/M6_24_HOT_PATH_PHASE0_BASELINE.json` now records the required Phase 0 baseline fields, and `scripts/check_implement_v2_hot_path.py` uses baseline-relative sidecar caps by default. The `20260510-001638` artifact exposed that metrics were counting full proof-artifact transcript/history/tool payload duplicates as resident state; current head compacts resident-sidecar metrics with hashes/previews while keeping full proof artifacts intact. Still partial until a fresh post-repair artifact stays green/yellow without widening model-visible state. |
 | Phase 1 prompt collapse | partial | Default prompt no longer relies on normal-prompt `frontier_state_update`, and fastcheck checks for prompt leaks. Compact `active_work_todo` / evidence / frontier projection still needs repeated proof that it stays small and sidecar-backed. The `20260510-001638` diagnostic showed a generic hard-runtime task-contract gap: the model substituted a host-native source build for the requested supplied-runtime artifact path. The current repair belongs in the small hard-runtime prompt/profile contract, not a new frontier. |
 | Phase 2 latest actionable failure | incomplete | Projection/reducer code exists. Two consecutive `make-mips-interpreter` artifacts now pass `latest_actionable_failure_shape` after raw structured failure projection and raw tool `failure_class` projection. This phase is not stable until the next changed artifact also passes before live step-shape. |
 | Phase 3 sidecar-inferred execution contracts | incomplete | Execution-contract and sidecar concepts exist, but cheap-probe versus execution-contract separation is not fully proven. Do not treat probe evidence as finish/runtime proof without a phase-specific fastcheck pass. |
@@ -363,14 +363,12 @@ Phase implementation order:
    should not be expanded while latest-actionable-failure projection is still
    unreliable.
 
-Immediate next action for this phase: review and commit the generic
-hard-runtime execution-authority repair. Then rerun the HOT_PATH fastcheck /
-micro next-action loop against the `20260510-001638` artifact before spending
-another live diagnostic. The next live same-shape `step-check-10min`, if
-allowed by fastcheck, should verify that the loop keeps the supplied runtime
-artifact as the execution authority instead of compiling/running a host-native
-source fallback. Do not run `speed_1` / `proof_5` before the fastcheck and
-step-shape comparison loop.
+Immediate next action for this phase: commit the reviewed resident-sidecar
+metric compaction. Then run one same-shape `make-mips-interpreter`
+`step-check-10min` on current head to generate fresh Phase 0 metrics and check
+whether the loop keeps the supplied runtime artifact as the execution authority
+instead of compiling/running a host-native source fallback. Do not run
+`speed_1` / `proof_5` before that fresh step-shape comparison loop.
 
 ## Historical Evidence
 

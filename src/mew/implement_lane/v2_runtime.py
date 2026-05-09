@@ -8682,14 +8682,14 @@ def _resident_sidecar_state_metrics(
     families = {
         "transcript_history": _json_bytes(
             {
-                "transcript": [event.as_dict() for event in transcript],
-                "history": list(history),
+                "transcript": [_resident_sidecar_compact_transcript_event(event) for event in transcript],
+                "history": [_resident_sidecar_compact_history_entry(entry) for entry in history],
             }
         ),
         "tool_call_result": _json_bytes(
             {
-                "tool_calls": [call.as_dict() for call in tool_calls],
-                "tool_results": [result.as_dict() for result in tool_results],
+                "tool_calls": [_resident_sidecar_compact_tool_call(call) for call in tool_calls],
+                "tool_results": [_resident_sidecar_compact_tool_result(result) for result in tool_results],
             }
         ),
         "frontier_todo_recovery_cards": _json_bytes(
@@ -8714,6 +8714,90 @@ def _resident_sidecar_state_metrics(
             "baseline_required": True,
         },
         "phase": "m6_24_hot_path_collapse_phase_0",
+    }
+
+
+_RESIDENT_SIDECAR_COMPACT_TEXT_CHARS = 240
+_RESIDENT_SIDECAR_COMPACT_JSON_BYTES = 2048
+_RESIDENT_SIDECAR_COMPACT_LIST_ITEMS = 8
+_RESIDENT_SIDECAR_COMPACT_DICT_ITEMS = 16
+
+
+def _resident_sidecar_compact_transcript_event(event: ImplementLaneTranscriptEvent) -> dict[str, object]:
+    data = event.as_dict()
+    data["payload"] = _resident_sidecar_compact_value(data.get("payload"))
+    return data
+
+
+def _resident_sidecar_compact_history_entry(entry: dict[str, object]) -> dict[str, object]:
+    compacted: dict[str, object] = {}
+    for key, value in entry.items():
+        if key == "summary":
+            compacted[key] = _resident_sidecar_compact_text(value)
+        else:
+            compacted[str(key)] = _resident_sidecar_compact_value(value)
+    return compacted
+
+
+def _resident_sidecar_compact_tool_call(call: ToolCallEnvelope) -> dict[str, object]:
+    data = call.as_dict()
+    data["arguments"] = _resident_sidecar_compact_value(data.get("arguments"))
+    return data
+
+
+def _resident_sidecar_compact_tool_result(result: ToolResultEnvelope) -> dict[str, object]:
+    data = result.as_dict()
+    data["content"] = _resident_sidecar_compact_value(data.get("content"))
+    data["side_effects"] = _resident_sidecar_compact_value(data.get("side_effects"))
+    return data
+
+
+def _resident_sidecar_compact_value(value: object, *, depth: int = 0) -> object:
+    if _json_bytes(value) <= _RESIDENT_SIDECAR_COMPACT_JSON_BYTES:
+        return value
+    if depth >= 3:
+        return _resident_sidecar_ref(value, kind="truncated")
+    if isinstance(value, str):
+        return _resident_sidecar_compact_text(value)
+    if isinstance(value, list):
+        return {
+            **_resident_sidecar_ref(value, kind="list"),
+            "item_count": len(value),
+            "items": [
+                _resident_sidecar_compact_value(item, depth=depth + 1)
+                for item in value[:_RESIDENT_SIDECAR_COMPACT_LIST_ITEMS]
+            ],
+        }
+    if isinstance(value, dict):
+        keys = [str(key) for key in value.keys()]
+        preview: dict[str, object] = {}
+        for key in sorted(value.keys(), key=str)[:_RESIDENT_SIDECAR_COMPACT_DICT_ITEMS]:
+            preview[str(key)] = _resident_sidecar_compact_value(value.get(key), depth=depth + 1)
+        return {
+            **_resident_sidecar_ref(value, kind="object"),
+            "keys": keys[:_RESIDENT_SIDECAR_COMPACT_DICT_ITEMS],
+            "key_count": len(keys),
+            "preview": preview,
+        }
+    return _resident_sidecar_ref(value, kind=type(value).__name__)
+
+
+def _resident_sidecar_compact_text(value: object) -> object:
+    text = str(value or "")
+    if len(text) <= _RESIDENT_SIDECAR_COMPACT_TEXT_CHARS:
+        return text
+    return {
+        **_resident_sidecar_ref(text, kind="text"),
+        "preview": text[:_RESIDENT_SIDECAR_COMPACT_TEXT_CHARS].rstrip(),
+    }
+
+
+def _resident_sidecar_ref(value: object, *, kind: str) -> dict[str, object]:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return {
+        "__mew_compacted__": kind,
+        "json_bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest()[:16],
     }
 
 
