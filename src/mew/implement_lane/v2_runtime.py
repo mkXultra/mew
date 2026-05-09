@@ -529,6 +529,12 @@ def run_live_json_implement_v2(
                 probe_threshold=_first_write_probe_threshold(lane_input),
                 source_mutation_roots=_source_mutation_roots(lane_input),
             )
+            prewrite_missing_probe = _deep_runtime_prewrite_missing_probe(
+                lane_input=lane_input,
+                readiness=prewrite_probe_readiness,
+                prior_tool_calls=tuple(tool_calls),
+                prior_tool_results=tuple(tool_results),
+            )
             prompt = _live_json_prompt(
                 lane_input,
                 lane_attempt_id=lane_attempt_id,
@@ -544,6 +550,7 @@ def run_live_json_implement_v2(
                 tool_contract_recovery_instruction=tool_contract_recovery_instruction,
                 tool_specs=model_visible_tool_specs,
                 prewrite_probe_readiness=prewrite_probe_readiness,
+                prewrite_missing_probe=prewrite_missing_probe,
                 write_repair_lock_state=write_repair_lock_state,
                 history=tuple(prompt_history),
             )
@@ -5400,6 +5407,7 @@ def _live_json_prompt(
     tool_contract_recovery_instruction: str = "",
     tool_specs: tuple[ImplementLaneToolSpec, ...] | None = None,
     prewrite_probe_readiness: dict[str, object] | None = None,
+    prewrite_missing_probe: dict[str, object] | None = None,
     write_repair_lock_state: dict[str, object] | None = None,
     history: tuple[dict[str, object], ...],
 ) -> str:
@@ -5440,9 +5448,14 @@ def _live_json_prompt(
     ):
         missing = _prewrite_missing_category_labels(prewrite_probe_readiness)
         missing_text = ", ".join(missing) if missing else "required hard-runtime probe coverage"
+        required_probe = _frontier_clip_text(
+            (prewrite_missing_probe or {}).get("required_next_probe"),
+            limit=320,
+        )
         tool_surface_notes.append(
             "write tools are available, but the first source mutation is execution-gated until cheap "
             f"hard-runtime probes cover: {missing_text}. Probe missing coverage before drafting a large write."
+            + (f" Required next probe: {required_probe}." if required_probe else "")
         )
     if write_repair_lock_state and bool(write_repair_lock_state.get("locked")):
         target_path = _frontier_clip_text(write_repair_lock_state.get("path") or "the failed write target", limit=160)

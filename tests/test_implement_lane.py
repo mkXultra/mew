@@ -3653,6 +3653,42 @@ def test_implement_v2_live_json_prompt_omits_frontier_update_contract_without_fr
     assert "do not rely on prose-only acceptance_evidence claims" in prompt
 
 
+def test_implement_v2_live_json_prompt_surfaces_prewrite_required_next_probe(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+        lane_config={"mode": "full"},
+    )
+
+    prompt = _live_json_prompt(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        turn_index=3,
+        max_turns=8,
+        base_max_turns=8,
+        tool_specs=list_v2_tool_specs_for_mode("full"),
+        prewrite_probe_readiness={
+            "ready": False,
+            "missing_categories": ("source_output_contract",),
+        },
+        prewrite_missing_probe={
+            "required_next_probe": (
+                "read_file doomgeneric/doomgeneric/doomgeneric_img.c "
+                "to confirm the source-declared output artifact before writing"
+            )
+        },
+        history=(),
+    )
+
+    assert "Required next probe" in prompt
+    assert "read_file doomgeneric/doomgeneric/doomgeneric_img.c" in prompt
+
+
 def test_implement_v2_finish_gate_history_projects_compact_recovery_card() -> None:
     history = _finish_gate_history(
         turn_index=2,
