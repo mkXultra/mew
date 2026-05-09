@@ -59,6 +59,7 @@ _PROVIDER_HISTORY_FULL_TURN_LIMIT = 1
 _PROVIDER_HISTORY_STREAM_TAIL_LIMIT = 900
 _PROVIDER_HISTORY_STREAM_LONG_LINE_THRESHOLD = 500
 _PROVIDER_HISTORY_STREAM_SUMMARY_LINE_LIMIT = 160
+_RUNTIME_ARTIFACT_FAILURE_PLATEAU_DEFAULT_THRESHOLD = 3
 _PROVIDER_HISTORY_SOURCE_MUTATION_KEYS = frozenset(
     {
         "content",
@@ -333,6 +334,7 @@ def run_live_json_implement_v2(
     hard_runtime_frontier_enabled = bool(hard_runtime_frontier_state) or is_hard_runtime_artifact_task(
         lane_input.task_contract
     )
+    runtime_artifact_failure_plateau: dict[str, object] = {}
     adapter = JsonModelProviderAdapter()
     exec_runtime = ImplementV2ManagedExecRuntime(
         workspace=lane_input.workspace,
@@ -982,6 +984,27 @@ def run_live_json_implement_v2(
                     f"implement_v2 turn #{turn_index}: "
                     f"{len(current_calls)} call(s), statuses={','.join(result.status for result in current_results)}"
                 )
+            runtime_artifact_failure_plateau = _runtime_artifact_failure_plateau_state(
+                tuple(tool_results),
+                hard_runtime_frontier_state,
+                threshold=_runtime_artifact_failure_plateau_threshold(lane_input),
+            )
+            if runtime_artifact_failure_plateau:
+                hard_runtime_frontier_enabled = True
+                hard_runtime_frontier_state = _compact_hard_runtime_frontier_state(
+                    {
+                        **dict(hard_runtime_frontier_state),
+                        "status": "blocked",
+                        "runtime_artifact_failure_plateau": dict(runtime_artifact_failure_plateau),
+                    }
+                )
+                exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
+                finish_arguments = {
+                    "outcome": "blocked",
+                    "summary": str(runtime_artifact_failure_plateau.get("summary") or "runtime artifact failure plateau"),
+                    "runtime_artifact_failure_plateau": dict(runtime_artifact_failure_plateau),
+                }
+                break
             if wall_blocked_tool_execution:
                 finish_arguments = {
                     "outcome": "blocked",
@@ -1123,6 +1146,14 @@ def run_live_json_implement_v2(
             tool_results=tuple(tool_results),
             artifact_namespace=artifact_namespace,
         )
+        if runtime_artifact_failure_plateau:
+            hard_runtime_frontier_state = _compact_hard_runtime_frontier_state(
+                {
+                    **dict(hard_runtime_frontier_state),
+                    "status": "blocked",
+                    "runtime_artifact_failure_plateau": dict(runtime_artifact_failure_plateau),
+                }
+            )
         exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
     auto_finish_arguments = _auto_finish_from_structured_final_verifier(
         finish_arguments,
@@ -1237,6 +1268,7 @@ def run_live_json_implement_v2(
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
             "first_write_readiness": dict(first_write_readiness),
+            "runtime_artifact_failure_plateau": dict(runtime_artifact_failure_plateau),
             **typed_metrics,
             "wall_timeout": dict(wall_timeout),
             "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
@@ -1306,6 +1338,7 @@ def run_live_json_implement_v2(
             "finish_gate_block_count": finish_gate_block_count,
             "finish_gate_decision": dict(finish_gate_decision),
             "first_write_readiness": dict(first_write_readiness),
+            "runtime_artifact_failure_plateau": dict(runtime_artifact_failure_plateau),
             "first_write_due": bool(first_write_readiness.get("first_write_due")),
             "first_write_latency_turns": first_write_readiness.get("first_write_latency_turns"),
             "first_write_probe_count": first_write_readiness.get("probe_count_before_first_write"),
@@ -2280,6 +2313,21 @@ def _hard_runtime_progress_continuation_turn_limit(
     return _HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT
 
 
+def _runtime_artifact_failure_plateau_threshold(lane_input: ImplementLaneInput) -> int:
+    configured = lane_input.lane_config.get("runtime_artifact_failure_plateau_threshold")
+    if configured not in (None, ""):
+        try:
+            return max(0, min(8, int(configured)))
+        except (TypeError, ValueError):
+            return 0
+    if not (
+        is_hard_runtime_artifact_task(lane_input.task_contract)
+        or isinstance(lane_input.persisted_lane_state.get("lane_hard_runtime_frontier"), dict)
+    ):
+        return 0
+    return _RUNTIME_ARTIFACT_FAILURE_PLATEAU_DEFAULT_THRESHOLD
+
+
 def _tool_contract_recovery_turn_limit(lane_input: ImplementLaneInput) -> int:
     configured = lane_input.lane_config.get("tool_contract_recovery_turns")
     if configured not in (None, ""):
@@ -2412,6 +2460,227 @@ def _hard_runtime_frontier_progress_signature(frontier_state: dict[str, object] 
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8", errors="replace")
     return hashlib.sha256(encoded).hexdigest()[:24]
+
+
+def _runtime_artifact_failure_plateau_state(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    frontier_state: dict[str, object] | None,
+    *,
+    threshold: int,
+) -> dict[str, object]:
+    if threshold <= 0:
+        return {}
+    observations: list[tuple[tuple[str, str, str], dict[str, object]]] = []
+    for result in tool_results:
+        if result.tool_name not in {"run_command", "run_tests", "poll_command"}:
+            continue
+        payload = _first_result_payload(result)
+        if not payload:
+            continue
+        for passed_path in _runtime_artifact_passed_paths(payload):
+            passed_identity = _frontier_artifact_identity(passed_path)
+            observations = [item for item in observations if item[0][2] != passed_identity]
+        if result.status not in {"failed", "interrupted"} or _is_tool_contract_misuse_result(result):
+            continue
+        structured = _structured_failure_classification(payload)
+        failure_class = str(structured.get("class") or structured.get("failure_class") or "").strip()
+        failure_kind = str(structured.get("kind") or "").strip()
+        if not _structured_failure_is_runtime_artifact_missing(failure_class, failure_kind):
+            continue
+        artifact_path = _runtime_artifact_failure_path(payload, frontier_state)
+        if not artifact_path:
+            continue
+        signature = ("runtime_artifact_missing", "missing_artifact", _frontier_artifact_identity(artifact_path))
+        observations.append(
+            (
+                signature,
+                {
+                    "provider_call_id": result.provider_call_id,
+                    "tool_name": result.tool_name,
+                    "status": result.status,
+                    "artifact_path": artifact_path,
+                    "failure_class": failure_class or "runtime_artifact_missing",
+                    "failure_kind": failure_kind or "missing_artifact",
+                    "exit_code": payload.get("exit_code"),
+                    "command_run_id": _frontier_clip_text(payload.get("command_run_id"), limit=160),
+                    "failure_summary": _frontier_failure_summary(payload),
+                    "required_next_probe": _frontier_clip_text(
+                        structured.get("required_next_probe") or "Inspect the producing substep and artifact path.",
+                        limit=360,
+                    ),
+                },
+            )
+        )
+    if not observations:
+        return {}
+    latest_signature = observations[-1][0]
+    same_shape = [item for signature, item in observations if signature == latest_signature]
+    if len(same_shape) < threshold:
+        return {}
+    artifact_path = str(same_shape[-1].get("artifact_path") or "")
+    provider_call_ids = [str(item.get("provider_call_id") or "") for item in same_shape if item.get("provider_call_id")]
+    return _drop_empty_frontier_values(
+        {
+            "failure_class": "runtime_artifact_failure_plateau",
+            "failure_kind": "repeated_runtime_artifact_missing",
+            "failure_phase": "runtime",
+            "artifact_path": _frontier_clip_text(artifact_path, limit=240),
+            "repeat_count": len(same_shape),
+            "threshold": threshold,
+            "provider_call_ids": provider_call_ids[-_FRONTIER_LIST_LIMIT:],
+            "latest_failure_summary": _frontier_clip_text(same_shape[-1].get("failure_summary"), limit=360),
+            "required_next_action": (
+                "Stop same-shape patch/verify cycling. Preserve the blocked runtime frontier and resume with a "
+                "targeted diagnostic of the producer path or runtime transition before another source mutation."
+            ),
+            "summary": (
+                f"runtime artifact failure plateau: {len(same_shape)} verifier failures still miss "
+                f"{artifact_path or 'the required runtime artifact'}"
+            ),
+        }
+    )
+
+
+def _structured_failure_is_runtime_artifact_missing(failure_class: str, failure_kind: str) -> bool:
+    normalized_class = str(failure_class or "").strip()
+    normalized_kind = str(failure_kind or "").strip()
+    if normalized_class == "runtime_artifact_missing":
+        return True
+    if normalized_kind == "missing_artifact" and normalized_class in {
+        "artifact_validation_failure",
+        "runtime_failure",
+        "verification_failure",
+    }:
+        return True
+    return False
+
+
+def _runtime_artifact_failure_path(payload: dict[str, object], frontier_state: dict[str, object] | None) -> str:
+    artifact_evidence = payload.get("artifact_evidence")
+    if isinstance(artifact_evidence, list):
+        for item in artifact_evidence:
+            if not isinstance(item, dict):
+                continue
+            if item.get("status") == "passed" or item.get("blocking") is False:
+                continue
+            path = _runtime_artifact_evidence_path(item)
+            if path:
+                return path
+    if isinstance(frontier_state, dict):
+        final_artifact = frontier_state.get("final_artifact")
+        if isinstance(final_artifact, dict):
+            path = str(final_artifact.get("path") or final_artifact.get("artifact_path") or "").strip()
+            if path:
+                return path
+    return ""
+
+
+def _runtime_artifact_passed_paths(payload: dict[str, object]) -> tuple[str, ...]:
+    artifact_evidence = payload.get("artifact_evidence")
+    if not isinstance(artifact_evidence, list):
+        return ()
+    paths: list[str] = []
+    for item in artifact_evidence:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").strip() != "passed":
+            continue
+        path = _runtime_artifact_evidence_path(item)
+        if path:
+            paths.append(path)
+    return tuple(dict.fromkeys(paths))
+
+
+def _runtime_artifact_any_passed_path_identities(tool_results: tuple[ToolResultEnvelope, ...]) -> frozenset[str]:
+    identities = []
+    for result in tool_results:
+        if result.tool_name not in {"run_command", "run_tests", "poll_command"}:
+            continue
+        payload = _first_result_payload(result)
+        for path in _runtime_artifact_passed_paths(payload):
+            identity = _frontier_artifact_identity(path)
+            if identity:
+                identities.append(identity)
+    return frozenset(identities)
+
+
+def _runtime_artifact_latest_passed_path_identities(tool_results: tuple[ToolResultEnvelope, ...]) -> frozenset[str]:
+    latest_status_by_identity: dict[str, str] = {}
+    for result in tool_results:
+        if result.tool_name not in {"run_command", "run_tests", "poll_command"}:
+            continue
+        payload = _first_result_payload(result)
+        artifact_evidence = payload.get("artifact_evidence")
+        if not isinstance(artifact_evidence, list):
+            continue
+        for item in artifact_evidence:
+            if not isinstance(item, dict):
+                continue
+            identity = _frontier_artifact_identity(_runtime_artifact_evidence_path(item))
+            if identity:
+                latest_status_by_identity[identity] = str(item.get("status") or "").strip()
+    return frozenset(
+        identity for identity, status in latest_status_by_identity.items() if status == "passed"
+    )
+
+
+def _clear_resolved_runtime_artifact_blockers(
+    frontier_state: dict[str, object],
+    *,
+    passed_artifact_identities: frozenset[str],
+    latest_passed_artifact_identities: frozenset[str],
+) -> None:
+    plateau = frontier_state.get("runtime_artifact_failure_plateau")
+    if isinstance(plateau, dict):
+        if _artifact_identity_matches_any(plateau.get("artifact_path"), passed_artifact_identities):
+            frontier_state.pop("runtime_artifact_failure_plateau", None)
+    final_artifact = frontier_state.get("final_artifact")
+    final_artifact_map = final_artifact if isinstance(final_artifact, dict) else {}
+    if _artifact_identity_matches_any(final_artifact_map.get("path"), latest_passed_artifact_identities):
+        runtime_failure = frontier_state.get("latest_runtime_failure")
+        if isinstance(runtime_failure, dict) and _structured_failure_is_runtime_artifact_missing(
+            str(runtime_failure.get("failure_class") or ""),
+            str(runtime_failure.get("failure_kind") or ""),
+        ):
+            frontier_state.pop("latest_runtime_failure", None)
+    if str(frontier_state.get("status") or "").strip().lower() == "blocked" and not any(
+        key in frontier_state
+        for key in (
+            "latest_build_failure",
+            "latest_runtime_failure",
+            "first_write_frontier_stall",
+            "runtime_artifact_contract_mismatch",
+            "runtime_artifact_failure_plateau",
+        )
+    ):
+        frontier_state["status"] = "active"
+
+
+def _artifact_identity_matches_any(value: object, candidates: frozenset[str]) -> bool:
+    identity = _frontier_artifact_identity(value)
+    if not identity:
+        return False
+    if identity in candidates:
+        return True
+    name = PurePosixPath(identity).name
+    if not name:
+        return False
+    for candidate in candidates:
+        candidate_name = PurePosixPath(candidate).name
+        if candidate_name == name and (not identity.startswith("/") or not candidate.startswith("/")):
+            return True
+    return False
+
+
+def _runtime_artifact_evidence_path(item: dict[str, object]) -> str:
+    path = str(item.get("path") or item.get("artifact_id") or "").strip()
+    if path:
+        return path
+    target = item.get("target") if isinstance(item.get("target"), dict) else {}
+    path = str(target.get("path") or "").strip()
+    if path:
+        return path
+    return ""
 
 
 def _should_closeout_for_terminal_failure_reaction(
@@ -3224,6 +3493,15 @@ def _merge_hard_runtime_frontier_state(
     if _write_evidence_count(tool_results) > 0:
         merged.pop("first_write_frontier_stall", None)
 
+    passed_runtime_artifacts = _runtime_artifact_any_passed_path_identities(tool_results)
+    latest_passed_runtime_artifacts = _runtime_artifact_latest_passed_path_identities(tool_results)
+    if passed_runtime_artifacts:
+        _clear_resolved_runtime_artifact_blockers(
+            merged,
+            passed_artifact_identities=passed_runtime_artifacts,
+            latest_passed_artifact_identities=latest_passed_runtime_artifacts,
+        )
+
     merged["schema_version"] = _HARD_RUNTIME_FRONTIER_SCHEMA_VERSION
     status = str(merged.get("status") or "active").strip().lower()
     merged["status"] = status if status in {"active", "blocked", "resolved"} else "active"
@@ -3250,6 +3528,7 @@ def _compact_hard_runtime_frontier_state(value: object) -> dict[str, object]:
         "runtime_artifact_contract_mismatch",
         "next_verifier_shaped_command",
         "first_write_frontier_stall",
+        "runtime_artifact_failure_plateau",
     ):
         if key in value:
             compact[key] = _frontier_compact_value(value[key], key=key)

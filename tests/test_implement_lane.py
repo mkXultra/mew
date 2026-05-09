@@ -14082,6 +14082,539 @@ def test_implement_v2_frontier_prefers_structured_missing_runtime_artifact(tmp_p
     assert "producing substep" in runtime_failure["required_next_probe"]
 
 
+def test_implement_v2_blocks_repeated_runtime_artifact_failure_plateau(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.error('initial missing frame'); process.exit(1);\n", encoding="utf-8")
+    calls = {"count": 0}
+
+    def fake_model(*_args, **_kwargs):
+        calls["count"] += 1
+        attempt = calls["count"]
+        return {
+            "summary": f"attempt {attempt} patches and verifies the runtime artifact",
+            "tool_calls": [
+                {
+                    "id": f"write-vm-{attempt}",
+                    "name": "write_file",
+                    "arguments": {
+                        "path": "vm.js",
+                        "content": f"console.error('NO_FRAME attempt {attempt}'); process.exit(1);\\n",
+                    },
+                },
+                {
+                    "id": f"verify-frame-{attempt}",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": f"contract:verify-frame-{attempt}",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue", "summary": "repair and verify again"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Implement a runtime interpreter so verifier writes frame.bmp.",
+                "max_wall_seconds": 600,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+                "runtime_artifact_failure_plateau_threshold": 3,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=10,
+    )
+
+    plateau = result.updated_lane_state["lane_hard_runtime_frontier"]["runtime_artifact_failure_plateau"]
+
+    assert calls["count"] == 3
+    assert result.status == "blocked"
+    assert "runtime artifact failure plateau" in result.user_visible_summary
+    assert result.updated_lane_state["lane_hard_runtime_frontier"]["status"] == "blocked"
+    assert plateau["failure_class"] == "runtime_artifact_failure_plateau"
+    assert plateau["repeat_count"] == 3
+    assert plateau["artifact_path"].endswith("frame.bmp")
+    assert result.metrics["runtime_artifact_failure_plateau"]["repeat_count"] == 3
+
+
+def test_implement_v2_runtime_artifact_failure_plateau_resets_after_passing_artifact(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "first verifier misses runtime artifact",
+            "tool_calls": [
+                {
+                    "id": "verify-frame-1",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:verify-frame-1",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "repair artifact path"},
+        },
+        {
+            "summary": "second verifier misses runtime artifact",
+            "tool_calls": [
+                {
+                    "id": "verify-frame-2",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:verify-frame-2",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue", "summary": "repair artifact path"},
+        },
+        {
+            "summary": "third same-shape precheck is followed by a passing verifier",
+            "tool_calls": [
+                {
+                    "id": "verify-frame-3-precheck",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:verify-frame-3-precheck",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                },
+                {
+                    "id": "create-frame",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": f"{shlex.quote(sys.executable)} -c \"from pathlib import Path; Path('frame.bmp').write_bytes(b'BM')\"",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                    },
+                },
+                {
+                    "id": "verify-frame-3-pass",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:verify-frame-3-pass",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "stop after passing artifact proof"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Implement a runtime interpreter so verifier writes frame.bmp.",
+                "max_wall_seconds": 600,
+            },
+            persisted_lane_state={
+                "lane_hard_runtime_frontier": {
+                    "status": "blocked",
+                    "final_artifact": {"path": "frame.bmp", "kind": "file"},
+                    "latest_runtime_failure": {
+                        "failure_class": "runtime_artifact_missing",
+                        "failure_kind": "missing_artifact",
+                        "failure_summary": "stale runtime artifact miss",
+                    },
+                    "runtime_artifact_failure_plateau": {
+                        "failure_class": "runtime_artifact_failure_plateau",
+                        "artifact_path": "frame.bmp",
+                        "repeat_count": 3,
+                    },
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+                "runtime_artifact_failure_plateau_threshold": 3,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=10,
+    )
+
+    assert result.metrics["runtime_artifact_failure_plateau"] == {}
+    assert "runtime_artifact_failure_plateau" not in result.updated_lane_state["lane_hard_runtime_frontier"]
+    assert "latest_runtime_failure" not in result.updated_lane_state["lane_hard_runtime_frontier"]
+    assert result.updated_lane_state["lane_hard_runtime_frontier"]["status"] != "blocked"
+
+
+def test_implement_v2_runtime_artifact_failure_plateau_keeps_later_missing_after_earlier_pass(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "first verifier passes artifact",
+            "tool_calls": [
+                {
+                    "id": "create-frame",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": f"{shlex.quote(sys.executable)} -c \"from pathlib import Path; Path('frame.bmp').write_bytes(b'BM')\"",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                    },
+                },
+                {
+                    "id": "verify-frame-pass",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:verify-frame-pass",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue", "summary": "later regression check"},
+        },
+        {
+            "summary": "later verifier misses the same artifact",
+            "tool_calls": [
+                {
+                    "id": "delete-frame",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "rm -f frame.bmp",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                    },
+                },
+                {
+                    "id": "verify-frame-missing",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "id": "contract:verify-frame-missing",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "any"},
+                            "expected_artifacts": [
+                                {
+                                    "id": "frame",
+                                    "kind": "file",
+                                    "path": "frame.bmp",
+                                    "checks": [{"type": "exists", "severity": "blocking"}],
+                                }
+                            ],
+                        },
+                    },
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "later artifact regression is still unresolved"},
+        },
+        {
+            "summary": "stop after recording later artifact regression",
+            "finish": {"outcome": "blocked", "summary": "later artifact regression is still unresolved"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Implement a runtime interpreter so verifier writes frame.bmp.",
+                "max_wall_seconds": 600,
+            },
+            persisted_lane_state={
+                "lane_hard_runtime_frontier": {
+                    "status": "blocked",
+                    "final_artifact": {"path": "frame.bmp", "kind": "file"},
+                    "runtime_artifact_failure_plateau": {
+                        "failure_class": "runtime_artifact_failure_plateau",
+                        "artifact_path": "frame.bmp",
+                        "repeat_count": 3,
+                    },
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+                "runtime_artifact_failure_plateau_threshold": 3,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=10,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert "runtime_artifact_failure_plateau" not in frontier
+    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_artifact_missing"
+
+
+def test_implement_v2_runtime_artifact_failure_plateau_clears_stale_but_keeps_same_turn_later_missing(
+    tmp_path,
+) -> None:
+    def frame_contract(contract_id: str) -> dict[str, object]:
+        return {
+            "id": contract_id,
+            "role": "runtime",
+            "stage": "verification",
+            "purpose": "verification",
+            "proof_role": "verifier",
+            "acceptance_kind": "external_verifier",
+            "expected_exit": {"mode": "any"},
+            "expected_artifacts": [
+                {
+                    "id": "frame",
+                    "kind": "file",
+                    "path": "frame.bmp",
+                    "checks": [{"type": "exists", "severity": "blocking"}],
+                }
+            ],
+        }
+
+    def fake_model(*_args, **_kwargs):
+        return {
+            "summary": "same turn passes artifact then regresses it",
+            "tool_calls": [
+                {
+                    "id": "create-frame",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": f"{shlex.quote(sys.executable)} -c \"from pathlib import Path; Path('frame.bmp').write_bytes(b'BM')\"",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                    },
+                },
+                {
+                    "id": "verify-frame-pass",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": frame_contract("contract:verify-frame-pass"),
+                    },
+                },
+                {
+                    "id": "delete-frame",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "rm -f frame.bmp",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                    },
+                },
+                {
+                    "id": "verify-frame-missing",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": frame_contract("contract:verify-frame-missing"),
+                    },
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "later artifact regression is still unresolved"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Implement a runtime interpreter so verifier writes frame.bmp.",
+                "max_wall_seconds": 600,
+            },
+            persisted_lane_state={
+                "lane_hard_runtime_frontier": {
+                    "status": "blocked",
+                    "final_artifact": {"path": "frame.bmp", "kind": "file"},
+                    "runtime_artifact_failure_plateau": {
+                        "failure_class": "runtime_artifact_failure_plateau",
+                        "artifact_path": "frame.bmp",
+                        "repeat_count": 3,
+                    },
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+                "runtime_artifact_failure_plateau_threshold": 3,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+
+    assert "runtime_artifact_failure_plateau" not in frontier
+    assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_artifact_missing"
+
+
 def test_implement_v2_frontier_retains_source_output_contract_over_model_artifact(tmp_path) -> None:
     source_output = tmp_path / "expected-output.dat"
     model_artifact = tmp_path / "generated.ppm"
