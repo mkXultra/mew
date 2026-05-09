@@ -10538,18 +10538,17 @@ def test_implement_v2_prompt_history_keeps_only_latest_same_family_failure() -> 
     ]
 
     rendered = json.loads(_render_prompt_history_json(prompt_history))
-    first_item = rendered[0]["tool_results"][0]["content"]["content"][0]
+    first_result = rendered[0]["tool_results"][0]
     second_item = rendered[1]["tool_results"][0]["content"]["content"][0]
 
-    assert first_item["provider_history_projection"] == "terminal_result_replaced_by_latest_failure_v1"
-    assert first_item["latest_failure_family"] == "runtime_artifact_missing:missing_artifact:artifact:frame:/tmp/frame.bmp"
-    assert first_item["output_ref"] == "out-1"
-    assert "latest_failure" not in first_item
+    assert rendered[0]["history_compacted"] is True
+    assert "content" not in first_result
+    assert "latest_failures" not in first_result
     assert second_item["latest_failure"]["summary"] == "new artifact miss"
     assert prompt_history[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "old artifact miss"
 
 
-def test_implement_v2_prompt_history_keeps_only_latest_two_full_turns() -> None:
+def test_implement_v2_prompt_history_keeps_only_latest_turn_full() -> None:
     prompt_history = [
         {
             "turn": turn,
@@ -10587,7 +10586,7 @@ def test_implement_v2_prompt_history_keeps_only_latest_two_full_turns() -> None:
     rendered = json.loads(_render_prompt_history_json(prompt_history))
 
     assert [entry["turn"] for entry in rendered] == [1, 2, 3, 4, 5]
-    assert [entry.get("history_compacted", False) for entry in rendered] == [True, True, True, False, False]
+    assert [entry.get("history_compacted", False) for entry in rendered] == [True, True, True, True, False]
     assert rendered[0]["tool_results"][0]["content_refs"] == ["out-1"]
     assert "content" not in rendered[0]["tool_results"][0]
     assert rendered[-1]["tool_results"][0]["content"]["content"][0]["stdout_tail"] == "probe output"
@@ -10653,7 +10652,8 @@ def test_implement_v2_prompt_history_keeps_different_artifact_failures() -> None
 
     rendered = json.loads(_render_prompt_history_json(prompt_history))
 
-    assert rendered[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "frame miss"
+    assert rendered[0]["history_compacted"] is True
+    assert rendered[0]["tool_results"][0]["latest_failures"][0]["summary"] == "frame miss"
     assert rendered[1]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "log miss"
 
 

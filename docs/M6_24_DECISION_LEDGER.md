@@ -1126,3 +1126,26 @@ an earlier long line; after the fix and regression test, the same session
 returned `STATUS: APPROVE`. Next step: run one 10 minute same-shape diagnostic
 for `make-mips-interpreter` and compare prompt bytes/model turns before
 `speed_1` / `proof_5`.
+
+Post-first-write verifier-gate diagnostic 2026-05-09 JST:
+
+The diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260509-193553` still scored
+`0/1`, but the intended first-write verifier gate worked. The prior broad
+probe/full-rewrite detour after the first source mutation disappeared: mew
+wrote `/app/vm.js` and ran `node vm.js` in the same turn. First verifier time
+improved from roughly `527s` in `20260509-190218` to roughly `262s`.
+
+The remaining blocker moved to the repair loop. The run spent late turns on
+exact edit/patch repair, no-output verifier handoff, and eventually
+`model_timeout`. It also accumulated `787k` prompt chars and `537s` model
+elapsed across `17` model turns. This is generic hot-path weight, not a
+MIPS-specific solver issue.
+
+Decision: continue Hot-Path Collapse by making normal provider history closer
+to a Codex-like latest-result loop. Keep only the latest one turn as full
+provider-visible hot-path history; compact all older turns to summaries, refs,
+and latest-failure digests. Full history, proof artifacts, replay state, typed
+evidence, and resident sidecar state remain the source of truth. After this
+repair, run focused tests, codex-ultra review, and one more 10 minute same-shape
+diagnostic before `speed_1` / `proof_5`.
