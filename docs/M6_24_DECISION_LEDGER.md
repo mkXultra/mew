@@ -1289,3 +1289,37 @@ contract and frontier-state rehydration; after the regression tests and fixes
 it returned `STATUS: APPROVE`. Next step: run exactly one same-shape 10 minute
 diagnostic for `make-mips-interpreter` before considering `speed_1` /
 `proof_5`.
+
+Source-output surface prewrite diagnostic 2026-05-10 JST:
+
+The same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260510-052052` scored `0/1` but
+confirmed the out-of-root artifact preflight blocker was gone. The step shape
+improved from the previous `044554` run: prompt chars dropped from about
+`818k` to `274k`, model turns from `26` to `9`, first edit from `260s` to
+`198s`, and HOT_PATH fastcheck passed. The new generic blocker is
+`SourceOutputSurfacePrewriteFalseNegative`: the model read the relevant
+render/output source surface (`DG_DrawFrame`, `SDL_UpdateTexture`,
+`SDL_RenderPresent`) but no source-declared artifact path existed, so the
+prewrite gate kept blocking first source mutation and repeatedly asked to
+`read_file doomgeneric_sdl.c` even though the same source file had already
+been read via its full path. The external verifier later revealed the concrete
+artifact `/tmp/frame.bmp`; the task instruction itself only says frames should
+be saved, so prewrite must not require a source path that the source does not
+declare.
+
+Decision: do not add a MIPS/Doom/`/tmp/frame.bmp` special case. Treat an
+actual `read_file` of source that exposes a render/output surface as enough
+prewrite coverage to allow first source mutation, while still not promoting it
+to `final_artifact` or an `execution_contract.expected_artifacts` path. Also
+avoid stale suggested probes by considering an already-read full path to satisfy
+a shorter source candidate with the same suffix. This preserves artifact-path
+safety while removing an artificial first-write stall. Local validation passed:
+full `tests/test_implement_lane.py` (`389 passed`), focused source-output
+subset (`13 passed`), scoped ruff, `git diff --check`, and HOT_PATH fastcheck
+on the `052052` artifact. codex-ultra review session
+`019e0e78-e2c5-7bf0-840e-634afb0ef7f4` first requested tighter source-like
+path and suffix-match boundaries; after negative regression tests for docs,
+generic syscall writes, and basename-vs-full-path candidates, it returned
+`STATUS: APPROVE`. Next step: commit, then run one same-shape 10 minute
+diagnostic before `speed_1` / `proof_5`.

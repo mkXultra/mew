@@ -3979,11 +3979,11 @@ def _source_output_contract_probe_candidate_from_trace(
     prior_tool_calls: tuple[object, ...],
     prior_tool_results: tuple[ToolResultEnvelope, ...],
 ) -> dict[str, object]:
-    already_read = {
+    already_read = tuple(
         _frontier_artifact_identity(_workspace_relative_target_path(_read_call_path(call), workspace=lane_input.workspace))
         for call, result in zip(prior_tool_calls, prior_tool_results)
         if str(getattr(call, "tool_name", "") or result.tool_name or "") == "read_file" and result.status == "completed"
-    }
+    )
     candidates: list[dict[str, object]] = []
     for call, result in zip(prior_tool_calls, prior_tool_results):
         if result.status != "completed":
@@ -3998,7 +3998,7 @@ def _source_output_contract_probe_candidate_from_trace(
         for path in _source_output_probe_paths_from_payload(tool_name, payload):
             relative_path = _workspace_relative_target_path(path, workspace=lane_input.workspace)
             normalized = _frontier_artifact_identity(relative_path)
-            if not normalized or normalized in already_read:
+            if not normalized or _source_output_probe_path_was_read(normalized, already_read):
                 continue
             score = _source_output_probe_candidate_score(normalized, context_text=context_text, tool_name=tool_name)
             if score <= 0:
@@ -4015,6 +4015,22 @@ def _source_output_contract_probe_candidate_from_trace(
     if not candidates:
         return {}
     return max(candidates, key=lambda item: (int(item.get("score") or 0), -len(str(item.get("path") or ""))))
+
+
+def _source_output_probe_path_was_read(path: str, already_read: tuple[str, ...]) -> bool:
+    normalized = _frontier_artifact_identity(path)
+    if not normalized:
+        return False
+    for read_path in already_read:
+        read_normalized = _frontier_artifact_identity(read_path)
+        if not read_normalized:
+            continue
+        if (
+            normalized == read_normalized
+            or read_normalized.endswith(f"/{normalized}")
+        ):
+            return True
+    return False
 
 
 def _source_output_probe_context_text(tool_name: str, call: object, payload: dict[str, object]) -> str:
@@ -5588,6 +5604,8 @@ def _tool_result_has_source_output_contract(result: ToolResultEnvelope) -> bool:
             return True
         if _text_has_source_output_declaration(text):
             return True
+        if _source_output_label_is_source_read(source_label) and _text_has_source_output_surface(text):
+            return True
     return False
 
 
@@ -5632,6 +5650,14 @@ def _source_output_contract_search_item_text(item: object) -> str:
         if value:
             chunks.append(str(value))
     return "\n".join(chunks)
+
+
+def _source_output_label_is_source_read(source_label: str) -> bool:
+    if not source_label.startswith("read_file"):
+        return False
+    if ":" not in source_label:
+        return False
+    return _shell_path_is_source_like(source_label.split(":", 1)[1])
 
 
 def _source_output_contract_payload_items(payload: dict[str, object]) -> tuple[dict[str, object], ...]:
@@ -5699,6 +5725,25 @@ def _text_has_source_output_declaration(text: str) -> bool:
         if value and not value.startswith(("-", "$")) and not _is_verifier_scratch_artifact_id(value):
             return True
     return False
+
+
+def _text_has_source_output_surface(text: str) -> bool:
+    value = str(text or "")
+    if not value.strip():
+        return False
+    return _text_matches_any(
+        value,
+        (
+            r"\b(?:draw|render|present|display|paint|save)[A-Za-z0-9_]*\s*\(",
+            r"\b(?:SDL_UpdateTexture|SDL_RenderPresent|DG_DrawFrame|save_frame)\b",
+        ),
+    ) and _text_matches_any(
+        value,
+        (
+            r"\b(?:frame|image|screen|canvas|texture|pixel|framebuffer|surface|buffer)\b",
+            r"\b(?:RGB|RGBA|BMP|PPM|PNG|JPEG|bitmap|rendered)\b",
+        ),
+    )
 
 
 def _source_output_contract_path_is_search_location(text: str, match: re.Match[str]) -> bool:

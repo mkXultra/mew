@@ -1948,6 +1948,249 @@ def test_implement_v2_read_file_preserves_medium_source_body_for_source_output_c
     assert "source_output_contract" in readiness["covered_categories"]
 
 
+def test_implement_v2_counts_read_source_output_surface_without_artifact_path() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="read-output-surface",
+        mew_tool_call_id="mew-read-output-surface",
+        tool_name="read_file",
+        arguments={"path": "/app/doomgeneric/doomgeneric/doomgeneric_sdl.c"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "path": "/app/doomgeneric/doomgeneric/doomgeneric_sdl.c",
+                "text": (
+                    "void DG_DrawFrame(void) {\n"
+                    "  SDL_UpdateTexture(texture, NULL, DG_ScreenBuffer, DOOMGENERIC_RESX * sizeof(uint32_t));\n"
+                    "  SDL_RenderPresent(renderer);\n"
+                    "}\n"
+                ),
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+    source_contract = _source_output_contract_from_tool_results((result,), {})
+
+    assert readiness["probe_count"] == 1
+    assert "source_output_contract" in readiness["covered_categories"]
+    assert source_contract == {}
+
+
+def test_implement_v2_does_not_count_doc_output_surface_as_prewrite_coverage() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="read-readme",
+        mew_tool_call_id="mew-read-readme",
+        tool_name="read_file",
+        arguments={"path": "/app/README.md"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "path": "/app/README.md",
+                "text": "The demo calls renderFrame(buffer) to show a screen image in the browser.",
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert "source_output_contract" not in readiness["covered_categories"]
+    assert "source_output_contract" in readiness["missing_categories"]
+
+
+def test_implement_v2_does_not_count_generic_syscall_write_as_source_output_surface() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="read-syscalls",
+        mew_tool_call_id="mew-read-syscalls",
+        tool_name="read_file",
+        arguments={"path": "/app/src/syscalls.c"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "path": "/app/src/syscalls.c",
+                "text": "int sys_write(int fd, const char *buffer, int len) { return write(fd, buffer, len); }\n",
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert "source_output_contract" not in readiness["covered_categories"]
+    assert "source_output_contract" in readiness["missing_categories"]
+
+
+def test_implement_v2_does_not_reprobe_source_output_candidate_after_same_basename_read(tmp_path) -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace="/app",
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={"goal": "Implement a runtime that saves rendered frames."},
+    )
+    search_call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="search-output-surface",
+        mew_tool_call_id="mew-search-output-surface",
+        tool_name="search_text",
+        arguments={"path": "/app/doomgeneric", "query": "DG_DrawFrame|SDL|frame"},
+        turn_index=1,
+    )
+    search_result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=search_call.provider_call_id,
+        mew_tool_call_id=search_call.mew_tool_call_id,
+        tool_name=search_call.tool_name,
+        status="completed",
+        content=(
+            {
+                "matches": [
+                    "doomgeneric_sdl.c:117:void DG_DrawFrame(void) {",
+                    "doomgeneric_sdl.c:122:  SDL_RenderPresent(renderer);",
+                ],
+                "summary": "Searched /app/doomgeneric; matches=2",
+            },
+        ),
+    )
+    read_call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="read-output-surface",
+        mew_tool_call_id="mew-read-output-surface",
+        tool_name="read_file",
+        arguments={"path": "/app/doomgeneric/doomgeneric/doomgeneric_sdl.c"},
+        turn_index=2,
+    )
+    read_result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=read_call.provider_call_id,
+        mew_tool_call_id=read_call.mew_tool_call_id,
+        tool_name=read_call.tool_name,
+        status="completed",
+        content=(
+            {
+                "path": "/app/doomgeneric/doomgeneric/doomgeneric_sdl.c",
+                "text": "void DG_DrawFrame(void) { SDL_RenderPresent(renderer); }\n",
+            },
+        ),
+    )
+
+    candidate = _source_output_contract_probe_candidate_from_trace(
+        lane_input=lane_input,
+        prior_tool_calls=(search_call, read_call),
+        prior_tool_results=(search_result, read_result),
+    )
+
+    assert candidate == {}
+
+
+def test_implement_v2_keeps_longer_source_output_candidate_after_shorter_basename_read() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace="/app",
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={"goal": "Implement a runtime that saves rendered frames."},
+    )
+    read_call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="read-short",
+        mew_tool_call_id="mew-read-short",
+        tool_name="read_file",
+        arguments={"path": "doomgeneric_sdl.c"},
+        turn_index=1,
+    )
+    read_result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=read_call.provider_call_id,
+        mew_tool_call_id=read_call.mew_tool_call_id,
+        tool_name=read_call.tool_name,
+        status="completed",
+        content=({"path": "doomgeneric_sdl.c", "text": "int helper(void) { return 0; }\n"},),
+    )
+    search_call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="search-output-surface",
+        mew_tool_call_id="mew-search-output-surface",
+        tool_name="search_text",
+        arguments={"path": "/app/doomgeneric", "query": "DG_DrawFrame|SDL|frame"},
+        turn_index=2,
+    )
+    search_result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=search_call.provider_call_id,
+        mew_tool_call_id=search_call.mew_tool_call_id,
+        tool_name=search_call.tool_name,
+        status="completed",
+        content=(
+            {
+                "matches": [
+                    "/app/doomgeneric/doomgeneric/doomgeneric_sdl.c:117:void DG_DrawFrame(void) {",
+                    "/app/doomgeneric/doomgeneric/doomgeneric_sdl.c:122:  SDL_RenderPresent(renderer);",
+                ],
+                "summary": "Searched /app/doomgeneric; matches=2",
+            },
+        ),
+    )
+
+    candidate = _source_output_contract_probe_candidate_from_trace(
+        lane_input=lane_input,
+        prior_tool_calls=(read_call, search_call),
+        prior_tool_results=(read_result, search_result),
+    )
+
+    assert candidate["path"] == "doomgeneric/doomgeneric/doomgeneric_sdl.c"
+
+
 def test_implement_v2_clipped_search_preserves_source_output_contract_matches(tmp_path) -> None:
     source_dir = tmp_path / "src"
     source_dir.mkdir()
