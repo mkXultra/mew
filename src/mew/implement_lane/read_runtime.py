@@ -121,12 +121,17 @@ def _execute_read_only_payload(
     if tool == "search_text":
         query = args.get("query")
         include_pattern = args.get("pattern")
+        regex = bool(args.get("regex"))
         if (query is None or not str(query).strip()) and include_pattern is not None:
             # Some provider turns use ``pattern`` as the search term because the
             # prompt surface names glob and search arguments similarly. Treat a
-            # lone pattern as the query instead of spending a recovery turn.
+            # lone pattern as the query instead of spending a recovery turn. If
+            # it looks like a content regex (for example ``foo|bar``), preserve
+            # that intent instead of running a fixed-string search for the
+            # whole expression.
             query = include_pattern
             include_pattern = None
+            regex = regex or _search_query_looks_regex(query)
         payload = search_text(
             query or "",
             _workspace_path(args.get("path") or ".", workspace),
@@ -134,6 +139,7 @@ def _execute_read_only_payload(
             max_matches=_bounded_int(args.get("max_matches"), 50, 1, 200),
             context_lines=_bounded_int(args.get("context_lines"), 3, 0, 5),
             pattern=include_pattern,
+            regex=regex,
         )
         payload["summary"] = summarize_read_result("search_text", payload)
         return payload
@@ -381,6 +387,13 @@ def _bounded_int(value: object, default: int, minimum: int, maximum: int) -> int
     except (TypeError, ValueError):
         return default
     return max(minimum, min(number, maximum))
+
+
+def _search_query_looks_regex(value: object) -> bool:
+    text = str(value or "")
+    if not text:
+        return False
+    return any(token in text for token in ("|", ".*", "\\b", "[", "]", "(", ")", "+", "?"))
 
 
 def _error_result(call: ToolCallEnvelope, *, status: str, reason: str) -> ToolResultEnvelope:

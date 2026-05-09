@@ -47,6 +47,7 @@ from mew.implement_lane.v2_runtime import (
     _finish_gate_history,
     _first_write_probe_threshold,
     _first_write_readiness_from_trace,
+    _frontier_evidence_registry,
     _frontier_failure_payload,
     _hard_runtime_frontier_progress_signature,
     _hard_runtime_progress_continuation_signature,
@@ -59,6 +60,7 @@ from mew.implement_lane.v2_runtime import (
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
     _shell_command_may_mutate_source_tree,
+    _source_output_contract_from_tool_results,
     _source_mutation_roots,
     _terminal_failure_reaction_turn_limit,
     _typed_finish_evidence_refs,
@@ -7767,6 +7769,37 @@ def test_implement_v2_search_text_treats_lone_pattern_as_query_alias(tmp_path) -
     assert any("DG_DrawFrame" in match for match in tool_result["content"][0]["matches"])
 
 
+def test_implement_v2_search_text_treats_lone_regex_pattern_as_query_alias(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.c").write_text(
+        "void DG_DrawFrame(void) {}\nFILE *fp = fopen(\"/tmp/frame.bmp\", \"wb\");\nfwrite(buf, 1, n, fp);\n",
+        encoding="utf-8",
+    )
+
+    result = run_fake_read_only_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "read_only"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "search_text",
+                "arguments": {"path": ".", "pattern": "DG_|fopen|fwrite"},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "regex search evidence ready"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["regex"] is True
+    assert any("DG_DrawFrame" in match for match in payload["matches"])
+    assert any("/tmp/frame.bmp" in match for match in payload["matches"])
+
+
 def test_implement_v2_glob_accepts_absolute_glob_in_path_argument(tmp_path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
@@ -12454,6 +12487,129 @@ def test_implement_v2_frontier_retains_source_output_contract_over_model_artifac
     assert frontier["runtime_artifact_contract_mismatch"]["failure_class"] == "runtime_artifact_contract_mismatch"
     assert frontier["runtime_artifact_contract_mismatch"]["model_declared_path"] == str(model_artifact)
     assert str(source_output) in frontier["runtime_artifact_contract_mismatch"]["required_next_action"]
+
+
+def test_implement_v2_frontier_reads_source_output_contract_from_nested_tool_payload(tmp_path) -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="implement_v2:ws-1:task-1:full",
+        provider_call_id="read-runtime-source",
+        mew_tool_call_id="mew-read-runtime-source",
+        tool_name="read_file",
+        status="completed",
+        content=(
+            {
+                "mew_status": "completed",
+                "content": [
+                    {
+                        "path": "src/runtime.c",
+                        "text": 'void render(void) { FILE *fp = fopen("/tmp/frame.bmp", "wb"); fwrite(buf, 1, n, fp); }',
+                    }
+                ],
+            },
+        ),
+        evidence_refs=("implement-v2-read://read-runtime-source/evidence",),
+    )
+    registry = _frontier_evidence_registry((result,), artifact_namespace="proof-artifacts/test")
+
+    contract = _source_output_contract_from_tool_results((result,), registry)
+
+    assert contract["path"] == "/tmp/frame.bmp"
+    assert contract["source_label"] == "read_file:src/runtime.c"
+    assert contract["confidence"] == "high"
+
+
+def test_implement_v2_frontier_does_not_promote_nested_verifier_output_as_source_contract() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="implement_v2:ws-1:task-1:full",
+        provider_call_id="runtime-verifier",
+        mew_tool_call_id="mew-runtime-verifier",
+        tool_name="run_command",
+        status="failed",
+        content=(
+            {
+                "mew_status": "failed",
+                "content": [
+                    {
+                        "command": "node vm.js",
+                        "stdout": "saved /tmp/frame.bmp\n",
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                        },
+                    }
+                ],
+            },
+        ),
+    )
+    registry = _frontier_evidence_registry((result,), artifact_namespace="proof-artifacts/test")
+
+    contract = _source_output_contract_from_tool_results((result,), registry)
+
+    assert contract == {}
+
+
+def test_implement_v2_frontier_ignores_broad_existing_directory_runtime_artifact(tmp_path) -> None:
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Build provided runtime source for an interpreter so node vm.js writes /tmp/frame.bmp."
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=lambda *_args, **_kwargs: {
+            "summary": "run verifier with broad directory artifact",
+            "tool_calls": [
+                {
+                    "id": "broad-directory-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "true",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "execution_contract": {
+                            "role": "runtime",
+                            "stage": "verify",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": 0,
+                            "expected_artifacts": [
+                                {
+                                    "path": str(tmp_path),
+                                    "kind": "directory",
+                                    "freshness": "exists_before_or_after",
+                                    "checks": [{"type": "exists"}],
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "blocked", "summary": "needs concrete artifact"},
+        },
+        max_turns=1,
+    )
+
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier", {})
+
+    assert frontier["schema_version"] == 1
+    assert "final_artifact" not in frontier
 
 
 def test_implement_v2_frontier_diagnostic_stream_miss_does_not_replace_runtime_failure(tmp_path) -> None:

@@ -4475,6 +4475,8 @@ def _frontier_expected_artifact_from_contract(
             "path": _frontier_clip_text(raw_artifact, limit=400),
             "freshness": "must be created by final verifier-shaped command",
         }
+    if _frontier_artifact_is_broad_existing_directory(artifact):
+        return {}
     return _drop_empty_frontier_values(artifact)
 
 
@@ -4502,6 +4504,16 @@ def _frontier_artifact_from_evidence(artifact: dict[str, object]) -> dict[str, o
             "source": _frontier_clip_text(artifact.get("source"), limit=160),
         }
     )
+
+
+def _frontier_artifact_is_broad_existing_directory(artifact: dict[str, object]) -> bool:
+    kind = str(artifact.get("kind") or "").strip().casefold()
+    if kind != "directory":
+        return False
+    freshness = str(artifact.get("freshness") or "").strip().casefold()
+    if freshness and freshness not in {"exists_before_or_after", "pre_existing", "already_exists"}:
+        return False
+    return True
 
 
 def _first_contract_list_item(value: object) -> object:
@@ -4661,28 +4673,53 @@ def _source_output_contract_from_tool_results(
 def _source_output_contract_texts(tool_name: str, payload: dict[str, object]) -> tuple[tuple[str, str], ...]:
     texts: list[tuple[str, str]] = []
     if tool_name == "read_file":
-        path = _frontier_clip_text(payload.get("path"), limit=240)
-        label = f"read_file:{path}" if path else "read_file"
-        for key in ("text", "summary"):
-            value = str(payload.get(key) or "")
-            if value.strip():
-                texts.append((value, label))
+        for nested in _source_output_contract_payload_items(payload):
+            path = _frontier_clip_text(nested.get("path"), limit=240)
+            label = f"read_file:{path}" if path else "read_file"
+            for key in ("text", "summary"):
+                value = str(nested.get(key) or "")
+                if value.strip():
+                    texts.append((value, label))
         return tuple(texts)
     if tool_name == "search_text":
-        for key in ("matches", "text", "summary"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                serialized = "\n".join(str(item) for item in value)
-            else:
-                serialized = str(value or "")
-            if serialized.strip():
-                texts.append((serialized, "search_text"))
+        for nested in _source_output_contract_payload_items(payload):
+            for key in ("matches", "snippets", "text", "summary"):
+                value = nested.get(key)
+                if isinstance(value, list):
+                    serialized = "\n".join(str(item) for item in value)
+                else:
+                    serialized = str(value or "")
+                if serialized.strip():
+                    texts.append((serialized, "search_text"))
         return tuple(texts)
-    for key in ("stdout", "stdout_tail", "stderr", "stderr_tail", "summary"):
-        value = str(payload.get(key) or "")
-        if value.strip():
-            texts.append((value, tool_name))
+    for nested in _source_output_contract_payload_items(payload):
+        for key in ("stdout", "stdout_tail", "stderr", "stderr_tail", "summary"):
+            value = str(nested.get(key) or "")
+            if value.strip():
+                texts.append((value, tool_name))
     return tuple(texts)
+
+
+def _source_output_contract_payload_items(payload: dict[str, object]) -> tuple[dict[str, object], ...]:
+    items = []
+    if not _source_output_contract_payload_item_is_verifier_like(payload):
+        items.append(payload)
+    nested = payload.get("content")
+    if isinstance(nested, list):
+        items.extend(
+            item
+            for item in nested
+            if isinstance(item, dict) and not _source_output_contract_payload_item_is_verifier_like(item)
+        )
+    return tuple(items)
+
+
+def _source_output_contract_payload_item_is_verifier_like(payload: dict[str, object]) -> bool:
+    raw_contract = payload.get("execution_contract")
+    normalized_contract = payload.get("execution_contract_normalized")
+    if not isinstance(raw_contract, dict) and not isinstance(normalized_contract, dict):
+        return False
+    return bool(_execution_contract_is_verifier_like(_payload_execution_contract(payload)))
 
 
 def _source_output_contract_candidates(text: str, *, source_label: str) -> tuple[dict[str, object], ...]:
