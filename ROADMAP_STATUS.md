@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-07
+Last updated: 2026-05-09
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -347,6 +347,21 @@ reentry that assumes HOT_PATH_COLLAPSE is done as drift.
 | Phase 4 patch/edit as mutation boundary | partial | Source mutation, first-write readiness, and post-write verifier gates exist. Shell mutation, source-root tracking, and tool-result projection have still produced fixes, so this remains open until replay/tool-lab/fastcheck stop finding boundary bugs. |
 | Phase 5 finish cited evidence | partial | Typed-evidence acceptance and visual/runtime finish gates are substantially implemented. Legacy/string gates and sidecar merge behavior still act as guardrails; do not remove or close until typed evidence proves equivalent or stricter coverage. |
 | Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and was reviewed, but current saved artifacts can still fail static phase checks. The close path is: focused UT -> replay/dogfood/emulator -> HOT_PATH fastcheck -> one same-shape 10min step-shape -> reference-step comparison. |
+
+Phase implementation order:
+
+1. Close Phase 2 first. `latest_actionable_failure_shape` is the active red
+   contract, and unstable latest-failure projection makes every later model
+   next-action check noisy.
+2. Harden Phase 0 and Phase 6 as the operational gate while Phase 2 is being
+   repaired. The fastcheck must become the detector for static phase-contract
+   bugs before another `step-check-10min`.
+3. Close Phase 1, Phase 4, and Phase 5 in the order exposed by fastcheck,
+   replay, dogfood, or emulator evidence. Do not add new normal-prompt
+   frontier/todo/evidence structures as a shortcut.
+4. Close Phase 3 after Phase 2 is stable. Sidecar-inferred execution contracts
+   should not be expanded while latest-actionable-failure projection is still
+   unreliable.
 
 Immediate next action for this phase: use the new fastcheck on the current
 `make-mips-interpreter` artifact, reduce any red static check to a focused
