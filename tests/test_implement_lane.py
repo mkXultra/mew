@@ -1863,6 +1863,55 @@ def test_implement_v2_read_file_preserves_medium_source_body_for_source_output_c
     assert "source_output_contract" in readiness["covered_categories"]
 
 
+def test_implement_v2_clipped_search_preserves_source_output_contract_matches(tmp_path) -> None:
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    for index in range(30):
+        (source_dir / f"frame_output_{index:02d}.c").write_text(
+            "\n".join(
+                [
+                    "void render_frame(void) {",
+                    '    FILE *fp = fopen("/tmp/frame.bmp", "wb");',
+                    "    fwrite(framebuffer, 1, frame_bytes, fp);",
+                    "}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+    call = ToolCallEnvelope(
+        lane_attempt_id="implement_v2:ws-1:task-1:full",
+        provider="test",
+        provider_call_id="probe-output-contract",
+        mew_tool_call_id="mew-probe-output-contract",
+        tool_name="search_text",
+        arguments={"path": ".", "pattern": "fopen|fwrite|frame"},
+        turn_index=1,
+    )
+
+    result = read_runtime.execute_read_only_tool_call(
+        call,
+        workspace=tmp_path,
+        allowed_roots=(str(tmp_path),),
+        result_max_chars=1_200,
+    )
+    payload = result.content[0]
+    assert isinstance(payload, dict)
+    assert payload.get("mew_content_truncated") is True
+    assert payload.get("matches")
+    assert int(payload.get("matches_original_count") or 0) > len(payload.get("matches") or [])
+    assert any("/tmp/frame.bmp" in str(match) for match in payload.get("matches") or [])
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "source_output_contract" in readiness["covered_categories"]
+
+
 def test_implement_v2_does_not_count_broad_source_search_as_output_contract() -> None:
     lane_attempt_id = "implement_v2:ws-1:task-1:full"
     calls = (

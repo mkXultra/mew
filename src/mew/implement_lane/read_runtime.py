@@ -417,6 +417,11 @@ def _clip_payload(payload: dict[str, object], *, max_chars: int) -> tuple[dict[s
     text = json.dumps(payload, ensure_ascii=True, sort_keys=True)
     if len(text) <= max_chars:
         return dict(payload), False
+    if _payload_is_search_text_result(payload):
+        compacted_search = _compact_search_text_payload(payload, max_chars=max_chars)
+        text = json.dumps(compacted_search, ensure_ascii=True, sort_keys=True)
+        if len(text) <= max_chars:
+            return compacted_search, True
     clipped = dict(payload)
     clipped["mew_content_truncated"] = True
     for key in ("text", "stdout", "stderr", "summary"):
@@ -433,6 +438,97 @@ def _clip_payload(payload: dict[str, object], *, max_chars: int) -> tuple[dict[s
             "truncated": True,
         }
     return clipped, True
+
+
+def _payload_is_search_text_result(payload: dict[str, object]) -> bool:
+    return "query" in payload and ("matches" in payload or "snippets" in payload)
+
+
+def _compact_search_text_payload(payload: dict[str, object], *, max_chars: int) -> dict[str, object]:
+    """Keep actionable search hits when a large read result exceeds budget.
+
+    The generic final clip path intentionally preserves only a one-line summary,
+    but implement_v2's prewrite gates need at least a few source locations and
+    snippets to turn a broad search into the next targeted read. This compactor
+    keeps the result bounded while retaining the top match paths.
+    """
+
+    matches = [str(item) for item in payload.get("matches") or () if str(item or "").strip()]
+    snippets = [
+        _compact_search_snippet(item)
+        for item in payload.get("snippets") or ()
+        if isinstance(item, dict) and item
+    ]
+    base = {
+        key: payload.get(key)
+        for key in (
+            "path",
+            "query",
+            "pattern",
+            "patterns",
+            "regex",
+            "context_lines",
+            "truncated",
+            "skipped_sensitive",
+            "engine",
+            "original_query",
+            "summary",
+            "summary_body_omitted",
+        )
+        if key in payload
+    }
+    base["mew_content_truncated"] = True
+    base["matches_original_count"] = len(matches)
+    base["snippets_original_count"] = len(snippets)
+
+    for match_limit, snippet_limit in ((30, 8), (20, 5), (12, 3), (8, 2), (4, 1), (2, 0), (0, 0)):
+        candidate = dict(base)
+        if match_limit:
+            candidate["matches"] = [_clip_search_match(item) for item in matches[:match_limit]]
+        if snippet_limit:
+            candidate["snippets"] = snippets[:snippet_limit]
+        omitted_matches = max(0, len(matches) - match_limit)
+        omitted_snippets = max(0, len(snippets) - snippet_limit)
+        if omitted_matches:
+            candidate["matches_omitted"] = omitted_matches
+        if omitted_snippets:
+            candidate["snippets_omitted"] = omitted_snippets
+        if len(json.dumps(candidate, ensure_ascii=True, sort_keys=True)) <= max_chars:
+            return candidate
+
+    fallback = dict(base)
+    fallback["summary"] = str(payload.get("summary") or "")[: min(1_000, max_chars)]
+    fallback["truncated"] = True
+    return fallback
+
+
+def _compact_search_snippet(snippet: dict[str, object]) -> dict[str, object]:
+    compacted: dict[str, object] = {}
+    for key in ("path", "line", "start_line", "end_line"):
+        if key in snippet:
+            compacted[key] = snippet.get(key)
+    lines = []
+    for line in (snippet.get("lines") or [])[:5]:
+        if not isinstance(line, dict):
+            continue
+        item = {
+            key: line.get(key)
+            for key in ("line", "match")
+            if key in line
+        }
+        text = str(line.get("text") or "")
+        if text:
+            item["text"] = text[:240]
+        lines.append(item)
+    if lines:
+        compacted["lines"] = lines
+    return compacted
+
+
+def _clip_search_match(match: str) -> str:
+    if len(match) <= 500:
+        return match
+    return f"{match[:500]}\n... match truncated ..."
 
 
 def _dedupe_summary_body(payload: dict[str, object]) -> dict[str, object]:
