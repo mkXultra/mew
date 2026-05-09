@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -748,7 +749,7 @@ def _generic_runtime_failure_summaries(projected_history: object) -> list[dict[s
         for latest_failure in _iter_latest_failure_dicts(value):
             failure_class = str(latest_failure.get("class") or latest_failure.get("failure_class") or "").strip()
             summary = str(latest_failure.get("summary") or "").strip().lower()
-            if failure_class == "runtime_failure" and summary in {"exit code 1", "command failed", "failed"}:
+            if failure_class == "runtime_failure" and _is_generic_runtime_failure_summary(summary):
                 failures.append(
                     {
                         "class": failure_class,
@@ -757,6 +758,16 @@ def _generic_runtime_failure_summaries(projected_history: object) -> list[dict[s
                     }
                 )
     return failures
+
+
+def _is_generic_runtime_failure_summary(summary: str) -> bool:
+    text = summary.strip().lower()
+    return bool(
+        text in {"exit code 1", "command failed", "failed", "killed", "interrupted"}
+        or re.fullmatch(r"exit code \d+", text)
+        or re.fullmatch(r"tool run .* ended with killed", text)
+        or re.fullmatch(r"tool run .* ended with interrupted", text)
+    )
 
 
 def _iter_latest_failure_dicts(value: dict[str, object]) -> Iterable[dict[str, object]]:

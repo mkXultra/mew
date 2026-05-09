@@ -11682,6 +11682,135 @@ def test_implement_v2_provider_history_uses_full_stderr_when_tail_is_only_stack_
     assert latest_failure["summary"] == "RuntimeError: root cause before long stack"
 
 
+def test_implement_v2_provider_history_skips_banner_before_runtime_diagnostic() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="call-banner-before-error",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr_tail": (
+                    "MIPS ELF entry=0x00400110 endian=le DG_DrawFrame=0x004395e4\n"
+                    "Error: unsupported special fn 52 ins 0x00e001f4 at 0x00439e3c\n"
+                    "    at step (/app/vm.js:306:24)\n"
+                ),
+                "output_ref": "cmd/output",
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "exit code 1",
+                },
+            },
+        ),
+        content_refs=("cmd/output",),
+        evidence_refs=("evidence/runtime",),
+    )
+
+    history = _provider_visible_tool_result_for_history(result)
+    latest_failure = history["content"]["content"][0]["latest_failure"]
+
+    assert latest_failure["summary"] == "Error: unsupported special fn 52 ins 0x00e001f4 at 0x00439e3c"
+
+
+def test_implement_v2_provider_history_uses_artifact_miss_for_killed_runtime_verifier() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="call-killed-runtime",
+        mew_tool_call_id="tool-1",
+        tool_name="run_tests",
+        status="interrupted",
+        is_error=True,
+        content=(
+            {
+                "command": "MAX_FRAMES=1 node vm.js",
+                "status": "killed",
+                "stderr_tail": "MIPS ELF entry=0x00400110 endian=le\n",
+                "reason": "verifier auto-poll budget exhausted before terminal evidence",
+                "artifact_evidence": [
+                    {
+                        "artifact_id": "/app/frames/frame_000000.ppm",
+                        "path": "/app/frames/frame_000000.ppm",
+                        "kind": "file",
+                        "status": "failed",
+                        "blocking": True,
+                    }
+                ],
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "killed",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "tool run tool-run-record:call-killed-runtime:2:interrupted ended with killed",
+                },
+            },
+        ),
+        content_refs=("cmd/output",),
+        evidence_refs=("evidence/runtime",),
+    )
+
+    history = _provider_visible_tool_result_for_history(result)
+    latest_failure = history["content"]["content"][0]["latest_failure"]
+
+    assert latest_failure["class"] == "runtime_failure"
+    assert latest_failure["summary"] == "required artifact missing: /app/frames/frame_000000.ppm"
+    assert latest_failure["path"] == "/app/frames/frame_000000.ppm"
+    assert "bounded instrumentation" in latest_failure["required_next_action"]
+
+
+def test_implement_v2_provider_history_prefers_error_over_artifact_miss_for_killed_runtime() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="call-killed-runtime-with-error",
+        mew_tool_call_id="tool-1",
+        tool_name="run_tests",
+        status="interrupted",
+        is_error=True,
+        content=(
+            {
+                "command": "MAX_FRAMES=1 node vm.js",
+                "status": "killed",
+                "stderr_tail": (
+                    "MIPS ELF entry=0x00400110 endian=le\n"
+                    "Error: unsupported syscall 4242 at 0x00401000\n"
+                ),
+                "artifact_evidence": [
+                    {
+                        "artifact_id": "/app/frames/frame_000000.ppm",
+                        "path": "/app/frames/frame_000000.ppm",
+                        "kind": "file",
+                        "status": "failed",
+                        "blocking": True,
+                    }
+                ],
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "killed",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "tool run tool-run-record:call-killed-runtime:2:interrupted ended with killed",
+                },
+            },
+        ),
+        content_refs=("cmd/output",),
+        evidence_refs=("evidence/runtime",),
+    )
+
+    history = _provider_visible_tool_result_for_history(result)
+    latest_failure = history["content"]["content"][0]["latest_failure"]
+
+    assert latest_failure["summary"] == "Error: unsupported syscall 4242 at 0x00401000"
+    assert latest_failure["path"] == "/app/frames/frame_000000.ppm"
+    assert "latest runtime diagnostic" in latest_failure["required_next_action"]
+
+
 def test_implement_v2_prompt_history_does_not_project_generic_runtime_exit_code_only() -> None:
     prompt_history = [
         {
@@ -11723,6 +11852,58 @@ def test_implement_v2_prompt_history_does_not_project_generic_runtime_exit_code_
 
     assert latest_failure["summary"] == "Error: unsupported opcode=58 at pc=0x00400110"
     assert latest_failure["summary"] != "exit code 1"
+
+
+def test_implement_v2_prompt_history_does_not_project_generic_killed_runtime_only() -> None:
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "runtime verifier was interrupted",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-runtime-killed",
+                    "tool_name": "run_tests",
+                    "status": "interrupted",
+                    "content": {
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "command_run_id": "cmd-1",
+                                "output_ref": "out-1",
+                                "stderr_tail": "MIPS ELF entry=0x00400110 endian=le\n",
+                                "artifact_evidence": [
+                                    {
+                                        "artifact_id": "/app/frames/frame_000000.ppm",
+                                        "path": "/app/frames/frame_000000.ppm",
+                                        "kind": "file",
+                                        "status": "failed",
+                                        "blocking": True,
+                                    }
+                                ],
+                                "failure_classification": {
+                                    "phase": "runtime",
+                                    "kind": "killed",
+                                    "class": "runtime_failure",
+                                    "confidence": "high",
+                                    "summary": (
+                                        "tool run tool-run-record:call-runtime-killed:2:interrupted ended with killed"
+                                    ),
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+    latest_failure = rendered[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]
+
+    assert latest_failure["summary"] == "required artifact missing: /app/frames/frame_000000.ppm"
+    assert "ended with killed" not in latest_failure["summary"]
+    assert latest_failure["path"] == "/app/frames/frame_000000.ppm"
 
 
 def test_implement_v2_prompt_history_keeps_only_latest_same_family_failure() -> None:

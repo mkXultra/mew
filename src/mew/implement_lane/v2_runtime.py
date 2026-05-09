@@ -7168,12 +7168,40 @@ def _latest_actionable_failure_for_provider_history(payload: dict[str, object]) 
         failure_kind = _provider_scalar_text(classification.get("kind"), limit=80)
         summary = _provider_scalar_text(classification.get("summary"), limit=220)
         diagnostic_summary = _terminal_diagnostic_summary_for_provider_history(payload)
-        if _is_generic_terminal_failure_summary(summary) and diagnostic_summary:
+        actionable_diagnostic_summary = _terminal_diagnostic_summary_for_provider_history(
+            payload, require_signal=True
+        )
+        artifact_summary = _artifact_failure_summary_for_provider_history(payload)
+        if _is_generic_killed_runtime_summary(summary) and actionable_diagnostic_summary:
+            summary = actionable_diagnostic_summary
+        elif _is_generic_killed_runtime_summary(summary) and artifact_summary:
+            summary = artifact_summary
+        elif _is_generic_terminal_failure_summary(summary) and diagnostic_summary:
             summary = diagnostic_summary
+        elif _is_generic_terminal_failure_summary(summary) and not diagnostic_summary and artifact_summary:
+            summary = artifact_summary
         next_action = _provider_scalar_text(classification.get("required_next_probe"), limit=240)
-        if not next_action and failure_class == "runtime_failure" and diagnostic_summary:
+        if (
+            not next_action
+            and failure_class == "runtime_failure"
+            and artifact_summary
+            and _is_generic_killed_runtime_summary(
+                _provider_scalar_text(classification.get("summary"), limit=220)
+            )
+            and not actionable_diagnostic_summary
+        ):
+            next_action = (
+                "inspect why the verifier made no progress toward the required artifact; "
+                "repair the producing source or add bounded instrumentation, then run one scoped verifier"
+            )
+        elif not next_action and failure_class == "runtime_failure" and diagnostic_summary:
             next_action = (
                 "repair the source using this latest runtime diagnostic, then run one scoped verifier"
+            )
+        elif not next_action and failure_class == "runtime_failure" and artifact_summary:
+            next_action = (
+                "inspect why the verifier made no progress toward the required artifact; "
+                "repair the producing source or add bounded instrumentation, then run one scoped verifier"
             )
         if failure_class and failure_class != "unknown_failure":
             return _drop_empty_frontier_values(
@@ -7184,6 +7212,7 @@ def _latest_actionable_failure_for_provider_history(payload: dict[str, object]) 
                     "confidence": _provider_scalar_text(classification.get("confidence"), limit=40),
                     "summary": summary,
                     "required_next_action": next_action,
+                    "path": _provider_scalar_text(_first_failed_artifact_path(payload), limit=180),
                 }
             )
     failure_class = _provider_scalar_text(payload.get("failure_class"), limit=80)
@@ -7206,15 +7235,49 @@ def _latest_actionable_failure_for_provider_history(payload: dict[str, object]) 
     return {}
 
 
-def _terminal_diagnostic_summary_for_provider_history(payload: dict[str, object]) -> str:
+def _terminal_diagnostic_summary_for_provider_history(
+    payload: dict[str, object], *, require_signal: bool = False
+) -> str:
     for key in ("stderr_tail", "stderr", "stdout_tail", "stdout", "reason"):
-        diagnostic = _first_actionable_terminal_line(payload.get(key))
+        diagnostic = _first_actionable_terminal_line(payload.get(key), require_signal=require_signal)
         if diagnostic:
             return _provider_scalar_text(diagnostic, limit=220)
     return ""
 
 
-def _first_actionable_terminal_line(value: object) -> str:
+def _artifact_failure_summary_for_provider_history(payload: dict[str, object]) -> str:
+    path = _first_failed_artifact_path(payload)
+    if path:
+        return f"required artifact missing: {path}"
+    verifier = payload.get("verifier_evidence")
+    if isinstance(verifier, dict):
+        reason = _provider_scalar_text(verifier.get("reason"), limit=160)
+        if reason:
+            return reason
+    reason = _provider_scalar_text(payload.get("reason"), limit=160)
+    if "artifact" in reason.lower():
+        return reason
+    return ""
+
+
+def _first_failed_artifact_path(payload: dict[str, object]) -> str:
+    artifacts = payload.get("artifact_evidence")
+    if not isinstance(artifacts, list):
+        return ""
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        status = str(artifact.get("status") or "").strip()
+        blocking = artifact.get("blocking")
+        if status in {"passed", "completed"} or blocking is False:
+            continue
+        path = _provider_scalar_text(artifact.get("path") or artifact.get("artifact_id"), limit=180)
+        if path:
+            return path
+    return ""
+
+
+def _first_actionable_terminal_line(value: object, *, require_signal: bool = False) -> str:
     if isinstance(value, (dict, list, tuple, set)):
         return ""
     text = str(value or "")
@@ -7229,9 +7292,8 @@ def _first_actionable_terminal_line(value: object) -> str:
             continue
         if _terminal_line_has_diagnostic_signal(line):
             return line
-        if not fallback:
+        if not require_signal and not fallback:
             fallback = line
-        return line
     return fallback
 
 
@@ -7264,6 +7326,16 @@ def _is_generic_terminal_failure_summary(value: object) -> bool:
         re.fullmatch(r"exit code \d+", text)
         or re.fullmatch(r"nonzero exit(?: code)?", text)
         or text in {"command failed", "runtime failure", "failed"}
+        or _is_generic_killed_runtime_summary(text)
+    )
+
+
+def _is_generic_killed_runtime_summary(value: object) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(
+        text in {"killed", "interrupted"}
+        or re.fullmatch(r"tool run .* ended with killed", text)
+        or re.fullmatch(r"tool run .* ended with interrupted", text)
     )
 
 
