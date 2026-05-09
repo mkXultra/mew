@@ -8666,6 +8666,9 @@ def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() ->
     assert "implement_v2_hard_runtime_profile" in by_id
     assert "handcrafted stub" in by_id["implement_v2_hard_runtime_profile"].content
     assert "provided source" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "execution authority" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "do not compile/run the provided source tree" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "substitute for executing or interpreting" in by_id["implement_v2_hard_runtime_profile"].content
     assert "run one verifier" in by_id["implement_v2_hard_runtime_profile"].content
     assert "fresh runtime/verifier evidence" in by_id["implement_v2_hard_runtime_profile"].content
     assert "implement_v2_hard_runtime_frontier_state" in by_id
@@ -8929,7 +8932,7 @@ def test_implement_v2_hard_runtime_profile_requires_fail_fast_runtime_unknowns()
     assert "unsupported opcode/syscall/ABI" in section.content
     assert "explicit PC/code" in section.content
     assert "only ignore/noop when source proves harmless" in section.content
-    assert len(section.content) <= 360
+    assert len(section.content) <= 760
 
 
 def test_implement_v2_prompt_read_only_mode_does_not_surface_exec_or_write_tools() -> None:

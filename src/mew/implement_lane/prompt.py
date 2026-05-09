@@ -46,7 +46,7 @@ _FINISH_RECOVERY_SECTION_IDS = frozenset({"implement_v2_execution_artifact_contr
 _ORDINARY_RESIDENT_SUMMARY_BYTE_CAP = 1536
 _ACTIVE_WORK_CARD_BYTE_CAP = 640
 _REPAIR_HISTORY_CARD_BYTE_CAP = 256
-_HARD_RUNTIME_PROFILE_BYTE_CAP = 360
+_HARD_RUNTIME_PROFILE_BYTE_CAP = 760
 _HARD_RUNTIME_FRONTIER_CARD_BYTE_CAP = 416
 
 
@@ -201,7 +201,12 @@ def build_implement_v2_prompt_sections(
                 version="v0",
                 title="Implement V2 Hard Runtime Profile",
                 content=_clip_text(
-                    "Hard-runtime: no handcrafted stub; preserve provided source/runtime. "
+                    "Hard-runtime: no handcrafted stub. The supplied runtime artifact "
+                    "(binary/executable/ELF/VM input) is the execution authority. "
+                    "Read provided source only to infer interfaces, ABI, syscalls, and output contracts; "
+                    "do not compile/run the provided source tree, a demo program, or a host-native fallback "
+                    "as a substitute for executing or interpreting that supplied artifact unless the task "
+                    "explicitly allows substitution. "
                     "Probe ABI/symbol/syscall/output before first write. Patch once, run one verifier, "
                     "finish with fresh runtime/verifier evidence. Generated runtimes/interpreters must fail fast on "
                     "unsupported opcode/syscall/ABI with explicit PC/code; only ignore/noop when source proves harmless.",
