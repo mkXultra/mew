@@ -1385,12 +1385,21 @@ def test_implement_v2_surfaces_write_tools_from_hard_runtime_prompt_before_probe
         max_turns=8,
         base_max_turns=8,
         tool_specs=specs,
+        prewrite_probe_readiness=_deep_runtime_prewrite_probe_readiness(
+            prior_tool_calls=(),
+            prior_tool_results=(),
+            probe_threshold=_first_write_probe_threshold(lane_input),
+            source_mutation_roots=(),
+        ),
         history=(),
     )
     response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
 
     assert {"write_file", "edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
     assert "write tools are temporarily hidden for this turn" not in response_contract
+    assert "write tools are available" in response_contract
+    assert "first source mutation is execution-gated" in response_contract
+    assert "source/output contract" in response_contract
     assert "write_file" in response_contract
     assert "edit_file" in response_contract
     assert "apply_patch" in response_contract

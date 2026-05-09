@@ -5166,6 +5166,18 @@ def _live_json_prompt(
         },
     }
     tool_surface_notes: list[str] = []
+    if (
+        prewrite_probe_readiness
+        and not bool(prewrite_probe_readiness.get("ready"))
+        and is_deep_probe_hard_runtime_task(lane_input.task_contract)
+        and any(spec.access == "write" for spec in specs)
+    ):
+        missing = _prewrite_missing_category_labels(prewrite_probe_readiness)
+        missing_text = ", ".join(missing) if missing else "required hard-runtime probe coverage"
+        tool_surface_notes.append(
+            "write tools are available, but the first source mutation is execution-gated until cheap "
+            f"hard-runtime probes cover: {missing_text}. Probe missing coverage before drafting a large write."
+        )
     if write_repair_lock_state and bool(write_repair_lock_state.get("locked")):
         target_path = _frontier_clip_text(write_repair_lock_state.get("path") or "the failed write target", limit=160)
         read_count = int(write_repair_lock_state.get("target_read_count_after_failure") or 0)
