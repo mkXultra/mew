@@ -8392,6 +8392,41 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(payload["status"], "completed")
         self.assertEqual(payload["content"][0]["stdout"], "ok")
 
+    def test_tool_invoke_run_tests_accepts_command_array_as_argv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            arguments = {
+                "command": [sys.executable, "-c", "print('test-ok')"],
+                "cwd": ".",
+                "timeout": 5,
+                "foreground_budget_seconds": 1,
+            }
+
+            with redirect_stdout(StringIO()) as stdout:
+                code = main(
+                    [
+                        "tool",
+                        "invoke",
+                        "run_tests",
+                        "--arguments",
+                        json.dumps(arguments),
+                        "--workspace",
+                        str(root),
+                        "--allow-read",
+                        str(root),
+                        "--allow-verify",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["tool_name"], "run_tests")
+        self.assertEqual(payload["status"], "completed")
+        self.assertEqual(payload["content"][0]["execution_mode"], "argv")
+        self.assertEqual(payload["content"][0]["command_source"], "command_argv")
+        self.assertIn("test-ok", payload["content"][0]["stdout"])
+
     def test_tool_read_refuses_sensitive_file(self):
         old_cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:

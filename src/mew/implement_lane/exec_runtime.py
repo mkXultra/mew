@@ -1284,9 +1284,7 @@ def _normalize_command_argument(args: dict[str, object]) -> tuple[str, str]:
 
     raw_argv = args.get("argv")
     if raw_argv not in (None, ""):
-        if isinstance(raw_argv, (str, bytes)) or not isinstance(raw_argv, (list, tuple)):
-            raise ValueError("argv must be a JSON array of command arguments")
-        argv = [str(part) for part in raw_argv if str(part) != ""]
+        argv = _normalize_argv_argument(raw_argv, argument_name="argv")
         if not argv:
             return "", "argv"
         return shlex.join(argv), "argv"
@@ -1295,7 +1293,18 @@ def _normalize_command_argument(args: dict[str, object]) -> tuple[str, str]:
     if command in (None, "") and args.get("cmd") not in (None, ""):
         command = args.get("cmd")
         command_source = "cmd"
+    if isinstance(command, (list, tuple)):
+        argv = _normalize_argv_argument(command, argument_name=command_source)
+        if not argv:
+            return "", f"{command_source}_argv"
+        return shlex.join(argv), f"{command_source}_argv"
     return str(command or "").strip(), command_source
+
+
+def _normalize_argv_argument(value: object, *, argument_name: str) -> list[str]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError(f"{argument_name} must be a JSON array of command arguments")
+    return [str(part) for part in value if str(part) != ""]
 
 
 def _use_shell_for_call(
@@ -1307,7 +1316,7 @@ def _use_shell_for_call(
 ) -> bool:
     if tool_name != "run_command":
         return bool(args.get("use_shell"))
-    if command_source == "argv":
+    if command_source in {"argv", "command_argv", "cmd_argv"}:
         return False
     if bool(args.get("use_shell")):
         return True

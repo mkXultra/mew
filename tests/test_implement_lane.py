@@ -11513,6 +11513,38 @@ def test_implement_v2_run_tests_simple_argv_command_still_runs(tmp_path) -> None
     assert "ok" in tool_result["content"][0]["stdout"]
 
 
+def test_implement_v2_run_tests_command_array_aliases_argv(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": [sys.executable, "-c", "print('ok-array')"],
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "command array ran"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert payload["execution_mode"] == "argv"
+    assert payload["command_source"] == "command_argv"
+    assert "ok-array" in payload["stdout"]
+
+
 def test_implement_v2_run_tests_allows_quoted_shell_metacharacters(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
