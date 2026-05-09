@@ -1321,6 +1321,53 @@ def test_implement_v2_source_output_probe_candidate_prefers_concrete_glob_path_o
     assert candidate["tool_name"] == "glob"
 
 
+def test_implement_v2_source_output_probe_does_not_invent_path_from_search_location_colon(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+    )
+    call = ToolCallEnvelope(
+        lane_attempt_id="implement_v2:ws-1:task-hard-runtime:full",
+        provider="test",
+        provider_call_id="search-source",
+        mew_tool_call_id="mew-search-source",
+        tool_name="search_text",
+        arguments={"path": "doomgeneric/doomgeneric", "pattern": "OUTPUT|frame"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "matches": [
+                    "/app/doomgeneric/doomgeneric/Makefile.sdl:28:OUTPUT=doomgeneric_mips",
+                    "/app/doomgeneric/doomgeneric/Makefile:14:SRC_DOOM = dummy.o am_map.o dstrings.o",
+                    "/app/doomgeneric/doomgeneric/Makefile:39:OUTPUT=doomgeneric_mips",
+                ],
+            },
+        ),
+    )
+
+    candidate = _source_output_contract_probe_candidate_from_trace(
+        lane_input=lane_input,
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+    )
+
+    assert candidate == {}
+
+
 def test_implement_v2_prewrite_missing_probe_waits_until_only_source_output_contract_missing(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
@@ -1816,6 +1863,40 @@ def test_implement_v2_counts_shell_source_output_path_toward_source_output_contr
     )
 
     assert readiness["probe_count"] == 1
+    assert "source_output_contract" in readiness["covered_categories"]
+
+
+def test_implement_v2_counts_build_output_declaration_toward_source_output_contract() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="read-makefile",
+        mew_tool_call_id="mew-read-makefile",
+        tool_name="read_file",
+        arguments={"path": "doomgeneric/doomgeneric/Makefile"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "path": "/app/doomgeneric/doomgeneric/Makefile",
+                "text": "SRC_DOOM = dummy.o am_map.o dstrings.o\nOUTPUT=doomgeneric_mips\n",
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
     assert "source_output_contract" in readiness["covered_categories"]
 
 

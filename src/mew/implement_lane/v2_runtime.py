@@ -193,9 +193,15 @@ _SOURCE_OUTPUT_PROBE_NEGATIVE_PATH_HINTS = frozenset(
     }
 )
 _SOURCE_LOCATION_RE = re.compile(
-    r"(?P<path>(?:\.{0,2}/)?[A-Za-z0-9._@%+=:,~/-]+\."
+    r"(?P<path>(?:\.{0,2}/)?[A-Za-z0-9._@%+=,~/-]+\."
     r"(?:c|cc|cpp|cxx|h|hpp|hh|rs|go|py|js|ts|java|kt|swift|zig|s|asm|wat|json|ya?ml|toml))"
+    r"(?=:\d+|[^A-Za-z0-9._@%+=,~/-]|$)"
     r"(?::\d+)?"
+)
+_SOURCE_OUTPUT_DECLARATION_RE = re.compile(
+    r"(?im)^\s*(?:export\s+)?"
+    r"(?:OUTPUT|OUTPUT_FILE|OUTPUT_PATH|OUT_FILE|OUT_PATH|TARGET|TARGET_NAME|BINARY|EXECUTABLE|ARTIFACT|IMAGE|FRAME)"
+    r"\s*(?::=|\?=|\+=|=)\s*[\"']?(?P<value>[A-Za-z0-9._@%+=,~/-]{1,200})"
 )
 _HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT = 4
 _IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS = 0.001
@@ -5437,6 +5443,8 @@ def _tool_result_has_source_output_contract(result: ToolResultEnvelope) -> bool:
     for text, source_label in _source_output_contract_texts(result.tool_name, payload):
         if _source_output_contract_candidates(text, source_label=source_label):
             return True
+        if _text_has_source_output_declaration(text):
+            return True
     return False
 
 
@@ -5540,6 +5548,14 @@ def _source_output_contract_candidates(text: str, *, source_label: str) -> tuple
             )
         )
     return tuple(candidates)
+
+
+def _text_has_source_output_declaration(text: str) -> bool:
+    for match in _SOURCE_OUTPUT_DECLARATION_RE.finditer(text or ""):
+        value = str(match.group("value") or "").strip().strip("'\"`")
+        if value and not value.startswith(("-", "$")) and not _is_verifier_scratch_artifact_id(value):
+            return True
+    return False
 
 
 def _source_output_contract_path_is_search_location(text: str, match: re.Match[str]) -> bool:
