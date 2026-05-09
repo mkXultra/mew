@@ -2738,6 +2738,367 @@ def test_implement_v2_write_repair_lock_allows_same_turn_write_then_verifier(tmp
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "function sys(){let n=0;return n}\n"
 
 
+def test_implement_v2_post_first_write_verifier_gate_blocks_probe_and_second_write(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "write first implementation",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "console.log('first')\n"},
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "probe and rewrite before verifier",
+            "tool_calls": [
+                {"id": "probe-after-write", "name": "glob", "arguments": {"path": ".", "pattern": "**/*.js"}},
+                {
+                    "id": "rewrite-before-verify",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "console.log('second')\n"},
+                },
+            ],
+            "finish": {"outcome": "blocked", "summary": "blocked before verifier"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    first_write = next(item for item in tool_results if item["provider_call_id"] == "write-vm")
+    probe = next(item for item in tool_results if item["provider_call_id"] == "probe-after-write")
+    rewrite = next(item for item in tool_results if item["provider_call_id"] == "rewrite-before-verify")
+
+    assert first_write["status"] == "completed"
+    assert probe["status"] == "invalid"
+    assert "post_first_write_verifier_required" in probe["content"][0]["reason"]
+    assert rewrite["status"] == "invalid"
+    assert "blocked_by_post_first_write_verifier_gate" in rewrite["content"][0]["reason"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('first')\n"
+
+
+def test_implement_v2_post_first_write_verifier_gate_allows_terminal_then_followup_read(tmp_path) -> None:
+    command = shlex.join([sys.executable, "-c", "print('ok')"])
+    outputs = [
+        {
+            "summary": "write first implementation",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "console.log('first')\n"},
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "run verifier",
+            "tool_calls": [
+                {
+                    "id": "verify-after-write",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "execution_contract": {
+                            "role": "verify",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "zero"},
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "read after verifier evidence",
+            "tool_calls": [{"id": "read-after-verify", "name": "read_file", "arguments": {"path": "vm.js"}}],
+            "finish": {"outcome": "blocked", "summary": "stop after read"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    verify = next(item for item in tool_results if item["provider_call_id"] == "verify-after-write")
+    followup_read = next(item for item in tool_results if item["provider_call_id"] == "read-after-verify")
+
+    assert verify["status"] == "completed"
+    assert followup_read["status"] == "completed"
+    assert "console.log('first')" in json.dumps(followup_read["content"], sort_keys=True)
+
+
+def test_implement_v2_post_first_write_verifier_gate_does_not_unlock_on_preexec_command_failure(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "write first implementation",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "console.log('first')\n"},
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "empty command then probe",
+            "tool_calls": [
+                {"id": "empty-command", "name": "run_command", "arguments": {"command": "", "cwd": "."}},
+                {"id": "read-after-empty-command", "name": "read_file", "arguments": {"path": "vm.js"}},
+            ],
+            "finish": {"outcome": "blocked", "summary": "empty command did not produce terminal feedback"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        if not outputs:
+            return {"summary": "stop", "finish": {"outcome": "blocked"}}
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    empty_command = next(item for item in tool_results if item["provider_call_id"] == "empty-command")
+    read_after_empty = next(item for item in tool_results if item["provider_call_id"] == "read-after-empty-command")
+
+    assert empty_command["status"] == "failed"
+    assert "command is empty" in empty_command["content"][0]["reason"]
+    assert "command_run_id" not in empty_command["content"][0]
+    assert read_after_empty["status"] == "invalid"
+    assert "post_first_write_verifier_required" in read_after_empty["content"][0]["reason"]
+
+
+def test_implement_v2_post_first_write_verifier_gate_allows_patch_text_same_target(tmp_path) -> None:
+    patch = "*** Begin Patch\n*** Update File: vm.js\n@@\n-console.log('first')\n+console.log('second')\n*** End Patch\n"
+    outputs = [
+        {
+            "summary": "write first implementation",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "console.log('first')\n"},
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "patch same target",
+            "tool_calls": [{"id": "patch-vm", "name": "apply_patch", "arguments": {"patch": patch}}],
+            "finish": {"outcome": "blocked", "summary": "stop after patch"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    patch_result = next(item for item in tool_results if item["provider_call_id"] == "patch-vm")
+
+    assert patch_result["status"] == "completed"
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('second')\n"
+
+
+def test_implement_v2_post_first_write_verifier_gate_blocks_same_target_delete_patch(tmp_path) -> None:
+    patch = "*** Begin Patch\n*** Delete File: vm.js\n*** End Patch\n"
+    outputs = [
+        {
+            "summary": "write first implementation",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "console.log('first')\n"},
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "delete same target before verifier",
+            "tool_calls": [{"id": "delete-vm", "name": "apply_patch", "arguments": {"patch": patch}}],
+            "finish": {"outcome": "blocked", "summary": "delete blocked before verifier"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    delete_result = next(item for item in tool_results if item["provider_call_id"] == "delete-vm")
+
+    assert delete_result["status"] == "invalid"
+    assert "post_first_write_verifier_required" in delete_result["content"][0]["reason"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('first')\n"
+
+
+def test_implement_v2_live_json_prompt_surfaces_post_first_write_verifier_gate(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        lane_config={"mode": "full"},
+    )
+    prompt = _live_json_prompt(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        turn_index=2,
+        max_turns=8,
+        base_max_turns=8,
+        post_first_write_verifier_state={
+            "active": True,
+            "first_write_path": "vm.js",
+            "required_next_action": "run one terminal verifier command",
+        },
+        history=(),
+    )
+    response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
+
+    assert "vm.js was written successfully" in response_contract
+    assert "Run one terminal verifier command now" in response_contract
+
+
 def test_implement_v2_write_repair_lock_does_not_unlock_after_dry_run_write(tmp_path) -> None:
     (tmp_path / "vm.js").write_text("function sys(){return 0}\n", encoding="utf-8")
     outputs = [

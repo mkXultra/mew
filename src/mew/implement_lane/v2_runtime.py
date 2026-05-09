@@ -535,6 +535,12 @@ def run_live_json_implement_v2(
                 prior_tool_calls=tuple(tool_calls),
                 prior_tool_results=tuple(tool_results),
             )
+            post_first_write_verifier_state = _post_first_write_verifier_gate_state(
+                active_work_todo_state=active_work_todo_state,
+                prior_tool_calls=tuple(tool_calls),
+                prior_tool_results=tuple(tool_results),
+                source_mutation_roots=_source_mutation_roots(lane_input),
+            )
             prompt = _live_json_prompt(
                 lane_input,
                 lane_attempt_id=lane_attempt_id,
@@ -552,6 +558,7 @@ def run_live_json_implement_v2(
                 prewrite_probe_readiness=prewrite_probe_readiness,
                 prewrite_missing_probe=prewrite_missing_probe,
                 write_repair_lock_state=write_repair_lock_state,
+                post_first_write_verifier_state=post_first_write_verifier_state,
                 history=tuple(prompt_history),
             )
             if progress:
@@ -824,6 +831,30 @@ def run_live_json_implement_v2(
                                         "blocked_by_deep_runtime_prewrite_probe_gate: "
                                         f"{capped_call.tool_name}#{capped_call.provider_call_id} "
                                         "must observe enough cheap source/runtime probes before source mutation"
+                                    ),
+                                )
+                            )
+                        break
+                    post_write_verifier_block = _post_first_write_verifier_gate_result(
+                        capped_call,
+                        active_work_todo_state=active_work_todo_state,
+                        prior_tool_calls=tuple(tool_calls) + tuple(executed_calls),
+                        prior_tool_results=tuple(tool_results) + tuple(current_results_list),
+                        source_mutation_roots=_source_mutation_roots(lane_input),
+                    )
+                    if post_write_verifier_block is not None:
+                        executed_calls.append(capped_call)
+                        current_results_list.append(post_write_verifier_block)
+                        for skipped_call in current_calls[call_index + 1 :]:
+                            executed_calls.append(skipped_call)
+                            current_results_list.append(
+                                build_invalid_tool_result(
+                                    skipped_call,
+                                    reason=(
+                                        "blocked_by_post_first_write_verifier_gate: "
+                                        f"{capped_call.tool_name}#{capped_call.provider_call_id} "
+                                        "must run one terminal verifier command after the first source write "
+                                        "before more reads, probes, or full rewrites"
                                     ),
                                 )
                             )
@@ -4214,6 +4245,189 @@ def _write_repair_lock_state(
     }
 
 
+def _post_first_write_verifier_gate_result(
+    call: object,
+    *,
+    active_work_todo_state: dict[str, object],
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+    source_mutation_roots: tuple[str, ...] = (),
+) -> ToolResultEnvelope | None:
+    state = _post_first_write_verifier_gate_state(
+        active_work_todo_state=active_work_todo_state,
+        prior_tool_calls=prior_tool_calls,
+        prior_tool_results=prior_tool_results,
+        source_mutation_roots=source_mutation_roots,
+    )
+    if not bool(state.get("active")):
+        return None
+    if _call_is_terminal_verifier_step(call):
+        return None
+    if _call_is_same_target_incremental_edit(call, state.get("first_write_path")):
+        return None
+    first_write = _frontier_clip_text(state.get("first_write_path") or "the first source write", limit=200)
+    return build_invalid_tool_result(
+        call,
+        reason=(
+            "post_first_write_verifier_required: "
+            f"{first_write} was written successfully, but no terminal verifier command has run after it. "
+            "Run one verifier-shaped terminal command before more reads, probes, or full rewrites. "
+            "A same-target incremental edit is allowed when it directly repairs the generated file."
+        ),
+        extra_content={
+            "failure_class": "post_first_write_verifier_missing",
+            "failure_subclass": "source_write_without_terminal_feedback",
+            "required_next_action": (
+                "run one terminal verifier command against the mutated source before another probe or full rewrite"
+            ),
+            "first_write_provider_call_id": state.get("first_write_provider_call_id"),
+            "first_write_path": state.get("first_write_path"),
+        },
+    )
+
+
+def _post_first_write_verifier_gate_state(
+    *,
+    active_work_todo_state: dict[str, object] | None,
+    prior_tool_calls: tuple[object, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+    source_mutation_roots: tuple[str, ...] = (),
+) -> dict[str, object]:
+    if not isinstance(active_work_todo_state, dict) or not active_work_todo_state:
+        return {}
+    if bool(
+        _write_repair_lock_state(
+            active_work_todo_state=active_work_todo_state,
+            prior_tool_calls=prior_tool_calls,
+            prior_tool_results=prior_tool_results,
+        ).get("locked")
+    ):
+        return {}
+
+    after_first_write = False
+    first_write_path = ""
+    first_write_provider_call_id = ""
+    first_write_tool = ""
+    first_write_turn: int | None = None
+    terminal_after_first_write = False
+    failed_write_after_first_write = False
+    for call, result in zip(prior_tool_calls, prior_tool_results):
+        tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
+        if not after_first_write:
+            if (
+                tool_name in WRITE_TOOL_NAMES
+                and result.status == "completed"
+                and _write_result_has_source_root_side_effect(result, source_mutation_roots=source_mutation_roots)
+            ):
+                after_first_write = True
+                first_write_path = _write_call_path(call) or next(iter(_write_result_paths(result)), "")
+                first_write_provider_call_id = str(
+                    getattr(call, "provider_call_id", "") or result.provider_call_id or ""
+                )
+                first_write_tool = tool_name
+                first_write_turn = int(getattr(call, "turn_index", 0) or 0) or None
+            continue
+        if tool_name in WRITE_TOOL_NAMES and result.status in {"failed", "invalid", "denied"}:
+            failed_write_after_first_write = True
+            break
+        if _result_is_terminal_verifier_step(result):
+            terminal_after_first_write = True
+            break
+
+    if not after_first_write or terminal_after_first_write or failed_write_after_first_write:
+        return {}
+    return {
+        "schema_version": 1,
+        "active": True,
+        "first_write_provider_call_id": first_write_provider_call_id,
+        "first_write_tool": first_write_tool,
+        "first_write_path": first_write_path,
+        "first_write_turn": first_write_turn,
+        "required_next_action": "run one terminal verifier command before another read/probe/full-rewrite turn",
+    }
+
+
+def _call_is_terminal_verifier_step(call: object) -> bool:
+    tool_name = str(getattr(call, "tool_name", "") or "").strip()
+    if tool_name == "run_tests":
+        return True
+    if tool_name not in EXEC_TOOL_NAMES:
+        return False
+    arguments = getattr(call, "arguments", {})
+    if not isinstance(arguments, dict):
+        return True
+    contract = _call_execution_contract(call)
+    return bool(contract and _execution_contract_is_verifier_like(contract)) or bool(
+        _command_has_verifier_surface(arguments.get("command"))
+    ) or tool_name in {"run_command", "poll_command"}
+
+
+def _call_is_same_target_incremental_edit(call: object, first_write_path: object) -> bool:
+    tool_name = str(getattr(call, "tool_name", "") or "").strip()
+    if tool_name == "edit_file":
+        path = _write_call_path(call)
+        return bool(path and _write_paths_match(path, str(first_write_path or "")))
+    if tool_name == "apply_patch":
+        return any(_write_paths_match(path, str(first_write_path or "")) for path in _apply_patch_call_paths(call))
+    return False
+
+
+def _apply_patch_call_paths(call: object) -> tuple[str, ...]:
+    arguments = getattr(call, "arguments", {})
+    if not isinstance(arguments, dict):
+        return ()
+    patch_text = str(arguments.get("patch") or arguments.get("input") or "")
+    paths: list[str] = []
+    for line in patch_text.splitlines():
+        marker = "*** Update File: "
+        if line.startswith(marker):
+            path = _frontier_clip_text(line[len(marker) :], limit=240)
+            if path:
+                paths.append(path)
+    return tuple(dict.fromkeys(paths))
+
+
+def _result_has_terminal_command_evidence(result: ToolResultEnvelope) -> bool:
+    payload = _first_result_payload(result)
+    if payload.get("command_run_id"):
+        return True
+    refs = (*result.content_refs, *result.evidence_refs)
+    return any(str(ref).startswith("implement-v2-exec://") for ref in refs)
+
+
+def _result_is_terminal_verifier_step(result: ToolResultEnvelope) -> bool:
+    if result.tool_name not in EXEC_TOOL_NAMES:
+        return False
+    if result.status not in {"completed", "failed", "interrupted", "invalid"}:
+        return False
+    if not _result_has_terminal_command_evidence(result):
+        return False
+    payload = _first_result_payload(result)
+    contract = _payload_execution_contract(payload)
+    return bool(contract and _execution_contract_is_verifier_like(contract)) or bool(
+        _command_has_verifier_surface(_result_command_text(result))
+    ) or result.tool_name in {"run_command", "run_tests", "poll_command"}
+
+
+def _call_execution_contract(call: object) -> dict[str, object]:
+    arguments = getattr(call, "arguments", {})
+    if not isinstance(arguments, dict):
+        return {}
+    raw = arguments.get("execution_contract")
+    raw_contract = raw if isinstance(raw, dict) else {}
+    normalized = arguments.get("execution_contract_normalized")
+    normalized_contract = normalized if isinstance(normalized, dict) else {}
+    merged = {**normalized_contract, **raw_contract}
+    if not merged:
+        return {}
+    contract = normalize_execution_contract(merged).as_dict()
+    for source in (normalized_contract, raw_contract):
+        for key, value in source.items():
+            if key not in contract:
+                contract[key] = value
+    return contract
+
+
 def _read_call_path(call: object) -> str:
     arguments = getattr(call, "arguments", {})
     if not isinstance(arguments, dict):
@@ -4480,8 +4694,10 @@ def _invalid_result_is_synthetic_non_observation(result: ToolResultEnvelope) -> 
     return reason.startswith(
         (
             "blocked_by_deep_runtime_prewrite_probe_gate",
+            "blocked_by_post_first_write_verifier_gate",
             "blocked_by_prior_failed_write_in_same_turn",
             "deep_runtime_prewrite_probe_budget_not_met",
+            "post_first_write_verifier_required",
         )
     )
 
@@ -5409,6 +5625,7 @@ def _live_json_prompt(
     prewrite_probe_readiness: dict[str, object] | None = None,
     prewrite_missing_probe: dict[str, object] | None = None,
     write_repair_lock_state: dict[str, object] | None = None,
+    post_first_write_verifier_state: dict[str, object] | None = None,
     history: tuple[dict[str, object], ...],
 ) -> str:
     specs = tool_specs if tool_specs is not None else list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode"))
@@ -5465,6 +5682,15 @@ def _live_json_prompt(
             "write repair lock is active; repair "
             f"{target_path} with {preferred}/edit_file/apply_patch before broad probes or verifiers. "
             f"Same-target post-failure reads used {read_count}/1."
+        )
+    if post_first_write_verifier_state and bool(post_first_write_verifier_state.get("active")):
+        first_write = _frontier_clip_text(
+            post_first_write_verifier_state.get("first_write_path") or "the first source write",
+            limit=160,
+        )
+        tool_surface_notes.append(
+            f"{first_write} was written successfully. Run one terminal verifier command now, "
+            "before another read/probe/full-rewrite turn; same-target incremental edits remain allowed."
         )
     if tool_surface_notes:
         response_contract["tool_surface_note"] = " ".join(tool_surface_notes)
