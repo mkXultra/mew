@@ -6797,6 +6797,23 @@ def _latest_actionable_failure_for_provider_history(payload: dict[str, object]) 
                     "required_next_action": next_action,
                 }
             )
+    failure_class = _provider_scalar_text(payload.get("failure_class"), limit=80)
+    if failure_class and failure_class != "unknown_failure":
+        return _drop_empty_frontier_values(
+            {
+                "kind": _provider_scalar_text(payload.get("failure_subclass"), limit=120),
+                "class": failure_class,
+                "summary": _provider_scalar_text(
+                    payload.get("reason") or payload.get("path") or payload.get("operation"),
+                    limit=220,
+                ),
+                "required_next_action": _provider_scalar_text(
+                    payload.get("suggested_next_action") or payload.get("reason"),
+                    limit=240,
+                ),
+                "path": _provider_scalar_text(payload.get("path"), limit=180),
+            }
+        )
     return {}
 
 
@@ -8531,8 +8548,11 @@ def _provider_latest_failure_identity(item: dict[str, object]) -> str:
             path = str(artifact.get("path") or "").strip()
             if artifact_id or path:
                 return f"artifact:{artifact_id}:{path}"
-    latest_failure = item.get("latest_failure")
+    latest_failure = _provider_history_latest_failure(item)
     if isinstance(latest_failure, dict):
+        path = str(latest_failure.get("path") or "").strip()
+        if path:
+            return f"path:{path}"
         summary = str(latest_failure.get("summary") or "").strip()
         if summary:
             return f"summary:{summary[:120]}"

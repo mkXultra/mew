@@ -11045,6 +11045,138 @@ def test_implement_v2_prompt_history_projects_raw_structured_failure_classificat
     assert latest_failure["required_next_action"] == "Inspect the producer path."
 
 
+def test_implement_v2_prompt_history_projects_raw_tool_failure_class() -> None:
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "raw write failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-write",
+                    "tool_name": "write_file",
+                    "status": "failed",
+                    "is_error": True,
+                    "content": {
+                        "content": [
+                            {
+                                "operation": "write_file",
+                                "failure_class": "source_mutation_unreadable_long_line",
+                                "failure_subclass": "source_mutation_single_line_diagnostic_risk",
+                                "path": "/app/vm.js",
+                                "reason": "write_file would create a 11966 character line",
+                                "suggested_next_action": "rewrite source mutations as readable multi-line code",
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+    latest_failure = rendered[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]
+
+    assert latest_failure["class"] == "source_mutation_unreadable_long_line"
+    assert latest_failure["kind"] == "source_mutation_single_line_diagnostic_risk"
+    assert latest_failure["path"] == "/app/vm.js"
+    assert latest_failure["required_next_action"] == "rewrite source mutations as readable multi-line code"
+
+
+def test_implement_v2_prompt_history_collapses_raw_tool_failure_by_path() -> None:
+    def raw_write_failure(path: str, reason: str) -> dict[str, object]:
+        return {
+            "operation": "write_file",
+            "failure_class": "source_mutation_unreadable_long_line",
+            "failure_subclass": "source_mutation_single_line_diagnostic_risk",
+            "path": path,
+            "reason": reason,
+            "suggested_next_action": "rewrite source mutations as readable multi-line code",
+        }
+
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "old raw write failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-old-write",
+                    "tool_name": "write_file",
+                    "status": "failed",
+                    "content": {"content": [raw_write_failure("/app/vm.js", "line length 9000")]},
+                }
+            ],
+        },
+        {
+            "turn": 2,
+            "summary": "new raw write failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-new-write",
+                    "tool_name": "write_file",
+                    "status": "failed",
+                    "content": {"content": [raw_write_failure("/app/vm.js", "line length 11966")]},
+                }
+            ],
+        },
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+    first_result = rendered[0]["tool_results"][0]
+    second_item = rendered[1]["tool_results"][0]["content"]["content"][0]
+
+    assert "latest_failures" not in first_result
+    assert second_item["latest_failure"]["summary"] == "line length 11966"
+
+
+def test_implement_v2_prompt_history_keeps_raw_tool_failures_for_different_paths() -> None:
+    def raw_write_failure(path: str) -> dict[str, object]:
+        return {
+            "operation": "write_file",
+            "failure_class": "source_mutation_unreadable_long_line",
+            "failure_subclass": "source_mutation_single_line_diagnostic_risk",
+            "path": path,
+            "reason": "write_file would create an unreadable generated source line",
+            "suggested_next_action": "rewrite source mutations as readable multi-line code",
+        }
+
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "first raw write failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-vm-write",
+                    "tool_name": "write_file",
+                    "status": "failed",
+                    "content": {"content": [raw_write_failure("/app/vm.js")]},
+                }
+            ],
+        },
+        {
+            "turn": 2,
+            "summary": "second raw write failure",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-helper-write",
+                    "tool_name": "write_file",
+                    "status": "failed",
+                    "content": {"content": [raw_write_failure("/app/helper.js")]},
+                }
+            ],
+        },
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+
+    assert rendered[0]["tool_results"][0]["latest_failures"][0]["path"] == "/app/vm.js"
+    assert rendered[1]["tool_results"][0]["content"]["content"][0]["latest_failure"]["path"] == "/app/helper.js"
+
+
 def test_implement_v2_prompt_history_collapses_raw_same_artifact_failures() -> None:
     def raw_failure(summary: str) -> dict[str, object]:
         return {
