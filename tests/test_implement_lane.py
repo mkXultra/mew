@@ -11559,6 +11559,172 @@ def test_implement_v2_provider_history_surfaces_structured_evidence_summary(tmp_
     assert "stdout_stderr_body_omitted" not in projected["execution_evidence_digest"]
 
 
+def test_implement_v2_provider_history_uses_terminal_diagnostic_for_generic_runtime_failure() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="call-runtime-fail",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr": (
+                    "TypeError: this.check is not a function\n"
+                    "    at m.write32 (/app/vm.js:182:37)\n"
+                    "    at MIPSVM.setupStack (/app/vm.js:191:23)\n"
+                ),
+                "stderr_tail": (
+                    "TypeError: this.check is not a function\n"
+                    "    at m.write32 (/app/vm.js:182:37)\n"
+                ),
+                "output_ref": "cmd/output",
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "exit code 1",
+                },
+            },
+        ),
+        content_refs=("cmd/output",),
+        evidence_refs=("evidence/runtime",),
+    )
+
+    history = _provider_visible_tool_result_for_history(result)
+    projected = history["content"]["content"][0]
+    latest_failure = projected["latest_failure"]
+
+    assert latest_failure["class"] == "runtime_failure"
+    assert latest_failure["summary"] == "TypeError: this.check is not a function"
+    assert "latest runtime diagnostic" in latest_failure["required_next_action"]
+    assert projected["stderr_tail"].startswith("TypeError: this.check is not a function")
+
+
+def test_implement_v2_provider_history_skips_traceback_context_for_runtime_summary() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="call-python-runtime-fail",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "python verify.py",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr_tail": (
+                    "Traceback (most recent call last):\n"
+                    "  File \"/app/verify.py\", line 2, in <module>\n"
+                    "    foo()\n"
+                    "TypeError: broken runtime state\n"
+                ),
+                "output_ref": "cmd/output",
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "exit code 1",
+                },
+            },
+        ),
+        content_refs=("cmd/output",),
+        evidence_refs=("evidence/runtime",),
+    )
+
+    history = _provider_visible_tool_result_for_history(result)
+    latest_failure = history["content"]["content"][0]["latest_failure"]
+
+    assert latest_failure["summary"] == "TypeError: broken runtime state"
+
+
+def test_implement_v2_provider_history_uses_full_stderr_when_tail_is_only_stack_context() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="call-tail-stack-only",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr": (
+                    "RuntimeError: root cause before long stack\n"
+                    "    at generated (/app/vm.js:1:1)\n"
+                ),
+                "stderr_tail": "    at finalFrame (/app/vm.js:999:1)\n    at node:internal/main\n",
+                "output_ref": "cmd/output",
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "exit code 1",
+                },
+            },
+        ),
+        content_refs=("cmd/output",),
+        evidence_refs=("evidence/runtime",),
+    )
+
+    history = _provider_visible_tool_result_for_history(result)
+    latest_failure = history["content"]["content"][0]["latest_failure"]
+
+    assert latest_failure["summary"] == "RuntimeError: root cause before long stack"
+
+
+def test_implement_v2_prompt_history_does_not_project_generic_runtime_exit_code_only() -> None:
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "runtime verifier failed",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-runtime-fail",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "command_run_id": "cmd-1",
+                                "output_ref": "out-1",
+                                "stderr_tail": (
+                                    "Error: unsupported opcode=58 at pc=0x00400110\n"
+                                    "    at MIPSVM.fail (/app/vm.js:178:11)\n"
+                                ),
+                                "failure_classification": {
+                                    "phase": "runtime",
+                                    "kind": "nonzero_exit",
+                                    "class": "runtime_failure",
+                                    "confidence": "high",
+                                    "summary": "exit code 1",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+    latest_failure = rendered[0]["tool_results"][0]["content"]["content"][0]["latest_failure"]
+
+    assert latest_failure["summary"] == "Error: unsupported opcode=58 at pc=0x00400110"
+    assert latest_failure["summary"] != "exit code 1"
+
+
 def test_implement_v2_prompt_history_keeps_only_latest_same_family_failure() -> None:
     prompt_history = [
         {

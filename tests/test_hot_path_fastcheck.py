@@ -116,6 +116,55 @@ def test_hot_path_fastcheck_rejects_model_supplied_unknown_category(tmp_path):
     assert result["metrics"]["micro_next_action"]["category"] == "invalid"
 
 
+def test_hot_path_fastcheck_rejects_generic_runtime_exit_code_projection(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    history_path = artifact / "implement_v2" / "history.json"
+    history = [
+        {
+            "turn": 1,
+            "summary": "runtime verifier failed",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-runtime",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "command_run_id": "cmd-runtime",
+                                "output_ref": "out-runtime",
+                                "latest_failure": {
+                                    "phase": "runtime",
+                                    "kind": "nonzero_exit",
+                                    "class": "runtime_failure",
+                                    "summary": "exit code 1",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        }
+    ]
+    history_path.write_text(json.dumps(history), encoding="utf-8")
+
+    def fail_if_called(prompt):
+        raise AssertionError(f"unexpected live call: {prompt[:80]}")
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        micro_model_callable=fail_if_called,
+    )
+
+    assert result["status"] == "fail"
+    latest_failure = [check for check in result["checks"] if check["name"] == "latest_actionable_failure_shape"][0]
+    assert latest_failure["details"]["generic_runtime_failures"][0]["summary"] == "exit code 1"
+    assert result["micro_next_action_refresh"]["mode"] == "skipped"
+
+
 def test_hot_path_fastcheck_skips_live_micro_when_static_checks_fail(tmp_path):
     artifact = _write_artifact(tmp_path)
     manifest_path = artifact / "implement_v2" / "proof-manifest.json"

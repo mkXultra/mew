@@ -635,8 +635,9 @@ def _check_latest_actionable_failure_shape(history: list[dict[str, object]]) -> 
     projected = json.loads(_render_prompt_history_json(history))
     families = _latest_failure_families(projected)
     duplicate_families = sorted(family for family, count in _counts(families).items() if count > 1)
+    generic_runtime_failures = _generic_runtime_failure_summaries(projected)
     failure_results = _non_completed_tool_result_count(history)
-    ok = not duplicate_families and (failure_results == 0 or bool(families))
+    ok = not duplicate_families and not generic_runtime_failures and (failure_results == 0 or bool(families))
     return _check(
         "latest_actionable_failure_shape",
         ok,
@@ -647,6 +648,7 @@ def _check_latest_actionable_failure_shape(history: list[dict[str, object]]) -> 
             "failure_tool_results": failure_results,
             "latest_failure_families": families,
             "duplicate_families": duplicate_families,
+            "generic_runtime_failures": generic_runtime_failures,
         },
     )
 
@@ -736,6 +738,36 @@ def _latest_failure_family(latest_failure: dict[str, object]) -> str:
     summary = str(latest_failure.get("summary") or latest_failure.get("required_next_action") or "").strip()
     identity = summary[:120] if summary else "unknown"
     return f"{failure_class or 'unknown'}:{failure_kind or 'unknown'}:{identity}"
+
+
+def _generic_runtime_failure_summaries(projected_history: object) -> list[dict[str, object]]:
+    failures: list[dict[str, object]] = []
+    for value in _walk(projected_history):
+        if not isinstance(value, dict):
+            continue
+        for latest_failure in _iter_latest_failure_dicts(value):
+            failure_class = str(latest_failure.get("class") or latest_failure.get("failure_class") or "").strip()
+            summary = str(latest_failure.get("summary") or "").strip().lower()
+            if failure_class == "runtime_failure" and summary in {"exit code 1", "command failed", "failed"}:
+                failures.append(
+                    {
+                        "class": failure_class,
+                        "kind": str(latest_failure.get("kind") or ""),
+                        "summary": str(latest_failure.get("summary") or ""),
+                    }
+                )
+    return failures
+
+
+def _iter_latest_failure_dicts(value: dict[str, object]) -> Iterable[dict[str, object]]:
+    latest_failure = value.get("latest_failure")
+    if isinstance(latest_failure, dict):
+        yield latest_failure
+    latest_failures = value.get("latest_failures")
+    if isinstance(latest_failures, list):
+        for item in latest_failures:
+            if isinstance(item, dict):
+                yield item
 
 
 def _non_completed_tool_result_count(history: list[dict[str, object]]) -> int:

@@ -7167,7 +7167,14 @@ def _latest_actionable_failure_for_provider_history(payload: dict[str, object]) 
         )
         failure_kind = _provider_scalar_text(classification.get("kind"), limit=80)
         summary = _provider_scalar_text(classification.get("summary"), limit=220)
+        diagnostic_summary = _terminal_diagnostic_summary_for_provider_history(payload)
+        if _is_generic_terminal_failure_summary(summary) and diagnostic_summary:
+            summary = diagnostic_summary
         next_action = _provider_scalar_text(classification.get("required_next_probe"), limit=240)
+        if not next_action and failure_class == "runtime_failure" and diagnostic_summary:
+            next_action = (
+                "repair the source using this latest runtime diagnostic, then run one scoped verifier"
+            )
         if failure_class and failure_class != "unknown_failure":
             return _drop_empty_frontier_values(
                 {
@@ -7197,6 +7204,67 @@ def _latest_actionable_failure_for_provider_history(payload: dict[str, object]) 
             }
         )
     return {}
+
+
+def _terminal_diagnostic_summary_for_provider_history(payload: dict[str, object]) -> str:
+    for key in ("stderr_tail", "stderr", "stdout_tail", "stdout", "reason"):
+        diagnostic = _first_actionable_terminal_line(payload.get(key))
+        if diagnostic:
+            return _provider_scalar_text(diagnostic, limit=220)
+    return ""
+
+
+def _first_actionable_terminal_line(value: object) -> str:
+    if isinstance(value, (dict, list, tuple, set)):
+        return ""
+    text = str(value or "")
+    if not text.strip():
+        return ""
+    fallback = ""
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if _terminal_line_is_stack_context(raw_line, line):
+            continue
+        if _terminal_line_has_diagnostic_signal(line):
+            return line
+        if not fallback:
+            fallback = line
+        return line
+    return fallback
+
+
+def _terminal_line_is_stack_context(raw_line: str, line: str) -> bool:
+    if raw_line[:1].isspace() and not _terminal_line_has_diagnostic_signal(line):
+        return True
+    return bool(
+        line.startswith(("at ", "File ", "Traceback "))
+        or re.match(r"^\^+$", line)
+        or re.match(r"^\s*\d+\s*\|\s*", line)
+    )
+
+
+def _terminal_line_has_diagnostic_signal(line: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:[A-Za-z]*Error|[A-Za-z]*Exception|AssertionError|Traceback|unsupported|missing|not found|"
+            r"cannot|failed|failure|segmentation|segfault|panic|abort|invalid)\b",
+            line,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _is_generic_terminal_failure_summary(value: object) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return True
+    return bool(
+        re.fullmatch(r"exit code \d+", text)
+        or re.fullmatch(r"nonzero exit(?: code)?", text)
+        or text in {"command failed", "runtime failure", "failed"}
+    )
 
 
 def _execution_evidence_digest_for_provider_history(payload: dict[str, object]) -> dict[str, object]:
