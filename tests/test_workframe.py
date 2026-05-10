@@ -421,6 +421,393 @@ def test_workframe_phase2_generic_family_fallback_does_not_emit_task_specific_na
     assert workframe.latest_actionable.generic_family == "unknown_failure"
 
 
+def test_workframe_phase3_cheap_probe_cannot_satisfy_finish_proof() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Do not let a cheap probe finish the task.",
+            sidecar_events=(
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 1,
+                    "event_id": "probe-1",
+                    "status": "passed",
+                    "command_intent": "probe",
+                    "execution_contract_normalized": {
+                        "id": "contract:probe-1",
+                        "role": "source",
+                        "proof_role": "none",
+                        "acceptance_kind": "not_acceptance",
+                    },
+                    "typed_evidence_id": "ev:probe-1",
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "cheap_probe"
+    assert workframe.finish_readiness.state == "not_ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "cheap_probe"
+    assert "ev:probe-1" in workframe.evidence_refs.typed
+    assert "contract:probe-1" in workframe.evidence_refs.sidecar
+
+
+def test_workframe_phase3_rejects_probe_authored_completion_obligation() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Reject model-authored proof obligations on probes.",
+            sidecar_events=(
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 1,
+                    "event_id": "probe-1",
+                    "status": "passed",
+                    "command_intent": "probe",
+                    "execution_contract": {
+                        "id": "contract:model-authored-probe",
+                        "role": "source",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_artifacts": [{"id": "artifact:result", "path": "result.txt"}],
+                    },
+                    "typed_evidence_id": "ev:probe-1",
+                },
+            ),
+        )
+    )
+
+    assert workframe.finish_readiness.state == "not_ready"
+    assert report.status == "fail"
+    assert {item["code"] for item in report.failed} == {"cheap_probe_authored_proof_obligation"}
+
+
+def test_workframe_phase3_strict_verifier_keeps_refs_without_contract_payload() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Finish from typed verifier evidence.",
+            sidecar_events=(
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 1,
+                    "event_id": "verify-1",
+                    "status": "passed",
+                    "command_run_id": "cmd:verify-1",
+                    "typed_evidence_id": "ev:verify-1",
+                    "execution_contract_normalized": {
+                        "id": "contract:verify-1",
+                        "role": "verify",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                        "expected_artifacts": [{"id": "artifact:answer", "path": "answer.txt"}],
+                    },
+                    "finish_gate": {"id": "finish:gate-1", "blocked": False},
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "finish_ready"
+    assert workframe.finish_readiness.state == "ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "finish"
+    assert "ev:verify-1" in workframe.required_next.evidence_refs
+    assert "finish:gate-1" in workframe.required_next.evidence_refs
+    assert "ev:verify-1" in workframe.evidence_refs.typed
+    assert "contract:verify-1" in workframe.evidence_refs.sidecar
+    serialized = json.dumps(workframe.as_dict(), sort_keys=True)
+    assert "execution_contract" not in serialized
+    assert "expected_artifacts" not in serialized
+    assert "artifact:answer" not in serialized
+
+
+def test_workframe_phase3_later_failed_verifier_blocks_earlier_finish_proof() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Repair after the latest verifier failure.",
+            sidecar_events=(
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 1,
+                    "event_id": "verify-1",
+                    "status": "passed",
+                    "typed_evidence_id": "ev:verify-1",
+                    "execution_contract_normalized": {
+                        "id": "contract:verify-1",
+                        "role": "verify",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 2,
+                    "event_id": "verify-2",
+                    "status": "failed",
+                    "summary": "latest verifier reports parser regression",
+                    "typed_evidence_id": "ev:verify-2",
+                    "execution_contract_normalized": {
+                        "id": "contract:verify-2",
+                        "role": "verify",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "repair_after_verifier_failure"
+    assert workframe.finish_readiness.state == "not_ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.source_ref == "ev:verify-2"
+
+
+def test_workframe_phase3_real_typed_evidence_event_can_drive_finish_readiness() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Finish from a typed EvidenceEvent record.",
+            sidecar_events=(
+                {
+                    "kind": "verifier_result",
+                    "event_sequence": 1,
+                    "id": "ev:verifier:cmd-1",
+                    "status": "passed",
+                    "contract_id": "contract:verify-typed",
+                    "observed": {"verdict": "pass"},
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "finish_ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "finish"
+    assert "ev:verifier:cmd-1" in workframe.evidence_refs.typed
+    assert "contract:verify-typed" in workframe.evidence_refs.sidecar
+
+
+def test_workframe_phase3_standalone_finish_gate_cannot_drive_finish_readiness() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Do not finish from a finish gate without verifier evidence.",
+            sidecar_events=(
+                {
+                    "kind": "structured_finish_gate",
+                    "event_sequence": 1,
+                    "id": "ev:finish-gate:1",
+                    "status": "passed",
+                    "observed": {"blocked": False},
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "cheap_probe"
+    assert workframe.finish_readiness.state == "not_ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "cheap_probe"
+
+
+def test_workframe_phase3_diagnostic_with_finish_gate_remains_non_proof() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Diagnostic sidecars and finish gates are not proof.",
+            sidecar_events=(
+                {
+                    "kind": "verifier",
+                    "event_sequence": 1,
+                    "event_id": "diagnostic-1",
+                    "status": "passed",
+                    "command_intent": "diagnostic",
+                    "execution_contract_normalized": {
+                        "id": "contract:diagnostic-1",
+                        "role": "diagnostic",
+                        "proof_role": "negative_diagnostic",
+                        "acceptance_kind": "not_acceptance",
+                    },
+                },
+                {
+                    "kind": "structured_finish_gate",
+                    "event_sequence": 2,
+                    "id": "ev:finish-gate:1",
+                    "status": "passed",
+                    "observed": {"blocked": False},
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.finish_readiness.state == "not_ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "cheap_probe"
+
+
+def test_workframe_phase3_finish_gate_supports_paired_verifier_proof() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Finish from verifier evidence with finish-gate support.",
+            sidecar_events=(
+                {
+                    "kind": "verifier_result",
+                    "event_sequence": 1,
+                    "id": "ev:verifier:cmd-1",
+                    "status": "passed",
+                    "contract_id": "contract:verify-typed",
+                    "observed": {"verdict": "pass"},
+                },
+                {
+                    "kind": "structured_finish_gate",
+                    "event_sequence": 2,
+                    "id": "ev:finish-gate:1",
+                    "status": "passed",
+                    "observed": {"blocked": False},
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "finish_ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "finish"
+    assert "ev:verifier:cmd-1" in workframe.required_next.evidence_refs
+    assert "ev:finish-gate:1" in workframe.required_next.evidence_refs
+
+
+def test_workframe_phase3_missing_obligations_block_fresh_verifier_finish() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Do not finish with missing typed obligations.",
+            sidecar_events=(
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 1,
+                    "event_id": "verify-1",
+                    "status": "passed",
+                    "typed_evidence_id": "ev:verify-1",
+                    "execution_contract_normalized": {
+                        "id": "contract:verify-1",
+                        "role": "verify",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                    "missing_obligations": ["oracle:artifact-fresh"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "cheap_probe"
+    assert workframe.finish_readiness.state == "not_ready"
+    assert workframe.finish_readiness.blockers == ("missing_typed_obligations",)
+    assert workframe.finish_readiness.missing_obligations == ("oracle:artifact-fresh",)
+
+
+def test_workframe_phase3_diagnostic_artifact_contract_is_non_proof_sidecar() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Allow observational diagnostic artifact checks without finish proof.",
+            sidecar_events=(
+                {
+                    "kind": "verifier",
+                    "event_sequence": 1,
+                    "event_id": "diagnostic-1",
+                    "status": "passed",
+                    "command_intent": "diagnostic",
+                    "execution_contract_normalized": {
+                        "id": "contract:diagnostic-1",
+                        "role": "diagnostic",
+                        "proof_role": "negative_diagnostic",
+                        "acceptance_kind": "not_acceptance",
+                        "expected_artifacts": [{"id": "artifact:diagnostic-log", "path": "diag.log"}],
+                    },
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.finish_readiness.state == "not_ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "cheap_probe"
+    assert "contract:diagnostic-1" in workframe.evidence_refs.sidecar
+    assert "artifact:diagnostic-log" not in json.dumps(workframe.as_dict(), sort_keys=True)
+
+
+def test_workframe_phase3_projects_missing_obligation_refs_only() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Expose missing obligations without proof payloads.",
+            sidecar_events=(
+                {
+                    "kind": "finish_gate",
+                    "event_sequence": 1,
+                    "event_id": "finish-1",
+                    "status": "failed",
+                    "finish_gate": {
+                        "id": "finish:gate-1",
+                        "missing_obligations": [
+                            {
+                                "id": "oracle:verify-pass",
+                                "kind": "verifier_pass",
+                                "subject": {"contract_id": "contract:verify"},
+                            }
+                        ],
+                    },
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.finish_readiness.missing_obligations == ("contract:verify", "oracle:verify-pass")
+    serialized = json.dumps(workframe.as_dict(), sort_keys=True)
+    assert "verifier_pass" not in serialized
+    assert "missing_obligations" in serialized
+
+
 def test_workframe_phase0_prompt_inventory_checker_detects_legacy_projection_presence() -> None:
     inventory = [
         {"id": section_id, "visibility": "ordinary", "bytes": 32}

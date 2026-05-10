@@ -9513,6 +9513,51 @@ def test_implement_v2_workframe_omits_nested_active_work_payloads() -> None:
     assert "do-not-leak" not in workframe_section.content
 
 
+def test_implement_v2_workframe_omits_full_execution_contract_payloads() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair without exposing sidecar proof payloads."},
+        persisted_lane_state={
+            "active_work_todo": {
+                "source": {
+                    "target_paths": ["src/app.py"],
+                    "execution_contract": {
+                        "id": "contract:do-not-project",
+                        "expected_artifacts": [{"id": "artifact:secret", "path": "secret.out"}],
+                    },
+                },
+                "first_write_readiness": {
+                    "first_write_due": True,
+                    "required_next_action": "patch src/app.py",
+                },
+            },
+            "lane_hard_runtime_frontier": {
+                "latest_runtime_failure": {
+                    "failure_class": "runtime_failure",
+                    "summary": "safe failure summary",
+                    "execution_contract": {
+                        "id": "contract:frontier-secret",
+                        "expected_artifacts": [{"id": "artifact:frontier-secret", "path": "frontier.out"}],
+                    },
+                }
+            },
+        },
+        lane_config={"mode": "full"},
+    )
+
+    sections = build_implement_v2_prompt_sections(lane_input)
+    workframe_section = next(section for section in sections if section.id == "implement_v2_workframe")
+
+    assert "safe failure summary" in workframe_section.content
+    assert '"execution_contract"' not in workframe_section.content
+    assert "expected_artifacts" not in workframe_section.content
+    assert "artifact:secret" not in workframe_section.content
+    assert "artifact:frontier-secret" not in workframe_section.content
+
+
 def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",

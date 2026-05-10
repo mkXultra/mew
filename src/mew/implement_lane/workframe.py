@@ -212,12 +212,14 @@ class WorkFrameFinishReadiness:
     state: Literal["not_ready", "ready", "blocked"] = "not_ready"
     blockers: tuple[str, ...] = ()
     required_evidence_refs: tuple[str, ...] = ()
+    missing_obligations: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
             "state": self.state,
             "blockers": list(self.blockers),
             "required_evidence_refs": list(self.required_evidence_refs),
+            "missing_obligations": list(self.missing_obligations),
         }
 
 
@@ -446,6 +448,18 @@ def validate_workframe(workframe: WorkFrame, *, inputs: WorkFrameInputs) -> Work
         failed.append({"code": "reducer_input_conflicting_event_sequence"})
     else:
         passed.append("event_sequences_unique_or_identical")
+    rejected_probe_proof_refs = _rejected_probe_proof_refs(
+        [event for event in inputs.sidecar_events if isinstance(event, dict)]
+    )
+    if rejected_probe_proof_refs:
+        failed.append(
+            {
+                "code": "cheap_probe_authored_proof_obligation",
+                "evidence_refs": list(rejected_probe_proof_refs),
+            }
+        )
+    else:
+        passed.append("cheap_probes_do_not_author_completion_proof")
     if frame_bytes <= WORKFRAME_TARGET_MAX_BYTES:
         passed.append("workframe_size_within_target_cap")
     elif frame_bytes <= WORKFRAME_RED_MAX_BYTES:
@@ -594,14 +608,22 @@ def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
     mutation = _latest_successful_event(events, kinds=mutation_kinds)
     write_failure = _latest_failed_event(events, kinds=mutation_kinds)
     verifier = _latest_event(events, kinds={"strict_verifier", "verifier", "run_tests"})
+    finish_proof = _latest_finish_proof_event(events)
     changed_paths = tuple(sorted(_event_paths(mutation))) if mutation else ()
     mutation_seq = _event_sequence(mutation) if mutation else -1
-    verifier_seq = _event_sequence(verifier) if verifier else -1
+    verifier_seq = _event_sequence(finish_proof) if finish_proof else -1
     failure = _latest_failure_event(events, min_sequence=mutation_seq)
     failure_seq = _event_sequence(failure) if failure else -1
-    verifier_status = _event_status(verifier) if verifier else "unknown"
-    verifier_fresh = verifier_seq >= mutation_seq and verifier_status == "passed" if verifier else False
-    source_changed_since_verifier = bool(mutation and (not verifier or mutation_seq > verifier_seq or verifier_status != "passed"))
+    verifier_status = _event_status(finish_proof) if finish_proof else (_event_status(verifier) if verifier else "unknown")
+    failure_after_finish_proof = bool(finish_proof and failure_seq > verifier_seq)
+    verifier_fresh = (
+        verifier_seq >= mutation_seq and verifier_status == "passed" and not failure_after_finish_proof
+        if finish_proof
+        else False
+    )
+    source_changed_since_verifier = bool(
+        mutation and (not finish_proof or mutation_seq > verifier_seq or verifier_status != "passed")
+    )
     configured_verifier_ref = str(payload.get("success_contract_ref") or "")
     closeout_required = bool(source_changed_since_verifier and _has_low_budget_event(events))
     return {
@@ -609,7 +631,9 @@ def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
         "evidence_index": evidence_index,
         "latest_mutation_ref": _event_ref(mutation),
         "changed_paths": changed_paths,
-        "last_verifier_ref": _event_ref(verifier),
+        "last_verifier_ref": _event_ref(finish_proof) or _event_ref(verifier),
+        "last_verifier_evidence_refs": _event_evidence_refs(finish_proof) if finish_proof else (),
+        "finish_gate_support_refs": _finish_gate_support_refs(events, min_sequence=max(mutation_seq, verifier_seq)),
         "verifier_status": verifier_status,
         "verifier_fresh": verifier_fresh,
         "source_changed_since_verifier": source_changed_since_verifier,
@@ -622,8 +646,14 @@ def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
         "latest_mutation_sequence": mutation_seq,
         "last_verifier_sequence": verifier_seq,
         "typed_refs": tuple(ref for ref in evidence_index if ref.startswith("ev:")),
-        "sidecar_refs": tuple(ref for ref in evidence_index if ref.startswith("sidecar:") or ref.startswith("cmd:")),
+        "sidecar_refs": tuple(
+            ref
+            for ref in evidence_index
+            if ref.startswith(("sidecar:", "cmd:", "contract:", "oracle:", "finish:"))
+        ),
         "replay_refs": tuple(ref for ref in evidence_index if ref.startswith("replay:")),
+        "missing_obligations": _missing_obligation_refs(events),
+        "rejected_probe_proof_refs": _rejected_probe_proof_refs(events),
     }
 
 
@@ -657,17 +687,43 @@ def _latest_actionable_from_facts(facts: dict[str, object]) -> WorkFrameLatestAc
 
 
 def _finish_readiness_from_facts(facts: dict[str, object]) -> WorkFrameFinishReadiness:
+    missing_obligations = tuple(str(item) for item in facts.get("missing_obligations") or () if str(item))
+    if missing_obligations:
+        return WorkFrameFinishReadiness(
+            state="not_ready",
+            blockers=("missing_typed_obligations",),
+            missing_obligations=missing_obligations,
+        )
     if facts.get("verifier_fresh"):
-        refs = tuple(ref for ref in (str(facts.get("last_verifier_ref") or ""),) if ref)
-        return WorkFrameFinishReadiness(state="ready", required_evidence_refs=refs)
+        refs = tuple(
+            dict.fromkeys(
+                [
+                    *(str(ref) for ref in facts.get("last_verifier_evidence_refs") or () if str(ref)),
+                    *(str(ref) for ref in facts.get("finish_gate_support_refs") or () if str(ref)),
+                    str(facts.get("last_verifier_ref") or ""),
+                ]
+            )
+        )
+        refs = tuple(ref for ref in refs if ref)
+        return WorkFrameFinishReadiness(
+            state="ready",
+            required_evidence_refs=refs,
+            missing_obligations=missing_obligations,
+        )
     blockers: list[str] = []
     if facts.get("source_changed_since_verifier"):
         blockers.append("verifier_stale_after_mutation")
     if facts.get("verifier_status") in {"failed", "interrupted", "invalid"}:
         blockers.append("verifier_failed")
+    if missing_obligations:
+        blockers.append("missing_typed_obligations")
     if not blockers:
         blockers.append("missing_passing_verifier")
-    return WorkFrameFinishReadiness(state="not_ready", blockers=tuple(blockers))
+    return WorkFrameFinishReadiness(
+        state="not_ready",
+        blockers=tuple(blockers),
+        missing_obligations=missing_obligations,
+    )
 
 
 def _required_next_from_facts(
@@ -820,7 +876,7 @@ def _event_sequence(event: object) -> int:
 def _event_ref(event: object) -> str:
     if not isinstance(event, dict):
         return ""
-    for key in ("evidence_ref", "event_ref", "command_run_id", "typed_evidence_id", "event_id"):
+    for key in ("evidence_ref", "event_ref", "command_run_id", "typed_evidence_id", "id", "event_id"):
         value = str(event.get(key) or "").strip()
         if value:
             return value
@@ -881,6 +937,8 @@ def _latest_failure_event(events: list[dict[str, object]], *, min_sequence: int 
             "verifier",
             "strict_verifier",
             "run_tests",
+            "verifier_result",
+            "structured_finish_gate",
             "source_mutation",
             "write",
             "edit",
@@ -890,6 +948,167 @@ def _latest_failure_event(events: list[dict[str, object]], *, min_sequence: int 
         and _event_sequence(event) >= min_sequence
     ]
     return max(failures, key=_event_sequence) if failures else None
+
+
+def _latest_finish_proof_event(events: list[dict[str, object]]) -> dict[str, object] | None:
+    matches = [event for event in events if _event_is_finish_proof(event)]
+    return max(matches, key=_event_sequence) if matches else None
+
+
+def _event_is_finish_proof(event: dict[str, object]) -> bool:
+    if _event_status(event) != "passed":
+        return False
+    intent = _event_execution_intent(event)
+    if intent not in {"verify", "finish_verifier"}:
+        return False
+    return _event_kind(event) in {
+        "strict_verifier",
+        "verifier",
+        "run_tests",
+        "typed_evidence",
+        "verifier_result",
+    }
+
+
+def _event_execution_intent(event: dict[str, object]) -> str:
+    command_intent = str(event.get("command_intent") or event.get("intent") or "").strip().casefold()
+    contract = _event_execution_contract(event)
+    role = _contract_enum(contract, "role")
+    purpose = _contract_enum(contract, "purpose")
+    stage = _contract_enum(contract, "stage")
+    proof_role = _contract_enum(contract, "proof_role")
+    acceptance_kind = _contract_enum(contract, "acceptance_kind")
+    kind = _event_kind(event)
+    non_acceptance = acceptance_kind in {"not_acceptance", "progress_only"} or proof_role in {
+        "none",
+        "progress",
+        "negative_diagnostic",
+    }
+    if command_intent in {"probe", "cheap_probe", "read", "inspect", "search"}:
+        return "cheap_probe"
+    if command_intent in {"diagnostic", "debug"}:
+        return "diagnostic"
+    if non_acceptance and role in {"source", "dependency", "artifact_probe", "unknown"}:
+        return "cheap_probe"
+    if non_acceptance or role == "diagnostic" or purpose == "diagnostic" or stage == "diagnostic":
+        return "diagnostic"
+    if acceptance_kind == "external_verifier" or proof_role in {"verifier", "final_artifact"}:
+        return "finish_verifier"
+    if role in {"verify", "test"} or purpose == "verification" or stage == "verification":
+        return "verify"
+    if acceptance_kind in {"candidate_final_proof", "candidate_artifact_proof", "candidate_runtime_smoke"}:
+        return "finish_verifier"
+    if role == "runtime" or purpose in {"runtime_build", "runtime_install", "smoke"}:
+        return "runtime"
+    if role == "build" or purpose == "build" or stage == "build" or proof_role == "target_build":
+        return "build"
+    if command_intent in {"verify", "test", "verifier"}:
+        return "verify"
+    if kind in {"strict_verifier", "verifier", "run_tests", "verifier_result"}:
+        return "verify"
+    return "cheap_probe"
+
+
+def _event_execution_contract(event: dict[str, object]) -> dict[str, object]:
+    raw = event.get("execution_contract")
+    normalized = event.get("execution_contract_normalized")
+    merged: dict[str, object] = {}
+    if isinstance(raw, dict):
+        merged.update(raw)
+    if isinstance(normalized, dict):
+        merged.update(normalized)
+    return merged
+
+
+def _contract_enum(contract: dict[str, object], key: str) -> str:
+    return str(contract.get(key) or "").strip().casefold()
+
+
+def _event_authored_completion_proof(event: dict[str, object]) -> bool:
+    contract = _event_execution_contract(event)
+    if not contract:
+        return False
+    acceptance_kind = _contract_enum(contract, "acceptance_kind")
+    proof_role = _contract_enum(contract, "proof_role")
+    if acceptance_kind in {"candidate_artifact_proof", "candidate_runtime_smoke", "candidate_final_proof", "external_verifier"}:
+        return True
+    if proof_role in {"target_build", "runtime_install", "default_smoke", "custom_runtime_smoke", "final_artifact", "verifier"}:
+        return True
+    if acceptance_kind in {"not_acceptance", "progress_only"} or proof_role in {
+        "none",
+        "progress",
+        "negative_diagnostic",
+    }:
+        return False
+    return bool(_expected_artifact_refs(contract) or _obligation_refs_from_value(contract.get("oracle_obligations")))
+
+
+def _rejected_probe_proof_refs(events: list[dict[str, object]]) -> tuple[str, ...]:
+    refs = []
+    for event in events:
+        if _event_execution_intent(event) in {"cheap_probe", "diagnostic"} and _event_authored_completion_proof(event):
+            refs.append(_event_ref(event))
+    return tuple(ref for ref in refs if ref)
+
+
+def _missing_obligation_refs(events: list[dict[str, object]]) -> tuple[str, ...]:
+    refs: set[str] = set()
+    for event in events:
+        for key in ("missing_obligations", "required_obligations", "oracle_obligations"):
+            refs.update(_obligation_refs_from_value(event.get(key)))
+        finish_gate = event.get("finish_gate") if isinstance(event.get("finish_gate"), dict) else {}
+        refs.update(_obligation_refs_from_value(finish_gate.get("missing_obligations")))
+        typed = event.get("typed_acceptance") if isinstance(event.get("typed_acceptance"), dict) else {}
+        digest = typed.get("digest") if isinstance(typed.get("digest"), dict) else {}
+        refs.update(_obligation_refs_from_value(digest.get("missing_obligations")))
+    return tuple(sorted(refs))
+
+
+def _finish_gate_support_refs(events: list[dict[str, object]], *, min_sequence: int) -> tuple[str, ...]:
+    refs: set[str] = set()
+    for event in events:
+        if _event_sequence(event) < min_sequence:
+            continue
+        if _event_kind(event) not in {"finish_gate", "structured_finish_gate"}:
+            continue
+        if _event_status(event) != "passed":
+            continue
+        refs.update(_event_evidence_refs(event))
+    return tuple(sorted(refs))
+
+
+def _obligation_refs_from_value(value: object) -> set[str]:
+    refs: set[str] = set()
+    if isinstance(value, str) and value.strip():
+        refs.add(value.strip())
+    elif isinstance(value, dict):
+        for key in ("id", "obligation_id", "ref"):
+            ref = str(value.get(key) or "").strip()
+            if ref:
+                refs.add(ref)
+        subject = value.get("subject")
+        if isinstance(subject, dict):
+            subject_ref = str(subject.get("id") or subject.get("artifact_id") or subject.get("contract_id") or "").strip()
+            if subject_ref:
+                refs.add(subject_ref)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            refs.update(_obligation_refs_from_value(item))
+    return refs
+
+
+def _expected_artifact_refs(contract: dict[str, object]) -> set[str]:
+    refs: set[str] = set()
+    raw = contract.get("expected_artifacts")
+    if not isinstance(raw, (list, tuple)):
+        return refs
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        ref = str(item.get("id") or item.get("artifact_id") or item.get("path") or "").strip()
+        if ref:
+            refs.add(ref)
+    return refs
 
 
 def _latest_failure_is_current(facts: dict[str, object]) -> bool:
@@ -917,13 +1136,26 @@ def _event_evidence_refs(event: object) -> tuple[str, ...]:
     if not isinstance(event, dict):
         return ()
     refs = set()
-    for key in ("evidence_ref", "event_ref", "command_run_id", "typed_evidence_id", "event_id"):
+    for key in ("evidence_ref", "event_ref", "command_run_id", "typed_evidence_id", "id", "event_id"):
         value = str(event.get(key) or "").strip()
         if value:
             refs.add(value)
     raw = event.get("evidence_refs")
     if isinstance(raw, (list, tuple)):
         refs.update(str(item).strip() for item in raw if str(item).strip())
+    contract = _event_execution_contract(event)
+    contract_id = str(contract.get("id") or contract.get("contract_id") or "").strip()
+    contract_id = contract_id or str(event.get("contract_id") or "").strip()
+    if contract_id:
+        refs.add(contract_id)
+    oracle = event.get("oracle_bundle") if isinstance(event.get("oracle_bundle"), dict) else {}
+    oracle_id = str(oracle.get("id") or "").strip()
+    if oracle_id:
+        refs.add(oracle_id)
+    finish_gate = event.get("finish_gate") if isinstance(event.get("finish_gate"), dict) else {}
+    finish_id = str(finish_gate.get("id") or finish_gate.get("finish_gate_id") or "").strip()
+    if finish_id:
+        refs.add(finish_id)
     return tuple(sorted(refs))
 
 
