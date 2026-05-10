@@ -136,15 +136,19 @@ class WorkFrameLatestActionable:
     generic_family: str = ""
     source_ref: str = ""
     evidence_refs: tuple[str, ...] = ()
+    recovery_hint: dict[str, object] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        payload = {
             "family": self.family,
             "summary": self.summary,
             "generic_family": self.generic_family,
             "source_ref": self.source_ref,
             "evidence_refs": list(self.evidence_refs),
         }
+        if self.recovery_hint:
+            payload["recovery_hint"] = self.recovery_hint
+        return payload
 
 
 @dataclass(frozen=True)
@@ -714,6 +718,7 @@ def _latest_actionable_from_facts(facts: dict[str, object]) -> WorkFrameLatestAc
             summary=_actionable_summary(failure),
             source_ref=_event_ref(failure),
             evidence_refs=evidence_refs,
+            recovery_hint=_event_recovery_hint(failure),
         )
     if facts.get("source_changed_since_verifier"):
         return WorkFrameLatestActionable(
@@ -798,9 +803,12 @@ def _required_next_from_facts(
                 after="patch_or_edit_or_block",
                 evidence_refs=latest_actionable.evidence_refs or (latest_actionable.source_ref,),
             )
+        reason = _required_next_reason_for_generic_family(latest_actionable.generic_family)
+        if latest_actionable.recovery_hint:
+            reason = f"{reason}; follow latest_actionable.recovery_hint before retrying the repair"
         return WorkFrameRequiredNext(
             kind=next_kind,
-            reason=_required_next_reason_for_generic_family(latest_actionable.generic_family),
+            reason=reason,
             target_paths=(
                 _required_next_target_paths(facts, generic_family=latest_actionable.generic_family)
                 if next_kind == "patch_or_edit"
@@ -1523,6 +1531,63 @@ def _actionable_summary(event: dict[str, object]) -> str:
         if value and not _is_generic_actionable_summary(value):
             return value
     return generic_candidate or "failure without actionable detail"
+
+
+def _event_recovery_hint(event: dict[str, object]) -> dict[str, object]:
+    hint = event.get("recovery_hint")
+    if not isinstance(hint, dict):
+        return {}
+    return _bounded_recovery_hint(hint)
+
+
+def _bounded_recovery_hint(hint: dict[str, object]) -> dict[str, object]:
+    output: dict[str, object] = {}
+    for key, limit in (
+        ("failure_subclass", 120),
+        ("suggested_tool", 120),
+        ("suggested_next_action", 260),
+    ):
+        value = str(hint.get(key) or "").strip()
+        if value:
+            output[key] = value[:limit]
+    recovery_call = hint.get("suggested_recovery_call")
+    if isinstance(recovery_call, dict):
+        call: dict[str, object] = {}
+        for key in ("tool_name", "path", "reason"):
+            value = str(recovery_call.get(key) or "").strip()
+            if value:
+                call[key] = value[:240]
+        for key in ("offset", "max_chars"):
+            value = recovery_call.get(key)
+            if isinstance(value, int):
+                call[key] = value
+        line_hint = recovery_call.get("line_hint")
+        if isinstance(line_hint, dict):
+            compact_line_hint: dict[str, int] = {}
+            for key in ("line_start", "line_count"):
+                value = line_hint.get(key)
+                if isinstance(value, int):
+                    compact_line_hint[key] = value
+            if compact_line_hint:
+                call["line_hint"] = compact_line_hint
+        if call:
+            output["suggested_recovery_call"] = call
+    current_window = hint.get("current_window")
+    if isinstance(current_window, dict):
+        window: dict[str, object] = {}
+        for key in ("line_start", "line_end"):
+            value = current_window.get(key)
+            if isinstance(value, int):
+                window[key] = value
+        similarity = current_window.get("similarity")
+        if isinstance(similarity, (int, float)):
+            window["similarity"] = round(float(similarity), 3)
+        text = str(current_window.get("text") or "").strip()
+        if text:
+            window["text"] = text[:500]
+        if window:
+            output["current_window"] = window
+    return output
 
 
 def _event_detail_text(event: dict[str, object]) -> str:

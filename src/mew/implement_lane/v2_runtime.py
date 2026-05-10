@@ -2555,6 +2555,9 @@ def _workframe_sidecar_event_from_tool_result(
         if result.status != "completed" or result.is_error:
             event["family"] = _write_failure_class(result) or _write_failure_kind(result)
             event["summary"] = _workframe_failure_summary(result, payload, default=_write_failure_reason(result))
+            recovery_hint = _workframe_write_recovery_hint(payload)
+            if recovery_hint:
+                event["recovery_hint"] = recovery_hint
         else:
             event["summary"] = _frontier_clip_text(payload.get("summary") or payload.get("operation") or "source mutated")
         return _drop_empty_frontier_values(event)
@@ -2625,6 +2628,96 @@ def _workframe_result_paths(
     if isinstance(raw_contract_paths, (list, tuple)):
         paths.extend(_frontier_clip_text(item, limit=240) for item in raw_contract_paths if str(item).strip())
     return tuple(dict.fromkeys(path for path in paths if path))
+
+
+def _workframe_write_recovery_hint(payload: dict[str, object]) -> dict[str, object]:
+    hint: dict[str, object] = {}
+    for key, limit in (
+        ("failure_subclass", 120),
+        ("suggested_tool", 120),
+        ("suggested_next_action", 260),
+    ):
+        value = _frontier_clip_text(payload.get(key), limit=limit)
+        if value:
+            hint[key] = value
+    recovery_calls = payload.get("suggested_recovery_calls")
+    if isinstance(recovery_calls, list):
+        recovery_call = next((call for call in recovery_calls if isinstance(call, dict)), {})
+        compact_call = _compact_recovery_call_for_workframe(recovery_call)
+        if compact_call:
+            hint["suggested_recovery_call"] = compact_call
+    current_window = _first_current_window_for_workframe(payload)
+    if current_window:
+        hint["current_window"] = current_window
+    return _drop_empty_frontier_values(hint)
+
+
+def _compact_recovery_call_for_workframe(call: dict[str, object]) -> dict[str, object]:
+    compact: dict[str, object] = {}
+    for key, limit in (
+        ("tool_name", 80),
+        ("path", 240),
+        ("reason", 220),
+    ):
+        value = _frontier_clip_text(call.get(key), limit=limit)
+        if value:
+            compact[key] = value
+    for key in ("offset", "max_chars"):
+        value = call.get(key)
+        if isinstance(value, int):
+            compact[key] = value
+    line_hint = call.get("line_hint")
+    if isinstance(line_hint, dict):
+        compact_line_hint: dict[str, int] = {}
+        for key in ("line_start", "line_count"):
+            value = line_hint.get(key)
+            if isinstance(value, int):
+                compact_line_hint[key] = value
+        if compact_line_hint:
+            compact["line_hint"] = compact_line_hint
+    return compact
+
+
+def _first_current_window_for_workframe(payload: dict[str, object]) -> dict[str, object]:
+    for window in _iter_write_recovery_windows(payload):
+        compact = _compact_current_window_for_workframe(window)
+        if compact:
+            return compact
+    return {}
+
+
+def _iter_write_recovery_windows(payload: dict[str, object]):
+    direct_windows = payload.get("nearest_existing_windows")
+    if isinstance(direct_windows, list):
+        for window in direct_windows:
+            if isinstance(window, dict):
+                yield window
+    patch_windows = payload.get("patch_anchor_windows")
+    if isinstance(patch_windows, list):
+        for item in patch_windows:
+            if not isinstance(item, dict):
+                continue
+            for key in ("nearest_existing_windows", "matching_existing_windows"):
+                nested = item.get(key)
+                if isinstance(nested, list):
+                    for window in nested:
+                        if isinstance(window, dict):
+                            yield window
+
+
+def _compact_current_window_for_workframe(window: dict[str, object]) -> dict[str, object]:
+    compact: dict[str, object] = {}
+    for key in ("line_start", "line_end"):
+        value = window.get(key)
+        if isinstance(value, int):
+            compact[key] = value
+    similarity = window.get("similarity")
+    if isinstance(similarity, (int, float)):
+        compact["similarity"] = round(float(similarity), 3)
+    text = _frontier_clip_text(window.get("text"), limit=500)
+    if text:
+        compact["text"] = text
+    return compact
 
 
 def _workframe_failure_family(payload: dict[str, object]) -> str:

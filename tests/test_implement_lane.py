@@ -10006,6 +10006,77 @@ def test_implement_v2_workframe_extracts_missing_write_target_path() -> None:
     assert "path does not exist" in events[0]["summary"]
 
 
+def test_implement_v2_workframe_projects_patch_anchor_recovery_hint() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the current patch failure."},
+        lane_config={"mode": "full"},
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="patch-anchor-miss",
+        mew_tool_call_id="tool-patch-anchor-miss",
+        tool_name="apply_patch",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "reason": "edit hunk #1 old text was not found; confirm the exact existing text before retrying",
+                "failure_class": "patch_anchor_mismatch",
+                "failure_subclass": "patch_exact_match_miss",
+                "path": "/app/vm.js",
+                "suggested_tool": "read_file/apply_patch/edit_file",
+                "suggested_next_action": (
+                    "retry with exact current source context from patch_anchor_windows; if more context is needed, "
+                    "run the first suggested_recovery_calls read_file window instead of reading the whole file"
+                ),
+                "patch_anchor_windows": [
+                    {
+                        "hunk_index": 1,
+                        "nearest_existing_windows": [
+                            {
+                                "line_start": 405,
+                                "line_end": 412,
+                                "similarity": 0.276,
+                                "text": "case 0x1c: { const funct = ins & 0x3f; }",
+                            }
+                        ],
+                    }
+                ],
+                "suggested_recovery_calls": [
+                    {
+                        "tool_name": "read_file",
+                        "path": "/app/vm.js",
+                        "offset": 18270,
+                        "max_chars": 1120,
+                        "reason": "bounded patch anchor recovery; do not read the whole file",
+                        "line_hint": {"line_start": 385, "line_count": 48},
+                    }
+                ],
+            },
+        ),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+    bundle = build_implement_v2_workframe_debug_bundle(lane_input, sidecar_events=events)
+    workframe = bundle["reducer_output"]
+    hint = workframe["latest_actionable"]["recovery_hint"]
+
+    assert bundle["invariant_report"]["status"] == "pass"
+    assert workframe["latest_actionable"]["family"] == "patch_anchor_mismatch"
+    assert workframe["latest_actionable"]["generic_family"] == "write_failure"
+    assert hint["failure_subclass"] == "patch_exact_match_miss"
+    assert hint["suggested_recovery_call"]["tool_name"] == "read_file"
+    assert hint["suggested_recovery_call"]["offset"] == 18270
+    assert hint["suggested_recovery_call"]["line_hint"]["line_start"] == 385
+    assert hint["current_window"]["line_start"] == 405
+    assert "case 0x1c" in hint["current_window"]["text"]
+    assert "recovery_hint" in workframe["required_next"]["reason"]
+
+
 def test_implement_v2_workframe_does_not_extract_missing_path_reason_for_non_write() -> None:
     result = ToolResultEnvelope(
         lane_attempt_id="attempt-1",
