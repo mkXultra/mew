@@ -1535,6 +1535,7 @@ def run_live_json_implement_v2(
             "resident_sidecar_state": resident_sidecar_metrics,
             "workframe": {
                 "schema_version": 1,
+                "variant": workframe_debug_bundle.get("workframe_variant") or "current",
                 "phase": "m6_24_workframe_redesign_phase_6",
                 "input_hash": workframe_trace.get("input_hash"),
                 "output_hash": workframe_trace.get("output_hash"),
@@ -10907,6 +10908,10 @@ def _write_live_json_artifacts(
             "prompt_visible_workframe.json": workframe_debug_bundle.get("prompt_visible_workframe"),
             "prompt_render_inventory.json": workframe_debug_bundle.get("prompt_render_inventory"),
             "workframe_cursor.json": workframe_debug_bundle.get("workframe_cursor"),
+            "workframe_variant.json": {
+                "schema_version": 1,
+                "variant": workframe_debug_bundle.get("workframe_variant") or "current",
+            },
         }
         for filename, payload in bundle_files.items():
             path = workframe_root / filename

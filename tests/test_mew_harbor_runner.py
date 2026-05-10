@@ -11,6 +11,7 @@ from mew.mew_harbor_runner import (
     make_jobs_dir,
     observer_detail_missing,
     summarize_latest_run,
+    work_guidance_with_workframe_variant,
 )
 
 
@@ -46,6 +47,27 @@ def test_mew_command_template_enables_implement_v2_and_observer_detail(tmp_path)
     assert "{max_wall_seconds_option}" in template
     assert "--report {report_path}" in template
     assert "--artifacts {artifact_dir}" in template
+
+
+def test_mew_command_template_can_pass_workframe_variant(tmp_path):
+    template = build_mew_work_command_template(_config(tmp_path, workframe_variant="transcript_first"))
+
+    assert "workframe_variant=transcript_first" in template
+
+
+def test_work_guidance_with_workframe_variant_preserves_existing_choice():
+    guidance = work_guidance_with_workframe_variant(
+        "selected_lane=implement_v2 workframe_variant=transition_contract",
+        "minimal",
+    )
+
+    assert guidance == "selected_lane=implement_v2 workframe_variant=transition_contract"
+
+
+def test_work_guidance_with_current_workframe_variant_is_noop():
+    guidance = work_guidance_with_workframe_variant("selected_lane=implement_v2", "current")
+
+    assert guidance == "selected_lane=implement_v2"
 
 
 def test_build_harbor_command_uses_mew_wrapper_mounts_and_timeout_shape(tmp_path):
@@ -94,6 +116,17 @@ def test_make_jobs_dir_includes_run_mode(tmp_path):
     assert jobs_dir == tmp_path / "mew-make-mips-interpreter-proof-5-20260508-173000"
 
 
+def test_make_jobs_dir_includes_non_current_workframe_variant(tmp_path):
+    jobs_dir = make_jobs_dir(
+        "make-mips-interpreter",
+        tmp_path,
+        now=dt.datetime(2026, 5, 8, 17, 30, 0),
+        workframe_variant="transcript_first",
+    )
+
+    assert jobs_dir == tmp_path / "mew-make-mips-interpreter-step-check-10min-wf-transcript-first-20260508-173000"
+
+
 def test_collect_mew_trial_summary_reports_observer_detail(tmp_path):
     task_dir = tmp_path / "run" / "trial"
     unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
@@ -107,6 +140,7 @@ def test_collect_mew_trial_summary_reports_observer_detail(tmp_path):
                     "tool_calls": 4,
                     "tool_results": 4,
                     "wall_elapsed_seconds": 12.5,
+                    "workframe": {"variant": "transcript_first"},
                     "integration_observation": {
                         "debug_detail_enabled": True,
                         "artifact_ref": "integration-observation.json",
@@ -144,6 +178,7 @@ def test_collect_mew_trial_summary_reports_observer_detail(tmp_path):
     assert summary["verifier_stdout_path"] == str(task_dir / "verifier" / "test-stdout.txt")
     assert summary["verifier_reward_path"] == str(task_dir / "verifier" / "reward.txt")
     assert summary["model_turns"] == 3
+    assert summary["workframe_variant"] == "transcript_first"
     assert summary["prompt_chars"] == 123
     assert observer_detail_missing([summary]) is False
 

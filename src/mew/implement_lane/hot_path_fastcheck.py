@@ -34,9 +34,9 @@ from .workframe import (
     WorkFrameInputs,
     canonical_json,
     canonicalize_workframe_inputs,
-    reduce_workframe,
     workframe_output_hash,
 )
+from .workframe_variants import reduce_workframe_with_variant
 
 HOT_PATH_FASTCHECK_SCHEMA_VERSION = 1
 DEFAULT_HOT_PATH_BASELINE_PATH = (
@@ -840,9 +840,14 @@ def _check_workframe_replay(bundle: dict[str, object], manifest: dict[str, objec
     if inputs is None:
         return _check("workframe_replay", False, "invalid reducer_inputs.json", {"bundle_dir": bundle.get("bundle_dir")})
     stored_inputs = _safe_mapping(bundle.get("reducer_inputs"))
+    workframe_variant = str(
+        stored_inputs.get("workframe_variant")
+        or _safe_mapping(_safe_mapping((manifest or {}).get("metrics")).get("workframe")).get("variant")
+        or "current"
+    )
     stored_canonical = _safe_mapping(stored_inputs.get("canonical"))
     canonical = canonicalize_workframe_inputs(inputs)
-    workframe, report = reduce_workframe(inputs)
+    workframe, report = reduce_workframe_with_variant(inputs, variant=workframe_variant)
     stored_output = _safe_mapping(bundle.get("reducer_output"))
     recomputed_output = workframe.as_dict()
     stored_report = _safe_mapping(bundle.get("invariant_report"))
@@ -866,6 +871,7 @@ def _check_workframe_replay(bundle: dict[str, object], manifest: dict[str, objec
         "saved WorkFrame replay matches reducer" if ok else "saved WorkFrame replay does not match reducer",
         {
             "bundle_dir": bundle.get("bundle_dir"),
+            "workframe_variant": workframe_variant,
             "stored_input_hash": _safe_mapping(stored_output.get("trace")).get("input_hash"),
             "recomputed_input_hash": workframe.trace.input_hash,
             "stored_output_hash": _safe_mapping(stored_output.get("trace")).get("output_hash"),

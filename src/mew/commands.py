@@ -7172,6 +7172,25 @@ def _work_guidance_bool_option(guidance, *names):
     return False
 
 
+def _work_guidance_string_option(guidance, *names):
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        if name in payload:
+            return str(payload.get(name) or "").strip()
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            if name in lane_config:
+                return str(lane_config.get(name) or "").strip()
+    text = str(guidance or "")
+    for name in names:
+        pattern = rf"(?:^|\s){re.escape(name)}\s*=\s*([A-Za-z0-9_.-]+)"
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
 def _work_guidance_persisted_lane_state(guidance):
     payload = _work_guidance_json_payload(guidance)
     if not payload:
@@ -7202,7 +7221,7 @@ def _work_guidance_persisted_lane_state(guidance):
 def _work_guidance_task_contract_guidance(guidance):
     payload = _work_guidance_json_payload(guidance)
     if not payload:
-        return str(guidance or "")
+        return _strip_internal_work_guidance_options(str(guidance or ""))
     sanitized = dict(payload)
     for key in (
         "persisted_lane_state",
@@ -7213,9 +7232,27 @@ def _work_guidance_task_contract_guidance(guidance):
         "lane_hard_runtime_frontier",
         "reentry_repair_history",
         "resume_repair_history",
+        "workframe_variant",
+        "work_frame_variant",
     ):
         sanitized.pop(key, None)
+    lane_config = sanitized.get("lane_config")
+    if isinstance(lane_config, dict):
+        lane_config = dict(lane_config)
+        lane_config.pop("workframe_variant", None)
+        lane_config.pop("work_frame_variant", None)
+        if lane_config:
+            sanitized["lane_config"] = lane_config
+        else:
+            sanitized.pop("lane_config", None)
     return json.dumps(sanitized, ensure_ascii=True, sort_keys=True) if sanitized else ""
+
+
+def _strip_internal_work_guidance_options(guidance):
+    text = str(guidance or "")
+    for name in ("workframe_variant", "work_frame_variant"):
+        text = re.sub(rf"(?:^|\s){re.escape(name)}\s*=\s*[A-Za-z0-9_.-]+", " ", text)
+    return " ".join(text.split())
 
 
 def _work_session_active_work_todo(session):
@@ -7420,6 +7457,11 @@ def _run_work_ai_implement_v2(
             "auto_approve_writes": work_auto_approve_edits_enabled(effective_args),
             "artifact_dir": getattr(effective_args, "oneshot_artifacts", "") or "",
             "max_steps": max_steps,
+            "workframe_variant": _work_guidance_string_option(
+                getattr(effective_args, "work_guidance", None),
+                "workframe_variant",
+                "work_frame_variant",
+            ),
             "write_integration_observation_detail": _work_guidance_bool_option(
                 getattr(effective_args, "work_guidance", None),
                 "write_integration_observation_detail",

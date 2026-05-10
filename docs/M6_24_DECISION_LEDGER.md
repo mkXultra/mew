@@ -1409,3 +1409,25 @@ path and suffix-match boundaries; after negative regression tests for docs,
 generic syscall writes, and basename-vs-full-path candidates, it returned
 `STATUS: APPROVE`. Next step: commit, then run one same-shape 10 minute
 diagnostic before `speed_1` / `proof_5`.
+
+WorkFrame variant benchmark substrate decision 2026-05-10 JST:
+
+Codex, Claude Code, and 2025-2026 literature reviews converged on a narrow
+M6.24 direction: keep transcript-first tool results as the immediate evidence
+substrate, but retain WorkFrame as a reducer-owned transition contract for
+state, forbidden actions, finish safety, replay, and repair routing. The next
+decision should be measured, not argued. Add a WorkFrame reducer variant
+boundary so `current`, future `transcript_first`, `transition_contract`, and
+`minimal` reducers can share the same inputs, artifact format, fastcheck,
+step-check runner, and analyzer.
+
+Decision: do not create a new implement lane yet. First make WorkFrame
+switchable inside `implement_v2` and record `workframe_variant` in artifacts.
+Variant implementations must stay in separate reducer/projection files and
+must not change the tool runtime, provider loop, verifier, or benchmark task
+setup; otherwise the comparison becomes an agent-loop comparison instead of a
+WorkFrame comparison. Once the substrate exists, use parallel same-shape
+`step-check-10min` runs to compare first-write latency, probe count,
+latest-result-to-patch turns, prompt/WorkFrame size, block reason, and
+reference-step distance. If reducer variants cannot explain the gap, only then
+consider a separate `implement_v3` lane.

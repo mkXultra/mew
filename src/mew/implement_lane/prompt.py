@@ -17,7 +17,8 @@ from ..prompt_sections import (
 )
 from .tool_policy import ImplementLaneToolSpec, list_v2_tool_specs_for_mode
 from .types import ImplementLaneInput
-from .workframe import WorkFrameInputs, canonicalize_workframe_inputs, reduce_workframe
+from .workframe import WorkFrameInputs, canonicalize_workframe_inputs
+from .workframe_variants import DEFAULT_WORKFRAME_VARIANT, reduce_workframe_with_variant, validate_workframe_variant_name
 
 HOT_PATH_PROJECTION_SURFACE = "hot_path_projection"
 ORDINARY_RESIDENT_SUMMARY_SURFACE = "ordinary_resident_summary"
@@ -249,7 +250,7 @@ def build_implement_v2_prompt_sections(
                         "model_backend": lane_input.model_backend,
                         "model": lane_input.model,
                         "effort": lane_input.effort,
-                        "lane_config": lane_input.lane_config,
+                        "lane_config": _model_visible_lane_config(lane_input.lane_config),
                         "lane_local_state": _lane_local_state(lane_input.persisted_lane_state),
                     }
                 ),
@@ -307,13 +308,16 @@ def build_implement_v2_workframe_debug_bundle(
         workspace_root=lane_input.workspace,
         artifact_root=str(lane_input.lane_config.get("artifact_dir") or ""),
     )
-    workframe, report = reduce_workframe(inputs)
+    workframe_variant = _workframe_variant(lane_input)
+    workframe, report = reduce_workframe_with_variant(inputs, variant=workframe_variant)
     visible = _workframe_visible_payload(workframe.as_dict())
     return {
         "schema_version": 1,
         "turn_id": turn_id,
+        "workframe_variant": workframe_variant,
         "reducer_inputs": {
             "schema_version": 1,
+            "workframe_variant": workframe_variant,
             "workframe_inputs": inputs.as_dict(),
             "canonical": canonicalize_workframe_inputs(inputs),
         },
@@ -329,6 +333,7 @@ def build_implement_v2_workframe_debug_bundle(
             "attempt_id": inputs.attempt_id,
             "turn_id": turn_id,
             "workframe_id": workframe.trace.workframe_id,
+            "workframe_variant": workframe_variant,
             "input_hash": workframe.trace.input_hash,
             "output_hash": workframe.trace.output_hash,
             "reducer_schema_version": workframe.trace.reducer_schema_version,
@@ -336,6 +341,21 @@ def build_implement_v2_workframe_debug_bundle(
             "previous_workframe_hash": inputs.previous_workframe_hash,
         },
     }
+
+
+def _workframe_variant(lane_input: ImplementLaneInput) -> str:
+    return validate_workframe_variant_name(
+        lane_input.lane_config.get("workframe_variant")
+        or lane_input.task_contract.get("workframe_variant")
+        or DEFAULT_WORKFRAME_VARIANT
+    )
+
+
+def _model_visible_lane_config(lane_config: dict[str, object]) -> dict[str, object]:
+    visible = dict(lane_config)
+    visible.pop("workframe_variant", None)
+    visible.pop("work_frame_variant", None)
+    return visible
 
 
 def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, object]:

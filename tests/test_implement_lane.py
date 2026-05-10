@@ -25,6 +25,7 @@ from mew.implement_lane import (
     get_implement_lane_runtime_view,
     implement_v2_prompt_section_metrics,
     list_implement_lane_runtime_views,
+    list_workframe_variants,
     list_v2_base_tool_specs,
     list_v2_tool_specs_for_mode,
     run_fake_exec_implement_v2,
@@ -216,6 +217,45 @@ def test_implement_v2_descriptor_exposes_live_runtime_and_tools() -> None:
     assert result.next_reentry_hint["fallback_lane"] == IMPLEMENT_V1_LANE
     assert result.next_reentry_hint["requires_separate_lane_attempt"] is True
     assert "fallback_lane" not in result.updated_lane_state
+
+
+def test_workframe_variant_registry_exposes_current_variant() -> None:
+    variants = list_workframe_variants()
+
+    assert [variant.name for variant in variants] == ["current"]
+    assert "Current M6.24" in variants[0].description
+
+
+def test_workframe_debug_bundle_records_variant() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-variant",
+        task_id="task-variant",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"workframe_variant": "current"},
+        task_contract={"objective": "Repair the workspace."},
+    )
+
+    bundle = build_implement_v2_workframe_debug_bundle(lane_input, turn_id="turn-variant")
+
+    assert bundle["workframe_variant"] == "current"
+    assert bundle["reducer_inputs"]["workframe_variant"] == "current"
+    assert bundle["workframe_cursor"]["workframe_variant"] == "current"
+
+
+def test_workframe_variant_is_not_rendered_in_lane_state_prompt() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-variant",
+        task_id="task-variant",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"mode": "full", "workframe_variant": "current"},
+    )
+
+    lane_state = next(section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_lane_state")
+
+    assert "workframe_variant" not in lane_state.content
+    assert '"mode": "full"' in lane_state.content
 
 
 def test_implement_v2_live_json_runtime_can_edit_verify_and_finish(tmp_path) -> None:

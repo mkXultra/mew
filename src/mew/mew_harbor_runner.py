@@ -82,6 +82,7 @@ class MewHarborRun:
     install_command: str
     run_mode: str = "step-check-10min"
     require_observer_detail: bool = True
+    workframe_variant: str = ""
 
     @property
     def item_id(self) -> str:
@@ -95,15 +96,28 @@ def make_jobs_dir(
     jobs_root: Path,
     now: dt.datetime | None = None,
     run_mode: str = "step-check-10min",
+    workframe_variant: str = "",
 ) -> Path:
     timestamp = (now or dt.datetime.now()).strftime("%Y%m%d-%H%M%S")
     task_slug = task_name.removeprefix("terminal-bench/").replace("/", "-")
     mode_slug = run_mode.replace("_", "-")
-    return jobs_root / f"mew-{task_slug}-{mode_slug}-{timestamp}"
+    variant_slug = workframe_variant.strip().replace("_", "-") if workframe_variant else ""
+    variant_part = f"-wf-{variant_slug}" if variant_slug and variant_slug != "current" else ""
+    return jobs_root / f"mew-{task_slug}-{mode_slug}{variant_part}-{timestamp}"
+
+
+def work_guidance_with_workframe_variant(work_guidance: str, workframe_variant: str) -> str:
+    variant = str(workframe_variant or "").strip()
+    guidance = str(work_guidance or "").strip()
+    if not variant or variant == "current":
+        return guidance
+    if "workframe_variant" in guidance or "work_frame_variant" in guidance:
+        return guidance
+    return " ".join(part for part in (guidance, f"workframe_variant={variant}") if part)
 
 
 def build_mew_work_command_template(config: MewHarborRun) -> str:
-    guidance = shlex.quote(config.work_guidance)
+    guidance = shlex.quote(work_guidance_with_workframe_variant(config.work_guidance, config.workframe_variant))
     return (
         "mew work --oneshot "
         "--instruction {instruction_shell} "
@@ -225,6 +239,7 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
     manifest = read_json(proof_manifest_path)
     result = read_json(result_path)
     metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    workframe_metrics = metrics.get("workframe") if isinstance(metrics.get("workframe"), dict) else {}
     observation = metrics.get("integration_observation") if isinstance(metrics.get("integration_observation"), dict) else {}
     observation_summary = (
         observation.get("summary")
@@ -241,6 +256,7 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
         "tool_calls": metrics.get("tool_calls"),
         "tool_results": metrics.get("tool_results"),
         "wall_elapsed_seconds": metrics.get("wall_elapsed_seconds"),
+        "workframe_variant": workframe_metrics.get("variant"),
         "observer_detail_enabled": bool(observation.get("debug_detail_enabled")),
         "observer_detail_written": bool(observation_summary.get("detail_written")),
         "observer_detail_ref": artifact_ref,
@@ -305,6 +321,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-reserve-seconds", type=int)
     parser.add_argument("--agent-timeout-multiplier", type=int, default=2)
     parser.add_argument("--work-guidance")
+    parser.add_argument(
+        "--workframe-variant",
+        default="",
+        help="WorkFrame reducer variant to pass into mew work, e.g. current or transcript_first.",
+    )
     parser.add_argument("--install-command", default=DEFAULT_INSTALL_COMMAND)
     parser.add_argument(
         "--allow-missing-observer-detail",
@@ -320,7 +341,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     mode_defaults = RUN_MODE_DEFAULTS[args.mode]
     require_observer_detail = mode_defaults.require_observer_detail and not args.allow_missing_observer_detail
-    jobs_dir = args.jobs_dir or make_jobs_dir(args.task_name, args.jobs_root, run_mode=args.mode)
+    jobs_dir = args.jobs_dir or make_jobs_dir(
+        args.task_name,
+        args.jobs_root,
+        run_mode=args.mode,
+        workframe_variant=args.workframe_variant,
+    )
     config = MewHarborRun(
         task_name=args.task_name,
         dataset=args.dataset,
@@ -343,6 +369,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         install_command=args.install_command,
         run_mode=args.mode,
         require_observer_detail=require_observer_detail,
+        workframe_variant=args.workframe_variant,
     )
     command = build_harbor_command(config)
     if args.print_command or args.dry_run:

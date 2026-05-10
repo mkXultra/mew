@@ -381,6 +381,16 @@ frontier/todo/evidence polish. Required order:
 Do not run `speed_1`, `proof_5`, or broad measurement until this gate is green
 or explicitly accepted yellow.
 
+WorkFrame variant benchmark note (2026-05-10): after Codex, Claude Code, and
+2025-2026 literature reviews of `tool result -> evidence/state -> next action`,
+the active M6.24 proof-gate strategy is to measure WorkFrame reducer variants
+before another long polish sequence. First add a switchable WorkFrame variant
+substrate inside `implement_v2` and record `workframe_variant` in artifacts.
+Then compare future variants such as `transcript_first`,
+`transition_contract`, and `minimal` with the same fastcheck, same
+`step-check-10min`, and same analyzer. Do not create a new implement lane unless
+reducer variants cannot explain the step-shape gap.
+
 ## Historical Evidence
 
 The long `compile-compcert` repair sequence, Long-Build Substrate work, Long
