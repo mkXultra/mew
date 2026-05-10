@@ -380,6 +380,8 @@ def run_live_json_implement_v2(
     last_final_verifier_closeout_turn_id = ""
     finish_gate_decision: dict[str, object] = {}
     finish_gate_block_count = 0
+    finish_gate_repeat_plateau_count = 0
+    finish_gate_decision_repeats: dict[str, int] = {}
     wall_timeout: dict[str, object] = {}
     model_turn_budget_block: dict[str, object] = {}
     run_started = time.monotonic()
@@ -507,6 +509,25 @@ def run_live_json_implement_v2(
             )
         )
         prompt_history.append(dict(history[-1]))
+
+    def finish_gate_repeat_plateau(decision: dict[str, object]) -> dict[str, object]:
+        nonlocal finish_gate_repeat_plateau_count
+        signature = _finish_gate_decision_signature(decision)
+        if not signature:
+            return {}
+        count = finish_gate_decision_repeats.get(signature, 0) + 1
+        finish_gate_decision_repeats[signature] = count
+        threshold = _finish_gate_repeat_plateau_threshold(lane_input)
+        if threshold <= 0 or count < threshold:
+            return {}
+        finish_gate_repeat_plateau_count += 1
+        return {
+            "schema_version": 1,
+            "signature": signature,
+            "repeat_count": count,
+            "threshold": threshold,
+            "summary": "finish gate repeated the same blocker without tool progress",
+        }
 
     try:
         while turn_index < turn_budget_limit:
@@ -913,6 +934,28 @@ def run_live_json_implement_v2(
                                 decision=finish_gate_decision,
                             )
                         )
+                        repeat_plateau = finish_gate_repeat_plateau(finish_gate_decision)
+                        if repeat_plateau:
+                            append_finish_gate_history(
+                                decision=finish_gate_decision,
+                                continuation_prompt=continuation_prompt,
+                            )
+                            finish_arguments = {
+                                "outcome": "blocked",
+                                "summary": str(repeat_plateau.get("summary") or "finish gate repeat plateau"),
+                                "failure_class": "finish_gate_repeat_plateau",
+                                "finish_gate": finish_gate_decision,
+                                "finish_gate_repeat_plateau": repeat_plateau,
+                            }
+                            transcript.append(
+                                adapter.finish_event_for_turn(
+                                    lane=IMPLEMENT_V2_LANE,
+                                    lane_attempt_id=lane_attempt_id,
+                                    turn_id=turn_id,
+                                    finish_arguments=finish_arguments,
+                                )
+                            )
+                            break
                         if turn_index < turn_budget_limit:
                             append_finish_gate_history(
                                 decision=finish_gate_decision,
@@ -1160,6 +1203,9 @@ def run_live_json_implement_v2(
                 )
             tool_calls.extend(current_calls)
             tool_results.extend(current_results)
+            current_results_have_actual_progress = _has_actual_tool_progress(current_results)
+            if current_results_have_actual_progress:
+                finish_gate_decision_repeats.clear()
             if active_work_todo_state:
                 active_work_todo_state = _merge_active_work_todo_first_write_readiness(
                     existing=active_work_todo_state,
@@ -1266,6 +1312,29 @@ def run_live_json_implement_v2(
                             decision=finish_gate_decision,
                         )
                     )
+                    if not current_results_have_actual_progress:
+                        repeat_plateau = finish_gate_repeat_plateau(finish_gate_decision)
+                        if repeat_plateau:
+                            append_finish_gate_history(
+                                decision=finish_gate_decision,
+                                continuation_prompt=continuation_prompt,
+                            )
+                            finish_arguments = {
+                                "outcome": "blocked",
+                                "summary": str(repeat_plateau.get("summary") or "finish gate repeat plateau"),
+                                "failure_class": "finish_gate_repeat_plateau",
+                                "finish_gate": finish_gate_decision,
+                                "finish_gate_repeat_plateau": repeat_plateau,
+                            }
+                            transcript.append(
+                                adapter.finish_event_for_turn(
+                                    lane=IMPLEMENT_V2_LANE,
+                                    lane_attempt_id=lane_attempt_id,
+                                    turn_id=turn_id,
+                                    finish_arguments=finish_arguments,
+                                )
+                            )
+                            break
                     if turn_index < turn_budget_limit:
                         append_finish_gate_history(
                             decision=finish_gate_decision,
@@ -1524,6 +1593,7 @@ def run_live_json_implement_v2(
             "final_verifier_closeout_reason": final_verifier_closeout_reason,
             "orphaned_command_cleanup_count": len(cleanup_payloads),
             "finish_gate_block_count": finish_gate_block_count,
+            "finish_gate_repeat_plateau_count": finish_gate_repeat_plateau_count,
             "finish_gate_decision": dict(finish_gate_decision),
             "first_write_readiness": dict(first_write_readiness),
             "runtime_artifact_failure_plateau": dict(runtime_artifact_failure_plateau),
@@ -1607,6 +1677,7 @@ def run_live_json_implement_v2(
             "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "finish_gate_block_count": finish_gate_block_count,
+            "finish_gate_repeat_plateau_count": finish_gate_repeat_plateau_count,
             "finish_gate_decision": dict(finish_gate_decision),
             "first_write_readiness": dict(first_write_readiness),
             "runtime_artifact_failure_plateau": dict(runtime_artifact_failure_plateau),
@@ -3600,6 +3671,16 @@ def _runtime_artifact_failure_plateau_threshold(lane_input: ImplementLaneInput) 
     ):
         return 0
     return _RUNTIME_ARTIFACT_FAILURE_PLATEAU_DEFAULT_THRESHOLD
+
+
+def _finish_gate_repeat_plateau_threshold(lane_input: ImplementLaneInput) -> int:
+    configured = lane_input.lane_config.get("finish_gate_repeat_plateau_threshold")
+    if configured not in (None, ""):
+        try:
+            return max(0, min(8, int(configured)))
+        except (TypeError, ValueError):
+            return 0
+    return 2
 
 
 def _tool_contract_recovery_turn_limit(lane_input: ImplementLaneInput) -> int:
@@ -10131,6 +10212,100 @@ def _finish_gate_continuation_text(decision: dict[str, object]) -> str:
         or decision.get("reason")
         or "finish blocked by deterministic done gate"
     ).strip()
+
+
+def _finish_gate_decision_signature(decision: dict[str, object]) -> str:
+    if not isinstance(decision, dict) or not decision:
+        return ""
+    blockers = []
+    raw_blockers = decision.get("blockers")
+    if isinstance(raw_blockers, list):
+        for blocker in raw_blockers:
+            if not isinstance(blocker, dict):
+                continue
+            blockers.append(
+                {
+                    "code": str(blocker.get("code") or ""),
+                    "subject": str(blocker.get("subject") or ""),
+                    "reason": str(blocker.get("reason") or ""),
+                    "provider_call_id": str(blocker.get("provider_call_id") or ""),
+                }
+            )
+    invalid_refs = []
+    raw_invalid = decision.get("invalid_evidence_refs")
+    if isinstance(raw_invalid, list):
+        for item in raw_invalid:
+            if not isinstance(item, dict):
+                continue
+            invalid_refs.append(
+                {
+                    "kind": str(item.get("kind") or ""),
+                    "id": str(item.get("id") or ""),
+                    "reason": str(item.get("reason") or ""),
+                    "status": str(item.get("status") or ""),
+                    "exit_code": item.get("exit_code"),
+                    "timed_out": bool(item.get("timed_out")),
+                }
+            )
+    missing = []
+    raw_missing = decision.get("missing_obligations")
+    if isinstance(raw_missing, list):
+        for item in raw_missing:
+            if isinstance(item, dict):
+                missing.append({str(key): str(value) for key, value in sorted(item.items())})
+            elif str(item or "").strip():
+                missing.append(str(item))
+    stable = {
+        "decision": str(decision.get("decision") or ""),
+        "gate_source": str(decision.get("gate_source") or ""),
+        "reason": str(decision.get("reason") or ""),
+        "blockers": sorted(blockers, key=lambda item: json.dumps(item, sort_keys=True)),
+        "invalid_evidence_refs": sorted(invalid_refs, key=lambda item: json.dumps(item, sort_keys=True)),
+        "missing_obligations": sorted(missing, key=lambda item: json.dumps(item, sort_keys=True, default=str)),
+    }
+    encoded = json.dumps(stable, sort_keys=True, separators=(",", ":"), default=str)
+    return "finish-gate:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _has_actual_tool_progress(tool_results: tuple[ToolResultEnvelope, ...]) -> bool:
+    """Return true when a result came from real tool execution rather than policy rejection."""
+
+    for result in tool_results:
+        if result.status in {"denied", "invalid"}:
+            continue
+        if result.status == "failed":
+            if _failed_tool_result_has_progress_marker(result):
+                return True
+            continue
+        return True
+    return False
+
+
+def _failed_tool_result_has_progress_marker(result: ToolResultEnvelope) -> bool:
+    if result.content_refs or result.evidence_refs or result.side_effects:
+        return True
+    marker_keys = {
+        "command_run_id",
+        "command_run",
+        "tool_run_record",
+        "execution_contract_normalized",
+        "exit_code",
+        "stdout",
+        "stderr",
+        "stdout_tail",
+        "stderr_tail",
+        "output_ref",
+    }
+    for item in result.content:
+        if not isinstance(item, dict):
+            continue
+        for key in marker_keys:
+            if key == "exit_code" and key in item:
+                return True
+            value = item.get(key)
+            if value not in (None, "", [], {}):
+                return True
+    return False
 
 
 def _finish_gate_history(

@@ -6475,6 +6475,269 @@ def test_implement_v2_live_json_finish_gate_can_continue_then_complete(tmp_path)
     assert any(event.payload.get("type") == "deterministic_finish_gate" for event in result.transcript)
 
 
+def test_implement_v2_live_json_stops_repeated_finish_gate_without_tool_progress(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "claim completion without proof",
+            "tool_calls": [],
+            "finish": {
+                "outcome": "completed",
+                "summary": "done",
+                "acceptance_evidence": ["I inspected it mentally"],
+            },
+        },
+        {
+            "summary": "repeat the same completion claim",
+            "tool_calls": [],
+            "finish": {
+                "outcome": "completed",
+                "summary": "done",
+                "acceptance_evidence": ["I inspected it mentally"],
+            },
+        },
+        pytest.fail,
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        item = outputs.pop(0)
+        if callable(item):
+            item("model should not receive a third turn after repeated finish gate block")
+        return item
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create the requested implementation and verify it."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=10,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["model_turns"] == 2
+    assert result.metrics["finish_gate_block_count"] == 2
+    assert result.metrics["finish_gate_repeat_plateau_count"] == 1
+    assert result.updated_lane_state["finish"]["failure_class"] == "finish_gate_repeat_plateau"
+
+
+def test_implement_v2_live_json_finish_gate_repeat_resets_after_tool_progress(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "claim completion without proof",
+            "tool_calls": [],
+            "finish": {
+                "outcome": "completed",
+                "summary": "done",
+                "acceptance_evidence": ["I inspected it mentally"],
+            },
+        },
+        {
+            "summary": "make observable progress before trying again",
+            "tool_calls": [
+                {
+                    "id": "progress-1",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'observable progress\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "done",
+                "acceptance_evidence": ["I inspected it mentally"],
+            },
+        },
+        {
+            "summary": "repeat the same completion claim after progress",
+            "tool_calls": [],
+            "finish": {
+                "outcome": "completed",
+                "summary": "done",
+                "acceptance_evidence": ["I inspected it mentally"],
+            },
+        },
+        pytest.fail,
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        item = outputs.pop(0)
+        if callable(item):
+            item("model should not plateau immediately after real tool progress")
+        return item
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create the requested implementation and verify it."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=3,
+    )
+
+    assert result.metrics["model_turns"] == 3
+    assert result.metrics["finish_gate_block_count"] == 3
+    assert result.metrics["finish_gate_repeat_plateau_count"] == 0
+    assert result.updated_lane_state["finish"].get("failure_class") != "finish_gate_repeat_plateau"
+
+
+def test_implement_v2_live_json_invalid_tool_call_does_not_reset_finish_gate_repeat(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "claim completion without proof",
+            "tool_calls": [],
+            "finish": {
+                "outcome": "completed",
+                "summary": "done",
+                "acceptance_evidence": ["I inspected it mentally"],
+            },
+        },
+        {
+            "summary": "try to avoid the finish gate with an invalid tool call",
+            "tool_calls": [
+                {
+                    "id": "fake-progress",
+                    "name": "not_a_mew_tool",
+                    "arguments": {},
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "done",
+                "acceptance_evidence": ["I inspected it mentally"],
+            },
+        },
+        pytest.fail,
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        item = outputs.pop(0)
+        if callable(item):
+            item("invalid tool calls must not bypass the finish-gate repeat plateau")
+        return item
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create the requested implementation and verify it."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=10,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["model_turns"] == 2
+    assert result.metrics["finish_gate_block_count"] == 2
+    assert result.metrics["finish_gate_repeat_plateau_count"] == 1
+    assert result.updated_lane_state["finish"]["failure_class"] == "finish_gate_repeat_plateau"
+    assert any(event.kind == "finish" for event in result.transcript)
+
+
+def test_implement_v2_live_json_pre_execution_failed_tool_does_not_reset_finish_gate_repeat(tmp_path) -> None:
+    outputs = [
+        {
+            "summary": "claim completion without proof",
+            "tool_calls": [],
+            "finish": {
+                "outcome": "completed",
+                "summary": "done",
+                "acceptance_evidence": ["I inspected it mentally"],
+            },
+        },
+        {
+            "summary": "try to avoid the finish gate with a pre-execution command failure",
+            "tool_calls": [
+                {
+                    "id": "empty-command",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "done",
+                "acceptance_evidence": ["I inspected it mentally"],
+            },
+        },
+        pytest.fail,
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        item = outputs.pop(0)
+        if callable(item):
+            item("pre-execution failed tool calls must not bypass finish-gate repeat plateau")
+        return item
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={"description": "Create the requested implementation and verify it."},
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=10,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["model_turns"] == 2
+    assert result.metrics["finish_gate_block_count"] == 2
+    assert result.metrics["finish_gate_repeat_plateau_count"] == 1
+    assert result.updated_lane_state["finish"]["failure_class"] == "finish_gate_repeat_plateau"
+
+
 def test_implement_v2_finish_gate_uses_structured_final_verifier_without_model_evidence(tmp_path) -> None:
     outputs = [
         {
