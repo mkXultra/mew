@@ -6,6 +6,9 @@ from dataclasses import dataclass
 import re
 
 from .workframe import WorkFrame, WorkFrameInputs, WorkFrameInvariantReport, reduce_workframe
+from .workframe_variant_minimal import reduce_minimal_workframe
+from .workframe_variant_transcript_first import reduce_transcript_first_workframe
+from .workframe_variant_transition_contract import reduce_transition_contract_workframe
 
 DEFAULT_WORKFRAME_VARIANT = "current"
 _VARIANT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -25,6 +28,18 @@ _VARIANTS: dict[str, WorkFrameReducerVariant] = {
     DEFAULT_WORKFRAME_VARIANT: WorkFrameReducerVariant(
         name=DEFAULT_WORKFRAME_VARIANT,
         description="Current M6.24 WorkFrame reducer behavior.",
+    ),
+    "minimal": WorkFrameReducerVariant(
+        name="minimal",
+        description="Thin WorkFrame reducer that preserves finish and verifier safety gates.",
+    ),
+    "transcript_first": WorkFrameReducerVariant(
+        name="transcript_first",
+        description="Prefers fresh paired transcript/tool evidence over stale prompt-projection fallback.",
+    ),
+    "transition_contract": WorkFrameReducerVariant(
+        name="transition_contract",
+        description="Adds a compact reducer-owned transition contract when fresh observations change state.",
     ),
 }
 
@@ -63,15 +78,19 @@ def reduce_workframe_with_variant(
 ) -> tuple[WorkFrame, WorkFrameInvariantReport]:
     """Reduce WorkFrame inputs with a registered variant.
 
-    Today this registry exposes only the current reducer. The important boundary
-    is intentional: future transcript-first or transition-contract experiments
-    can live in separate files while sharing the same inputs, artifact format,
-    fastchecks, and step-shape analyzer.
+    Variants live in separate modules while sharing the same inputs, artifact
+    format, fastchecks, and step-shape analyzer.
     """
 
     name = validate_workframe_variant_name(variant)
     if name == DEFAULT_WORKFRAME_VARIANT:
         return reduce_workframe(inputs)
+    if name == "minimal":
+        return reduce_minimal_workframe(inputs)
+    if name == "transcript_first":
+        return reduce_transcript_first_workframe(inputs)
+    if name == "transition_contract":
+        return reduce_transition_contract_workframe(inputs)
     raise UnknownWorkFrameVariantError(f"unimplemented WorkFrame variant {name!r}")
 
 

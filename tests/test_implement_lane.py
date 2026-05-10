@@ -222,7 +222,12 @@ def test_implement_v2_descriptor_exposes_live_runtime_and_tools() -> None:
 def test_workframe_variant_registry_exposes_current_variant() -> None:
     variants = list_workframe_variants()
 
-    assert [variant.name for variant in variants] == ["current"]
+    assert [variant.name for variant in variants] == [
+        "current",
+        "minimal",
+        "transcript_first",
+        "transition_contract",
+    ]
     assert "Current M6.24" in variants[0].description
 
 
