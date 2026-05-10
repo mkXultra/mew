@@ -3207,7 +3207,7 @@ def _has_focused_runtime_diagnostic_patch_surface(workframe: dict[str, object]) 
         return False
     if _is_low_detail_runtime_diagnostic_summary(summary):
         return False
-    if re.search(r"\b[A-Za-z_]+(?:Error|Exception)\b", summary):
+    if _has_concrete_error_diagnostic_surface(summary):
         return True
     return _text_matches_any(
         summary,
@@ -3218,6 +3218,21 @@ def _has_focused_runtime_diagnostic_patch_surface(workframe: dict[str, object]) 
             r"\b(?:pc=|program counter|signal\s+\d+|exit code\s+[2-9]\d*)\b",
         ),
     )
+
+
+def _has_concrete_error_diagnostic_surface(summary: str) -> bool:
+    qualified = re.search(r"\b([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception))\b", summary)
+    if qualified and qualified.group(1) not in {"Error", "Exception"}:
+        return True
+    thrown = re.search(
+        r"\bthrow\s+new\s+(?:Error|Exception)\s*\(\s*([`'\"])(?P<message>.+?)\1",
+        summary,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not thrown:
+        return False
+    message = " ".join(str(thrown.group("message") or "").split())
+    return bool(message and message not in {".", ";", ":"})
 
 
 def _has_inspected_artifact_missing_patch_surface(workframe: dict[str, object]) -> bool:

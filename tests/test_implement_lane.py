@@ -7872,6 +7872,68 @@ def test_implement_v2_allows_short_syntax_error_repair_patch_turn(tmp_path) -> N
     assert block == {}
 
 
+def test_implement_v2_allows_short_throw_new_error_runtime_repair_patch_turn(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "description": "Implement a runtime that produces an output artifact.",
+            "max_wall_seconds": 660,
+        },
+        lane_config={
+            "mode": "full",
+            "allowed_read_roots": [str(tmp_path)],
+            "allowed_write_roots": [str(tmp_path)],
+            "allow_shell": True,
+        },
+    )
+    thrown_error_failure = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="verify-node-vm-js",
+        mew_tool_call_id="tool-verify-node-vm-js",
+        tool_name="run_tests",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr_tail": (
+                    "if (this.frames < DEFAULT_MAX_FRAMES) "
+                    "throw new Error(`program exited before saving a frame; frames=${this.frames}`);"
+                ),
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "program exited before saving a frame",
+                },
+            },
+        ),
+        evidence_refs=("ev:verify-node-vm-js",),
+    )
+
+    block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
+        hard_runtime_frontier_state={},
+        tool_results=(thrown_error_failure,),
+        run_started=time.monotonic() - 451,
+        next_turn=10,
+        next_model_timeout_seconds=208,
+        requested_timeout=600,
+    )
+
+    assert block == {}
+
+
 @pytest.mark.parametrize(
     "diagnostic",
     [
@@ -7880,6 +7942,10 @@ def test_implement_v2_allows_short_syntax_error_repair_patch_turn(tmp_path) -> N
         "panic",
         "assert",
         "traceback",
+        "Error:",
+        "Exception:",
+        "Runtime Error:",
+        "throw new Error();",
         pytest.param("no fault injection\ninvalid", id="banner-fault-then-invalid"),
     ],
 )
