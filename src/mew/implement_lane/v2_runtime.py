@@ -3057,8 +3057,7 @@ def _required_patch_model_turn_budget_block(
     requested_timeout: float,
 ) -> dict[str, object]:
     minimum_seconds = _required_patch_model_turn_min_seconds(lane_input)
-    effective_minimum_seconds = _required_patch_model_turn_effective_min_seconds(minimum_seconds)
-    if minimum_seconds <= 0 or next_model_timeout_seconds >= effective_minimum_seconds:
+    if minimum_seconds <= 0:
         return {}
     requested_timeout_seconds = _positive_float_or_zero(requested_timeout)
     if requested_timeout_seconds > 0 and next_model_timeout_seconds >= requested_timeout_seconds:
@@ -3079,6 +3078,12 @@ def _required_patch_model_turn_budget_block(
     if str(required_next.get("kind") or "") != "patch_or_edit":
         return {}
     if not _required_patch_is_budget_sensitive(lane_input, workframe=workframe):
+        return {}
+    effective_minimum_seconds = _required_patch_model_turn_effective_min_seconds(
+        minimum_seconds,
+        workframe=workframe,
+    )
+    if next_model_timeout_seconds >= effective_minimum_seconds:
         return {}
     wall_timeout = _implement_v2_wall_timeout(
         lane_input,
@@ -3129,15 +3134,29 @@ def _required_patch_model_turn_min_seconds(lane_input: ImplementLaneInput) -> fl
     return _IMPLEMENT_V2_REQUIRED_PATCH_MODEL_TURN_MIN_SECONDS
 
 
-def _required_patch_model_turn_effective_min_seconds(minimum_seconds: float) -> float:
+def _required_patch_model_turn_effective_min_seconds(minimum_seconds: float, *, workframe: dict[str, object]) -> float:
     if minimum_seconds <= 0:
         return 0.0
+    latest = _dict_or_empty(workframe.get("latest_actionable"))
+    if str(latest.get("generic_family") or "") == "write_failure" and _has_bounded_write_recovery_hint(latest):
+        return min(120.0, minimum_seconds)
     material_shortfall_ratio = 0.9
     material_shortfall_seconds = 30.0
     return max(
         minimum_seconds * material_shortfall_ratio,
         minimum_seconds - material_shortfall_seconds,
     )
+
+
+def _has_bounded_write_recovery_hint(latest_actionable: dict[str, object]) -> bool:
+    hint = _dict_or_empty(latest_actionable.get("recovery_hint"))
+    current_window = _dict_or_empty(hint.get("current_window"))
+    recovery_call = _dict_or_empty(hint.get("suggested_recovery_call"))
+    if not current_window or not recovery_call:
+        return False
+    if str(recovery_call.get("tool_name") or "") != "read_file":
+        return False
+    return bool(str(recovery_call.get("path") or "").strip())
 
 
 def _has_hard_runtime_budget_sensitive_surface(lane_input: ImplementLaneInput) -> bool:

@@ -7250,6 +7250,150 @@ def test_implement_v2_allows_near_threshold_required_patch_turn(tmp_path) -> Non
     assert material_shortfall_block["minimum_enforced_model_timeout_seconds"] == 270.0
 
 
+def test_implement_v2_allows_short_recovery_hint_write_failure_patch_turn(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "description": "Implement a VM runtime from provided source that produces frame.bmp.",
+            "max_wall_seconds": 660,
+        },
+        lane_config={
+            "mode": "full",
+            "allowed_read_roots": [str(tmp_path)],
+            "allowed_write_roots": [str(tmp_path)],
+            "allow_shell": True,
+        },
+    )
+    patch_anchor_mismatch = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="patch-anchor-miss",
+        mew_tool_call_id="tool-patch-anchor-miss",
+        tool_name="apply_patch",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "reason": "edit hunk #1 old text was not found; confirm the exact existing text before retrying",
+                "failure_class": "patch_anchor_mismatch",
+                "failure_subclass": "patch_exact_match_miss",
+                "path": "/app/vm.js",
+                "suggested_tool": "read_file/apply_patch/edit_file",
+                "suggested_next_action": "retry with exact current source context from patch_anchor_windows",
+                "patch_anchor_windows": [
+                    {
+                        "hunk_index": 1,
+                        "nearest_existing_windows": [
+                            {
+                                "line_start": 32,
+                                "line_end": 42,
+                                "similarity": 0.42,
+                                "text": "chk(a,n){ if ((a>>>0) + n > this.size) throw new Error(); }",
+                            }
+                        ],
+                    }
+                ],
+                "suggested_recovery_calls": [
+                    {
+                        "tool_name": "read_file",
+                        "path": "/app/vm.js",
+                        "offset": 1156,
+                        "max_chars": 1120,
+                        "reason": "bounded patch anchor recovery; do not read the whole file",
+                    }
+                ],
+            },
+        ),
+        evidence_refs=("ev:patch-anchor-miss",),
+    )
+
+    short_recovery_turn_block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={},
+        hard_runtime_frontier_state={},
+        tool_results=(patch_anchor_mismatch,),
+        run_started=time.monotonic() - 468,
+        next_turn=21,
+        next_model_timeout_seconds=192,
+        requested_timeout=600,
+    )
+    too_short_recovery_turn_block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={},
+        hard_runtime_frontier_state={},
+        tool_results=(patch_anchor_mismatch,),
+        run_started=time.monotonic() - 568,
+        next_turn=21,
+        next_model_timeout_seconds=92,
+        requested_timeout=600,
+    )
+
+    assert short_recovery_turn_block == {}
+    assert too_short_recovery_turn_block["failure_class"] == "model_budget_insufficient_for_required_patch"
+    assert too_short_recovery_turn_block["minimum_enforced_model_timeout_seconds"] == 120.0
+
+
+def test_implement_v2_keeps_full_patch_budget_for_unbounded_write_recovery_hint(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "description": "Implement a VM runtime from provided source that produces frame.bmp.",
+            "max_wall_seconds": 660,
+        },
+        lane_config={
+            "mode": "full",
+            "allowed_read_roots": [str(tmp_path)],
+            "allowed_write_roots": [str(tmp_path)],
+            "allow_shell": True,
+        },
+    )
+    unbounded_write_failure = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="unbounded-write-fail",
+        mew_tool_call_id="tool-unbounded-write-fail",
+        tool_name="write_file",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "reason": "write_file would create an unreadable generated source line",
+                "failure_class": "source_mutation_unreadable_long_line",
+                "failure_subclass": "long_line",
+                "path": "/app/vm.js",
+                "suggested_tool": "write_file/edit_file",
+                "suggested_next_action": "rewrite into readable multi-line source before retrying",
+            },
+        ),
+        evidence_refs=("ev:unbounded-write-fail",),
+    )
+
+    block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={},
+        hard_runtime_frontier_state={},
+        tool_results=(unbounded_write_failure,),
+        run_started=time.monotonic() - 468,
+        next_turn=21,
+        next_model_timeout_seconds=192,
+        requested_timeout=600,
+    )
+
+    assert block["failure_class"] == "model_budget_insufficient_for_required_patch"
+    assert block["minimum_enforced_model_timeout_seconds"] == 270.0
+
+
 def test_implement_v2_live_json_extends_one_reaction_turn_after_final_terminal_failure(tmp_path) -> None:
     outputs = [
         {
