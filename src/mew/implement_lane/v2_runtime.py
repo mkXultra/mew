@@ -3057,7 +3057,8 @@ def _required_patch_model_turn_budget_block(
     requested_timeout: float,
 ) -> dict[str, object]:
     minimum_seconds = _required_patch_model_turn_min_seconds(lane_input)
-    if minimum_seconds <= 0 or next_model_timeout_seconds >= minimum_seconds:
+    effective_minimum_seconds = _required_patch_model_turn_effective_min_seconds(minimum_seconds)
+    if minimum_seconds <= 0 or next_model_timeout_seconds >= effective_minimum_seconds:
         return {}
     requested_timeout_seconds = _positive_float_or_zero(requested_timeout)
     if requested_timeout_seconds > 0 and next_model_timeout_seconds >= requested_timeout_seconds:
@@ -3098,6 +3099,7 @@ def _required_patch_model_turn_budget_block(
         "next_turn": int(next_turn),
         "active_model_timeout_seconds": round(max(0.0, float(next_model_timeout_seconds or 0.0)), 3),
         "minimum_required_model_timeout_seconds": round(minimum_seconds, 3),
+        "minimum_enforced_model_timeout_seconds": round(effective_minimum_seconds, 3),
         "remaining_wall_seconds": wall_timeout.get("remaining_seconds"),
         "requested_model_timeout_seconds": wall_timeout.get("requested_model_timeout_seconds"),
         "required_next": required_next,
@@ -3125,6 +3127,17 @@ def _required_patch_model_turn_min_seconds(lane_input: ImplementLaneInput) -> fl
     except (TypeError, ValueError):
         return 0.0
     return _IMPLEMENT_V2_REQUIRED_PATCH_MODEL_TURN_MIN_SECONDS
+
+
+def _required_patch_model_turn_effective_min_seconds(minimum_seconds: float) -> float:
+    if minimum_seconds <= 0:
+        return 0.0
+    material_shortfall_ratio = 0.9
+    material_shortfall_seconds = 30.0
+    return max(
+        minimum_seconds * material_shortfall_ratio,
+        minimum_seconds - material_shortfall_seconds,
+    )
 
 
 def _has_hard_runtime_budget_sensitive_surface(lane_input: ImplementLaneInput) -> bool:

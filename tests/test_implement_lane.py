@@ -63,6 +63,7 @@ from mew.implement_lane.v2_runtime import (
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
     _resident_sidecar_state_metrics,
+    _required_patch_model_turn_budget_block,
     _shell_command_may_mutate_source_tree,
     _source_output_contract_from_tool_results,
     _source_output_contract_probe_candidate_from_trace,
@@ -7174,6 +7175,79 @@ def test_implement_v2_blocks_under_budget_required_patch_turn(tmp_path) -> None:
     assert block["required_next"]["kind"] == "patch_or_edit"
     assert block["active_model_timeout_seconds"] < block["minimum_required_model_timeout_seconds"]
     assert result.metrics["model_turns"] == 1
+
+
+def test_implement_v2_allows_near_threshold_required_patch_turn(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "description": "Implement a VM runtime from provided source that produces frame.bmp.",
+            "max_wall_seconds": 660,
+        },
+        lane_config={
+            "mode": "full",
+            "allowed_read_roots": [str(tmp_path)],
+            "allowed_write_roots": [str(tmp_path)],
+            "allow_shell": True,
+        },
+    )
+    runtime_failure = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="verify-node-vm-js",
+        mew_tool_call_id="tool-verify-node-vm-js",
+        tool_name="run_tests",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr_tail": "Error: unsupported MIPS syscall 83 at 0x0043da48\n    at VM.syscall (/app/vm.js:564:11)",
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "unsupported MIPS syscall 83",
+                },
+            },
+        ),
+        evidence_refs=("ev:verify-node-vm-js",),
+    )
+
+    near_threshold_block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={},
+        hard_runtime_frontier_state={},
+        tool_results=(runtime_failure,),
+        run_started=time.monotonic() - 371,
+        next_turn=2,
+        next_model_timeout_seconds=289,
+        requested_timeout=600,
+    )
+    material_shortfall_block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={},
+        hard_runtime_frontier_state={},
+        tool_results=(runtime_failure,),
+        run_started=time.monotonic() - 461,
+        next_turn=2,
+        next_model_timeout_seconds=199,
+        requested_timeout=600,
+    )
+
+    assert near_threshold_block == {}
+    assert material_shortfall_block["failure_class"] == "model_budget_insufficient_for_required_patch"
+    assert material_shortfall_block["minimum_required_model_timeout_seconds"] == 300.0
+    assert material_shortfall_block["minimum_enforced_model_timeout_seconds"] == 270.0
 
 
 def test_implement_v2_live_json_extends_one_reaction_turn_after_final_terminal_failure(tmp_path) -> None:
