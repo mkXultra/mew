@@ -3445,6 +3445,107 @@ def test_implement_v2_write_repair_lock_blocks_repeated_target_reads_and_verifie
     assert repair["failure_kind"] == "stale_exact_edit"
 
 
+def test_implement_v2_source_patch_shell_misuse_requires_target_read_before_write_repair(tmp_path) -> None:
+    (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
+    shell_patch = (
+        "node - <<'NODE'\n"
+        "const fs = require('fs');\n"
+        "const p = 'vm.js';\n"
+        "let s = fs.readFileSync(p, 'utf8');\n"
+        "fs.writeFileSync(p, s.replace('old', 'new'));\n"
+        "NODE\n"
+    )
+    patch_text = (
+        "*** Begin Patch\n"
+        "*** Update File: vm.js\n"
+        "@@\n"
+        "-console.log('old')\n"
+        "+console.log('new')\n"
+        "*** End Patch\n"
+    )
+    outputs = [
+        {
+            "summary": "attempt shell source patch",
+            "tool_calls": [
+                {
+                    "id": "shell-patch",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": shell_patch,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "try write repair before observing current target",
+            "tool_calls": [
+                {"id": "patch-without-read", "name": "apply_patch", "arguments": {"patch": patch_text}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "read current target after rejected shell patch",
+            "tool_calls": [{"id": "read-current-vm", "name": "read_file", "arguments": {"path": "vm.js"}}],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "apply source patch after reading current target",
+            "tool_calls": [{"id": "patch-after-read", "name": "apply_patch", "arguments": {"patch": patch_text}}],
+            "finish": {"outcome": "blocked", "summary": "write repair done"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Repair generated VM"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=4,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    shell_result = next(item for item in tool_results if item["provider_call_id"] == "shell-patch")
+    patch_result = next(item for item in tool_results if item["provider_call_id"] == "patch-without-read")
+    read_result = next(item for item in tool_results if item["provider_call_id"] == "read-current-vm")
+    patch_after_read = next(item for item in tool_results if item["provider_call_id"] == "patch-after-read")
+
+    assert shell_result["status"] == "failed"
+    assert shell_result["content"][0]["failure_subclass"] == "run_command_source_patch_shell_surface"
+    assert patch_result["status"] == "invalid"
+    assert "write_repair_lock_target_read_required" in patch_result["content"][0]["reason"]
+    assert read_result["status"] == "completed"
+    assert patch_after_read["status"] == "completed"
+    assert "write_repair" not in result.updated_lane_state["active_work_todo"]
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
+
+
 def test_implement_v2_write_repair_lock_allows_same_turn_write_then_verifier(tmp_path) -> None:
     (tmp_path / "vm.js").write_text("function sys(){return 0}\n", encoding="utf-8")
     outputs = [

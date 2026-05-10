@@ -5811,6 +5811,18 @@ def _write_repair_lock_gate_result(
         return None
     tool_name = str(getattr(call, "tool_name", "") or "").strip()
     if tool_name in WRITE_TOOL_NAMES:
+        if bool(lock.get("target_read_required_before_write")) and not bool(lock.get("write_allowed")):
+            target_path = str(lock.get("path") or "")
+            required_next_action = str(lock.get("required_next_action") or "")
+            return build_invalid_tool_result(
+                call,
+                reason=(
+                    "write_repair_lock_target_read_required: "
+                    f"read the current {target_path or 'failed write target'} window after the rejected shell patch "
+                    "before rewriting it with write_file/edit_file/apply_patch."
+                    + (f" Required next action: {required_next_action}." if required_next_action else "")
+                ),
+            )
         return None
     target_path = str(lock.get("path") or "")
     failure_kind = str(lock.get("failure_kind") or "write_failed")
@@ -5842,7 +5854,7 @@ def _write_repair_lock_state(
     if not repair or repair.get("status") != "blocked":
         return {}
     failure_kind = str(repair.get("failure_kind") or "")
-    if failure_kind not in {"stale_exact_edit", "source_mutation_unreadable_long_line"}:
+    if failure_kind not in {"stale_exact_edit", "source_mutation_unreadable_long_line", "source_patch_shell_surface"}:
         return {}
     target_path = _frontier_clip_text(repair.get("path"), limit=240)
     failed_provider_call_id = str(repair.get("provider_call_id") or "")
@@ -5864,6 +5876,8 @@ def _write_repair_lock_state(
                 return {}
         if tool_name == "read_file" and _write_paths_match(_read_call_path(call), target_path):
             target_read_count += 1
+    target_read_required_before_write = failure_kind == "source_patch_shell_surface"
+    write_allowed = not target_read_required_before_write or target_read_count > 0
     return {
         "schema_version": 1,
         "locked": True,
@@ -5872,6 +5886,8 @@ def _write_repair_lock_state(
         "provider_call_id": failed_provider_call_id,
         "target_read_count_after_failure": target_read_count,
         "target_read_allowed": target_read_count <= 0,
+        "target_read_required_before_write": target_read_required_before_write,
+        "write_allowed": write_allowed,
         "preferred_tool": repair.get("preferred_tool")
         or ("write_file" if bool(repair.get("path_previously_mutated_this_attempt")) else "apply_patch"),
         "required_next_action": repair.get("required_next_action"),
@@ -6079,6 +6095,14 @@ def _write_repair_from_trace(
     for call, result in zip(tool_calls, tool_results):
         tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
         if tool_name not in WRITE_TOOL_NAMES:
+            source_patch_repair = _source_patch_shell_repair_from_result(
+                call=call,
+                result=result,
+                prior_success_paths=tuple(prior_success_paths),
+                failed_ids=tuple(failed_ids),
+            )
+            if source_patch_repair:
+                latest_repair = source_patch_repair
             continue
         path = _write_call_path(call)
         result_paths = _write_result_paths(result)
@@ -6095,7 +6119,7 @@ def _write_repair_from_trace(
         if provider_call_id:
             failed_ids.append(provider_call_id)
         failure_kind = _write_failure_kind(result)
-        if failure_kind == "same_turn_write_chain_blocked" and latest_repair:
+        if failure_kind in {"same_turn_write_chain_blocked", "write_repair_lock_target_read_required"} and latest_repair:
             continue
         path_previously_mutated = bool(
             effective_path
@@ -6126,6 +6150,64 @@ def _write_repair_from_trace(
             "source": "implement_v2_write_trace",
         }
     return _drop_empty_frontier_values(latest_repair)
+
+
+def _source_patch_shell_repair_from_result(
+    *,
+    call: object,
+    result: ToolResultEnvelope,
+    prior_success_paths: tuple[str, ...],
+    failed_ids: tuple[str, ...],
+) -> dict[str, object]:
+    payload = _first_result_payload(result)
+    if str(payload.get("failure_subclass") or "") != "run_command_source_patch_shell_surface":
+        return {}
+    paths = _payload_path_candidates(payload, keys=("common_paths", "mutation_paths", "read_paths"))
+    target_path = next(iter(paths), "")
+    if not target_path:
+        return {}
+    provider_call_id = str(getattr(call, "provider_call_id", "") or result.provider_call_id or "")
+    recent_failed_ids = [*failed_ids, *([provider_call_id] if provider_call_id else [])]
+    path_previously_mutated = any(_write_paths_match(target_path, prior_path) for prior_path in prior_success_paths)
+    return _drop_empty_frontier_values(
+        {
+            "schema_version": 1,
+            "status": "blocked",
+            "failure_kind": "source_patch_shell_surface",
+            "failure_class": "tool_contract_misuse",
+            "tool_name": str(getattr(call, "tool_name", "") or result.tool_name or "").strip(),
+            "provider_call_id": provider_call_id,
+            "path": target_path,
+            "path_previously_mutated_this_attempt": path_previously_mutated,
+            "target_read_required_before_write": True,
+            "recent_failed_write_provider_call_ids": recent_failed_ids[-3:],
+            "reason": _frontier_clip_text(_write_failure_reason(result), limit=360),
+            "preferred_tool": "apply_patch",
+            "required_next_action": (
+                f"read the current {target_path} window after the rejected shell patch, then convert the "
+                "intended source mutation into one same-path write_file/edit_file/apply_patch; do not run "
+                "another verifier until that write succeeds"
+            ),
+            "source": "implement_v2_tool_contract_trace",
+        }
+    )
+
+
+def _payload_path_candidates(payload: dict[str, object], *, keys: tuple[str, ...]) -> tuple[str, ...]:
+    paths: list[str] = []
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str):
+            items = (value,)
+        elif isinstance(value, (list, tuple)):
+            items = tuple(value)
+        else:
+            items = ()
+        for item in items:
+            path = _frontier_clip_text(item, limit=240)
+            if path:
+                paths.append(path)
+    return tuple(dict.fromkeys(paths))
 
 
 def _write_call_path(call: object) -> str:
@@ -6206,6 +6288,8 @@ def _write_failure_kind(result: ToolResultEnvelope) -> str:
     reason = _write_failure_reason(result).casefold()
     if "old text was not found" in reason:
         return "stale_exact_edit"
+    if "write_repair_lock_target_read_required" in reason:
+        return "write_repair_lock_target_read_required"
     if "blocked_by_prior_failed_write" in reason:
         return "same_turn_write_chain_blocked"
     if "approval" in reason and "denied" in reason:
@@ -6235,6 +6319,12 @@ def _write_repair_required_next_action(
         return (
             f"repair {target} by rewriting the same intended source mutation as readable multi-line code; "
             "do not run probes or verifiers until the same-path write/edit/apply_patch succeeds"
+        )
+    if failure_kind == "source_patch_shell_surface":
+        return (
+            f"repair {target} by first reading the current target window, then converting the rejected shell "
+            "source patch into one same-path write_file/edit_file/apply_patch; do not run verifier again "
+            "until a write succeeds"
         )
     if failure_kind == "stale_exact_edit" and path_previously_mutated:
         return (
