@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is now implement_v2 scoped rebaseline: remeasure the 25 software/coding tasks with v2 and repair any miss before unrelated measurement continues. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the WorkFrame proof gate: Phase 0-6 implementation is committed through `3787e83`, but closure requires current-head WorkFrame-native fastcheck/pre-speed, dogfood/emulator, exactly one same-shape `make-mips-interpreter` `step-check-10min`, and reference-step comparison before any `speed_1`/`proof_5`/broad measurement resumes. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -95,13 +95,14 @@ Scope:
 - Provider-specific native tool-call transport is still future work; current
   v2 proof must be described as `model_json`, not provider-native.
 - M6.24 live proof work resumes only with explicit lane metadata. The active
-  measurement lane is now `implement_v2`; historical `implement_v1` results
-  remain repair evidence but cannot close the current M6.24 gate.
-- The active controller is
-  `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`: run one `speed_1` per
-  scoped software/coding task with `selected_lane=implement_v2`, and pause to
-  repair if a task misses, is harness-invalid, lacks replayable artifacts, or
-  exposes a structural lane gap.
+  proof lane is `implement_v2`, but the active controller is temporarily the
+  WorkFrame proof gate below, not scoped `speed_1` rebaseline. Historical
+  `implement_v1` and pre-WorkFrame `implement_v2` results remain repair
+  evidence but cannot close the current M6.24 gate.
+- The prior scoped rebaseline controller
+  (`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`) is suspended until the
+  WorkFrame-native fastcheck/dogfood/emulator gate and exactly one same-shape
+  `make-mips-interpreter` `step-check-10min` are recorded.
 - The first true-v2 `build-cython-ext` speed attempt
   `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215` is excluded from
   product evidence: Docker failed before `mew` launched because the harness
@@ -234,17 +235,17 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 is now the active M6.24 measurement lane; remeasure scoped software/coding tasks with v2 speed_1; if a run misses or exposes a structural lane gap, reproduce through replay/dogfood/emulator and repair before unrelated measurement continues
+selected_lane=implement_v2 is still the active M6.24 lane, but measurement is paused while the WorkFrame proof gate is active; run WorkFrame-native fastcheck/pre-speed, dogfood/emulator, exactly one same-shape make-mips-interpreter step-check-10min, then reference-step comparison before any speed_1/proof_5/broad measurement
 ```
 
 Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
 `cobol-modernization`, `distribution-search`,
 `feal-differential-cryptanalysis`, `feal-linear-cryptanalysis`, `fix-git`,
 `hf-model-inference`, `kv-store-grpc`, and `largest-eigenval` v2 speed_1 runs
-passed with exact replay and terminal-bench replay dogfood. The
-current decision is no longer
-"build-cython proof_5 now"; it is "continue the implement_v2 scoped rebaseline,
-while preserving immediate repair on any miss or structural lane gap."
+passed with exact replay and terminal-bench replay dogfood. This is historical
+pre-WorkFrame measurement evidence. The current decision is no longer
+"build-cython proof_5 now" or "continue the implement_v2 scoped rebaseline";
+the current decision is the WorkFrame-gated next action above.
 
 ## Active M6.24 Context
 
@@ -276,11 +277,14 @@ Controller docs:
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
 
-Next action:
+Current WorkFrame-gated next action:
 
 ```text
-M6.24 -> implement_v2 scoped rebaseline -> make-mips-interpreter 0/1 exposed generic stdout/stderr expected-artifact contract gap -> review/commit/pre-speed generic repair -> rerun make-mips-interpreter with selected_lane=implement_v2 exactly once if green
+M6.24 -> WorkFrame Phase 0-6 implementation reviewed/committed -> WorkFrame-native fastcheck/pre-speed artifact -> dogfood/emulator for the same generic failure family -> exactly one make-mips-interpreter step-check-10min -> reference-step comparison
 ```
+
+Older scoped-rebaseline rows remain historical evidence only until the
+WorkFrame proof gate is green or explicitly accepted yellow.
 
 The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
 prior-failure repair is replayable and classified, but codex-ultra marked it
@@ -288,15 +292,15 @@ prior-failure repair is replayable and classified, but codex-ultra marked it
 frontier, not a local loop-boundary bug. Do not spend another same-shape
 make-doom speed run without a generic frontier-throttling or strategy design.
 
-The active repair target is still `make-mips-interpreter`: the first v2 speed
-run exposed generic tool-contract friction and that repair was committed. The
+Historical pre-WorkFrame `make-mips-interpreter` note: the first v2 speed run
+exposed generic tool-contract friction and that repair was committed. The
 same-shape rerun at `20260507-1341-tool-contract-repair` moved past that bug
 but exposed a second generic expected-artifact contract normalization gap:
 stdout/stderr artifacts declared as `target: "stdout"` or `stream: "stdout"`
 were treated as path artifacts with no path, and model-facing check aliases
-were projected as default `exists` checks. No unrelated scoped measurement
-should run until that reviewed stream-contract repair is committed, current-head
-pre-speed is green, and one same-shape rerun is recorded.
+were projected as default `exists` checks. That evidence helped motivate the
+WorkFrame proof gate; it is not an active instruction to resume the old repair
+or spend scoped measurement before the WorkFrame gate.
 
 The active repair target does not stay on `build-cython-ext`: its passing v2
 artifact `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout`
@@ -334,9 +338,12 @@ Done when:
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 
-Status as of 2026-05-10: **not closeable**. The design has several implemented
-slices, but the Phase 0-6 contract is not yet closed. Treat any future context
-reentry that assumes HOT_PATH_COLLAPSE is done as drift.
+Status as of 2026-05-10: **implementation complete, proof gate pending**. The
+WorkFrame Phase 0-6 code path has been implemented, reviewed phase-by-phase,
+and committed through `3787e83`. HOT_PATH_COLLAPSE is still not closeable until
+the WorkFrame-native fastcheck/dogfood/emulator gate and one same-shape
+`step-check-10min` are recorded. Treat any reentry that jumps to `speed_1`,
+`proof_5`, or broad measurement before that gate as drift.
 
 Redesign note: after many same-shape polish commits across frontier/todo/
 evidence/contract/finish/closeout boundaries, a reviewed no-backward-
@@ -345,43 +352,34 @@ compatibility WorkFrame redesign now exists at
 paper-grounded support in
 `docs/REVIEW_2026-05-10_M6_24_WORKFRAME_LITERATURE_REVIEW.md`. The review loop
 resolved round-1 findings and round 2 returned no remaining `needs_fix`
-findings. Active decision as of 2026-05-10: start WorkFrame Phase 0. This
-supersedes older same-shape `step-check-10min` / `speed_1` / `proof_5`
-next-action rows until Phase 0 closes. See
-`docs/M6_24_WORKFRAME_PHASE0_PREP_2026-05-10.md`.
+findings. Phases 0-6 were then implemented in small reviewed commits:
+`42a8012`, `6548669`, `57e7aff`, `c3ccfa9`, `3d28412`, `1fff2ab`, and
+`3787e83`. This supersedes older same-shape `step-check-10min` / `speed_1` /
+`proof_5` rows that predate the WorkFrame boundary.
 
 | Phase | Status | Current evidence / remaining gap |
 |---|---|---|
-| Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist. `docs/M6_24_HOT_PATH_PHASE0_BASELINE.json` now records the required Phase 0 baseline fields, and `scripts/check_implement_v2_hot_path.py` uses baseline-relative sidecar caps by default. The `20260510-005032` artifact confirms the resident-sidecar compaction is effective: total `269,166` bytes and per-turn growth `29,907` bytes, both green against Phase 0 caps. Still partial until the next changed artifact also stays green/yellow without widening model-visible state. |
-| Phase 1 prompt collapse | partial | Default prompt no longer relies on normal-prompt `frontier_state_update`, and fastcheck checks for prompt leaks. Compact `active_work_todo` / evidence / frontier projection still needs repeated proof that it stays small and sidecar-backed. The `20260510-001638` diagnostic showed a generic hard-runtime task-contract gap: the model substituted a host-native source build for the requested supplied-runtime artifact path. The current repair belongs in the small hard-runtime prompt/profile contract, not a new frontier. |
-| Phase 2 latest actionable failure | incomplete/monitor | Projection/reducer code exists and has moved through runtime-primary, concrete terminal-diagnostic, killed/no-output, and finish-recovery repairs. The `20260510-071112` same-shape diagnostic did not reach finish, so the latest-failure path was not the immediate blocker; keep Phase 2 monitored by HOT_PATH fastcheck and same-shape diagnostics, but do not add task-specific MIPS/VM rules. |
-| Phase 3 sidecar-inferred execution contracts | incomplete | Execution-contract and sidecar concepts exist, but cheap-probe versus execution-contract separation is not fully proven. Do not treat probe evidence as finish/runtime proof without a phase-specific fastcheck pass. |
-| Phase 4 patch/edit as mutation boundary | active/partial | Source mutation, first-write readiness, post-write verifier gates, and `write_file content_lines` for large generated source exist. The `20260510-074203` diagnostic confirmed the prewrite coverage repair: first source mutation happened at turn 4 and all prewrite categories were covered. The new boundary gap is after a late source mutation: turn 25 patched source, then turn 26 model timeout happened before final verification. The current reviewed repair adds a generic configured final-verifier closeout before low-budget model turns. |
-| Phase 5 finish cited evidence | active/partial | Typed-evidence acceptance and visual/runtime finish gates are substantially implemented. The `20260510-064431` diagnostic exposed a finish-recovery shape issue: a raw `command_run` id was invalid as a typed evidence ref, then the visual-quality blocker pushed the model toward a self-authored verifier instead of task-provided tests/reference/expected-output markers. The current reviewed repair resolves safe raw evidence aliases to typed events and tightens the visual-quality recovery prompt. Legacy/string gates remain guardrails; do not remove or close until typed evidence proves equivalent or stricter coverage. |
-| Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The `20260510-074203` step-shape moved past the prewrite stall but exposed low-wall final verification closeout after a late source mutation. The close path remains: focused UT -> HOT_PATH fastcheck -> exactly one same-shape 10min step-shape -> reference-step comparison. |
+| Phase 0 baseline/metrics | implemented/reviewed | `42a8012` introduced the WorkFrame schema, canonical reducer, invariant report, baseline fields, and fixture tests. |
+| Phase 1 prompt collapse | implemented/reviewed | `6548669` cut the ordinary prompt over to a single dynamic `implement_v2_workframe` section and removed normal prompt dependence on model-authored frontier state. |
+| Phase 2 latest actionable failure | implemented/reviewed | `57e7aff` routes latest failures through reducer-owned generic categories and `required_next`/`forbidden_next` rather than parallel frontier/todo prompt cards. |
+| Phase 3 sidecar-inferred execution contracts | implemented/reviewed | `c3ccfa9` keeps execution contracts, typed evidence, and oracle details sidecar-only while WorkFrame carries compact refs and obligations. |
+| Phase 4 patch/edit as mutation boundary | implemented/reviewed | `3d28412` makes source mutation and verifier freshness reducer-owned WorkFrame facts. |
+| Phase 5 finish cited evidence | implemented/reviewed | `1fff2ab` routes finish readiness and final verifier closeout deterministically through WorkFrame/sidecars instead of finish-continuation proof dumps. |
+| Phase 6 replay/dogfood/emulator/step-shape gate | implemented/reviewed; proof gate pending | `3787e83` extends HOT_PATH fastcheck with WorkFrame replay, invariant, ref-policy, reentry, prompt-leak, hard-reject, and hash-bound micro checks. Focused validation passed (`454 passed`), scoped ruff passed, `git diff --check` passed, and codex-ultra reviewer session `019e0f86-d16a-7da3-ac92-2a39cb825ca6` returned `STATUS: APPROVE`. Remaining gap: run the WorkFrame-native fastcheck/pre-speed operation on a current-head artifact, then exactly one same-shape `make-mips-interpreter` 10 minute diagnostic and reference-step comparison. |
 
-Historical HOT_PATH implementation order, superseded while WorkFrame Phase 0 is
-active:
+Immediate next action for this phase: close the WorkFrame proof gate, not more
+frontier/todo/evidence polish. Required order:
 
-1. Close Phase 2 first. `latest_actionable_failure_shape` is the active red
-   contract, and unstable latest-failure projection makes every later model
-   next-action check noisy.
-2. Harden Phase 0 and Phase 6 as the operational gate while Phase 2 is being
-   repaired. The fastcheck must become the detector for static phase-contract
-   bugs before another `step-check-10min`.
-3. Close Phase 1, Phase 4, and Phase 5 in the order exposed by fastcheck,
-   replay, dogfood, or emulator evidence. Do not add new normal-prompt
-   frontier/todo/evidence structures as a shortcut.
-4. Close Phase 3 after Phase 2 is stable. Sidecar-inferred execution contracts
-   should not be expanded while latest-actionable-failure projection is still
-   unreliable.
+1. Run focused validation if files changed.
+2. Run HOT_PATH fastcheck on a current-head WorkFrame-native artifact or create
+   the smallest same-shape fixture needed for the fastcheck.
+3. Run dogfood/emulator coverage for the same generic failure family when the
+   fastcheck is green.
+4. Spend exactly one same-shape `make-mips-interpreter` `step-check-10min`.
+5. Compare the step shape against the reference traces and Phase 0 bands.
 
-Immediate next action for this phase: implement WorkFrame Phase 0 from
-`docs/DESIGN_2026-05-10_M6_24_IMPLEMENT_V2_WORKFRAME_REDESIGN.md`. The target
-is schema plus fixture-only deterministic reducer, prompt inventory checks,
-debug bundle documentation, and baseline metric recording. Do not run live
-Harbor, same-shape `step-check-10min`, `speed_1`, or `proof_5` while Phase 0 is
-open.
+Do not run `speed_1`, `proof_5`, or broad measurement until this gate is green
+or explicitly accepted yellow.
 
 ## Historical Evidence
 
@@ -401,19 +399,18 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. WorkFrame Phase 0 is the active M6.24 focus. Implement the schema,
-   fixture-only reducer, prompt inventory checks, debug bundle documentation,
-   and baseline metric recording from
+1. WorkFrame Phase 0-6 implementation is complete through `3787e83`; the active
+   M6.24 focus is now proof-gate closure from
    `docs/DESIGN_2026-05-10_M6_24_IMPLEMENT_V2_WORKFRAME_REDESIGN.md`.
-2. Use `docs/M6_24_WORKFRAME_PHASE0_PREP_2026-05-10.md` as the reentry guard.
-   It supersedes older HOT_PATH polish rows that point to a same-shape
-   diagnostic.
-3. Phase 0 validation is local only: focused UT, deterministic fixture
-   recomputation, prompt inventory checks, baseline band checks, and
-   `git diff --check`. No live Harbor, `step-check-10min`, `speed_1`, or
-   `proof_5`.
-4. After Phase 0 closes, decide the next WorkFrame phase from the design. Do not
-   silently return to old frontier/todo/evidence patching unless the WorkFrame
-   close gate explicitly fails and the failure is recorded.
+2. Use `docs/M6_24_DECISION_LEDGER.md` and the WorkFrame section above as the
+   reentry guard. They supersede older HOT_PATH polish or scoped-rebaseline rows
+   that point directly to `speed_1`, `proof_5`, or broad measurement.
+3. Required next order: current-head WorkFrame-native fastcheck/pre-speed
+   artifact, dogfood/emulator coverage for the same generic failure family,
+   exactly one same-shape `make-mips-interpreter` `step-check-10min`, then
+   reference-step comparison.
+4. If the gate is red, repair the generic WorkFrame/fastcheck/dogfood/emulator
+   failure first. Do not add another normal-prompt frontier/todo/evidence
+   projection as a shortcut.
 5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.
