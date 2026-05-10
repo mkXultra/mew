@@ -1189,6 +1189,46 @@ evidence, and resident sidecar state remain the source of truth. After this
 repair, run focused tests, codex-ultra review, and one more 10 minute same-shape
 diagnostic before `speed_1` / `proof_5`.
 
+Implementation-feature surface depth decision 2026-05-10 JST:
+
+After the `mew-make-mips-interpreter-step-check-10min-20260510-173208`
+diagnostic, the budget blockers were gone and HOT_PATH fastcheck passed, but
+the step shape still diverged from the Codex reference. mew wrote earlier than
+Codex yet produced a shallower first implementation, then spent the remaining
+window in opcode-by-opcode repair. The generic cause was not first-write
+latency; it was prewrite coverage accepting syscall/readelf-style probes as
+`implementation_feature_surface`. Codex first builds a broader operation /
+instruction inventory before the large patch.
+
+Decision: keep the deep prewrite coverage gate, but make
+`implementation_feature_surface` require a real implementation-feature probe.
+Syscall-only disassembly or host-interface filtering must not satisfy it.
+Broad disassembly/bytecode inventories, source-level opcode/dispatch/decode
+surfaces, or explicit operation-class probes should satisfy it. Also treat
+`cmd` and `command` tool arguments identically so command-shape differences do
+not hide source-read or disassembly evidence. This is a generic WorkFrame
+repair, not a MIPS-specific solver heuristic. Next step: focused tests,
+HOT_PATH fastcheck if needed, codex-ultra review, commit, then one same-shape
+10 minute diagnostic to confirm broader prewrite feature inventory before first
+write.
+
+Implementation-feature surface depth repair result 2026-05-10 JST:
+
+Implemented the WorkFrame repair. The classifier now treats `cmd` and
+`command` equivalently, excludes syscall-only host-interface disassembly from
+`implementation_feature_surface`, excludes readelf hex/relocation probes unless
+their output/query demonstrates operation evidence, includes native source
+reads that expose opcode/dispatch/decode surfaces, and accepts common broad
+disassembly forms such as `objdump -dr` and `wasm-objdump -d`. Validation
+passed with `uv run pytest --no-testmon tests/test_implement_lane.py` (`426
+passed`), scoped ruff, `git diff --check`, and HOT_PATH fastcheck on the latest
+`make-mips-interpreter` artifact. codex-ultra review session
+`019e1118-de0b-74f0-8394-13430ec80053` requested two rounds of fixes for
+readelf-only false positives, native `read_file` source bodies, and overly
+broad disassembly regexes, then returned `STATUS: APPROVE`. Next step after
+commit: run one same-shape 10 minute diagnostic and compare whether
+implementation-feature inventory happens before first write.
+
 Latest-one-turn compaction diagnostic 2026-05-09 JST:
 
 Commit `5f91df1` reduced model-visible hot-path weight but did not pass the

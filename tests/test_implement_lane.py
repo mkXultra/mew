@@ -1909,6 +1909,297 @@ def test_implement_v2_counts_shell_source_read_probe_toward_deep_runtime_categor
     assert "runtime_binary_layout" in readiness["missing_categories"]
 
 
+def test_implement_v2_does_not_count_syscall_only_disassembly_as_feature_surface() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-syscall-only-disassembly",
+        mew_tool_call_id="mew-probe-syscall-only-disassembly",
+        tool_name="run_command",
+        arguments={"cmd": "llvm-objdump -d app.bin | rg -n -C 4 syscall", "cwd": "."},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "cmd": call.arguments["cmd"],
+                "stdout": (
+                    "120:  400510:\t0000000c \tsyscall\n"
+                    "121:  400514:\t03e00008 \tjr $ra\n"
+                ),
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "host_interface_surface" in readiness["covered_categories"]
+    assert "implementation_feature_surface" not in readiness["covered_categories"]
+    assert "implementation_feature_surface" in readiness["missing_categories"]
+
+
+def test_implement_v2_counts_broad_disassembly_inventory_as_feature_surface() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-disassembly-feature-inventory",
+        mew_tool_call_id="mew-probe-disassembly-feature-inventory",
+        tool_name="run_command",
+        arguments={
+            "cmd": "llvm-objdump -d app.bin | rg -n 'clz|seb|seh|ext|ins|wsbh|lwl|lwr|sdc1|ldc1'",
+            "cwd": ".",
+        },
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "cmd": call.arguments["cmd"],
+                "stdout": (
+                    "44:  4010a0:\t7c0420a0 \tseb $4, $4\n"
+                    "87:  401140:\t88050000 \tlwl $5, 0($0)\n"
+                    "91:  401154:\tf7a60010 \tsdc1 $f6, 16($29)\n"
+                ),
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "implementation_feature_surface" in readiness["covered_categories"]
+
+
+def test_implement_v2_counts_common_broad_disassembly_forms_as_feature_surface() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    calls = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id=lane_attempt_id,
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "probe-native-disassembly",
+                "tool_name": "run_command",
+                "arguments": {"cmd": "objdump -dr app.bin | head -200", "cwd": "."},
+            },
+            {
+                "provider_call_id": "probe-wasm-disassembly",
+                "tool_name": "run_command",
+                "arguments": {"cmd": "wasm-objdump -d module.wasm | head -200", "cwd": "."},
+            },
+        ),
+    )
+    results = tuple(
+        ToolResultEnvelope(
+            lane_attempt_id=call.lane_attempt_id,
+            provider_call_id=call.provider_call_id,
+            mew_tool_call_id=call.mew_tool_call_id,
+            tool_name=call.tool_name,
+            status="completed",
+            content=({"cmd": call.arguments["cmd"], "stdout": "", "exit_code": 0},),
+        )
+        for call in calls
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=tuple(calls),
+        prior_tool_results=results,
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 2
+    assert readiness["category_provider_call_ids"]["implementation_feature_surface"] == [
+        "probe-native-disassembly",
+        "probe-wasm-disassembly",
+    ]
+
+
+def test_implement_v2_does_not_count_symbol_or_classpath_probes_as_disassembly_surface() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    calls = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id=lane_attempt_id,
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "probe-dynamic-symbols",
+                "tool_name": "run_command",
+                "arguments": {"cmd": "objdump --dynamic-syms app.bin | head -80", "cwd": "."},
+            },
+            {
+                "provider_call_id": "probe-demangled-symbols",
+                "tool_name": "run_command",
+                "arguments": {"cmd": "objdump --demangle --syms app.bin | head -80", "cwd": "."},
+            },
+            {
+                "provider_call_id": "probe-javap-classpath",
+                "tool_name": "run_command",
+                "arguments": {"cmd": "javap -classpath build/classes com.example.Main", "cwd": "."},
+            },
+        ),
+    )
+    results = tuple(
+        ToolResultEnvelope(
+            lane_attempt_id=call.lane_attempt_id,
+            provider_call_id=call.provider_call_id,
+            mew_tool_call_id=call.mew_tool_call_id,
+            tool_name=call.tool_name,
+            status="completed",
+            content=({"cmd": call.arguments["cmd"], "stdout": "", "exit_code": 0},),
+        )
+        for call in calls
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=tuple(calls),
+        prior_tool_results=results,
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 3
+    assert "implementation_feature_surface" not in readiness["covered_categories"]
+    assert "entry_symbol_surface" in readiness["covered_categories"]
+
+
+def test_implement_v2_does_not_count_readelf_hex_as_feature_surface_without_feature_output() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-readelf-hex",
+        mew_tool_call_id="mew-probe-readelf-hex",
+        tool_name="run_command",
+        arguments={"cmd": "readelf -x .text app.bin | head -80", "cwd": "."},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "cmd": call.arguments["cmd"],
+                "stdout": (
+                    "Hex dump of section '.text':\n"
+                    "0x00001000 01020304 05060708 090a0b0c 0d0e0f10\n"
+                ),
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert "runtime_binary_layout" in readiness["covered_categories"]
+    assert "implementation_feature_surface" not in readiness["covered_categories"]
+
+
+def test_implement_v2_read_file_dispatch_source_counts_as_feature_surface() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="read-dispatch-source",
+        mew_tool_call_id="mew-read-dispatch-source",
+        tool_name="read_file",
+        arguments={"path": "src/interpreter.py"},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "path": "/app/src/interpreter.py",
+                "text": (
+                    "def execute(bytecode):\n"
+                    "    instruction = decode(bytecode)\n"
+                    "    return dispatch(instruction)\n"
+                ),
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert "implementation_feature_surface" in readiness["covered_categories"]
+
+
+def test_implement_v2_cmd_alias_source_read_counts_for_deep_runtime_categories() -> None:
+    lane_attempt_id = "implement_v2:ws-1:task-1:full"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider="test",
+        provider_call_id="probe-source-shell-cmd-alias",
+        mew_tool_call_id="mew-probe-source-shell-cmd-alias",
+        tool_name="run_command",
+        arguments={"cmd": "sed -n '1,240p' src/runtime_backend.c", "cwd": "."},
+        turn_index=1,
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name=call.tool_name,
+        status="completed",
+        content=(
+            {
+                "cmd": call.arguments["cmd"],
+                "stdout": (
+                    "int main(void) { host api open write; }\n"
+                    "switch (opcode) { case 1: instruction(); }\n"
+                ),
+                "exit_code": 0,
+            },
+        ),
+    )
+
+    readiness = _deep_runtime_prewrite_probe_readiness(
+        prior_tool_calls=(call,),
+        prior_tool_results=(result,),
+        probe_threshold=1,
+    )
+
+    assert readiness["probe_count"] == 1
+    assert "entry_symbol_surface" in readiness["covered_categories"]
+    assert "host_interface_surface" in readiness["covered_categories"]
+    assert "implementation_feature_surface" in readiness["covered_categories"]
+
+
 def test_implement_v2_does_not_treat_broad_find_as_source_output_contract() -> None:
     lane_attempt_id = "implement_v2:ws-1:task-1:full"
     call = ToolCallEnvelope(

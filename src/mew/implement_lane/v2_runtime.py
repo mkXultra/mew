@@ -5190,7 +5190,9 @@ def _deep_runtime_prewrite_probe_categories(
     argument_text = _deep_runtime_prewrite_probe_argument_text(call)
     result_text = _tool_result_content_text(result).casefold()
     raw_command_text = _call_command_text(call).casefold() if tool_name in {"run_command", "run_tests"} else ""
-    command_text = argument_text if tool_name in {"run_command", "run_tests"} else ""
+    command_text = "\n".join(
+        part for part in (argument_text, raw_command_text) if part
+    ) if tool_name in {"run_command", "run_tests"} else ""
     output_text = result_text if tool_name == "read_command_output" else ""
     search_text = argument_text if tool_name == "search_text" else ""
     source_shell_text = (
@@ -5198,6 +5200,7 @@ def _deep_runtime_prewrite_probe_categories(
         if tool_name in {"run_command", "run_tests"} and _shell_command_reads_source_like_path(raw_command_text)
         else ""
     )
+    source_read_text = result_text if tool_name == "read_file" else ""
     probe_text = "\n".join(part for part in (command_text, output_text, search_text, source_shell_text) if part)
     categories: list[str] = []
     if _tool_result_has_source_output_contract(result):
@@ -5229,16 +5232,120 @@ def _deep_runtime_prewrite_probe_categories(
         ),
     ):
         categories.append("host_interface_surface")
-    if _text_matches_any(
-        probe_text,
-        (
-            r"\b(disassembl|opcode|instruction|bytecode|mnemonic|register|relocation|section dump)\b",
-            r"\b(llvm-objdump|objdump\s+-d|javap\s+-c|wasm-objdump|readelf\s+-x|readelf\s+-r)\b",
-            r"\b(feature|compatibility|supported|unsupported|operation|operator|runtime behavior)\b",
-        ),
+    if _deep_runtime_probe_has_implementation_feature_surface(
+        raw_command_text=raw_command_text,
+        argument_text=argument_text,
+        result_text=result_text,
+        search_text=search_text,
+        source_shell_text=source_shell_text,
+        source_read_text=source_read_text,
     ):
         categories.append("implementation_feature_surface")
     return tuple(dict.fromkeys(categories))
+
+
+def _deep_runtime_probe_has_implementation_feature_surface(
+    *,
+    raw_command_text: str,
+    argument_text: str,
+    result_text: str,
+    search_text: str,
+    source_shell_text: str,
+    source_read_text: str,
+) -> bool:
+    source_feature_text = "\n".join(part for part in (source_shell_text, source_read_text, search_text) if part)
+    if _text_matches_any(
+        source_feature_text,
+        (
+            r"\b(?:switch|case|dispatch|decode|decoder|interpret|interpreter|emulat|vm)\b.*"
+            r"\b(?:opcode|op|instruction|inst|bytecode|mnemonic)\b",
+            r"\b(?:opcode|op|instruction|inst|bytecode|mnemonic)\b.*"
+            r"\b(?:switch|case|dispatch|decode|decoder|interpret|interpreter|emulat|vm)\b",
+            r"\b(?:register file|relocation|section dump|api shape|operation classes?)\b",
+        ),
+    ):
+        return True
+
+    command_text = str(raw_command_text or "")
+    if _deep_runtime_command_is_disassembly_probe(command_text):
+        if _deep_runtime_command_is_narrow_host_interface_disassembly_probe(command_text):
+            return False
+        if _deep_runtime_command_has_broad_disassembly_scope(command_text):
+            return True
+        if _deep_runtime_disassembly_output_has_feature_surface(result_text):
+            return True
+
+    feature_query_text = "\n".join(part for part in (argument_text, search_text) if part)
+    if _text_matches_any(
+        feature_query_text,
+        (
+            r"\b(?:opcode|instruction|bytecode|mnemonic|register|relocation|section dump)\b",
+            r"\b(?:api shape|runtime behavior|operation classes?|unsupported operations?)\b",
+        ),
+    ):
+        return not _deep_runtime_command_is_narrow_host_interface_disassembly_probe(command_text)
+    return False
+
+
+def _deep_runtime_command_is_disassembly_probe(command: str) -> bool:
+    return _text_matches_any(
+        command,
+        (
+            r"\b(?:llvm-objdump|objdump)\b[^\n;&|]*(?:\s-(?!-)[A-Za-z]*[dD][A-Za-z]*\b|\s--disassemble(?:-all)?\b)",
+            r"\bjavap\b[^\n;&|]*(?:\s-c\b)",
+            r"\bwasm-objdump\b[^\n;&|]*(?:\s-d\b|\s--details\b)",
+        ),
+    )
+
+
+def _deep_runtime_command_is_narrow_host_interface_disassembly_probe(command: str) -> bool:
+    if not _deep_runtime_command_is_disassembly_probe(command):
+        return False
+    has_filter = _text_matches_any(command, (r"\|\s*(?:grep|rg|ag|awk|sed)\b",))
+    if not has_filter:
+        return False
+    has_host_filter = _text_matches_any(
+        command,
+        (
+            r"\b(?:syscall|host|hook|ffi|extern|import|export|open|read|write|close|"
+            r"stdin|stdout|stderr|filesystem|socket|process|env)\b",
+        ),
+    )
+    has_feature_filter = _text_matches_any(
+        command,
+        (
+            r"\b(?:opcode|instruction|bytecode|mnemonic|decode|decoder|dispatch|register|"
+            r"relocation|section dump|operation classes?)\b",
+        ),
+    )
+    return has_host_filter and not has_feature_filter
+
+
+def _deep_runtime_command_has_broad_disassembly_scope(command: str) -> bool:
+    if not _deep_runtime_command_is_disassembly_probe(command):
+        return False
+    if _text_matches_any(command, (r"\|\s*(?:head|tail)\b",)):
+        return True
+    return not _text_matches_any(command, (r"\|\s*(?:grep|rg|ag|awk|sed)\b",))
+
+
+def _deep_runtime_disassembly_output_has_feature_surface(text: str) -> bool:
+    if not str(text or "").strip():
+        return False
+    if _text_matches_any(
+        text,
+        (
+            r"\b(?:opcode|instruction|bytecode|mnemonic|register|relocation|section dump)\b",
+            r"\b(?:unsupported|unknown)\s+(?:opcode|instruction|bytecode|operation)\b",
+        ),
+    ):
+        return True
+    disassembly_lines = re.findall(
+        r"(?m)^\s*(?:\d+:)?\s*[0-9a-f]{3,}:\s+(?:[0-9a-f]{2,8}\s+){1,8}[a-z][a-z0-9_.-]{1,16}\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return len(disassembly_lines) >= 3
 
 
 def _deep_runtime_prewrite_probe_argument_text(call: object) -> str:
@@ -5404,7 +5511,7 @@ def _call_command_text(call: object) -> str:
     arguments = getattr(call, "arguments", {})
     if not isinstance(arguments, dict):
         return ""
-    return str(arguments.get("command") or "")
+    return str(arguments.get("command") or arguments.get("cmd") or "")
 
 
 def _shell_command_may_mutate_source_tree(command: object) -> bool:
