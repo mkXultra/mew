@@ -153,6 +153,262 @@ def test_workframe_pathless_write_failure_does_not_inherit_previous_changed_sour
     assert workframe.required_next.target_paths == ()
 
 
+def test_workframe_repeated_runtime_diagnostics_require_inspection_before_patch() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-7",
+            task_id="task-1",
+            objective="Repair repeated runtime failures without single-symptom looping.",
+            sidecar_events=(
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 1,
+                    "event_id": "write-vm-1",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm-1"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 2,
+                    "event_id": "verify-vm-1",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "VM error: unsupported syscall 1 at 0x00400100",
+                    "evidence_refs": ["ev:verify-vm-1"],
+                },
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 3,
+                    "event_id": "write-vm-2",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm-2"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 4,
+                    "event_id": "verify-vm-2",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "VM error: unsupported opcode 0x1c at 0x00400200",
+                    "evidence_refs": ["ev:verify-vm-2"],
+                },
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 5,
+                    "event_id": "write-vm-3",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm-3"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 6,
+                    "event_id": "verify-vm-3",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "VM error: unsupported syscall 8 at 0x00400300",
+                    "evidence_refs": ["ev:verify-vm-3"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.generic_family == "runtime_diagnostic"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "inspect_latest_failure"
+    assert workframe.required_next.target_paths == ("vm.js",)
+    assert "repeated 3 times" in workframe.required_next.reason
+
+
+def test_workframe_runtime_inspection_satisfies_repeated_runtime_pivot() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-8",
+            task_id="task-1",
+            objective="Allow a focused patch after inspecting repeated runtime failures.",
+            sidecar_events=(
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 1,
+                    "event_id": "write-vm-1",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm-1"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 2,
+                    "event_id": "verify-vm-1",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "Runtime error: unsupported syscall 1 at 0x00400100",
+                    "evidence_refs": ["ev:verify-vm-1"],
+                },
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 3,
+                    "event_id": "write-vm-2",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm-2"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 4,
+                    "event_id": "verify-vm-2",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "Runtime error: unsupported opcode 0x1c at 0x00400200",
+                    "evidence_refs": ["ev:verify-vm-2"],
+                },
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 5,
+                    "event_id": "write-vm-3",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm-3"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 6,
+                    "event_id": "verify-vm-3",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "Runtime error: unsupported syscall 8 at 0x00400300",
+                    "evidence_refs": ["ev:verify-vm-3"],
+                },
+                {
+                    "kind": "tool_result",
+                    "event_sequence": 7,
+                    "event_id": "inspect-runtime-pattern",
+                    "status": "completed",
+                    "command_intent": "diagnostic",
+                    "summary": "Inspected runtime trace: failures group into syscall handling and special opcode support.",
+                    "evidence_refs": ["sidecar:inspect-runtime-pattern"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.generic_family == "runtime_diagnostic"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+    assert workframe.required_next.target_paths == ("vm.js",)
+
+
+def test_workframe_passing_verifier_resets_runtime_repeat_window() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-9",
+            task_id="task-1",
+            objective="Do not let resolved runtime failures force inspection after a known-good verifier.",
+            sidecar_events=(
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 1,
+                    "event_id": "write-vm-1",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm-1"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 2,
+                    "event_id": "verify-vm-1",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "Runtime error: unsupported syscall 1 at 0x00400100",
+                    "evidence_refs": ["ev:verify-vm-1"],
+                },
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 3,
+                    "event_id": "write-vm-2",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm-2"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 4,
+                    "event_id": "verify-vm-2",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "Runtime error: unsupported opcode 0x1c at 0x00400200",
+                    "evidence_refs": ["ev:verify-vm-2"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 5,
+                    "event_id": "verify-known-good",
+                    "status": "passed",
+                    "command_intent": "verify",
+                    "evidence_refs": ["ev:verify-known-good"],
+                },
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 6,
+                    "event_id": "write-vm-3",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm-3"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 7,
+                    "event_id": "verify-vm-3",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "Runtime error: unsupported syscall 8 at 0x00400300",
+                    "evidence_refs": ["ev:verify-vm-3"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.generic_family == "runtime_diagnostic"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+    assert workframe.required_next.target_paths == ("vm.js",)
+
+
+def test_workframe_first_runtime_diagnostic_still_allows_patch() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-3",
+            task_id="task-1",
+            objective="Patch the first concrete runtime diagnostic.",
+            sidecar_events=(
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 1,
+                    "event_id": "write-vm",
+                    "path": "vm.js",
+                    "evidence_refs": ["sidecar:write-vm"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 2,
+                    "event_id": "verify-vm",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "VM error: unsupported syscall 1 at 0x00400100",
+                    "evidence_refs": ["ev:verify-vm"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+    assert workframe.required_next.target_paths == ("vm.js",)
+
+
 def test_workframe_canonicalization_removes_volatile_fields_and_is_stable() -> None:
     inputs = _workframe_inputs()
     canonical = canonicalize_workframe_inputs(inputs)

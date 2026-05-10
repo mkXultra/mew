@@ -20,6 +20,7 @@ WORKFRAME_PHASE0_SCHEMA_VERSION = 1
 WORKFRAME_TARGET_MAX_BYTES = 4096
 WORKFRAME_RED_MAX_BYTES = 6144
 _PATCH_TARGET_FALLBACK_GENERIC_FAMILIES = frozenset({"runtime_diagnostic", "verifier_failure"})
+_RUNTIME_REPEAT_INSPECT_THRESHOLD = 3
 
 WorkFramePhase = Literal[
     "orient",
@@ -633,6 +634,15 @@ def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
     verifier_seq = _event_sequence(finish_proof) if finish_proof else -1
     failure = _latest_failure_event(events, min_sequence=mutation_seq)
     failure_seq = _event_sequence(failure) if failure else -1
+    failure_generic_family = _generic_failure_family(failure) if isinstance(failure, dict) else ""
+    latest_failure_inspection_seq = _latest_relevant_failure_inspection_sequence(
+        events,
+        generic_family=failure_generic_family,
+    )
+    latest_resolved_failure_seq = max(
+        latest_failure_inspection_seq,
+        verifier_seq if finish_proof and _event_status(finish_proof) == "passed" else -1,
+    )
     verifier_status = _event_status(finish_proof) if finish_proof else (_event_status(verifier) if verifier else "unknown")
     failure_after_finish_proof = bool(finish_proof and failure_seq > verifier_seq)
     verifier_fresh = (
@@ -659,6 +669,13 @@ def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
         "configured_verifier_ref": configured_verifier_ref,
         "budget_closeout_required": closeout_required,
         "latest_failure": failure,
+        "latest_generic_failure_repeat_count": _generic_failure_repeat_count(
+            events,
+            failure_generic_family,
+            min_sequence=latest_resolved_failure_seq,
+        ),
+        "latest_failure_inspection_sequence": latest_failure_inspection_seq,
+        "latest_resolved_failure_sequence": latest_resolved_failure_seq,
         "latest_write_failure_ref": _event_ref(write_failure),
         "latest_write_failure_sequence": _event_sequence(write_failure) if write_failure else -1,
         "latest_failure_sequence": failure_seq,
@@ -765,6 +782,18 @@ def _required_next_from_facts(
         )
     if latest_actionable and latest_actionable.family != "verifier_stale_after_mutation":
         next_kind = _required_next_kind_for_generic_family(latest_actionable.generic_family)
+        if _should_inspect_repeated_runtime_failure(facts, latest_actionable):
+            repeat_count = int(facts.get("latest_generic_failure_repeat_count") or 0)
+            return WorkFrameRequiredNext(
+                kind="inspect_latest_failure",
+                reason=(
+                    f"runtime diagnostics repeated {repeat_count} times; inspect and aggregate the "
+                    "failure pattern before another source mutation"
+                ),
+                target_paths=_required_next_target_paths(facts, generic_family=latest_actionable.generic_family),
+                after="patch_or_edit_or_block",
+                evidence_refs=latest_actionable.evidence_refs or (latest_actionable.source_ref,),
+            )
         return WorkFrameRequiredNext(
             kind=next_kind,
             reason=_required_next_reason_for_generic_family(latest_actionable.generic_family),
@@ -790,6 +819,15 @@ def _required_next_from_facts(
             evidence_refs=tuple(ref for ref in (str(facts.get("latest_mutation_ref") or ""),) if ref),
         )
     return WorkFrameRequiredNext(kind="cheap_probe", reason="no actionable source or verifier evidence yet")
+
+
+def _should_inspect_repeated_runtime_failure(
+    facts: dict[str, object],
+    latest_actionable: WorkFrameLatestActionable,
+) -> bool:
+    if latest_actionable.generic_family != "runtime_diagnostic":
+        return False
+    return int(facts.get("latest_generic_failure_repeat_count") or 0) >= _RUNTIME_REPEAT_INSPECT_THRESHOLD
 
 
 def _forbidden_next_from_facts(
@@ -1393,6 +1431,43 @@ def _generic_failure_family(event: dict[str, object]) -> str:
     if status == "failed":
         return "command_nonzero"
     return "unknown_failure"
+
+
+def _generic_failure_repeat_count(events: list[dict[str, object]], generic_family: str, *, min_sequence: int = -1) -> int:
+    if not generic_family:
+        return 0
+    count = 0
+    for event in events:
+        if _event_sequence(event) <= min_sequence:
+            continue
+        if _event_status(event) not in {"failed", "interrupted", "invalid"} and not _event_source_mutation_failed(event):
+            continue
+        if _generic_failure_family(event) == generic_family:
+            count += 1
+    return count
+
+
+def _latest_relevant_failure_inspection_sequence(events: list[dict[str, object]], *, generic_family: str) -> int:
+    if generic_family != "runtime_diagnostic":
+        return -1
+    matches = [
+        _event_sequence(event)
+        for event in events
+        if _event_inspects_runtime_failure_pattern(event)
+    ]
+    return max(matches) if matches else -1
+
+
+def _event_inspects_runtime_failure_pattern(event: dict[str, object]) -> bool:
+    if _event_status(event) in {"failed", "interrupted", "invalid"} or _event_source_mutation_failed(event):
+        return False
+    if _event_is_source_mutation_surface(event):
+        return False
+    intent = _event_execution_intent(event)
+    if intent not in {"cheap_probe", "diagnostic"}:
+        return False
+    detail = _event_detail_text(event).lower()
+    return any(term in detail for term in ("runtime", "trace", "opcode", "syscall", " pc=", "program terminated"))
 
 
 def _required_next_kind_for_generic_family(generic_family: str) -> WorkFrameNextKind:
