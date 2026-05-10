@@ -53,6 +53,7 @@ def build_implement_v2_prompt_sections(
     lane_input: ImplementLaneInput,
     *,
     tool_specs: tuple[ImplementLaneToolSpec, ...] | None = None,
+    workframe_sidecar_events: tuple[dict[str, object], ...] = (),
 ) -> list[PromptSection]:
     """Build provider-neutral v2 prompt sections without provider cache transport."""
 
@@ -218,6 +219,7 @@ def build_implement_v2_prompt_sections(
                 active_work_todo=active_work_todo,
                 hard_runtime_frontier=hard_runtime_frontier,
                 repair_history=repair_history,
+                sidecar_events=workframe_sidecar_events,
             ),
             stability=STABILITY_DYNAMIC,
             cache_policy=CACHE_POLICY_DYNAMIC,
@@ -274,6 +276,7 @@ def build_implement_v2_workframe_debug_bundle(
     active_work_todo: dict[str, object] | None = None,
     hard_runtime_frontier: dict[str, object] | None = None,
     repair_history: dict[str, object] | None = None,
+    sidecar_events: tuple[dict[str, object], ...] = (),
     prompt_inventory: tuple[dict[str, object], ...] = (),
     turn_id: str = "prompt",
 ) -> dict[str, object]:
@@ -286,6 +289,12 @@ def build_implement_v2_workframe_debug_bundle(
         else dict(hard_runtime_frontier)
     )
     history = _repair_history_state(lane_input.persisted_lane_state) if repair_history is None else dict(repair_history)
+    runtime_events = tuple(dict(event) for event in sidecar_events if isinstance(event, dict))
+    prompt_events = _workframe_prompt_sidecar_events(
+        active_work_todo=todo,
+        hard_runtime_frontier=frontier,
+        repair_history=history,
+    )
     inputs = WorkFrameInputs(
         attempt_id=lane_input.work_session_id or "implement-v2-prompt",
         turn_id=turn_id,
@@ -293,11 +302,7 @@ def build_implement_v2_workframe_debug_bundle(
         objective=_task_objective(lane_input),
         success_contract_ref=_success_contract_ref(lane_input),
         constraints=("model_visible_workframe_only",),
-        sidecar_events=_workframe_prompt_sidecar_events(
-            active_work_todo=todo,
-            hard_runtime_frontier=frontier,
-            repair_history=history,
-        ),
+        sidecar_events=_merge_workframe_sidecar_events(runtime_events=runtime_events, prompt_events=prompt_events),
         prompt_inventory=prompt_inventory,
         workspace_root=lane_input.workspace,
         artifact_root=str(lane_input.lane_config.get("artifact_dir") or ""),
@@ -412,12 +417,14 @@ def _workframe_section_content(
     active_work_todo: dict[str, object],
     hard_runtime_frontier: dict[str, object],
     repair_history: dict[str, object],
+    sidecar_events: tuple[dict[str, object], ...] = (),
 ) -> str:
     bundle = build_implement_v2_workframe_debug_bundle(
         lane_input,
         active_work_todo=active_work_todo,
         hard_runtime_frontier=hard_runtime_frontier,
         repair_history=repair_history,
+        sidecar_events=sidecar_events,
     )
     return _bounded_compact_json(
         bundle["prompt_visible_workframe"],
@@ -433,6 +440,102 @@ def _workframe_visible_payload(workframe: dict[str, object]) -> dict[str, object
             "avoid forbidden_next, and cite evidence refs when finishing."
         ),
     }
+
+
+def _merge_workframe_sidecar_events(
+    *,
+    runtime_events: tuple[dict[str, object], ...],
+    prompt_events: tuple[dict[str, object], ...],
+) -> tuple[dict[str, object], ...]:
+    """Use runtime facts as authoritative and prompt projections only as fallback.
+
+    WorkFrame is allowed to summarize resident prompt projections, but live
+    reducer state must not let a generic prompt-frontier failure override
+    concrete tool-result evidence from the same attempt.
+    """
+
+    if runtime_events:
+        prompt_recovery_events = tuple(
+            event for event in prompt_events if not _is_generic_prompt_frontier_event(event)
+        )
+        if _has_passing_runtime_verifier_event(runtime_events):
+            return _renumber_workframe_events(runtime_events)
+        if _latest_runtime_event_needs_prompt_recovery(runtime_events):
+            return _renumber_workframe_events((*runtime_events, *prompt_recovery_events))
+        return _renumber_workframe_events((*prompt_recovery_events, *runtime_events))
+    return _renumber_workframe_events(prompt_events)
+
+
+def _is_generic_prompt_frontier_event(event: dict[str, object]) -> bool:
+    event_id = str(event.get("event_id") or "")
+    if not event_id.startswith("prompt-"):
+        return False
+    return _is_generic_workframe_summary(event.get("summary"))
+
+
+def _latest_runtime_event_needs_prompt_recovery(events: tuple[dict[str, object], ...]) -> bool:
+    for event in reversed(events):
+        status = str(event.get("status") or "").strip().casefold()
+        kind = str(event.get("kind") or "").strip()
+        if status in {"failed", "interrupted", "invalid"} and kind in {
+            "verifier",
+            "strict_verifier",
+            "run_tests",
+            "latest_failure",
+        }:
+            return not bool(event.get("observable_output"))
+        return False
+    return False
+
+
+def _has_passing_runtime_verifier_event(events: tuple[dict[str, object], ...]) -> bool:
+    for event in events:
+        status = str(event.get("status") or "").strip().casefold()
+        kind = str(event.get("kind") or "").strip()
+        if status in {"completed", "passed", "pass", "success", "succeeded"} and kind in {
+            "verifier",
+            "strict_verifier",
+            "run_tests",
+        }:
+            return True
+    return False
+
+
+def _is_generic_workframe_summary(value: object) -> bool:
+    text = str(value or "").strip().casefold()
+    if not text:
+        return True
+    normalized = " ".join(text.replace("_", " ").replace("-", " ").split())
+    generic = {
+        "failed",
+        "failure",
+        "error",
+        "unknown",
+        "nonzero",
+        "nonzero exit",
+        "exit code 1",
+        "exit status 1",
+        "killed",
+        "timeout",
+        "timed out",
+        "interrupted",
+        "command failed",
+        "tool failed",
+        "latest runtime frontier failure",
+        "runtime failure",
+    }
+    if normalized in generic:
+        return True
+    return bool(re.fullmatch(r"exit code \d+", normalized))
+
+
+def _renumber_workframe_events(events: tuple[dict[str, object], ...]) -> tuple[dict[str, object], ...]:
+    renumbered: list[dict[str, object]] = []
+    for index, event in enumerate(events, start=1):
+        item = dict(event)
+        item["event_sequence"] = index
+        renumbered.append(item)
+    return tuple(renumbered)
 
 
 def _workframe_prompt_sidecar_events(

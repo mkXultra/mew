@@ -70,8 +70,10 @@ from mew.implement_lane.v2_runtime import (
     _terminal_failure_reaction_turn_limit,
     _typed_finish_evidence_refs,
     _typed_retired_legacy_blockers_for_bundle,
+    _workframe_sidecar_events_from_tool_results,
     _write_result_covers_source_tree_mutation,
 )
+from mew.implement_lane.prompt import build_implement_v2_workframe_debug_bundle
 from mew.read_tools import read_file
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
@@ -9808,6 +9810,330 @@ def test_implement_v2_prompt_folds_persisted_frontier_state_into_workframe() -> 
     assert "artifact ABI/ISA/endianness/entrypoint" in workframe_section.content
     assert "wf:frontier_failure" in workframe_section.content
     assert len(workframe_section.content) <= 4096
+
+
+def test_implement_v2_workframe_uses_runtime_sidecar_before_prompt_frontier() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Implement a VM and satisfy the runtime verifier."},
+        lane_config={"mode": "full"},
+    )
+    runtime_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-runtime-verifier",
+        mew_tool_call_id="tool-runtime-verifier",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "latest_failure": {"summary": "exit status 1"},
+                "stderr_tail": (
+                    "Loaded runtime\n"
+                    "Error: memory access 0x00000000+4 outside mapped range\n"
+                    "    at CPU.step (/app/vm.js:240:26)\n"
+                ),
+                "failure_classification": {
+                    "class": "runtime_failure",
+                    "kind": "nonzero_exit",
+                    "summary": "exit code 1",
+                },
+                "execution_contract_normalized": {
+                    "role": "runtime",
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                    "affected_paths": ["vm.js"],
+                },
+            },
+        ),
+        evidence_refs=("ev:runtime-verifier",),
+        content_refs=("cmd:runtime-output",),
+    )
+    generic_frontier = {
+        "latest_failure": {
+            "failure_class": "runtime_failure",
+            "summary": "failed",
+        }
+    }
+
+    runtime_events = _workframe_sidecar_events_from_tool_results((runtime_result,))
+    bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        hard_runtime_frontier=generic_frontier,
+        sidecar_events=runtime_events,
+    )
+    workframe = bundle["reducer_output"]
+
+    assert bundle["invariant_report"]["status"] == "pass"
+    assert bundle["reducer_inputs"]["workframe_inputs"]["sidecar_events"][0]["event_id"] == (
+        "tool-result:call-runtime-verifier"
+    )
+    assert "prompt-frontier-failure" not in json.dumps(bundle["reducer_inputs"], sort_keys=True)
+    assert "memory access 0x00000000+4 outside mapped range" in workframe["latest_actionable"]["summary"]
+    assert workframe["required_next"]["kind"] == "patch_or_edit"
+
+
+def test_implement_v2_workframe_keeps_runtime_failure_after_prompt_recovery() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the current verifier failure."},
+        lane_config={"mode": "full"},
+    )
+    runtime_events = (
+        {
+            "kind": "verifier",
+            "event_id": "tool-result:runtime",
+            "event_sequence": 1,
+            "status": "failed",
+            "family": "runtime_failure",
+            "summary": "TypeError: cannot read property 'pc' of undefined",
+            "observable_output": True,
+            "target_paths": ["vm.js"],
+            "evidence_refs": ["ev:runtime"],
+        },
+    )
+    repair_history = {
+        "failure_class": "repair_history",
+        "required_next_action": "Run one scoped producer/artifact diagnostic before editing again.",
+    }
+
+    bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        repair_history=repair_history,
+        sidecar_events=runtime_events,
+    )
+    sidecar_events = bundle["reducer_inputs"]["workframe_inputs"]["sidecar_events"]
+    workframe = bundle["reducer_output"]
+
+    assert sidecar_events[-1]["event_id"] == "tool-result:runtime"
+    assert "Run one scoped producer/artifact diagnostic" in json.dumps(sidecar_events)
+    assert workframe["latest_actionable"]["summary"] == "TypeError: cannot read property 'pc' of undefined"
+    assert bundle["invariant_report"]["status"] == "pass"
+
+
+def test_implement_v2_workframe_keeps_passing_verifier_after_prompt_recovery() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the current verifier failure."},
+        lane_config={"mode": "full"},
+    )
+    runtime_events = (
+        {
+            "kind": "verifier",
+            "event_id": "tool-result:passing-verifier",
+            "event_sequence": 1,
+            "status": "completed",
+            "summary": "pytest passed",
+            "command_intent": "verify",
+            "evidence_refs": ["ev:passing-verifier"],
+        },
+    )
+    repair_history = {
+        "failure_class": "repair_history",
+        "required_next_action": "Run one scoped producer/artifact diagnostic before editing again.",
+    }
+
+    bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        repair_history=repair_history,
+        sidecar_events=runtime_events,
+    )
+    sidecar_events = bundle["reducer_inputs"]["workframe_inputs"]["sidecar_events"]
+    workframe = bundle["reducer_output"]
+
+    assert sidecar_events[-1]["event_id"] == "tool-result:passing-verifier"
+    assert workframe["current_phase"] == "finish_ready"
+    assert workframe["latest_actionable"] is None
+    assert workframe["required_next"]["kind"] == "finish"
+    assert bundle["invariant_report"]["status"] == "pass"
+
+
+def test_implement_v2_workframe_keeps_completed_write_after_prompt_recovery() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the current verifier failure."},
+        lane_config={"mode": "full"},
+    )
+    write_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-write-file",
+        mew_tool_call_id="tool-write-file",
+        tool_name="write_file",
+        status="completed",
+        content=({"path": "vm.js", "summary": "source written"},),
+        evidence_refs=("ev:write-file",),
+        side_effects=(
+            {
+                "kind": "file_write",
+                "operation": "write_file",
+                "path": "vm.js",
+                "written": True,
+            },
+        ),
+    )
+    repair_history = {
+        "failure_class": "repair_history",
+        "required_next_action": "Run one scoped producer/artifact diagnostic before editing again.",
+    }
+
+    runtime_events = _workframe_sidecar_events_from_tool_results((write_result,))
+    bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        repair_history=repair_history,
+        sidecar_events=runtime_events,
+    )
+    sidecar_events = bundle["reducer_inputs"]["workframe_inputs"]["sidecar_events"]
+    workframe = bundle["reducer_output"]
+
+    assert sidecar_events[-1]["kind"] == "write"
+    assert sidecar_events[-1]["event_id"] == "tool-result:call-write-file"
+    assert workframe["current_phase"] == "verify_after_mutation"
+    assert workframe["required_next"]["kind"] == "run_verifier"
+    assert workframe["changed_sources"]["paths"] == ["vm.js"]
+    assert bundle["invariant_report"]["status"] == "pass"
+
+
+def test_implement_v2_workframe_keeps_shell_source_mutation_after_prompt_recovery() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the current verifier failure."},
+        lane_config={"mode": "full"},
+    )
+    command_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-shell-mutation",
+        mew_tool_call_id="tool-shell-mutation",
+        tool_name="run_command",
+        status="completed",
+        content=({"command": "python generate.py", "status": "completed", "summary": "generated source"},),
+        evidence_refs=("ev:shell-mutation",),
+        side_effects=(
+            {
+                "kind": "source_tree_mutation",
+                "record": {
+                    "changed_count": 1,
+                    "changes": [{"path": "vm.js"}],
+                },
+            },
+        ),
+    )
+    repair_history = {
+        "failure_class": "repair_history",
+        "required_next_action": "Run one scoped producer/artifact diagnostic before editing again.",
+    }
+
+    runtime_events = _workframe_sidecar_events_from_tool_results((command_result,))
+    bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        repair_history=repair_history,
+        sidecar_events=runtime_events,
+    )
+    sidecar_events = bundle["reducer_inputs"]["workframe_inputs"]["sidecar_events"]
+    workframe = bundle["reducer_output"]
+
+    assert sidecar_events[-1]["kind"] == "run_command"
+    assert sidecar_events[-1]["event_id"] == "tool-result:call-shell-mutation"
+    assert workframe["current_phase"] == "verify_after_mutation"
+    assert workframe["required_next"]["kind"] == "run_verifier"
+    assert workframe["changed_sources"]["paths"] == ["vm.js"]
+    assert bundle["invariant_report"]["status"] == "pass"
+
+
+def test_implement_v2_workframe_allows_recovery_after_trailing_no_output_failure() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the current verifier failure."},
+        lane_config={"mode": "full"},
+    )
+    runtime_events = (
+        {
+            "kind": "source_mutation",
+            "event_id": "tool-result:source-mutation",
+            "event_sequence": 1,
+            "status": "completed",
+            "path": "vm.js",
+            "evidence_refs": ["ev:source-mutation"],
+        },
+        {
+            "kind": "verifier",
+            "event_id": "tool-result:no-output-verifier",
+            "event_sequence": 2,
+            "status": "failed",
+            "family": "runtime_failure",
+            "summary": "hard-runtime verifier had no observable output",
+            "evidence_refs": ["ev:no-output-verifier"],
+        },
+    )
+    repair_history = {
+        "failure_class": "no_output_verifier_recovery",
+        "required_next_action": "Run one scoped producer/artifact diagnostic before editing again.",
+    }
+
+    bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        repair_history=repair_history,
+        sidecar_events=runtime_events,
+    )
+    sidecar_events = bundle["reducer_inputs"]["workframe_inputs"]["sidecar_events"]
+    workframe = bundle["reducer_output"]
+
+    assert sidecar_events[-1]["event_id"] == "prompt-repair-history"
+    assert "Run one scoped producer/artifact diagnostic" in workframe["latest_actionable"]["summary"]
+    assert bundle["invariant_report"]["status"] == "pass"
+
+
+def test_implement_v2_workframe_prompt_accepts_runtime_sidecar_events() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair a runtime failure."},
+        lane_config={"mode": "full"},
+    )
+    runtime_events = (
+        {
+            "kind": "verifier",
+            "event_id": "tool-result:call-runtime-verifier",
+            "event_sequence": 1,
+            "status": "failed",
+            "family": "runtime_failure",
+            "summary": "Error: memory access 0x00000000+4 outside mapped range",
+            "target_paths": ["vm.js"],
+            "evidence_refs": ["ev:runtime-verifier"],
+        },
+    )
+
+    section = next(
+        item
+        for item in build_implement_v2_prompt_sections(lane_input, workframe_sidecar_events=runtime_events)
+        if item.id == "implement_v2_workframe"
+    )
+
+    assert "memory access 0x00000000+4 outside mapped range" in section.content
+    assert "wf:frontier_failure" not in section.content
+    assert len(section.content) <= 4096
 
 
 def test_implement_v2_prompt_omits_hard_runtime_profile_for_simple_task() -> None:

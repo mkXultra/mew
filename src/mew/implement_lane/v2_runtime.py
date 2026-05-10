@@ -673,6 +673,7 @@ def run_live_json_implement_v2(
                 write_repair_lock_state=write_repair_lock_state,
                 post_first_write_verifier_state=post_first_write_verifier_state,
                 history=tuple(prompt_history),
+                tool_results=tuple(tool_results),
             )
             if progress:
                 progress(f"implement_v2 turn #{turn_index}: prompt_render done prompt_chars={len(prompt)}")
@@ -1419,6 +1420,7 @@ def run_live_json_implement_v2(
         runtime_prompt_lane_input,
         active_work_todo=active_work_todo_state,
         hard_runtime_frontier=hard_runtime_frontier_state,
+        sidecar_events=_workframe_sidecar_events_from_tool_results(tuple(tool_results)),
         prompt_inventory=prompt_inventory,
         turn_id=f"turn-{model_turns}-final",
     )
@@ -2478,6 +2480,215 @@ def _first_result_payload(result: ToolResultEnvelope) -> dict[str, object]:
         if isinstance(item, dict):
             return item
     return {}
+
+
+def _workframe_sidecar_events_from_tool_results(
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> tuple[dict[str, object], ...]:
+    """Project concrete tool-result evidence into WorkFrame reducer events."""
+
+    events: list[dict[str, object]] = []
+    for index, result in enumerate(tool_results, start=1):
+        event = _workframe_sidecar_event_from_tool_result(index, result)
+        if event:
+            events.append(event)
+    return tuple(events)
+
+
+def _workframe_sidecar_event_from_tool_result(
+    index: int,
+    result: ToolResultEnvelope,
+) -> dict[str, object]:
+    payload = _first_result_payload(result)
+    status = str(result.status or "").strip()
+    evidence_refs = _workframe_result_evidence_refs(result)
+    event: dict[str, object] = {
+        "event_sequence": index,
+        "event_id": f"tool-result:{result.provider_call_id or index}",
+        "status": status,
+        "tool_name": result.tool_name,
+        "provider_call_id": result.provider_call_id,
+        "evidence_refs": evidence_refs,
+    }
+    contract = _payload_execution_contract(payload)
+    if contract:
+        event["execution_contract"] = contract
+        event["command_intent"] = _frontier_clip_text(payload.get("command_intent"), limit=120)
+    if _workframe_payload_has_observable_output(payload):
+        event["observable_output"] = True
+    if result.side_effects:
+        event["side_effects"] = [dict(effect) for effect in result.side_effects if isinstance(effect, dict)]
+
+    paths = _workframe_result_paths(result, payload, contract=contract)
+    if paths:
+        event["target_paths"] = list(paths)
+
+    if result.tool_name in WRITE_TOOL_NAMES:
+        event["kind"] = _workframe_write_event_kind(result.tool_name)
+        event["path"] = paths[0] if paths else _frontier_clip_text(payload.get("path"), limit=240)
+        if result.status != "completed" or result.is_error:
+            event["family"] = _write_failure_class(result) or _write_failure_kind(result)
+            event["summary"] = _workframe_failure_summary(result, payload, default=_write_failure_reason(result))
+        else:
+            event["summary"] = _frontier_clip_text(payload.get("summary") or payload.get("operation") or "source mutated")
+        return _drop_empty_frontier_values(event)
+
+    if result.tool_name in EXEC_TOOL_NAMES:
+        verifier_like = _result_is_configured_verifier_step(result)
+        if verifier_like:
+            event["kind"] = "verifier"
+        elif result.status in {"failed", "interrupted", "invalid"} or result.is_error:
+            event["kind"] = "latest_failure"
+        elif _source_tree_mutation_from_result(result):
+            event["kind"] = "run_command"
+        else:
+            return {}
+        event["command_run_id"] = _result_command_run_id(result)
+        event["command"] = _frontier_clip_text(_result_command_text(result), limit=_FRONTIER_COMMAND_TEXT_LIMIT)
+        if result.status != "completed" or result.is_error:
+            event["family"] = _workframe_failure_family(payload)
+            event["failure_kind"] = _workframe_failure_kind(payload)
+            event["summary"] = _workframe_failure_summary(result, payload)
+        else:
+            event["summary"] = _frontier_clip_text(payload.get("summary") or payload.get("status") or "command completed")
+        return _drop_empty_frontier_values(event)
+
+    if result.status in {"failed", "interrupted", "invalid"} or result.is_error:
+        event["kind"] = "latest_failure"
+        event["family"] = _frontier_clip_text(payload.get("failure_class") or result.tool_name or "tool_failure")
+        event["summary"] = _workframe_failure_summary(result, payload)
+        return _drop_empty_frontier_values(event)
+
+    return {}
+
+
+def _workframe_write_event_kind(tool_name: str) -> str:
+    if tool_name == "write_file":
+        return "write"
+    if tool_name == "edit_file":
+        return "edit"
+    return tool_name
+
+
+def _workframe_result_evidence_refs(result: ToolResultEnvelope) -> list[str]:
+    refs: list[str] = []
+    refs.extend(str(ref) for ref in result.evidence_refs if str(ref).strip())
+    if not refs:
+        refs.extend(str(ref) for ref in result.content_refs if str(ref).strip())
+    return list(dict.fromkeys(refs))[:3]
+
+
+def _workframe_result_paths(
+    result: ToolResultEnvelope,
+    payload: dict[str, object],
+    *,
+    contract: dict[str, object],
+) -> tuple[str, ...]:
+    paths: list[str] = []
+    paths.extend(_write_result_paths(result))
+    for key in ("path", "target_path", "source_path"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            paths.append(_frontier_clip_text(value, limit=240))
+    for key in ("affected_paths", "target_paths", "source_paths", "changed_paths"):
+        raw = payload.get(key)
+        if isinstance(raw, (list, tuple)):
+            paths.extend(_frontier_clip_text(item, limit=240) for item in raw if str(item).strip())
+    raw_contract_paths = contract.get("affected_paths")
+    if isinstance(raw_contract_paths, (list, tuple)):
+        paths.extend(_frontier_clip_text(item, limit=240) for item in raw_contract_paths if str(item).strip())
+    return tuple(dict.fromkeys(path for path in paths if path))
+
+
+def _workframe_failure_family(payload: dict[str, object]) -> str:
+    classification = payload.get("failure_classification")
+    if isinstance(classification, dict):
+        for key in ("class", "failure_class", "phase"):
+            value = _frontier_clip_text(classification.get(key), limit=120)
+            if value:
+                return value
+    structured = _structured_failure_classification(payload)
+    for key in ("class", "failure_class", "phase"):
+        value = _frontier_clip_text(structured.get(key), limit=120)
+        if value:
+            return value
+    return _frontier_clip_text(payload.get("failure_class") or "runtime_failure", limit=120)
+
+
+def _workframe_failure_kind(payload: dict[str, object]) -> str:
+    classification = payload.get("failure_classification")
+    if isinstance(classification, dict):
+        value = _frontier_clip_text(classification.get("kind"), limit=120)
+        if value:
+            return value
+    structured = _structured_failure_classification(payload)
+    return _frontier_clip_text(
+        structured.get("kind") or payload.get("failure_kind") or payload.get("status") or "",
+        limit=120,
+    )
+
+
+def _workframe_failure_summary(
+    result: ToolResultEnvelope,
+    payload: dict[str, object],
+    *,
+    default: object = "",
+) -> str:
+    latest_failure = payload.get("latest_failure")
+    if isinstance(latest_failure, dict):
+        for key in ("summary", "message", "reason"):
+            value = _frontier_clip_text(latest_failure.get(key), limit=220)
+            if value and not _workframe_summary_is_generic(value):
+                return value
+    for key in ("stderr_tail", "stdout_tail", "stderr", "stdout", "reason", "error", "message"):
+        value = _frontier_clip_text(payload.get(key), limit=220)
+        if value:
+            return value
+    classification = payload.get("failure_classification")
+    if isinstance(classification, dict):
+        value = _frontier_clip_text(classification.get("summary"), limit=220)
+        if value:
+            return value
+    value = _frontier_clip_text(default, limit=220)
+    if value:
+        return value
+    if result.status:
+        return f"{result.tool_name} {result.status}"
+    return "tool result failed"
+
+
+def _workframe_payload_has_observable_output(payload: dict[str, object]) -> bool:
+    for key in ("stderr_tail", "stdout_tail", "stderr", "stdout", "output_tail", "output"):
+        if str(payload.get(key) or "").strip():
+            return True
+    return False
+
+
+def _workframe_summary_is_generic(value: object) -> bool:
+    text = str(value or "").strip().casefold()
+    if not text:
+        return True
+    normalized = " ".join(text.replace("_", " ").replace("-", " ").split())
+    generic = {
+        "failed",
+        "failure",
+        "error",
+        "unknown",
+        "nonzero",
+        "nonzero exit",
+        "exit code 1",
+        "exit status 1",
+        "killed",
+        "timeout",
+        "timed out",
+        "interrupted",
+        "command failed",
+        "tool failed",
+        "runtime failure",
+    }
+    if normalized in generic:
+        return True
+    return bool(re.fullmatch(r"exit code \d+", normalized))
 
 
 def _hard_runtime_verifier_payload_has_no_progress(
@@ -6803,6 +7014,7 @@ def _live_json_prompt(
     write_repair_lock_state: dict[str, object] | None = None,
     post_first_write_verifier_state: dict[str, object] | None = None,
     history: tuple[dict[str, object], ...],
+    tool_results: tuple[ToolResultEnvelope, ...] = (),
 ) -> str:
     specs = tool_specs if tool_specs is not None else list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode"))
     available_tool_names = " | ".join(spec.name for spec in specs if spec.access != "finish") or "no tool calls"
@@ -6814,6 +7026,7 @@ def _live_json_prompt(
                 hard_runtime_frontier_state=hard_runtime_frontier_state,
             ),
             tool_specs=specs,
+            workframe_sidecar_events=_workframe_sidecar_events_from_tool_results(tool_results),
         )
     )
     response_contract: dict[str, object] = {
