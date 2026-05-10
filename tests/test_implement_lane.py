@@ -7113,6 +7113,69 @@ def test_implement_v2_blocks_exec_tool_when_wall_budget_exhausted_after_model_tu
     assert not (tmp_path / "should_not_exist.txt").exists()
 
 
+def test_implement_v2_blocks_under_budget_required_patch_turn(tmp_path) -> None:
+    calls = 0
+
+    def fake_model(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return {
+            "summary": "surface runtime failure",
+            "tool_calls": [
+                {
+                    "id": "runtime-fail",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "python - <<'PY'\n"
+                            "raise RuntimeError('unsupported runtime opcode')\n"
+                            "PY"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 1,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        }
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Implement a VM runtime from provided source that produces frame.bmp.",
+                "max_wall_seconds": 0.2,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "required_patch_model_turn_min_seconds": 0.5,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        timeout=60,
+        max_turns=3,
+    )
+
+    block = result.metrics["model_turn_budget_block"]
+    assert calls == 1
+    assert result.status == "blocked"
+    assert result.updated_lane_state["finish"]["failure_class"] == "model_budget_insufficient_for_required_patch"
+    assert block["failure_class"] == "model_budget_insufficient_for_required_patch"
+    assert block["required_next"]["kind"] == "patch_or_edit"
+    assert block["active_model_timeout_seconds"] < block["minimum_required_model_timeout_seconds"]
+    assert result.metrics["model_turns"] == 1
+
+
 def test_implement_v2_live_json_extends_one_reaction_turn_after_final_terminal_failure(tmp_path) -> None:
     outputs = [
         {

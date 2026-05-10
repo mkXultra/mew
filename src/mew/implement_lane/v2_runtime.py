@@ -208,6 +208,7 @@ _SOURCE_OUTPUT_DECLARATION_RE = re.compile(
 )
 _HARD_RUNTIME_PROGRESS_CONTINUATION_DEFAULT_LIMIT = 4
 _IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS = 0.001
+_IMPLEMENT_V2_REQUIRED_PATCH_MODEL_TURN_MIN_SECONDS = 180.0
 _IMPLEMENT_V2_TRANSIENT_MODEL_RETRY_DELAYS = (0.0,)
 _IMPLEMENT_V2_TRANSIENT_MODEL_ERROR_MARKERS = (
     "incompleteread",
@@ -376,6 +377,7 @@ def run_live_json_implement_v2(
     finish_gate_decision: dict[str, object] = {}
     finish_gate_block_count = 0
     wall_timeout: dict[str, object] = {}
+    model_turn_budget_block: dict[str, object] = {}
     run_started = time.monotonic()
     base_max_turns = max(1, int(max_turns))
     turn_budget_limit = base_max_turns
@@ -618,6 +620,28 @@ def run_live_json_implement_v2(
                     "completion_source": "deterministic_final_verifier_closeout",
                     "latest_source_mutation": dict(pending_final_verifier_closeout),
                     "final_verifier_provider_call_id": closeout_call.provider_call_id,
+                }
+                break
+            model_turn_budget_block = _required_patch_model_turn_budget_block(
+                lane_input,
+                lane_attempt_id=lane_attempt_id,
+                active_work_todo_state=active_work_todo_state,
+                hard_runtime_frontier_state=hard_runtime_frontier_state,
+                tool_results=tuple(tool_results),
+                run_started=run_started,
+                next_turn=turn_index + 1,
+                next_model_timeout_seconds=model_timeout_seconds,
+                requested_timeout=timeout,
+            )
+            if model_turn_budget_block:
+                finish_arguments = {
+                    "outcome": "blocked",
+                    "summary": str(model_turn_budget_block.get("summary") or ""),
+                    "failure_class": str(
+                        model_turn_budget_block.get("failure_class")
+                        or "model_budget_insufficient_for_required_patch"
+                    ),
+                    "model_turn_budget_block": dict(model_turn_budget_block),
                 }
                 break
             turn_index += 1
@@ -1476,6 +1500,7 @@ def run_live_json_implement_v2(
             "finish_gate_decision": dict(finish_gate_decision),
             "first_write_readiness": dict(first_write_readiness),
             "runtime_artifact_failure_plateau": dict(runtime_artifact_failure_plateau),
+            "model_turn_budget_block": dict(model_turn_budget_block),
             **typed_metrics,
             "wall_timeout": dict(wall_timeout),
             "wall_elapsed_seconds": round(max(0.0, time.monotonic() - run_started), 3),
@@ -1557,6 +1582,7 @@ def run_live_json_implement_v2(
             "finish_gate_decision": dict(finish_gate_decision),
             "first_write_readiness": dict(first_write_readiness),
             "runtime_artifact_failure_plateau": dict(runtime_artifact_failure_plateau),
+            "model_turn_budget_block": dict(model_turn_budget_block),
             "first_write_due": bool(first_write_readiness.get("first_write_due")),
             "first_write_latency_turns": first_write_readiness.get("first_write_latency_turns"),
             "first_write_probe_count": first_write_readiness.get("probe_count_before_first_write"),
@@ -2883,6 +2909,114 @@ def _model_turn_timeout_seconds(
     if timeout <= 0:
         return max(_IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS, remaining_wall)
     return min(timeout, max(_IMPLEMENT_V2_MIN_MODEL_TURN_TIMEOUT_SECONDS, remaining_wall))
+
+
+def _required_patch_model_turn_budget_block(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    active_work_todo_state: dict[str, object],
+    hard_runtime_frontier_state: dict[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    run_started: float,
+    next_turn: int,
+    next_model_timeout_seconds: float,
+    requested_timeout: float,
+) -> dict[str, object]:
+    minimum_seconds = _required_patch_model_turn_min_seconds(lane_input)
+    if minimum_seconds <= 0 or next_model_timeout_seconds >= minimum_seconds:
+        return {}
+    requested_timeout_seconds = _positive_float_or_zero(requested_timeout)
+    if requested_timeout_seconds > 0 and next_model_timeout_seconds >= requested_timeout_seconds:
+        return {}
+    bundle = build_implement_v2_workframe_debug_bundle(
+        _lane_input_with_runtime_prompt_state(
+            lane_input,
+            active_work_todo_state=active_work_todo_state,
+            hard_runtime_frontier_state=hard_runtime_frontier_state,
+        ),
+        active_work_todo=active_work_todo_state,
+        hard_runtime_frontier=hard_runtime_frontier_state,
+        sidecar_events=_workframe_sidecar_events_from_tool_results(tool_results),
+        turn_id=f"turn-{next_turn}-model-budget-preflight",
+    )
+    workframe = _dict_or_empty(bundle.get("reducer_output"))
+    required_next = _dict_or_empty(workframe.get("required_next"))
+    if str(required_next.get("kind") or "") != "patch_or_edit":
+        return {}
+    if not _required_patch_is_budget_sensitive(lane_input, workframe=workframe):
+        return {}
+    wall_timeout = _implement_v2_wall_timeout(
+        lane_input,
+        run_started=run_started,
+        reason="not enough model-turn budget remains for the required patch/edit",
+        next_turn=next_turn,
+        requested_model_timeout=requested_timeout,
+    )
+    summary = (
+        "implement_v2 stopped before an under-budget required patch/edit turn; "
+        "resume with a larger wall/model budget instead of spending the next turn on a likely timeout"
+    )
+    return {
+        "schema_version": 1,
+        "failure_class": "model_budget_insufficient_for_required_patch",
+        "summary": summary,
+        "lane_attempt_id": lane_attempt_id,
+        "next_turn": int(next_turn),
+        "active_model_timeout_seconds": round(max(0.0, float(next_model_timeout_seconds or 0.0)), 3),
+        "minimum_required_model_timeout_seconds": round(minimum_seconds, 3),
+        "remaining_wall_seconds": wall_timeout.get("remaining_seconds"),
+        "requested_model_timeout_seconds": wall_timeout.get("requested_model_timeout_seconds"),
+        "required_next": required_next,
+        "current_phase": workframe.get("current_phase"),
+        "latest_actionable": _dict_or_empty(workframe.get("latest_actionable")),
+        "workframe_output_hash": _dict_or_empty(workframe.get("trace")).get("output_hash"),
+    }
+
+
+def _required_patch_model_turn_min_seconds(lane_input: ImplementLaneInput) -> float:
+    configured = lane_input.lane_config.get("required_patch_model_turn_min_seconds")
+    if configured in (None, ""):
+        configured = lane_input.lane_config.get("hard_runtime_required_patch_model_turn_min_seconds")
+    if configured not in (None, ""):
+        try:
+            return max(0.0, min(600.0, float(configured)))
+        except (TypeError, ValueError):
+            return 0.0
+    if not _has_hard_runtime_budget_sensitive_surface(lane_input):
+        return 0.0
+    max_wall = lane_input.task_contract.get("max_wall_seconds")
+    try:
+        if max_wall in (None, "") or float(max_wall) < 300.0:
+            return 0.0
+    except (TypeError, ValueError):
+        return 0.0
+    return _IMPLEMENT_V2_REQUIRED_PATCH_MODEL_TURN_MIN_SECONDS
+
+
+def _has_hard_runtime_budget_sensitive_surface(lane_input: ImplementLaneInput) -> bool:
+    if is_hard_runtime_artifact_task(lane_input.task_contract):
+        return True
+    frontier = lane_input.persisted_lane_state.get("lane_hard_runtime_frontier")
+    return isinstance(frontier, dict) and bool(frontier)
+
+
+def _required_patch_is_budget_sensitive(lane_input: ImplementLaneInput, *, workframe: dict[str, object]) -> bool:
+    if not _has_hard_runtime_budget_sensitive_surface(lane_input):
+        return False
+    latest = _dict_or_empty(workframe.get("latest_actionable"))
+    generic_family = str(latest.get("generic_family") or "").strip()
+    if generic_family in {"runtime_diagnostic", "verifier_failure", "artifact_missing", "write_failure"}:
+        return True
+    current_phase = str(workframe.get("current_phase") or "").strip()
+    return current_phase in {"repair_after_verifier_failure", "repair_after_write_failure"}
+
+
+def _positive_float_or_zero(value: object) -> float:
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _wall_budget_gate_tool_call(
