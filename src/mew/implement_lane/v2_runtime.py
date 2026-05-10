@@ -3140,6 +3140,8 @@ def _required_patch_model_turn_effective_min_seconds(minimum_seconds: float, *, 
     latest = _dict_or_empty(workframe.get("latest_actionable"))
     if str(latest.get("generic_family") or "") == "write_failure" and _has_bounded_write_recovery_hint(latest):
         return min(120.0, minimum_seconds)
+    if _has_focused_runtime_diagnostic_patch_surface(workframe):
+        return min(120.0, minimum_seconds)
     material_shortfall_ratio = 0.8
     material_shortfall_seconds = 60.0
     return max(
@@ -3157,6 +3159,34 @@ def _has_bounded_write_recovery_hint(latest_actionable: dict[str, object]) -> bo
     if str(recovery_call.get("tool_name") or "") != "read_file":
         return False
     return bool(str(recovery_call.get("path") or "").strip())
+
+
+def _has_focused_runtime_diagnostic_patch_surface(workframe: dict[str, object]) -> bool:
+    latest = _dict_or_empty(workframe.get("latest_actionable"))
+    if str(latest.get("generic_family") or "") not in {"runtime_diagnostic", "runtime_failure"}:
+        return False
+    required_next = _dict_or_empty(workframe.get("required_next"))
+    if str(required_next.get("kind") or "") != "patch_or_edit":
+        return False
+    evidence_refs = required_next.get("evidence_refs")
+    if not isinstance(evidence_refs, (list, tuple)) or not evidence_refs:
+        return False
+    summary = str(latest.get("summary") or "").strip()
+    if not summary:
+        return False
+    if summary.casefold() in {"exit code 1", "nonzero exit", "command failed", "runtime failure"}:
+        return False
+    if re.search(r"\b[A-Za-z_]+(?:Error|Exception)\b", summary):
+        return True
+    return _text_matches_any(
+        summary,
+        (
+            r"\b(?:traceback|assert|fault|segv|panic)\b",
+            r"\b(?:unsupported|unknown|missing|not found|invalid)\b",
+            r"\b(?:not a function|cannot|undefined|null reference)\b",
+            r"\b(?:pc=|program counter|signal\s+\d+|exit code\s+[2-9]\d*)\b",
+        ),
+    )
 
 
 def _has_hard_runtime_budget_sensitive_surface(lane_input: ImplementLaneInput) -> bool:

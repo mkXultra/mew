@@ -1229,6 +1229,35 @@ broad disassembly regexes, then returned `STATUS: APPROVE`. Next step after
 commit: run one same-shape 10 minute diagnostic and compare whether
 implementation-feature inventory happens before first write.
 
+Focused runtime diagnostic budget decision 2026-05-10 JST:
+
+The same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260510-180546` confirmed the
+feature-surface repair worked: first write followed a broad implementation
+feature/tooling probe, prompt chars dropped to about `401k`, first edit was
+`232s`, and the loop reached concrete runtime repair. The new generic blocker
+was again budget preflight: the final WorkFrame required `patch_or_edit` for a
+focused runtime diagnostic (`unsupported syscall 83`), but stopped with about
+`179s` remaining because the generic runtime patch threshold was `240s`. This
+wasted useful step-check time after the failure surface was already concrete.
+
+Decision: keep the high threshold for vague runtime failures, but treat a
+focused runtime diagnostic like bounded recovery. If WorkFrame has
+`required_next.kind=patch_or_edit`, evidence refs, and a concrete diagnostic
+summary, the effective minimum model-turn budget is `120s`. Generic summaries
+such as `exit code 1` still require the normal `240s` material threshold. This
+is a generic WorkFrame budget repair, not a syscall-specific heuristic. Current
+validation: focused budget subset passed (`20 passed`), full
+`tests/test_implement_lane.py` passed (`426 passed`), scoped ruff and
+`git diff --check` passed, and HOT_PATH fastcheck on the `180546` artifact
+passed with micro next-action `patch/edit`. codex-ultra review session
+`019e112f-c81e-7ff2-bac4-3fe9464ded1f` requested two rounds of fixes to keep
+generic summaries such as `error`, `runtime error`, `test failed`, and
+`verifier failed` on the normal `240s` threshold; after the stricter concrete
+diagnostic tests it returned `STATUS: APPROVE`. Next step after commit: run one
+same-shape 10 minute diagnostic and check whether the focused runtime patch now
+uses the remaining budget instead of stopping early.
+
 Latest-one-turn compaction diagnostic 2026-05-09 JST:
 
 Commit `5f91df1` reduced model-visible hot-path weight but did not pass the

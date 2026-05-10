@@ -7515,7 +7515,7 @@ def test_implement_v2_allows_near_threshold_required_patch_turn(tmp_path) -> Non
     near_threshold_block = _required_patch_model_turn_budget_block(
         lane_input,
         lane_attempt_id="attempt-1",
-        active_work_todo_state={},
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
         hard_runtime_frontier_state={},
         tool_results=(runtime_failure,),
         run_started=time.monotonic() - 371,
@@ -7526,7 +7526,7 @@ def test_implement_v2_allows_near_threshold_required_patch_turn(tmp_path) -> Non
     barely_below_old_threshold_block = _required_patch_model_turn_budget_block(
         lane_input,
         lane_attempt_id="attempt-1",
-        active_work_todo_state={},
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
         hard_runtime_frontier_state={},
         tool_results=(runtime_failure,),
         run_started=time.monotonic() - 393,
@@ -7537,7 +7537,7 @@ def test_implement_v2_allows_near_threshold_required_patch_turn(tmp_path) -> Non
     material_shortfall_block = _required_patch_model_turn_budget_block(
         lane_input,
         lane_attempt_id="attempt-1",
-        active_work_todo_state={},
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
         hard_runtime_frontier_state={},
         tool_results=(runtime_failure,),
         run_started=time.monotonic() - 461,
@@ -7545,12 +7545,100 @@ def test_implement_v2_allows_near_threshold_required_patch_turn(tmp_path) -> Non
         next_model_timeout_seconds=199,
         requested_timeout=600,
     )
+    generic_runtime_failure = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="verify-generic",
+        mew_tool_call_id="tool-verify-generic",
+        tool_name="run_tests",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "medium",
+                    "summary": "exit code 1",
+                },
+            },
+        ),
+        evidence_refs=("ev:verify-generic",),
+    )
+    generic_material_shortfall_block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
+        hard_runtime_frontier_state={},
+        tool_results=(generic_runtime_failure,),
+        run_started=time.monotonic() - 461,
+        next_turn=2,
+        next_model_timeout_seconds=199,
+        requested_timeout=600,
+    )
+    generic_runtime_diagnostic_blocks = []
+    for summary in ("Runtime failure: exit code 1", "test failed", "verifier failed", "error", "runtime error"):
+        generic_runtime_diagnostic = ToolResultEnvelope(
+            lane_attempt_id="attempt-1",
+            provider_call_id=f"verify-generic-{summary.replace(' ', '-')}",
+            mew_tool_call_id=f"tool-verify-generic-{summary.replace(' ', '-')}",
+            tool_name="run_tests",
+            status="failed",
+            is_error=True,
+            content=(
+                {
+                    "command": "node vm.js",
+                    "status": "failed",
+                    "exit_code": 1,
+                    "failure_classification": {
+                        "phase": "runtime",
+                        "kind": "nonzero_exit",
+                        "class": "runtime_failure",
+                        "confidence": "medium",
+                        "summary": summary,
+                    },
+                },
+            ),
+            evidence_refs=(f"ev:{summary}",),
+        )
+        generic_runtime_diagnostic_blocks.append(
+            _required_patch_model_turn_budget_block(
+                lane_input,
+                lane_attempt_id="attempt-1",
+                active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
+                hard_runtime_frontier_state={},
+                tool_results=(generic_runtime_diagnostic,),
+                run_started=time.monotonic() - 461,
+                next_turn=2,
+                next_model_timeout_seconds=199,
+                requested_timeout=600,
+            )
+        )
+    too_short_focused_runtime_block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
+        hard_runtime_frontier_state={},
+        tool_results=(runtime_failure,),
+        run_started=time.monotonic() - 561,
+        next_turn=2,
+        next_model_timeout_seconds=99,
+        requested_timeout=600,
+    )
 
     assert near_threshold_block == {}
     assert barely_below_old_threshold_block == {}
-    assert material_shortfall_block["failure_class"] == "model_budget_insufficient_for_required_patch"
-    assert material_shortfall_block["minimum_required_model_timeout_seconds"] == 300.0
-    assert material_shortfall_block["minimum_enforced_model_timeout_seconds"] == 240.0
+    assert material_shortfall_block == {}
+    assert generic_material_shortfall_block["failure_class"] == "model_budget_insufficient_for_required_patch"
+    assert generic_material_shortfall_block["minimum_required_model_timeout_seconds"] == 300.0
+    assert generic_material_shortfall_block["minimum_enforced_model_timeout_seconds"] == 240.0
+    assert all(block["failure_class"] == "model_budget_insufficient_for_required_patch" for block in generic_runtime_diagnostic_blocks)
+    assert {block["minimum_enforced_model_timeout_seconds"] for block in generic_runtime_diagnostic_blocks} == {240.0}
+    assert too_short_focused_runtime_block["failure_class"] == "model_budget_insufficient_for_required_patch"
+    assert too_short_focused_runtime_block["minimum_enforced_model_timeout_seconds"] == 120.0
 
 
 def test_implement_v2_allows_short_recovery_hint_write_failure_patch_turn(tmp_path) -> None:
