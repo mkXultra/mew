@@ -3140,8 +3140,8 @@ def _required_patch_model_turn_effective_min_seconds(minimum_seconds: float, *, 
     latest = _dict_or_empty(workframe.get("latest_actionable"))
     if str(latest.get("generic_family") or "") == "write_failure" and _has_bounded_write_recovery_hint(latest):
         return min(120.0, minimum_seconds)
-    material_shortfall_ratio = 0.9
-    material_shortfall_seconds = 30.0
+    material_shortfall_ratio = 0.8
+    material_shortfall_seconds = 60.0
     return max(
         minimum_seconds * material_shortfall_ratio,
         minimum_seconds - material_shortfall_seconds,

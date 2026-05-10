@@ -7232,6 +7232,17 @@ def test_implement_v2_allows_near_threshold_required_patch_turn(tmp_path) -> Non
         next_model_timeout_seconds=289,
         requested_timeout=600,
     )
+    barely_below_old_threshold_block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={},
+        hard_runtime_frontier_state={},
+        tool_results=(runtime_failure,),
+        run_started=time.monotonic() - 393,
+        next_turn=2,
+        next_model_timeout_seconds=267,
+        requested_timeout=600,
+    )
     material_shortfall_block = _required_patch_model_turn_budget_block(
         lane_input,
         lane_attempt_id="attempt-1",
@@ -7245,9 +7256,10 @@ def test_implement_v2_allows_near_threshold_required_patch_turn(tmp_path) -> Non
     )
 
     assert near_threshold_block == {}
+    assert barely_below_old_threshold_block == {}
     assert material_shortfall_block["failure_class"] == "model_budget_insufficient_for_required_patch"
     assert material_shortfall_block["minimum_required_model_timeout_seconds"] == 300.0
-    assert material_shortfall_block["minimum_enforced_model_timeout_seconds"] == 270.0
+    assert material_shortfall_block["minimum_enforced_model_timeout_seconds"] == 240.0
 
 
 def test_implement_v2_allows_short_recovery_hint_write_failure_patch_turn(tmp_path) -> None:
@@ -7391,7 +7403,7 @@ def test_implement_v2_keeps_full_patch_budget_for_unbounded_write_recovery_hint(
     )
 
     assert block["failure_class"] == "model_budget_insufficient_for_required_patch"
-    assert block["minimum_enforced_model_timeout_seconds"] == 270.0
+    assert block["minimum_enforced_model_timeout_seconds"] == 240.0
 
 
 def test_implement_v2_live_json_extends_one_reaction_turn_after_final_terminal_failure(tmp_path) -> None:
