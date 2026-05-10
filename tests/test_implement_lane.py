@@ -9983,6 +9983,50 @@ def test_implement_v2_workframe_keeps_runtime_failure_after_prompt_recovery() ->
     assert bundle["invariant_report"]["status"] == "pass"
 
 
+def test_implement_v2_workframe_extracts_missing_write_target_path() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="patch-missing-target",
+        mew_tool_call_id="tool-patch-missing-target",
+        tool_name="apply_patch",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "reason": "path does not exist: /app/vm.js; use write_file with --create/create=True to create new files",
+            },
+        ),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+
+    assert events[0]["kind"] == "apply_patch"
+    assert events[0]["path"] == "/app/vm.js"
+    assert events[0]["target_paths"] == ["/app/vm.js"]
+    assert "path does not exist" in events[0]["summary"]
+
+
+def test_implement_v2_workframe_does_not_extract_missing_path_reason_for_non_write() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="read-missing-target",
+        mew_tool_call_id="tool-read-missing-target",
+        tool_name="read_file",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "reason": "path does not exist: /app/vm.js",
+            },
+        ),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+
+    assert events[0]["kind"] == "latest_failure"
+    assert "target_paths" not in events[0]
+
+
 def test_implement_v2_workframe_keeps_passing_verifier_after_prompt_recovery() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",

@@ -2611,7 +2611,8 @@ def _workframe_result_paths(
     contract: dict[str, object],
 ) -> tuple[str, ...]:
     paths: list[str] = []
-    paths.extend(_write_result_paths(result))
+    if result.tool_name in WRITE_TOOL_NAMES:
+        paths.extend(_write_result_paths(result))
     for key in ("path", "target_path", "source_path"):
         value = str(payload.get(key) or "").strip()
         if value:
@@ -5775,6 +5776,8 @@ def _write_result_paths(result: ToolResultEnvelope) -> tuple[str, ...]:
             paths.append(_frontier_clip_text(effect.get("path"), limit=240))
     payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
     paths.append(_frontier_clip_text(payload.get("path"), limit=240))
+    if result.status != "completed" or result.is_error:
+        paths.extend(_paths_from_write_failure_reason(_write_failure_reason(result)))
     return tuple(path for path in paths if path)
 
 
@@ -5799,6 +5802,30 @@ def _write_paths_match(left: object, right: object) -> bool:
 def _write_failure_reason(result: ToolResultEnvelope) -> str:
     payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
     return str(payload.get("reason") or payload.get("error") or "")
+
+
+def _paths_from_write_failure_reason(reason: str) -> tuple[str, ...]:
+    text = str(reason or "").strip()
+    if not text:
+        return ()
+    paths: list[str] = []
+    for marker in (
+        "path does not exist:",
+        "target path does not exist:",
+        "file does not exist:",
+        "no such file or directory:",
+    ):
+        lower = text.casefold()
+        index = lower.find(marker)
+        if index < 0:
+            continue
+        tail = text[index + len(marker) :].strip()
+        if not tail:
+            continue
+        token = tail.split(";", 1)[0].split("\n", 1)[0].strip().strip("'\"`")
+        if token:
+            paths.append(_frontier_clip_text(token, limit=240))
+    return tuple(dict.fromkeys(path for path in paths if path))
 
 
 def _write_failure_class(result: ToolResultEnvelope) -> str:

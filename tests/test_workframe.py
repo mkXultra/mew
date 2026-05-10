@@ -153,6 +153,107 @@ def test_workframe_pathless_write_failure_does_not_inherit_previous_changed_sour
     assert workframe.required_next.target_paths == ()
 
 
+def test_workframe_prior_failed_write_owns_same_turn_invalid_verifier() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-4",
+            task_id="task-1",
+            objective="Repair the workspace to satisfy the configured verifier.",
+            success_contract_ref="task-contract:verify",
+            sidecar_events=(
+                {
+                    "kind": "apply_patch",
+                    "event_sequence": 1,
+                    "event_id": "tool-result:patch-missing-target",
+                    "status": "failed",
+                    "family": "write_failed",
+                    "summary": "path does not exist: /app/vm.js; use write_file with create=True",
+                    "path": "$WORKSPACE/vm.js",
+                    "evidence_refs": ["ev:write-failure"],
+                },
+                {
+                    "kind": "verifier",
+                    "event_sequence": 2,
+                    "event_id": "tool-result:verifier-skipped-after-write-failure",
+                    "status": "invalid",
+                    "family": "runtime_failure",
+                    "summary": (
+                        "blocked_by_prior_failed_write_in_same_turn: "
+                        "apply_patch#patch-missing-target ended with status=failed"
+                    ),
+                    "evidence_refs": ["ev:invalid-verifier"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "repair_after_write_failure"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.source_ref == "ev:write-failure"
+    assert workframe.latest_actionable.generic_family == "write_failure"
+    assert "path does not exist" in workframe.latest_actionable.summary
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+    assert workframe.required_next.target_paths == ("vm.js",)
+
+
+def test_workframe_skipped_write_does_not_hide_prior_failed_write() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-4",
+            task_id="task-1",
+            objective="Repair the workspace to satisfy the configured verifier.",
+            success_contract_ref="task-contract:verify",
+            sidecar_events=(
+                {
+                    "kind": "apply_patch",
+                    "event_sequence": 1,
+                    "event_id": "tool-result:patch-missing-target",
+                    "status": "failed",
+                    "family": "write_failed",
+                    "summary": "path does not exist: /app/vm.js; use write_file with create=True",
+                    "path": "$WORKSPACE/vm.js",
+                    "evidence_refs": ["ev:write-failure"],
+                },
+                {
+                    "kind": "write",
+                    "event_sequence": 2,
+                    "event_id": "tool-result:write-skipped-after-write-failure",
+                    "status": "invalid",
+                    "family": "write_failed",
+                    "summary": (
+                        "blocked_by_prior_failed_write_in_same_turn: "
+                        "apply_patch#patch-missing-target ended with status=failed"
+                    ),
+                    "path": "$WORKSPACE/other.js",
+                    "evidence_refs": ["ev:skipped-write"],
+                },
+                {
+                    "kind": "verifier",
+                    "event_sequence": 3,
+                    "event_id": "tool-result:verifier-skipped-after-write-failure",
+                    "status": "invalid",
+                    "family": "runtime_failure",
+                    "summary": (
+                        "blocked_by_prior_failed_write_in_same_turn: "
+                        "apply_patch#patch-missing-target ended with status=failed"
+                    ),
+                    "evidence_refs": ["ev:invalid-verifier"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.source_ref == "ev:write-failure"
+    assert workframe.required_next
+    assert workframe.required_next.target_paths == ("vm.js",)
+
+
 def test_workframe_repeated_runtime_diagnostics_require_inspection_before_patch() -> None:
     workframe, report = reduce_workframe(
         WorkFrameInputs(

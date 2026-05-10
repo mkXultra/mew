@@ -633,6 +633,10 @@ def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
     mutation_seq = _event_sequence(mutation) if mutation else -1
     verifier_seq = _event_sequence(finish_proof) if finish_proof else -1
     failure = _latest_failure_event(events, min_sequence=mutation_seq)
+    if _event_blocked_by_prior_failed_write(failure) and write_failure:
+        write_failure_seq = _event_sequence(write_failure)
+        if write_failure_seq >= mutation_seq and write_failure_seq <= _event_sequence(failure):
+            failure = write_failure
     failure_seq = _event_sequence(failure) if failure else -1
     failure_generic_family = _generic_failure_family(failure) if isinstance(failure, dict) else ""
     latest_failure_inspection_seq = _latest_relevant_failure_inspection_sequence(
@@ -1019,6 +1023,7 @@ def _latest_source_mutation_failure_event(events: list[dict[str, object]]) -> di
         event
         for event in events
         if _event_is_source_mutation_surface(event) and _event_source_mutation_failed(event)
+        and not _event_blocked_by_prior_failed_write(event)
     ]
     return max(matches, key=_event_sequence) if matches else None
 
@@ -1109,6 +1114,14 @@ def _latest_failure_event(events: list[dict[str, object]], *, min_sequence: int 
         and _event_sequence(event) >= min_sequence
     ]
     return max(failures, key=_event_sequence) if failures else None
+
+
+def _event_blocked_by_prior_failed_write(event: object) -> bool:
+    if not isinstance(event, dict):
+        return False
+    if _event_status(event) != "invalid":
+        return False
+    return "blocked_by_prior_failed_write" in _event_detail_text(event).casefold()
 
 
 def _latest_finish_proof_event(events: list[dict[str, object]]) -> dict[str, object] | None:
@@ -1368,7 +1381,13 @@ def _paths_from_failure(value: object) -> tuple[str, ...]:
 def _required_next_target_paths(facts: dict[str, object], *, generic_family: str) -> tuple[str, ...]:
     failure_paths = _paths_from_failure(facts.get("latest_failure"))
     if failure_paths:
-        return failure_paths
+        return tuple(
+            dict.fromkeys(
+                _model_visible_workspace_path(path)
+                for path in failure_paths
+                if _model_visible_workspace_path(path)
+            )
+        )
     if generic_family not in _PATCH_TARGET_FALLBACK_GENERIC_FAMILIES:
         return ()
     if not _latest_failure_is_current(facts):
