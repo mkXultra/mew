@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from mew.implement_lane.workframe import WorkFrameInputs, reduce_workframe, workframe_output_hash
+from mew.implement_lane.workframe import WORKFRAME_RED_MAX_BYTES, WorkFrameInputs, reduce_workframe, workframe_output_hash
 from mew.implement_lane.workframe_variants import DEFAULT_WORKFRAME_VARIANT, reduce_workframe_with_variant
 from mew.implement_lane.workframe_variant_transition_contract import (
     VARIANT_NAME,
@@ -181,6 +181,72 @@ def test_transition_contract_fixture_identifies_runtime_artifact_repeat() -> Non
     assert runtime_transition["producer_paths"] == [expected["producer_path"]]
     assert runtime_transition["repeat_count"] == expected["repeat_count"]
     assert runtime_transition["repeat_key"] == expected["repeat_key"]
+
+
+def test_transition_contract_keeps_runtime_artifact_repeat_under_workframe_cap() -> None:
+    inputs, expected = _runtime_artifact_repeat_fixture()
+    events: list[dict[str, object]] = []
+    for index, event in enumerate(inputs.sidecar_events):
+        updated = dict(event)
+        updated["evidence_refs"] = [
+            (
+                "contract:implement_v2:attempt:turn:full:command:"
+                f"call-{index}-very-long-command-name-for-runtime-artifact-repeat-{index:02d}-abcdef1234567890"
+            ),
+            (
+                "implement-v2-evidence://implement_v2:attempt:turn:full/tool_run_record/"
+                f"tool-run-record-call-{index}-runtime-artifact-repeat-yielded-abcdef1234567890"
+            ),
+        ]
+        events.append(updated)
+    for sequence in range(6, 15):
+        events.insert(
+            -1,
+            {
+                "kind": "verifier",
+                "event_sequence": sequence,
+                "event_id": f"probe-{sequence}",
+                "status": "failed",
+                "summary": f"prior verifier failure {sequence}",
+                "evidence_refs": [
+                    (
+                        "contract:implement_v2:attempt:turn:full:command:"
+                        f"call-{sequence}-probe-runtime-context-long-ref-abcdef1234567890"
+                    )
+                ],
+                "execution_contract_normalized": {
+                    "id": (
+                        "contract:implement_v2:attempt:turn:full:command:"
+                        f"call-{sequence}-probe-runtime-context-long-ref-abcdef1234567890"
+                    )
+                },
+            },
+        )
+
+    workframe, report = reduce_transition_contract_workframe(
+        WorkFrameInputs(
+            attempt_id=inputs.attempt_id,
+            turn_id=inputs.turn_id,
+            task_id=inputs.task_id,
+            objective=inputs.objective,
+            success_contract_ref=inputs.success_contract_ref,
+            sidecar_events=tuple(events),
+        )
+    )
+
+    assert report.status == "pass"
+    assert len(json.dumps(workframe.as_dict(), ensure_ascii=False, sort_keys=True)) < WORKFRAME_RED_MAX_BYTES
+    assert workframe.required_next
+    assert workframe.required_next.kind == expected["required_next_kind"]
+    assert workframe.required_next.target_paths == ("vm.js",)
+    assert workframe.required_next.evidence_refs
+    assert any(str(ref).startswith("artifact-evidence:") for ref in workframe.required_next.evidence_refs)
+    contract = workframe.latest_actionable.recovery_hint["transition_contract"]
+    runtime_transition = contract["runtime_artifact_transition"]
+    assert runtime_transition["rule_id"] == expected["rule_id"]
+    assert runtime_transition["artifact_path"] == expected["artifact_path"]
+    assert runtime_transition["producer_paths"] == [expected["producer_path"]]
+    assert "evidence_refs" not in runtime_transition
 
 
 def test_transition_contract_blocks_runtime_artifact_repeat_beyond_budget() -> None:

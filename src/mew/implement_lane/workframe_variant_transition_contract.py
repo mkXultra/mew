@@ -159,12 +159,12 @@ def _runtime_artifact_decision(
     current_inspection_paths = current_required.inspection_target_paths if current_required else ()
     current_inspection_refs = current_required.inspection_evidence_refs if current_required else ()
     evidence_refs = _stable_values(
+        (latest.artifact_evidence_id,),
         latest.evidence_refs,
         post_failure_inspection_refs,
         current_inspection_refs,
-        (latest.artifact_evidence_id,),
         (latest.command_run_id,),
-        limit=4,
+        limit=2,
     )
     producer_paths = latest.producer_paths or post_failure_inspection_paths or tuple(workframe.changed_sources.paths)
     if not producer_paths and current_required and current_required.kind == "patch_or_edit":
@@ -795,15 +795,21 @@ def _apply_runtime_artifact_decision(
     workframe: WorkFrame,
     decision: _RuntimeArtifactDecision,
 ) -> WorkFrame:
+    evidence_refs = _stable_values(decision.evidence_refs, limit=1)
+    inspection_evidence_refs = (
+        _stable_values(decision.inspection_evidence_refs, limit=1)
+        if decision.required_next_kind == "patch_or_edit"
+        else ()
+    )
     latest_actionable = _runtime_decision_latest_actionable(workframe.latest_actionable, decision)
     required_next = WorkFrameRequiredNext(
         kind=decision.required_next_kind,  # type: ignore[arg-type]
         reason=decision.reason,
         target_paths=decision.target_paths,
         after=_runtime_decision_after(decision),
-        evidence_refs=decision.evidence_refs,
+        evidence_refs=evidence_refs,
         inspection_target_paths=decision.inspection_target_paths,
-        inspection_evidence_refs=decision.inspection_evidence_refs,
+        inspection_evidence_refs=inspection_evidence_refs,
     )
     forbidden = list(workframe.forbidden_next)
     existing = {item.kind for item in forbidden}
@@ -814,7 +820,7 @@ def _apply_runtime_artifact_decision(
             WorkFrameForbiddenNext(
                 kind=kind,
                 reason=f"forbidden by {decision.rule_id}",
-                evidence_refs=decision.evidence_refs,
+                evidence_refs=(),
             )
         )
     phase = "blocked" if decision.required_next_kind == "blocked" else workframe.current_phase
@@ -837,7 +843,7 @@ def _runtime_decision_latest_actionable(
         generic_family="artifact_missing",
         summary=decision.reason,
         source_ref=_event_ref(decision.failure.event),
-        evidence_refs=decision.evidence_refs,
+        evidence_refs=_stable_values(decision.evidence_refs, limit=1),
         recovery_hint=hint,
     )
 
@@ -907,9 +913,13 @@ def _apply_runtime_artifact_decision_to_contract(
             reason=decision.reason,
             target_paths=decision.target_paths,
             after=_runtime_decision_after(decision),
-            evidence_refs=decision.evidence_refs,
+            evidence_refs=_stable_values(decision.evidence_refs, limit=1),
             inspection_target_paths=decision.inspection_target_paths,
-            inspection_evidence_refs=decision.inspection_evidence_refs,
+            inspection_evidence_refs=(
+                _stable_values(decision.inspection_evidence_refs, limit=1)
+                if decision.required_next_kind == "patch_or_edit"
+                else ()
+            ),
         ),
         decision.evidence_refs,
     )
@@ -923,8 +933,101 @@ def _apply_latest_actionable_contract(
     if latest_actionable is None:
         return None
     recovery_hint = dict(latest_actionable.recovery_hint)
-    recovery_hint["transition_contract"] = contract
+    recovery_hint["transition_contract"] = _compact_recovery_contract(contract)
     return replace(latest_actionable, recovery_hint=recovery_hint)
+
+
+def _compact_recovery_contract(contract: dict[str, object]) -> dict[str, object]:
+    """Keep model-visible transition hints small; full evidence lives in sidecar refs."""
+
+    latest_observation = _mapping(contract.get("latest_observation"))
+    evidence_delta = _mapping(contract.get("evidence_delta"))
+    state_transition = _mapping(contract.get("state_transition"))
+    next_action = _mapping(contract.get("next_action_contract"))
+    runtime_transition = _mapping(contract.get("runtime_artifact_transition"))
+    is_runtime_artifact_contract = bool(runtime_transition)
+    next_action_contract = _drop_empty(
+        {
+            "kind": next_action.get("kind"),
+            "target_paths": list(_stable_values(_list_value(next_action.get("target_paths")), limit=4)),
+            "after": _clip_text(next_action.get("after"), 160),
+            "inspection_target_paths": list(
+                _stable_values(_list_value(next_action.get("inspection_target_paths")), limit=4)
+            ),
+        }
+    )
+    if not is_runtime_artifact_contract:
+        next_action_contract.update(
+            _drop_empty(
+                {
+                    "reason": _clip_text(next_action.get("reason"), 240),
+                    "evidence_refs": list(_stable_values(_list_value(next_action.get("evidence_refs")), limit=4)),
+                    "inspection_evidence_refs": list(
+                        _stable_values(_list_value(next_action.get("inspection_evidence_refs")), limit=4)
+                    ),
+                }
+            )
+        )
+    compact: dict[str, object] = {
+        "latest_observation": _drop_empty(
+            {
+                "source_ref": latest_observation.get("source_ref"),
+                "kind": latest_observation.get("kind"),
+                "status": latest_observation.get("status"),
+                "sequence": latest_observation.get("sequence"),
+            }
+        ),
+        "evidence_delta": _drop_empty(
+            {
+                "new_ref_count": len(_list_value(evidence_delta.get("new_refs"))),
+                "latest_mutation_ref": evidence_delta.get("latest_mutation_ref"),
+                "latest_verifier_ref": evidence_delta.get("latest_verifier_ref"),
+            }
+        ),
+        "state_transition": _drop_empty(
+            {
+                "from_phase": state_transition.get("from_phase"),
+                "to_phase": state_transition.get("to_phase"),
+                "rule_id": state_transition.get("rule_id"),
+                "reason": _clip_text(state_transition.get("reason"), 160),
+                "provenance_refs": []
+                if is_runtime_artifact_contract
+                else list(
+                    _stable_values(
+                        (evidence_delta.get("latest_mutation_ref"),),
+                        _list_value(state_transition.get("provenance_refs")),
+                        limit=2,
+                    )
+                ),
+            }
+        ),
+        "next_action_contract": next_action_contract,
+    }
+    if is_runtime_artifact_contract:
+        compact["runtime_artifact_transition"] = _drop_empty(
+            {
+                "schema_version": runtime_transition.get("schema_version"),
+                "family": runtime_transition.get("family"),
+                "subfamily": runtime_transition.get("subfamily"),
+                "status": runtime_transition.get("status"),
+                "artifact_path": runtime_transition.get("artifact_path"),
+                "failed_checks": list(_stable_values(_list_value(runtime_transition.get("failed_checks")), limit=4)),
+                "producer_paths": list(
+                    _stable_values(_list_value(runtime_transition.get("producer_paths")), limit=4)
+                ),
+                "observable_progress": runtime_transition.get("observable_progress"),
+                "repeat_key": runtime_transition.get("repeat_key"),
+                "repeat_count": runtime_transition.get("repeat_count"),
+                "threshold": runtime_transition.get("threshold"),
+                "rule_id": runtime_transition.get("rule_id"),
+                "required_next": runtime_transition.get("required_next"),
+                "target_paths": list(_stable_values(_list_value(runtime_transition.get("target_paths")), limit=4)),
+                "inspection_target_paths": list(
+                    _stable_values(_list_value(runtime_transition.get("inspection_target_paths")), limit=4)
+                ),
+            }
+        )
+    return {key: value for key, value in compact.items() if value}
 
 
 def _apply_required_next_contract(
@@ -935,7 +1038,7 @@ def _apply_required_next_contract(
         return None
     transition = _mapping(contract.get("state_transition"))
     rule_id = str(transition.get("rule_id") or "").strip()
-    ref_limit = 4 if rule_id.startswith("transition_contract.runtime_artifact_missing.") else _MAX_CONTRACT_REFS
+    ref_limit = 2 if rule_id.startswith("transition_contract.runtime_artifact_missing.") else _MAX_CONTRACT_REFS
     provenance_refs = _stable_values(_list_value(transition.get("provenance_refs")), limit=ref_limit)
     evidence_refs = _stable_values(required_next.evidence_refs, provenance_refs, limit=ref_limit)
     reason = _contract_reason(required_next.reason, rule_id)
