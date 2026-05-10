@@ -1,4 +1,5 @@
 from mew.implement_lane.workframe import WorkFrameInputs, reduce_workframe, workframe_output_hash
+from mew.implement_lane.workframe_variants import DEFAULT_WORKFRAME_VARIANT, reduce_workframe_with_variant
 from mew.implement_lane.workframe_variant_transition_contract import (
     VARIANT_NAME,
     reduce_transition_contract_workframe,
@@ -120,3 +121,20 @@ def test_transition_contract_output_hash_is_deterministic_across_replay() -> Non
     assert first.as_dict() == second.as_dict() == third.as_dict()
     assert first.trace.output_hash == second.trace.output_hash == third.trace.output_hash
     assert first.trace.output_hash == workframe_output_hash(first)
+
+
+def test_default_variant_dispatches_transition_contract_and_current_alias_dispatches_current() -> None:
+    inputs = _verifier_failure_after_mutation_inputs()
+
+    default, default_report = reduce_workframe_with_variant(inputs)
+    transition, transition_report = reduce_transition_contract_workframe(inputs)
+    explicit_current, explicit_current_report = reduce_workframe_with_variant(inputs, variant="current")
+    current, current_report = reduce_workframe(inputs)
+
+    assert DEFAULT_WORKFRAME_VARIANT == "transition_contract"
+    assert default_report.status == "pass"
+    assert transition_report.status == "pass"
+    assert explicit_current_report.status == "pass"
+    assert current_report.status == "pass"
+    assert default.as_dict() == transition.as_dict()
+    assert explicit_current.as_dict() == current.as_dict()

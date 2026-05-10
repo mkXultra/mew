@@ -64,10 +64,10 @@ def test_work_guidance_with_workframe_variant_preserves_existing_choice():
     assert guidance == "selected_lane=implement_v2 workframe_variant=transition_contract"
 
 
-def test_work_guidance_with_current_workframe_variant_is_noop():
+def test_work_guidance_with_current_workframe_variant_is_explicit_override():
     guidance = work_guidance_with_workframe_variant("selected_lane=implement_v2", "current")
 
-    assert guidance == "selected_lane=implement_v2"
+    assert guidance == "selected_lane=implement_v2 workframe_variant=current"
 
 
 def test_build_harbor_command_uses_mew_wrapper_mounts_and_timeout_shape(tmp_path):
@@ -125,6 +125,17 @@ def test_make_jobs_dir_includes_non_current_workframe_variant(tmp_path):
     )
 
     assert jobs_dir == tmp_path / "mew-make-mips-interpreter-step-check-10min-wf-transcript-first-20260508-173000"
+
+
+def test_make_jobs_dir_includes_current_workframe_variant_when_explicit(tmp_path):
+    jobs_dir = make_jobs_dir(
+        "make-mips-interpreter",
+        tmp_path,
+        now=dt.datetime(2026, 5, 8, 17, 30, 0),
+        workframe_variant="current",
+    )
+
+    assert jobs_dir == tmp_path / "mew-make-mips-interpreter-step-check-10min-wf-current-20260508-173000"
 
 
 def test_collect_mew_trial_summary_reports_observer_detail(tmp_path):

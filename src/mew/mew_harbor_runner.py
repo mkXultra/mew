@@ -102,14 +102,14 @@ def make_jobs_dir(
     task_slug = task_name.removeprefix("terminal-bench/").replace("/", "-")
     mode_slug = run_mode.replace("_", "-")
     variant_slug = workframe_variant.strip().replace("_", "-") if workframe_variant else ""
-    variant_part = f"-wf-{variant_slug}" if variant_slug and variant_slug != "current" else ""
+    variant_part = f"-wf-{variant_slug}" if variant_slug else ""
     return jobs_root / f"mew-{task_slug}-{mode_slug}{variant_part}-{timestamp}"
 
 
 def work_guidance_with_workframe_variant(work_guidance: str, workframe_variant: str) -> str:
     variant = str(workframe_variant or "").strip()
     guidance = str(work_guidance or "").strip()
-    if not variant or variant == "current":
+    if not variant:
         return guidance
     if "workframe_variant" in guidance or "work_frame_variant" in guidance:
         return guidance
@@ -324,7 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--workframe-variant",
         default="",
-        help="WorkFrame reducer variant to pass into mew work, e.g. current or transcript_first.",
+        help="WorkFrame reducer variant to pass into mew work, e.g. transition_contract, current, or transcript_first.",
     )
     parser.add_argument("--install-command", default=DEFAULT_INSTALL_COMMAND)
     parser.add_argument(

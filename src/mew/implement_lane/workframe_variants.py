@@ -10,7 +10,8 @@ from .workframe_variant_minimal import reduce_minimal_workframe
 from .workframe_variant_transcript_first import reduce_transcript_first_workframe
 from .workframe_variant_transition_contract import reduce_transition_contract_workframe
 
-DEFAULT_WORKFRAME_VARIANT = "current"
+CURRENT_WORKFRAME_VARIANT = "current"
+DEFAULT_WORKFRAME_VARIANT = "transition_contract"
 _VARIANT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -25,8 +26,8 @@ class UnknownWorkFrameVariantError(ValueError):
 
 
 _VARIANTS: dict[str, WorkFrameReducerVariant] = {
-    DEFAULT_WORKFRAME_VARIANT: WorkFrameReducerVariant(
-        name=DEFAULT_WORKFRAME_VARIANT,
+    CURRENT_WORKFRAME_VARIANT: WorkFrameReducerVariant(
+        name=CURRENT_WORKFRAME_VARIANT,
         description="Current M6.24 WorkFrame reducer behavior.",
     ),
     "minimal": WorkFrameReducerVariant(
@@ -83,7 +84,7 @@ def reduce_workframe_with_variant(
     """
 
     name = validate_workframe_variant_name(variant)
-    if name == DEFAULT_WORKFRAME_VARIANT:
+    if name == CURRENT_WORKFRAME_VARIANT:
         return reduce_workframe(inputs)
     if name == "minimal":
         return reduce_minimal_workframe(inputs)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import re
 from pathlib import Path
 
@@ -184,11 +185,11 @@ class ImplementV2WriteRuntime:
         anchor_missing = "old text was not found" in reason
         anchor_ambiguous = "old text matched" in reason
         if not anchor_missing and not anchor_ambiguous:
-            return {}
+            return _apply_patch_parse_recovery_payload(call, reason=reason)
         try:
             patch_args = _patch_edit_arguments(dict(call.arguments))
         except ValueError:
-            return {}
+            return _apply_patch_parse_recovery_payload(call, reason=reason)
         if str(patch_args.get("operation") or "") != "update_file":
             return {}
         path = _workspace_path(patch_args.get("path") or "", self.workspace)
@@ -205,6 +206,7 @@ class ImplementV2WriteRuntime:
             "failure_subclass": failure_subclass,
             "recoverable": True,
             "path": str(path),
+            "patch_transport": _patch_transport_metadata(dict(call.arguments), patch_args=patch_args),
             "suggested_tool": "read_file/apply_patch/edit_file",
             "suggested_next_action": (
                 "retry with exact current source context from patch_anchor_windows; if more context is needed, "
@@ -286,6 +288,7 @@ class ImplementV2WriteRuntime:
         result["operation"] = "apply_patch"
         result["patch_operation"] = patch_operation
         result["patch_format"] = patch_args["format"]
+        result["patch_transport"] = _patch_transport_metadata(args, patch_args=patch_args)
         return _write_payload(call, result, apply=apply, approval=approval)
 
     def _approval_for_call(self, call: ToolCallEnvelope) -> dict[str, object]:
@@ -714,7 +717,7 @@ def _write_payload(
 
 
 def _patch_edit_arguments(args: dict[str, object]) -> dict[str, object]:
-    patch_text = str(args.get("patch") or args.get("input") or "")
+    patch_text = _patch_text_from_arguments(args)
     if args.get("edits") or ((args.get("path") or args.get("edits")) and not patch_text):
         raise ValueError("apply_patch requires patch text; path/edits structured bypass is not accepted in implement_v2")
     parsed = _parse_minimal_apply_patch(patch_text)
@@ -722,6 +725,72 @@ def _patch_edit_arguments(args: dict[str, object]) -> dict[str, object]:
     if explicit_path and explicit_path != str(parsed.get("path") or "").strip():
         raise ValueError("apply_patch path argument must match patch update file")
     return parsed
+
+
+def _patch_text_from_arguments(args: dict[str, object]) -> str:
+    if "patch_lines" in args and args.get("patch_lines") is not None:
+        raw_lines = args.get("patch_lines")
+        if not isinstance(raw_lines, list) or not all(isinstance(line, str) for line in raw_lines):
+            raise ValueError("apply_patch patch_lines must be an array of strings")
+        lines = []
+        for line in raw_lines:
+            if "\n" in line or "\r" in line:
+                raise ValueError("apply_patch patch_lines entries must not contain embedded newline characters")
+            lines.append(line)
+        if not lines:
+            return ""
+        return "\n".join(lines) + "\n"
+    return str(args.get("patch") or args.get("input") or "")
+
+
+def _patch_transport_metadata(args: dict[str, object], *, patch_args: dict[str, object]) -> dict[str, object]:
+    patch_text = _patch_text_from_arguments(args)
+    digest = "sha256:" + hashlib.sha256(patch_text.encode("utf-8")).hexdigest()
+    if "patch_lines" in args and args.get("patch_lines") is not None:
+        transport = "patch_lines"
+    elif "patch" in args:
+        transport = "legacy_patch_string"
+    elif "input" in args:
+        transport = "legacy_input_string"
+    else:
+        transport = "unknown"
+    return {
+        "transport": transport,
+        "operation": "apply_patch",
+        "patch_operation": str(patch_args.get("operation") or ""),
+        "paths": [str(patch_args.get("path") or "")],
+        "hash": digest,
+        "sha256": digest,
+        "line_count": len(patch_text.splitlines()),
+    }
+
+
+def _apply_patch_parse_recovery_payload(call: ToolCallEnvelope, *, reason: str) -> dict[str, object]:
+    text = str(reason or "")
+    if "apply_patch" not in text:
+        return {}
+    payload: dict[str, object] = {
+        "failure_class": "patch_parse_error",
+        "failure_subclass": "patch_parse_error",
+        "recoverable": True,
+        "suggested_tool": "apply_patch/edit_file",
+        "suggested_next_action": (
+            "retry with a complete apply_patch grammar payload; prefer patch_lines with one patch line per "
+            "array item, or use edit_file for a smaller exact old/new replacement"
+        ),
+    }
+    try:
+        patch_text = _patch_text_from_arguments(dict(call.arguments))
+    except ValueError:
+        patch_text = ""
+    if patch_text:
+        digest = "sha256:" + hashlib.sha256(patch_text.encode("utf-8")).hexdigest()
+        payload["patch_transport"] = {
+            "hash": digest,
+            "sha256": digest,
+            "line_count": len(patch_text.splitlines()),
+        }
+    return payload
 
 
 def _parse_minimal_apply_patch(patch_text: str) -> dict[str, object]:

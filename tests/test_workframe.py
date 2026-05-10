@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -519,6 +520,61 @@ def test_workframe_canonicalization_removes_volatile_fields_and_is_stable() -> N
     assert canonical["reducer_schema_version"] == 1
     events = canonical["payload"]["sidecar_events"]
     assert [event["event_sequence"] for event in events] == [1, 2]
+
+
+def test_workframe_canonicalization_projects_apply_patch_body_to_compact_metadata() -> None:
+    patch_lines = [
+        "*** Begin Patch",
+        "*** Update File: src/vm.js",
+        "@@",
+        *(("-old();", "+new();") * 120),
+        "*** End Patch",
+    ]
+    patch_text = "\n".join(patch_lines) + "\n"
+
+    canonical = canonicalize_workframe_inputs(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Repair with apply_patch.",
+            workspace_root="/tmp/work",
+            sidecar_events=(
+                {
+                    "kind": "apply_patch",
+                    "event_sequence": 1,
+                    "event_id": "patch-1",
+                    "status": "completed",
+                    "path": "/tmp/work/src/vm.js",
+                    "patch_lines": patch_lines,
+                    "source_mutation": {
+                        "operation": "apply_patch",
+                        "status": "completed",
+                        "paths": ["/tmp/work/src/vm.js"],
+                        "format": "exact_update_patch_v0",
+                        "hash": "sha256:precomputed",
+                        "line_count": len(patch_lines),
+                    },
+                },
+            ),
+        )
+    )
+
+    event = canonical["payload"]["sidecar_events"][0]
+    projection = event["patch_lines"]
+    serialized = json.dumps(canonical, sort_keys=True)
+
+    assert projection["workframe_text_omitted"] is True
+    assert projection["operation"] == "apply_patch"
+    assert projection["status"] == "completed"
+    assert projection["paths"] == ["$WORKSPACE/src/vm.js"]
+    assert projection["format"] == "exact_update_patch_v0"
+    assert projection["patch_operation"] == "update_file"
+    assert projection["line_count"] == len(patch_lines)
+    assert projection["hash"] == "sha256:" + hashlib.sha256(patch_text.encode()).hexdigest()
+    assert projection["sha256"] == "sha256:" + hashlib.sha256(patch_text.encode()).hexdigest()
+    assert "-old();" not in serialized
+    assert "+new();" not in serialized
 
 
 def test_workframe_canonicalization_normalizes_nested_volatility_and_roots() -> None:

@@ -9,6 +9,7 @@ import mew.implement_lane.read_runtime as read_runtime
 import pytest
 from mew.errors import ModelBackendError
 from mew.implement_lane import (
+    DEFAULT_WORKFRAME_VARIANT,
     FakeProviderAdapter,
     FakeProviderToolCall,
     ImplementLaneInput,
@@ -24,6 +25,7 @@ from mew.implement_lane import (
     evaluate_m6_24_reentry_ab_gate,
     get_implement_lane_runtime_view,
     implement_v2_prompt_section_metrics,
+    describe_workframe_variant,
     list_implement_lane_runtime_views,
     list_workframe_variants,
     list_v2_base_tool_specs,
@@ -34,8 +36,10 @@ from mew.implement_lane import (
     run_live_json_implement_v2,
     run_unavailable_implement_v2,
     select_implement_lane_runtime,
+    normalize_workframe_variant,
     validate_proof_manifest_pairing,
     validate_tool_result_pairing,
+    validate_workframe_variant_name,
 )
 from mew.implement_lane.v2_runtime import (
     ModelTurnInput,
@@ -60,6 +64,7 @@ from mew.implement_lane.v2_runtime import (
     _live_json_prompt,
     _model_visible_tool_specs_for_turn,
     _post_failure_source_mutation_count,
+    _PROVIDER_HISTORY_SOURCE_MUTATION_KEYS,
     _provider_visible_tool_call_for_history,
     _provider_visible_tool_result_for_history,
     _render_prompt_history_json,
@@ -219,7 +224,7 @@ def test_implement_v2_descriptor_exposes_live_runtime_and_tools() -> None:
     assert "fallback_lane" not in result.updated_lane_state
 
 
-def test_workframe_variant_registry_exposes_current_variant() -> None:
+def test_workframe_variant_registry_exposes_current_alias_and_transition_contract_default() -> None:
     variants = list_workframe_variants()
 
     assert [variant.name for variant in variants] == [
@@ -228,7 +233,41 @@ def test_workframe_variant_registry_exposes_current_variant() -> None:
         "transcript_first",
         "transition_contract",
     ]
+    assert DEFAULT_WORKFRAME_VARIANT == "transition_contract"
+    assert normalize_workframe_variant(None) == "transition_contract"
+    assert normalize_workframe_variant("") == "transition_contract"
+    assert normalize_workframe_variant("   ") == "transition_contract"
+    assert describe_workframe_variant().name == "transition_contract"
+    assert validate_workframe_variant_name("current") == "current"
     assert "Current M6.24" in variants[0].description
+
+
+def test_workframe_debug_bundle_defaults_to_transition_contract_when_variant_omitted_or_blank() -> None:
+    omitted = ImplementLaneInput(
+        work_session_id="ws-variant",
+        task_id="task-variant",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"objective": "Repair the workspace."},
+    )
+    blank = ImplementLaneInput(
+        work_session_id="ws-variant",
+        task_id="task-variant",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"workframe_variant": " "},
+        task_contract={"objective": "Repair the workspace."},
+    )
+
+    omitted_bundle = build_implement_v2_workframe_debug_bundle(omitted, turn_id="turn-variant")
+    blank_bundle = build_implement_v2_workframe_debug_bundle(blank, turn_id="turn-variant")
+
+    assert omitted_bundle["workframe_variant"] == "transition_contract"
+    assert omitted_bundle["reducer_inputs"]["workframe_variant"] == "transition_contract"
+    assert omitted_bundle["workframe_cursor"]["workframe_variant"] == "transition_contract"
+    assert blank_bundle["workframe_variant"] == "transition_contract"
+    assert blank_bundle["reducer_inputs"]["workframe_variant"] == "transition_contract"
+    assert blank_bundle["workframe_cursor"]["workframe_variant"] == "transition_contract"
 
 
 def test_workframe_debug_bundle_records_variant() -> None:
@@ -1769,7 +1808,11 @@ def test_implement_v2_surfaces_write_tools_from_hard_runtime_prompt_before_probe
     assert "write_file" in response_contract
     assert "edit_file" in response_contract
     assert "apply_patch" in response_contract
-    assert "finish" not in json.loads(response_contract)["tool_calls"][0]["name"]
+    response_shape = json.loads(response_contract)
+    assert "bulk_transport" not in response_shape
+    assert "patch_lines" not in response_contract
+    assert "patch_lines" in prompt
+    assert "finish" not in response_shape["tool_calls"][0]["name"]
     assert "run_command" in response_contract
 
 
@@ -4228,6 +4271,70 @@ def test_implement_v2_post_first_write_verifier_gate_allows_patch_text_same_targ
     )
     tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
     patch_result = next(item for item in tool_results if item["provider_call_id"] == "patch-vm")
+
+    assert patch_result["status"] == "completed"
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('second')\n"
+
+
+def test_implement_v2_post_first_write_verifier_gate_allows_patch_lines_same_target(tmp_path) -> None:
+    patch_lines = [
+        "*** Begin Patch",
+        "*** Update File: vm.js",
+        "@@",
+        "-console.log('first')",
+        "+console.log('second')",
+        "*** End Patch",
+    ]
+    outputs = [
+        {
+            "summary": "write first implementation",
+            "tool_calls": [
+                {
+                    "id": "write-vm",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "console.log('first')\n"},
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "patch same target with line-array transport",
+            "tool_calls": [{"id": "patch-vm-lines", "name": "apply_patch", "arguments": {"patch_lines": patch_lines}}],
+            "finish": {"outcome": "blocked", "summary": "stop after patch"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            persisted_lane_state={
+                "active_work_todo": {
+                    "id": "todo-1",
+                    "status": "drafting",
+                    "source": {"target_paths": ["vm.js"], "plan_item": "Implement the runtime"},
+                }
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    patch_result = next(item for item in tool_results if item["provider_call_id"] == "patch-vm-lines")
 
     assert patch_result["status"] == "completed"
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('second')\n"
@@ -9682,6 +9789,10 @@ def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:
     assert specs["write_file"].approval_required is True
     assert specs["edit_file"].dry_run_supported is True
     assert specs["apply_patch"].dry_run_supported is True
+    assert specs["apply_patch"].input_transport == "json_line_array"
+    assert specs["apply_patch"].preferred_bulk_argument == "patch_lines"
+    assert specs["apply_patch"].fallback_bulk_arguments == ("patch", "input")
+    assert specs["apply_patch"].provider_native_input_kind == "freeform_apply_patch"
 
 
 def test_fake_provider_normalizes_tool_calls_and_transcript_events() -> None:
@@ -10133,6 +10244,7 @@ def test_implement_v2_projects_large_source_mutation_tool_call_arguments_for_his
     projected = _provider_visible_tool_call_for_history(call)
     args = projected["arguments"]
 
+    assert "patch_lines" not in _PROVIDER_HISTORY_SOURCE_MUTATION_KEYS
     assert args["arguments_projected_for_history"] is True
     assert args["old_string"]["history_text_omitted"] is True
     assert args["new_string"]["history_text_omitted"] is True
@@ -10175,6 +10287,105 @@ def test_implement_v2_projects_source_mutation_alias_arguments_for_history() -> 
     assert large_old not in projected_text
     assert large_new not in projected_text
     assert large_patch not in projected_text
+
+
+def test_implement_v2_projects_apply_patch_lines_as_hash_only_for_history() -> None:
+    patch_lines = ["*** Begin Patch", "*** Update File: vm.js", "@@"] + ["-old();", "+new();"] * 300 + [
+        "*** End Patch"
+    ]
+    patch_text = "\n".join(patch_lines) + "\n"
+    call = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-1",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-patch-lines",
+                "tool_name": "apply_patch",
+                "arguments": {"path": "vm.js", "patch_lines": patch_lines},
+            },
+        ),
+    )[0]
+
+    projected = _provider_visible_tool_call_for_history(call)
+    rendered = _render_prompt_history_json(
+        [
+            {
+                "turn": 1,
+                "summary": "patch via line-array transport",
+                "tool_calls": [projected],
+                "tool_results": [],
+            }
+        ]
+    )
+    args = projected["arguments"]
+
+    assert args["arguments_projected_for_history"] is True
+    expected_projection = {
+        "history_text_omitted": True,
+        "field": "patch_lines",
+        "transport": "patch_lines",
+        "operation": "apply_patch",
+        "patch_operation": "update_file",
+        "paths": ["vm.js"],
+        "format": "exact_update_patch_v0",
+        "line_count": len(patch_lines),
+        "chars": len(patch_text),
+        "hash": "sha256:" + hashlib.sha256(patch_text.encode()).hexdigest(),
+        "sha256": "sha256:" + hashlib.sha256(patch_text.encode()).hexdigest(),
+    }
+    for key, value in expected_projection.items():
+        assert args["patch_lines"][key] == value
+    assert "-old();" not in json.dumps(projected)
+    assert "+new();" not in rendered
+
+
+def test_implement_v2_projects_legacy_apply_patch_string_as_metadata_only_for_history() -> None:
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: vm.js\n"
+        "@@\n"
+        + ("-old();\n+new();\n" * 300)
+        + "*** End Patch\n"
+    )
+    call = FakeProviderAdapter().normalize_tool_calls(
+        lane_attempt_id="lane-v2-1",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-legacy-patch",
+                "tool_name": "apply_patch",
+                "arguments": {"patch": patch},
+            },
+        ),
+    )[0]
+
+    projected = _provider_visible_tool_call_for_history(call)
+    args = projected["arguments"]
+    patch_projection = args["patch"]
+    rendered = _render_prompt_history_json(
+        [
+            {
+                "turn": 1,
+                "summary": "legacy patch string transport",
+                "tool_calls": [projected],
+                "tool_results": [],
+            }
+        ]
+    )
+
+    assert args["arguments_projected_for_history"] is True
+    assert patch_projection["history_text_omitted"] is True
+    assert patch_projection["transport"] == "legacy_patch_string"
+    assert patch_projection["operation"] == "apply_patch"
+    assert patch_projection["patch_operation"] == "update_file"
+    assert patch_projection["paths"] == ["vm.js"]
+    assert patch_projection["format"] == "exact_update_patch_v0"
+    assert patch_projection["line_count"] == len(patch.splitlines())
+    assert patch_projection["hash"] == "sha256:" + hashlib.sha256(patch.encode()).hexdigest()
+    assert patch_projection["sha256"] == "sha256:" + hashlib.sha256(patch.encode()).hexdigest()
+    assert "excerpt" not in patch_projection
+    assert "-old();" not in rendered
+    assert "+new();" not in json.dumps(projected)
 
 
 def test_implement_v2_source_mutation_projection_respects_small_clip_limit() -> None:
@@ -11186,6 +11397,47 @@ def test_implement_v2_workframe_extracts_missing_write_target_path() -> None:
     assert events[0]["path"] == "/app/vm.js"
     assert events[0]["target_paths"] == ["/app/vm.js"]
     assert "path does not exist" in events[0]["summary"]
+
+
+def test_implement_v2_workframe_projects_apply_patch_compact_metadata_only() -> None:
+    patch_body = "*** Begin Patch\n*** Update File: vm.js\n@@\n-old();\n+new();\n*** End Patch\n"
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="patch-lines",
+        mew_tool_call_id="tool-patch-lines",
+        tool_name="apply_patch",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "operation": "apply_patch",
+                "path": "/app/vm.js",
+                "patch_transport": {
+                    "transport": "patch_lines",
+                    "operation": "apply_patch",
+                    "paths": ["/app/vm.js"],
+                    "sha256": "sha256:" + hashlib.sha256(patch_body.encode()).hexdigest(),
+                    "line_count": len(patch_body.splitlines()),
+                },
+            },
+        ),
+        evidence_refs=("ev:patch-lines",),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+    rendered = json.dumps(events, sort_keys=True)
+
+    assert events[0]["source_mutation"] == {
+        "operation": "apply_patch",
+        "status": "completed",
+        "paths": ["/app/vm.js"],
+        "transport": "patch_lines",
+        "hash": "sha256:" + hashlib.sha256(patch_body.encode()).hexdigest(),
+        "sha256": "sha256:" + hashlib.sha256(patch_body.encode()).hexdigest(),
+        "line_count": len(patch_body.splitlines()),
+    }
+    assert "-old();" not in rendered
+    assert "+new();" not in rendered
 
 
 def test_implement_v2_workframe_projects_patch_anchor_recovery_hint() -> None:
@@ -20862,6 +21114,43 @@ def test_implement_v2_apply_patch_exact_miss_returns_anchor_windows(tmp_path) ->
     assert target.read_text(encoding="utf-8").startswith("function actualCall")
 
 
+def test_implement_v2_apply_patch_lines_exact_miss_returns_anchor_windows(tmp_path) -> None:
+    target = tmp_path / "worker.txt"
+    target.write_text(
+        "function actualCall() {\n  return rareWidget;\n}\n",
+        encoding="utf-8",
+    )
+    patch_lines = [
+        "*** Begin Patch",
+        "*** Update File: worker.txt",
+        "@@",
+        "-function missingCall() {",
+        "-  return rareWidget;",
+        "-}",
+        "+function replacementCall() {",
+        "+  return rareWidget;",
+        "+}",
+        "*** End Patch",
+    ]
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-lines", "tool_name": "apply_patch", "arguments": {"patch_lines": patch_lines}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch lines exact miss recovery"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_class"] == "patch_anchor_mismatch"
+    assert payload["failure_subclass"] == "patch_exact_match_miss"
+    assert payload["patch_transport"]["transport"] == "patch_lines"
+    assert payload["patch_transport"]["line_count"] == len(patch_lines)
+    assert payload["patch_anchor_windows"][0]["hunk_index"] == 1
+    assert "actualCall" in payload["patch_anchor_windows"][0]["nearest_existing_windows"][0]["text"]
+    assert payload["suggested_recovery_calls"][0]["tool_name"] == "read_file"
+
+
 def test_implement_v2_apply_patch_ambiguous_match_returns_matching_windows(tmp_path) -> None:
     target = tmp_path / "worker.txt"
     target.write_text(
@@ -20915,7 +21204,14 @@ def test_implement_v2_apply_patch_parse_failure_pairs_error(tmp_path) -> None:
 
     assert result.status == "blocked"
     assert tool_result["status"] == "failed"
-    assert "must start with *** Begin Patch" in tool_result["content"][0]["reason"]
+    payload = tool_result["content"][0]
+    assert "must start with *** Begin Patch" in payload["reason"]
+    assert payload["failure_class"] == "patch_parse_error"
+    assert payload["recoverable"] is True
+    assert payload["suggested_tool"] == "apply_patch/edit_file"
+    assert payload["patch_transport"]["line_count"] == 1
+    assert payload["patch_transport"]["hash"] == "sha256:" + hashlib.sha256("*** End Patch\n".encode()).hexdigest()
+    assert payload["patch_transport"]["sha256"] == "sha256:" + hashlib.sha256("*** End Patch\n".encode()).hexdigest()
 
 
 def test_implement_v2_apply_patch_dry_run_and_approved_apply(tmp_path) -> None:
@@ -20949,10 +21245,65 @@ def test_implement_v2_apply_patch_dry_run_and_approved_apply(tmp_path) -> None:
     )
 
     assert dry_run.status == "analysis_ready"
-    assert dry_run.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]["dry_run"] is True
+    dry_payload = dry_run.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["patch_transport"]["transport"] == "legacy_patch_string"
     assert apply.status == "analysis_ready"
     assert target.read_text(encoding="utf-8") == "new\n"
     assert apply.updated_lane_state["proof_manifest"]["tool_results"][0]["evidence_refs"]
+
+
+def test_implement_v2_apply_patch_lines_dry_run_and_approved_apply(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("old\n", encoding="utf-8")
+    patch_lines = ["*** Begin Patch", "*** Update File: README.md", "@@", "-old", "+new", "*** End Patch"]
+    patch_text = "\n".join(patch_lines) + "\n"
+
+    dry_run = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {
+                "provider_call_id": "call-lines",
+                "tool_name": "apply_patch",
+                "arguments": {"patch_lines": patch_lines},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch lines preview"},
+    )
+
+    dry_payload = dry_run.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+    assert dry_run.status == "analysis_ready"
+    assert dry_payload["dry_run"] is True
+    assert dry_payload["patch_transport"]["transport"] == "patch_lines"
+    assert dry_payload["patch_transport"]["paths"] == ["README.md"]
+    assert dry_payload["patch_transport"]["line_count"] == len(patch_lines)
+    assert dry_payload["patch_transport"]["hash"] == "sha256:" + hashlib.sha256(patch_text.encode()).hexdigest()
+    assert dry_payload["patch_transport"]["sha256"] == "sha256:" + hashlib.sha256(patch_text.encode()).hexdigest()
+    assert target.read_text(encoding="utf-8") == "old\n"
+
+    apply = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-lines", "status": "approved", "approval_id": "approval-lines"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-lines",
+                "tool_name": "apply_patch",
+                "arguments": {"patch_lines": patch_lines, "apply": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "patch lines applied"},
+    )
+
+    apply_payload = apply.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert target.read_text(encoding="utf-8") == "new\n"
+    assert apply.status == "analysis_ready"
+    assert apply_payload["dry_run"] is False
+    assert apply_payload["patch_operation"] == "update_file"
 
 
 def test_implement_v2_apply_patch_accepts_redundant_matching_path(tmp_path) -> None:

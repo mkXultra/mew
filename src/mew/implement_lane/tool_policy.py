@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 ToolAccess = Literal["read", "write", "execute", "approval", "finish"]
+ToolInputTransport = Literal["json_arguments", "json_line_array", "provider_native_freeform"]
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,10 @@ class ImplementLaneToolSpec:
     approval_required: bool = False
     dry_run_supported: bool = False
     provider_native_eligible: bool = True
+    input_transport: ToolInputTransport = "json_arguments"
+    preferred_bulk_argument: str = ""
+    fallback_bulk_arguments: tuple[str, ...] = ()
+    provider_native_input_kind: str = ""
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -27,6 +32,10 @@ class ImplementLaneToolSpec:
             "approval_required": self.approval_required,
             "dry_run_supported": self.dry_run_supported,
             "provider_native_eligible": self.provider_native_eligible,
+            "input_transport": self.input_transport,
+            "preferred_bulk_argument": self.preferred_bulk_argument,
+            "fallback_bulk_arguments": list(self.fallback_bulk_arguments),
+            "provider_native_input_kind": self.provider_native_input_kind,
         }
 
 
@@ -117,9 +126,16 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
     ImplementLaneToolSpec(
         name="apply_patch",
         access="write",
-        description="Apply a patch through the existing patch approval path.",
+        description=(
+            "Apply a patch through the existing patch approval path. Prefer patch_lines, an array with one "
+            "apply_patch line per item and no embedded newline characters. Legacy patch/input strings remain accepted."
+        ),
         approval_required=True,
         dry_run_supported=True,
+        input_transport="json_line_array",
+        preferred_bulk_argument="patch_lines",
+        fallback_bulk_arguments=("patch", "input"),
+        provider_native_input_kind="freeform_apply_patch",
     ),
     ImplementLaneToolSpec(
         name="finish",
@@ -153,6 +169,7 @@ def list_v2_tool_specs_for_mode(mode: object) -> tuple[ImplementLaneToolSpec, ..
 __all__ = [
     "ImplementLaneToolSpec",
     "ToolAccess",
+    "ToolInputTransport",
     "V2_BASE_TOOL_SPECS",
     "list_v2_base_tool_specs",
     "list_v2_tool_specs_for_mode",

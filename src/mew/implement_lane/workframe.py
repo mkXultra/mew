@@ -89,6 +89,12 @@ _VOLATILE_CANONICAL_KEYS = frozenset(
 )
 
 _SOURCE_MUTATION_FAILURE_STATUSES = frozenset({"failed", "interrupted", "invalid", "blocked"})
+_BULK_APPLY_PATCH_FIELDS = frozenset({"patch", "input", "patch_lines"})
+_BULK_APPLY_PATCH_HEADER_MARKERS = (
+    ("*** Add File:", "add_file", "add_file_patch_v0"),
+    ("*** Delete File:", "delete_file", "delete_file_patch_v0"),
+    ("*** Update File:", "update_file", "exact_update_patch_v0"),
+)
 
 
 @dataclass(frozen=True)
@@ -959,6 +965,15 @@ def _canonical_mapping(value: object, *, workspace_root: str = "", artifact_root
         canonical_key = str(key)
         if canonical_key in _VOLATILE_CANONICAL_KEYS:
             continue
+        if _should_project_workframe_apply_patch_body(canonical_key, item, parent=value):
+            result[canonical_key] = _workframe_apply_patch_body_projection(
+                canonical_key,
+                item,
+                parent=value,
+                workspace_root=workspace_root,
+                artifact_root=artifact_root,
+            )
+            continue
         result[canonical_key] = _canonical_value(
             item,
             key=canonical_key,
@@ -984,6 +999,117 @@ def _canonical_value(value: object, *, key: str = "", workspace_root: str = "", 
     if isinstance(value, float):
         return f"{value:.6f}"
     return value
+
+
+def _should_project_workframe_apply_patch_body(key: str, value: object, *, parent: dict[str, object]) -> bool:
+    if key not in _BULK_APPLY_PATCH_FIELDS:
+        return False
+    if key == "patch_lines" and isinstance(value, list):
+        return True
+    patch_text = _workframe_apply_patch_text(value)
+    if not patch_text:
+        return False
+    if patch_text.lstrip().startswith("*** Begin Patch"):
+        return True
+    return _workframe_mapping_mentions_apply_patch(parent)
+
+
+def _workframe_apply_patch_body_projection(
+    key: str,
+    value: object,
+    *,
+    parent: dict[str, object],
+    workspace_root: str,
+    artifact_root: str,
+) -> dict[str, object]:
+    patch_text = _workframe_apply_patch_text(value)
+    digest = "sha256:" + hashlib.sha256(patch_text.encode("utf-8")).hexdigest()
+    details = _workframe_apply_patch_details(patch_text)
+    paths = _workframe_parent_patch_paths(parent, details=details)
+    projected_paths = [
+        _canonical_value(path, key="path", workspace_root=workspace_root, artifact_root=artifact_root)
+        for path in paths
+        if str(path).strip()
+    ]
+    metadata: dict[str, object] = {
+        "workframe_text_omitted": True,
+        "field": key,
+        "transport": (
+            "patch_lines"
+            if isinstance(value, list)
+            else ("legacy_input_string" if key == "input" else "legacy_patch_string")
+        ),
+        "operation": str(parent.get("operation") or "apply_patch"),
+        "status": str(parent.get("status") or ""),
+        "paths": list(dict.fromkeys(str(path) for path in projected_paths if str(path).strip())),
+        "hash": digest,
+        "sha256": digest,
+        "line_count": len(patch_text.splitlines()),
+        "format": str(parent.get("format") or parent.get("patch_format") or details.get("format") or ""),
+    }
+    patch_operation = str(parent.get("patch_operation") or details.get("patch_operation") or "")
+    if patch_operation:
+        metadata["patch_operation"] = patch_operation
+    return _canonical_mapping(
+        _drop_empty_workframe_values(metadata),
+        workspace_root=workspace_root,
+        artifact_root=artifact_root,
+    )
+
+
+def _workframe_apply_patch_text(value: object) -> str:
+    if isinstance(value, str):
+        return value.replace("\r\n", "\n").replace("\r", "\n")
+    if isinstance(value, list):
+        lines = [str(item).replace("\r\n", "\n").replace("\r", "\n") for item in value]
+        return "\n".join(lines) + ("\n" if lines else "")
+    return ""
+
+
+def _workframe_mapping_mentions_apply_patch(value: dict[str, object]) -> bool:
+    for key in ("kind", "tool_name", "operation"):
+        if str(value.get(key) or "").strip() == "apply_patch":
+            return True
+    return False
+
+
+def _workframe_apply_patch_details(patch_text: str) -> dict[str, object]:
+    for raw_line in patch_text.splitlines():
+        stripped = raw_line.strip()
+        for marker, patch_operation, patch_format in _BULK_APPLY_PATCH_HEADER_MARKERS:
+            if not stripped.startswith(marker):
+                continue
+            path = stripped.split(":", 1)[1].strip()
+            return _drop_empty_workframe_values(
+                {
+                    "patch_operation": patch_operation,
+                    "paths": [path] if path else [],
+                    "format": patch_format,
+                }
+            )
+    return {}
+
+
+def _drop_empty_workframe_values(value: dict[str, object]) -> dict[str, object]:
+    return {key: item for key, item in value.items() if item not in (None, "", [], {})}
+
+
+def _workframe_parent_patch_paths(parent: dict[str, object], *, details: dict[str, object]) -> list[str]:
+    paths: list[str] = []
+    for key in ("path", "target_path", "source_path", "changed_path"):
+        value = str(parent.get(key) or "").strip()
+        if value:
+            paths.append(value)
+    for key in ("paths", "target_paths", "changed_paths", "changed_files", "source_paths"):
+        values = parent.get(key)
+        if isinstance(values, (list, tuple)):
+            paths.extend(str(item).strip() for item in values if str(item).strip())
+    if paths:
+        return list(dict.fromkeys(path for path in paths if path))
+    detail_paths = details.get("paths")
+    if isinstance(detail_paths, list):
+        paths.extend(str(item).strip() for item in detail_paths if str(item).strip())
+    return list(dict.fromkeys(path for path in paths if path))
 
 
 def _sha256_json(value: object) -> str:

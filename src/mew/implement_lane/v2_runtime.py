@@ -43,6 +43,7 @@ from .transcript import lane_artifact_namespace
 from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
 from .types import ToolCallEnvelope
 from .types import ToolResultEnvelope
+from .workframe_variants import DEFAULT_WORKFRAME_VARIANT
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
 from ..tool_kernel import ToolKernel, ToolKernelConfig
 
@@ -1535,7 +1536,7 @@ def run_live_json_implement_v2(
             "resident_sidecar_state": resident_sidecar_metrics,
             "workframe": {
                 "schema_version": 1,
-                "variant": workframe_debug_bundle.get("workframe_variant") or "current",
+                "variant": workframe_debug_bundle.get("workframe_variant") or DEFAULT_WORKFRAME_VARIANT,
                 "phase": "m6_24_workframe_redesign_phase_6",
                 "input_hash": workframe_trace.get("input_hash"),
                 "output_hash": workframe_trace.get("output_hash"),
@@ -2579,6 +2580,9 @@ def _workframe_sidecar_event_from_tool_result(
     if result.tool_name in WRITE_TOOL_NAMES:
         event["kind"] = _workframe_write_event_kind(result.tool_name)
         event["path"] = paths[0] if paths else _frontier_clip_text(payload.get("path"), limit=240)
+        write_metadata = _workframe_write_compact_metadata(result, payload, paths=paths)
+        if write_metadata:
+            event["source_mutation"] = write_metadata
         if result.status != "completed" or result.is_error:
             event["family"] = _write_failure_class(result) or _write_failure_kind(result)
             event["summary"] = _workframe_failure_summary(result, payload, default=_write_failure_reason(result))
@@ -2709,6 +2713,41 @@ def _workframe_write_event_kind(tool_name: str) -> str:
     if tool_name == "edit_file":
         return "edit"
     return tool_name
+
+
+def _workframe_write_compact_metadata(
+    result: ToolResultEnvelope,
+    payload: dict[str, object],
+    *,
+    paths: tuple[str, ...],
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "operation": _frontier_clip_text(payload.get("operation") or result.tool_name, limit=80),
+        "status": str(result.status or ""),
+        "paths": list(paths),
+    }
+    patch_format = _frontier_clip_text(payload.get("patch_format"), limit=80)
+    if patch_format:
+        metadata["format"] = patch_format
+    patch_operation = _frontier_clip_text(payload.get("patch_operation"), limit=80)
+    if patch_operation:
+        metadata["patch_operation"] = patch_operation
+    patch_transport = payload.get("patch_transport") if isinstance(payload.get("patch_transport"), dict) else {}
+    transport = _frontier_clip_text(patch_transport.get("transport"), limit=80) if patch_transport else ""
+    if transport:
+        metadata["transport"] = transport
+    patch_hash = (
+        _frontier_clip_text(patch_transport.get("hash") or patch_transport.get("sha256"), limit=96)
+        if patch_transport
+        else ""
+    )
+    if patch_hash:
+        metadata["hash"] = patch_hash
+        metadata["sha256"] = patch_hash
+    line_count = patch_transport.get("line_count") if patch_transport else None
+    if isinstance(line_count, int):
+        metadata["line_count"] = line_count
+    return _drop_empty_frontier_values(metadata)
 
 
 def _workframe_result_evidence_refs(result: ToolResultEnvelope) -> list[str]:
@@ -6217,7 +6256,7 @@ def _apply_patch_call_paths(call: object) -> tuple[str, ...]:
     arguments = getattr(call, "arguments", {})
     if not isinstance(arguments, dict):
         return ()
-    patch_text = str(arguments.get("patch") or arguments.get("input") or "")
+    patch_text = _apply_patch_call_text(arguments)
     paths: list[str] = []
     for line in patch_text.splitlines():
         marker = "*** Update File: "
@@ -6226,6 +6265,14 @@ def _apply_patch_call_paths(call: object) -> tuple[str, ...]:
             if path:
                 paths.append(path)
     return tuple(dict.fromkeys(paths))
+
+
+def _apply_patch_call_text(arguments: dict[str, object]) -> str:
+    patch_lines = arguments.get("patch_lines")
+    if isinstance(patch_lines, list):
+        lines = [str(line).replace("\r\n", "\n").replace("\r", "\n") for line in patch_lines]
+        return "\n".join(lines) + ("\n" if lines else "")
+    return str(arguments.get("patch") or arguments.get("input") or "")
 
 
 def _result_has_terminal_command_evidence(result: ToolResultEnvelope) -> bool:
@@ -7913,13 +7960,17 @@ def _live_json_prompt(
         "Return exactly one JSON object. Use tool_calls for observations, edits, and commands. "
         "Use finish only when the task is completed, blocked, or failed. If more work is needed, "
         "set finish.outcome to continue or omit finish. For edits, prefer exact edit_file old/new "
-        "(old_string/new_string aliases are accepted) or apply_patch. If the CLI grants accept-edits, "
+        "(old_string/new_string aliases are accepted) or apply_patch with patch_lines for multi-line patches. "
+        "If the CLI grants accept-edits, "
         "write/edit/apply_patch calls without dry_run=true or apply=false are intended to mutate; "
         "mew defaults omitted apply to true and supplies independent approval outside the model output. "
         "For a missing write_file target, mew also defaults omitted create to true. If tests or an external verifier matter, "
         "run a concrete run_command or run_tests before claiming completed. Finish completed with cited "
         "finish.evidence_refs/oracle_refs from the latest verifier or typed evidence; do not rely on prose-only "
         "acceptance_evidence claims.\n"
+        "Apply_patch transport: for multi-line patches, prefer tool_calls[].arguments.patch_lines as an array "
+        "with one apply_patch line per item and no embedded newline characters. Legacy arguments.patch/input "
+        "strings remain accepted. A future provider-native freeform input can map to the same patch parser.\n"
         f"{terminal_reaction_guidance}"
         f"lane_attempt_id: {lane_attempt_id}\n"
         f"turn: {turn_index}/{max_turns}\n"
@@ -8105,8 +8156,8 @@ def _append_live_json_parse_retry_instruction(prompt: str, model_error: dict[str
         "an implement_v2 action. Retry the same turn now.\n"
         "- Return exactly one complete JSON object, no markdown and no trailing prose.\n"
         "- Escape every newline inside string values as \\n.\n"
-        "- For large source changes, prefer a smaller exact edit_file old/new or a compact apply_patch hunk; "
-        "do not stream a half-written patch string.\n"
+        "- For large source changes, prefer a smaller exact edit_file old/new or apply_patch patch_lines "
+        "with one patch line per array item; do not stream a half-written patch string.\n"
         "- Preserve the same immediate repair intent; do not restart broad exploration.\n"
         f"previous_raw_excerpt: {json.dumps(raw_excerpt, ensure_ascii=False)}\n"
         "[/section:implement_v2_json_repair_retry]"
@@ -8222,7 +8273,12 @@ def _project_provider_history_tool_arguments(tool_name: str, arguments: dict[str
 def _project_provider_history_tool_argument(tool_name: str, key: str, value: object) -> tuple[object, bool]:
     if key == "execution_contract" and isinstance(value, dict):
         return _frontier_compact_mapping(value), False
+    if tool_name == "apply_patch" and key == "patch_lines" and isinstance(value, list):
+        return _project_apply_patch_lines_argument(value, key=key), True
     if isinstance(value, str):
+        if tool_name == "apply_patch" and key in {"patch", "input"}:
+            transport = "legacy_patch_string" if key == "patch" else "legacy_input_string"
+            return _project_apply_patch_text_argument(value, key=key, transport=transport), True
         if tool_name in WRITE_TOOL_NAMES and key in _PROVIDER_HISTORY_SOURCE_MUTATION_KEYS:
             projected = _project_source_mutation_text_argument(value, key=key)
             return projected, isinstance(projected, dict)
@@ -8273,6 +8329,53 @@ def _project_source_mutation_text_argument(value: str, *, key: str) -> str | dic
         "sha256": _sha256_text(value),
         "excerpt": excerpt,
     }
+
+
+def _project_apply_patch_text_argument(value: str, *, key: str, transport: str) -> dict[str, object]:
+    return _apply_patch_projection_metadata(value, key=key, transport=transport)
+
+
+def _project_apply_patch_lines_argument(value: list[object], *, key: str) -> dict[str, object]:
+    lines = [str(item) for item in value]
+    patch_text = "\n".join(lines) + ("\n" if lines else "")
+    return _apply_patch_projection_metadata(patch_text, key=key, transport="patch_lines")
+
+
+def _apply_patch_projection_metadata(patch_text: str, *, key: str, transport: str) -> dict[str, object]:
+    digest = _sha256_text(patch_text)
+    metadata: dict[str, object] = {
+        "history_text_omitted": True,
+        "field": key,
+        "transport": transport,
+        "operation": "apply_patch",
+        "line_count": len(patch_text.splitlines()),
+        "chars": len(patch_text),
+        "hash": digest,
+        "sha256": digest,
+    }
+    metadata.update(_apply_patch_projection_details(patch_text))
+    return metadata
+
+
+def _apply_patch_projection_details(patch_text: str) -> dict[str, object]:
+    for raw_line in patch_text.splitlines():
+        stripped = raw_line.strip()
+        for marker, patch_operation, patch_format in (
+            ("*** Add File:", "add_file", "add_file_patch_v0"),
+            ("*** Delete File:", "delete_file", "delete_file_patch_v0"),
+            ("*** Update File:", "update_file", "exact_update_patch_v0"),
+        ):
+            if not stripped.startswith(marker):
+                continue
+            path = stripped.split(":", 1)[1].strip()
+            return _drop_empty_frontier_values(
+                {
+                    "patch_operation": patch_operation,
+                    "paths": [path] if path else [],
+                    "format": patch_format,
+                }
+            )
+    return {}
 
 
 def _project_clipped_argument(value: str, *, key: str, limit: int) -> dict[str, object]:
@@ -10910,7 +11013,7 @@ def _write_live_json_artifacts(
             "workframe_cursor.json": workframe_debug_bundle.get("workframe_cursor"),
             "workframe_variant.json": {
                 "schema_version": 1,
-                "variant": workframe_debug_bundle.get("workframe_variant") or "current",
+                "variant": workframe_debug_bundle.get("workframe_variant") or DEFAULT_WORKFRAME_VARIANT,
             },
         }
         for filename, payload in bundle_files.items():
