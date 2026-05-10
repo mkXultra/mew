@@ -5888,6 +5888,69 @@ def test_implement_v2_live_json_rejects_cross_turn_duplicate_before_write(tmp_pa
     assert "duplicate_provider_call_id_across_turns" in manifest["tool_results"][1]["content"][0]["reason"]
 
 
+def test_implement_v2_live_json_duplicate_verifier_id_does_not_poison_sibling_write(tmp_path) -> None:
+    sample = tmp_path / "sample.txt"
+    sample.write_text("before\n", encoding="utf-8")
+    target = tmp_path / "vm.js"
+    outputs = [
+        {
+            "summary": "establish prior provider id",
+            "tool_calls": [
+                {"id": "verify-existing", "name": "read_file", "arguments": {"path": "sample.txt"}},
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "write fix then accidentally reuse verifier id",
+            "tool_calls": [
+                {
+                    "id": "write-vm-new",
+                    "name": "write_file",
+                    "arguments": {"path": "vm.js", "content": "module.exports = {};\n", "create": True},
+                },
+                {
+                    "id": "verify-existing",
+                    "name": "run_tests",
+                    "arguments": {"command": "node vm.js", "cwd": "."},
+                },
+            ],
+            "finish": {"outcome": "completed", "summary": "write should survive duplicate verifier id"},
+        },
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+
+    manifest = result.updated_lane_state["proof_manifest"]
+    assert result.metrics["replay_valid"] is True
+    assert target.read_text(encoding="utf-8") == "module.exports = {};\n"
+    assert [item["status"] for item in manifest["tool_results"]] == ["completed", "completed", "invalid"]
+    assert manifest["tool_results"][1]["provider_call_id"] == "write-vm-new"
+    assert "tool_call_identity_invalid" not in str(manifest["tool_results"][1]["content"][0])
+    assert manifest["tool_results"][2]["provider_call_id"] == "verify-existing-turn2-seq2"
+    assert "duplicate_provider_call_id_across_turns" in manifest["tool_results"][2]["content"][0]["reason"]
+
+
 def test_implement_v2_live_json_rejects_missing_provider_call_id_before_write(tmp_path) -> None:
     target = tmp_path / "sample.txt"
     target.write_text("before\n", encoding="utf-8")
@@ -5975,7 +6038,7 @@ def test_implement_v2_live_json_rejects_same_turn_duplicate_with_same_turn_reaso
     assert result.metrics["replay_valid"] is True
     assert target.read_text(encoding="utf-8") == "before\n"
     manifest = result.updated_lane_state["proof_manifest"]
-    assert [item["status"] for item in manifest["tool_results"]] == ["invalid", "invalid"]
+    assert [item["status"] for item in manifest["tool_results"]] == ["completed", "invalid"]
     assert manifest["tool_calls"][1]["provider_call_id"] == "dup-turn1-seq2"
     reason = manifest["tool_results"][1]["content"][0]["reason"]
     assert "duplicate_provider_call_id:dup" in reason

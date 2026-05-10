@@ -965,28 +965,51 @@ def run_live_json_implement_v2(
                 seen_provider_call_ids=seen_provider_call_ids,
             )
             current_calls = _normalize_accept_edits_write_calls(lane_input, current_calls)
-            identity_errors = _tool_call_identity_errors(
+            identity_errors_by_call = _tool_call_identity_errors_by_provider_call_id(
                 current_calls,
                 expected_lane_attempt_id=lane_attempt_id,
                 seen_provider_call_ids=seen_provider_call_ids,
-            ) + provider_call_id_repairs
+            )
+            identity_errors_by_call = _merge_tool_call_identity_error_maps(
+                identity_errors_by_call,
+                provider_call_id_repairs,
+            )
             wall_blocked_tool_execution = False
-            if identity_errors:
-                current_results = tuple(
-                    build_invalid_tool_result(call, reason=f"tool_call_identity_invalid: {'; '.join(identity_errors)}")
-                    for call in current_calls
-                )
-            else:
-                approved_write_calls = _auto_approval_records(lane_input, current_calls)
-                write_runtime = ImplementV2WriteRuntime(
-                    workspace=lane_input.workspace,
-                    allowed_write_roots=_allowed_write_roots(lane_input),
-                    approved_write_calls=approved_write_calls,
-                    allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
-                )
-                executed_calls = []
-                current_results_list = []
-                for call_index, call in enumerate(current_calls):
+            approved_write_calls = _auto_approval_records(lane_input, current_calls)
+            write_runtime = ImplementV2WriteRuntime(
+                workspace=lane_input.workspace,
+                allowed_write_roots=_allowed_write_roots(lane_input),
+                approved_write_calls=approved_write_calls,
+                allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
+            )
+            executed_calls = []
+            current_results_list = []
+            for call_index, call in enumerate(current_calls):
+                identity_errors = identity_errors_by_call.get(str(call.provider_call_id or ""))
+                if identity_errors:
+                    identity_result = build_invalid_tool_result(
+                        call,
+                        reason=f"tool_call_identity_invalid: {'; '.join(identity_errors)}",
+                    )
+                    executed_calls.append(call)
+                    current_results_list.append(identity_result)
+                    if _same_turn_write_failure_blocks_remaining_calls(identity_result):
+                        for skipped_call in current_calls[call_index + 1 :]:
+                            executed_calls.append(skipped_call)
+                            current_results_list.append(
+                                build_invalid_tool_result(
+                                    skipped_call,
+                                    reason=(
+                                        "blocked_by_prior_failed_write_in_same_turn: "
+                                        f"{call.tool_name}#{call.provider_call_id} "
+                                        f"ended with status={identity_result.status}; "
+                                        "retry after observing the write failure"
+                                    ),
+                                )
+                            )
+                        break
+                    continue
+                else:
                     capped_call, block_result, block_timeout = _wall_budget_gate_tool_call(
                         call,
                         lane_input=lane_input,
@@ -1097,8 +1120,8 @@ def run_live_json_implement_v2(
                                 )
                             )
                         break
-                current_calls = tuple(executed_calls)
-                current_results = tuple(current_results_list)
+            current_calls = tuple(executed_calls)
+            current_results = tuple(current_results_list)
             auto_poll_chunk = _auto_poll_yielded_verifier_commands(
                 current_results,
                 exec_runtime=exec_runtime,
@@ -4041,11 +4064,53 @@ def _tool_call_identity_errors(
     return tuple(errors)
 
 
+def _tool_call_identity_errors_by_provider_call_id(
+    tool_calls,
+    *,
+    expected_lane_attempt_id: str,
+    seen_provider_call_ids: set[str] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    errors_by_call: dict[str, list[str]] = {}
+    provider_ids: set[str] = set()
+    mew_ids: set[str] = set()
+    seen_provider_call_ids = set(seen_provider_call_ids or ())
+    for call in tool_calls:
+        call_key = str(call.provider_call_id or "")
+        errors: list[str] = []
+        if call.lane_attempt_id != expected_lane_attempt_id:
+            errors.append(f"tool_call_wrong_lane_attempt_id:{call.provider_call_id}")
+        if not call.provider_call_id:
+            errors.append(f"tool_call_missing_provider_call_id:{call.mew_tool_call_id}")
+        if call.provider_call_id and call.provider_call_id in seen_provider_call_ids:
+            errors.append(f"duplicate_provider_call_id_across_turns:{call.provider_call_id}")
+        if call.provider_call_id in provider_ids:
+            errors.append(f"duplicate_provider_call_id:{call.provider_call_id}")
+        provider_ids.add(call.provider_call_id)
+        if call.mew_tool_call_id in mew_ids:
+            errors.append(f"duplicate_mew_tool_call_id:{call.mew_tool_call_id}")
+        mew_ids.add(call.mew_tool_call_id)
+        if errors:
+            errors_by_call.setdefault(call_key, []).extend(errors)
+    return {provider_call_id: tuple(errors) for provider_call_id, errors in errors_by_call.items()}
+
+
+def _merge_tool_call_identity_error_maps(
+    *error_maps: dict[str, tuple[str, ...]],
+) -> dict[str, tuple[str, ...]]:
+    merged: dict[str, list[str]] = {}
+    for error_map in error_maps:
+        for provider_call_id, errors in error_map.items():
+            if not errors:
+                continue
+            merged.setdefault(str(provider_call_id or ""), []).extend(str(error) for error in errors if str(error))
+    return {provider_call_id: tuple(errors) for provider_call_id, errors in merged.items()}
+
+
 def _repair_live_json_provider_call_ids_for_replay(
     tool_calls: tuple[ToolCallEnvelope, ...],
     *,
     seen_provider_call_ids: set[str] | None = None,
-) -> tuple[tuple[ToolCallEnvelope, ...], tuple[str, ...]]:
+) -> tuple[tuple[ToolCallEnvelope, ...], dict[str, tuple[str, ...]]]:
     """Keep invalid provider-id reuse replayable by assigning internal ids.
 
     Provider call ids are model-authored. If the model reuses one, the tool call
@@ -4057,7 +4122,7 @@ def _repair_live_json_provider_call_ids_for_replay(
     used_ids = set(seen_provider_call_ids or ())
     current_ids: set[str] = set()
     repaired: list[ToolCallEnvelope] = []
-    errors: list[str] = []
+    errors_by_call: dict[str, tuple[str, ...]] = {}
 
     for call in tool_calls:
         provider_call_id = str(call.provider_call_id or "")
@@ -4071,15 +4136,15 @@ def _repair_live_json_provider_call_ids_for_replay(
             repair_reason = f"duplicate_provider_call_id_across_turns:{provider_call_id}"
 
         if repair_reason:
-            errors.append(repair_reason)
             provider_call_id = _unique_repaired_provider_call_id(provider_call_id, call=call, used_ids=used_ids | current_ids)
             call = replace(call, provider_call_id=provider_call_id)
+            errors_by_call[str(call.provider_call_id or "")] = (repair_reason,)
 
         repaired.append(call)
         current_ids.add(str(call.provider_call_id or ""))
         used_ids.add(str(call.provider_call_id or ""))
 
-    return tuple(repaired), tuple(errors)
+    return tuple(repaired), errors_by_call
 
 
 def _unique_repaired_provider_call_id(
