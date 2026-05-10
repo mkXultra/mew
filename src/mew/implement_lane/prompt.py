@@ -460,6 +460,8 @@ def _merge_workframe_sidecar_events(
         )
         if _has_passing_runtime_verifier_event(runtime_events):
             return _renumber_workframe_events(runtime_events)
+        if _latest_runtime_event_blocked_by_prior_failed_write(runtime_events):
+            return _renumber_workframe_events(runtime_events)
         if _latest_runtime_event_needs_prompt_recovery(runtime_events):
             return _renumber_workframe_events((*runtime_events, *prompt_recovery_events))
         return _renumber_workframe_events((*prompt_recovery_events, *runtime_events))
@@ -486,6 +488,26 @@ def _latest_runtime_event_needs_prompt_recovery(events: tuple[dict[str, object],
             return not bool(event.get("observable_output"))
         return False
     return False
+
+
+def _latest_runtime_event_blocked_by_prior_failed_write(events: tuple[dict[str, object], ...]) -> bool:
+    if not events:
+        return False
+    event = events[-1]
+    status = str(event.get("status") or "").strip().casefold()
+    if status != "invalid":
+        return False
+    detail = " ".join(
+        str(event.get(key) or "")
+        for key in (
+            "summary",
+            "reason",
+            "failure_class",
+            "failure_kind",
+            "family",
+        )
+    ).casefold()
+    return "blocked_by_prior_failed_write" in detail
 
 
 def _has_passing_runtime_verifier_event(events: tuple[dict[str, object], ...]) -> bool:

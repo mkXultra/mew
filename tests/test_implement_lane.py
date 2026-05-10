@@ -10027,6 +10027,66 @@ def test_implement_v2_workframe_does_not_extract_missing_path_reason_for_non_wri
     assert "target_paths" not in events[0]
 
 
+def test_implement_v2_workframe_does_not_prompt_override_blocked_write_failure() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the current verifier failure."},
+        lane_config={"mode": "full"},
+    )
+    active_work_todo = {
+        "write_repair": {
+            "schema_version": 1,
+            "status": "blocked",
+            "failure_kind": "stale_exact_edit",
+            "path": "vm.js",
+            "required_next_action": "repair vm.js from exact current text",
+        }
+    }
+    runtime_events = (
+        {
+            "kind": "edit",
+            "event_sequence": 1,
+            "event_id": "tool-result:edit-miss",
+            "status": "failed",
+            "family": "edit_exact_match_miss",
+            "summary": "old text was not found; confirm the exact existing text before retrying",
+            "path": "$WORKSPACE/vm.js",
+            "target_paths": ["$WORKSPACE/vm.js"],
+            "evidence_refs": ["ev:edit-miss"],
+        },
+        {
+            "kind": "verifier",
+            "event_sequence": 2,
+            "event_id": "tool-result:verifier-skipped",
+            "status": "invalid",
+            "family": "runtime_failure",
+            "summary": (
+                "blocked_by_prior_failed_write_in_same_turn: "
+                "edit_file#call-edit-miss ended with status=failed"
+            ),
+            "evidence_refs": ["ev:invalid-verifier"],
+        },
+    )
+
+    bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        active_work_todo=active_work_todo,
+        sidecar_events=runtime_events,
+    )
+    sidecar_events = bundle["reducer_inputs"]["workframe_inputs"]["sidecar_events"]
+    workframe = bundle["reducer_output"]
+
+    assert "prompt-write-repair" not in json.dumps(sidecar_events, sort_keys=True)
+    assert workframe["latest_actionable"]["source_ref"] == "ev:edit-miss"
+    assert workframe["latest_actionable"]["generic_family"] == "write_failure"
+    assert "old text was not found" in workframe["latest_actionable"]["summary"]
+    assert workframe["required_next"]["target_paths"] == ["vm.js"]
+    assert bundle["invariant_report"]["status"] == "pass"
+
+
 def test_implement_v2_workframe_keeps_passing_verifier_after_prompt_recovery() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
