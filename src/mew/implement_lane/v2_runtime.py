@@ -86,6 +86,9 @@ _PROVIDER_HISTORY_CLIP_KEYS = {
     "text",
 }
 _PROVIDER_HISTORY_TERMINAL_TOOL_NAMES = {"run_command", "run_tests", "poll_command", "cancel_command"}
+_WORKFRAME_INSPECTION_TOOL_NAMES = frozenset(
+    {"glob", "inspect_dir", "read_command_output", "read_file", "search_text"}
+)
 _FIRST_WRITE_PROBE_TOOL_NAMES = frozenset(
     {
         "glob",
@@ -2562,6 +2565,11 @@ def _workframe_sidecar_event_from_tool_result(
             event["summary"] = _frontier_clip_text(payload.get("summary") or payload.get("operation") or "source mutated")
         return _drop_empty_frontier_values(event)
 
+    if result.tool_name in _WORKFRAME_INSPECTION_TOOL_NAMES and result.status == "completed":
+        event["kind"] = "inspection"
+        event["summary"] = _workframe_inspection_summary(result, payload)
+        return _drop_empty_frontier_values(event)
+
     if result.tool_name in EXEC_TOOL_NAMES:
         verifier_like = _result_is_configured_verifier_step(result)
         if verifier_like:
@@ -2624,10 +2632,41 @@ def _workframe_result_paths(
         raw = payload.get(key)
         if isinstance(raw, (list, tuple)):
             paths.extend(_frontier_clip_text(item, limit=240) for item in raw if str(item).strip())
+    content_items = payload.get("content")
+    if isinstance(content_items, list):
+        for item in content_items[:4]:
+            if not isinstance(item, dict):
+                continue
+            for key in ("path", "target_path", "source_path"):
+                value = str(item.get(key) or "").strip()
+                if value:
+                    paths.append(_frontier_clip_text(value, limit=240))
     raw_contract_paths = contract.get("affected_paths")
     if isinstance(raw_contract_paths, (list, tuple)):
         paths.extend(_frontier_clip_text(item, limit=240) for item in raw_contract_paths if str(item).strip())
     return tuple(dict.fromkeys(path for path in paths if path))
+
+
+def _workframe_inspection_summary(result: ToolResultEnvelope, payload: dict[str, object]) -> str:
+    for key in ("summary", "message", "reason"):
+        value = _frontier_clip_text(payload.get(key), limit=220)
+        if value:
+            return value
+    content_items = payload.get("content")
+    if isinstance(content_items, list):
+        for item in content_items[:4]:
+            if not isinstance(item, dict):
+                continue
+            summary = _frontier_clip_text(item.get("summary"), limit=220)
+            if summary:
+                return summary
+            path = _frontier_clip_text(item.get("path"), limit=180)
+            if path:
+                return f"{result.tool_name} {path}"
+            command_run_id = _frontier_clip_text(item.get("command_run_id"), limit=180)
+            if command_run_id:
+                return f"{result.tool_name} {command_run_id}"
+    return f"{result.tool_name} completed"
 
 
 def _workframe_write_recovery_hint(payload: dict[str, object]) -> dict[str, object]:

@@ -982,6 +982,55 @@ def test_workframe_phase2_latest_actionable_reduces_to_generic_category(
     assert workframe.required_next.evidence_refs == ("ev:event-1", "event-1")
 
 
+def test_workframe_phase2_artifact_missing_moves_to_patch_after_inspection() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Repair the missing runtime artifact.",
+            sidecar_events=(
+                {
+                    "kind": "write",
+                    "event_sequence": 1,
+                    "event_id": "ev:write-vm",
+                    "status": "completed",
+                    "path": "$WORKSPACE/vm.js",
+                    "evidence_refs": ["ev:write-vm"],
+                },
+                {
+                    "kind": "verifier",
+                    "event_sequence": 2,
+                    "event_id": "ev:missing-frame",
+                    "status": "interrupted",
+                    "family": "runtime_artifact_missing",
+                    "failure_kind": "missing_artifact",
+                    "summary": "expected artifact /tmp/frame.bmp was missing after verifier",
+                    "evidence_refs": ["ev:missing-frame"],
+                },
+                {
+                    "kind": "inspection",
+                    "event_sequence": 3,
+                    "event_id": "ev:read-producer",
+                    "status": "completed",
+                    "summary": "read_file /app/vm.js after missing artifact",
+                    "path": "$WORKSPACE/vm.js",
+                    "evidence_refs": ["ev:read-producer"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.generic_family == "artifact_missing"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+    assert workframe.required_next.target_paths == ("vm.js",)
+    assert "patch/edit the inspected producer" in workframe.required_next.reason
+    assert "inspect producer or artifact path before repair" not in workframe.required_next.reason
+
+
 def test_workframe_phase2_verifier_pass_reduces_to_finish_ready() -> None:
     workframe, report = reduce_workframe(
         WorkFrameInputs(

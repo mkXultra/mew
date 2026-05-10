@@ -19,7 +19,7 @@ WORKFRAME_CANONICALIZER_VERSION = 1
 WORKFRAME_PHASE0_SCHEMA_VERSION = 1
 WORKFRAME_TARGET_MAX_BYTES = 4096
 WORKFRAME_RED_MAX_BYTES = 6144
-_PATCH_TARGET_FALLBACK_GENERIC_FAMILIES = frozenset({"runtime_diagnostic", "verifier_failure"})
+_PATCH_TARGET_FALLBACK_GENERIC_FAMILIES = frozenset({"artifact_missing", "runtime_diagnostic", "verifier_failure"})
 _RUNTIME_REPEAT_INSPECT_THRESHOLD = 3
 
 WorkFramePhase = Literal[
@@ -791,6 +791,9 @@ def _required_next_from_facts(
         )
     if latest_actionable and latest_actionable.family != "verifier_stale_after_mutation":
         next_kind = _required_next_kind_for_generic_family(latest_actionable.generic_family)
+        inspected_enough_for_patch = _failure_inspected_enough_for_patch(facts, latest_actionable)
+        if inspected_enough_for_patch:
+            next_kind = "patch_or_edit"
         if _should_inspect_repeated_runtime_failure(facts, latest_actionable):
             repeat_count = int(facts.get("latest_generic_failure_repeat_count") or 0)
             return WorkFrameRequiredNext(
@@ -804,6 +807,8 @@ def _required_next_from_facts(
                 evidence_refs=latest_actionable.evidence_refs or (latest_actionable.source_ref,),
             )
         reason = _required_next_reason_for_generic_family(latest_actionable.generic_family)
+        if inspected_enough_for_patch:
+            reason = "expected artifact is missing after inspection; patch/edit the inspected producer or runtime path"
         if latest_actionable.recovery_hint:
             reason = f"{reason}; follow latest_actionable.recovery_hint before retrying the repair"
         return WorkFrameRequiredNext(
@@ -840,6 +845,17 @@ def _should_inspect_repeated_runtime_failure(
     if latest_actionable.generic_family != "runtime_diagnostic":
         return False
     return int(facts.get("latest_generic_failure_repeat_count") or 0) >= _RUNTIME_REPEAT_INSPECT_THRESHOLD
+
+
+def _failure_inspected_enough_for_patch(
+    facts: dict[str, object],
+    latest_actionable: WorkFrameLatestActionable,
+) -> bool:
+    if latest_actionable.generic_family != "artifact_missing":
+        return False
+    return int(facts.get("latest_failure_inspection_sequence") or -1) > int(
+        facts.get("latest_failure_sequence") or -1
+    )
 
 
 def _forbidden_next_from_facts(
@@ -1475,25 +1491,31 @@ def _generic_failure_repeat_count(events: list[dict[str, object]], generic_famil
 
 
 def _latest_relevant_failure_inspection_sequence(events: list[dict[str, object]], *, generic_family: str) -> int:
-    if generic_family != "runtime_diagnostic":
+    if generic_family not in {"artifact_missing", "command_no_output_or_interrupted", "runtime_diagnostic"}:
         return -1
     matches = [
         _event_sequence(event)
         for event in events
-        if _event_inspects_runtime_failure_pattern(event)
+        if _event_inspects_failure_pattern(event, generic_family=generic_family)
     ]
     return max(matches) if matches else -1
 
 
-def _event_inspects_runtime_failure_pattern(event: dict[str, object]) -> bool:
+def _event_inspects_failure_pattern(event: dict[str, object], *, generic_family: str) -> bool:
     if _event_status(event) in {"failed", "interrupted", "invalid"} or _event_source_mutation_failed(event):
         return False
     if _event_is_source_mutation_surface(event):
         return False
+    detail = _event_detail_text(event).lower()
+    if _event_kind(event) == "inspection" and generic_family == "artifact_missing":
+        return True
+    if _event_kind(event) == "inspection" and generic_family == "command_no_output_or_interrupted":
+        return any(term in detail for term in ("command", "output", "log", "stdout", "stderr", "file", "path"))
     intent = _event_execution_intent(event)
     if intent not in {"cheap_probe", "diagnostic"}:
         return False
-    detail = _event_detail_text(event).lower()
+    if generic_family == "artifact_missing":
+        return any(term in detail for term in ("artifact", "frame", "output", "producer", "path", "file"))
     return any(term in detail for term in ("runtime", "trace", "opcode", "syscall", " pc=", "program terminated"))
 
 

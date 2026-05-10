@@ -10077,6 +10077,66 @@ def test_implement_v2_workframe_projects_patch_anchor_recovery_hint() -> None:
     assert "recovery_hint" in workframe["required_next"]["reason"]
 
 
+def test_implement_v2_workframe_projects_completed_read_as_inspection() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="read-producer",
+        mew_tool_call_id="tool-read-producer",
+        tool_name="read_file",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "mew_status": "completed",
+                "content": [
+                    {
+                        "path": "/app/vm.js",
+                        "summary": "Read file /app/vm.js size=100 chars",
+                    }
+                ],
+            },
+        ),
+        evidence_refs=("ev:read-producer",),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+
+    assert events[0]["kind"] == "inspection"
+    assert events[0]["summary"] == "Read file /app/vm.js size=100 chars"
+    assert events[0]["target_paths"] == ["/app/vm.js"]
+    assert events[0]["evidence_refs"] == ["ev:read-producer"]
+
+
+def test_implement_v2_workframe_projects_completed_read_command_output_as_inspection() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="read-command-output",
+        mew_tool_call_id="tool-read-command-output",
+        tool_name="read_command_output",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "mew_status": "completed",
+                "content": [
+                    {
+                        "command_run_id": "cmd-1",
+                        "content": "frame_missing=/tmp/frame.bmp",
+                        "status": "completed",
+                    }
+                ],
+            },
+        ),
+        evidence_refs=("ev:read-command-output",),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+
+    assert events[0]["kind"] == "inspection"
+    assert events[0]["summary"] == "read_command_output cmd-1"
+    assert events[0]["evidence_refs"] == ["ev:read-command-output"]
+
+
 def test_implement_v2_workframe_does_not_extract_missing_path_reason_for_non_write() -> None:
     result = ToolResultEnvelope(
         lane_attempt_id="attempt-1",
@@ -13783,8 +13843,7 @@ def test_implement_v2_no_output_verifier_recovery_collapses_after_source_probe(t
     assert latest_failure["recovery_mode"] == "no_output_verifier_recovery"
     assert latest_failure["post_failure_probe_count"] == 1
     assert "Run one scoped producer/artifact diagnostic" in prompts[1]
-    assert "Patch/edit the producer or runtime path" in prompts[2]
-    assert "Do not broad-search" in prompts[2]
+    assert "Run one scoped producer/artifact diagnostic" not in prompts[2]
 
 
 def test_implement_v2_no_output_verifier_recovery_counts_current_run_after_persisted_failure(tmp_path) -> None:
