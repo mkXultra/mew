@@ -823,6 +823,7 @@ def _apply_runtime_artifact_decision(
                 evidence_refs=(),
             )
         )
+    forbidden = [_compact_runtime_forbidden_next(item) for item in forbidden]
     phase = "blocked" if decision.required_next_kind == "blocked" else workframe.current_phase
     return replace(
         workframe,
@@ -831,6 +832,12 @@ def _apply_runtime_artifact_decision(
         required_next=required_next,
         forbidden_next=tuple(forbidden),
     )
+
+
+def _compact_runtime_forbidden_next(item: WorkFrameForbiddenNext) -> WorkFrameForbiddenNext:
+    if item.kind in {"finish", "broad_rediscovery", "patch_or_edit", "run_verifier"}:
+        return replace(item, evidence_refs=())
+    return item
 
 
 def _runtime_decision_latest_actionable(
