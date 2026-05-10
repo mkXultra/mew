@@ -250,6 +250,215 @@ def test_workframe_ignores_stale_verifier_failure_after_source_mutation() -> Non
     assert "old_runtime_failure" not in json.dumps(workframe.as_dict(), sort_keys=True)
 
 
+def test_workframe_phase4_shell_source_side_effect_counts_as_mutation() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-2",
+            task_id="task-1",
+            objective="Verify after shell source side effects.",
+            sidecar_events=(
+                {
+                    "kind": "run_command",
+                    "event_sequence": 1,
+                    "event_id": "cmd-shell-write",
+                    "status": "passed",
+                    "command_run_id": "cmd:shell-write",
+                    "source_side_effect": True,
+                    "source_mutation": {"path": "src/generated.py"},
+                    "evidence_refs": ["sidecar:shell-source-mutation"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "verify_after_mutation"
+    assert workframe.changed_sources.paths == ("src/generated.py",)
+    assert workframe.changed_sources.since_last_strict_verifier is True
+    assert workframe.required_next
+    assert workframe.required_next.kind == "run_verifier"
+    assert "finish" in [item.kind for item in workframe.forbidden_next]
+
+
+def test_workframe_phase4_source_tree_mutation_record_after_verifier_blocks_finish() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-2",
+            task_id="task-1",
+            objective="Do not finish after a source_tree_mutation record.",
+            sidecar_events=(
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 1,
+                    "event_id": "verify-1",
+                    "status": "passed",
+                    "typed_evidence_id": "ev:verify-1",
+                    "execution_contract_normalized": {
+                        "id": "contract:verify-1",
+                        "role": "verify",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+                {
+                    "kind": "source_tree_mutation",
+                    "event_sequence": 2,
+                    "event_id": "mutation-2",
+                    "record": {
+                        "changed_count": 1,
+                        "changes": [{"path": "src/generated.py", "change": "modified"}],
+                    },
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "verify_after_mutation"
+    assert workframe.changed_sources.paths == ("src/generated.py",)
+    assert workframe.finish_readiness.state == "not_ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "run_verifier"
+
+
+def test_workframe_phase4_nested_side_effect_source_tree_mutation_counts_as_mutation() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-2",
+            task_id="task-1",
+            objective="Represent nested side effect mutation facts.",
+            sidecar_events=(
+                {
+                    "kind": "run_command",
+                    "event_sequence": 1,
+                    "event_id": "cmd-1",
+                    "status": "passed",
+                    "side_effects": [
+                        {
+                            "kind": "source_tree_mutation",
+                            "record": {
+                                "changed_count": 1,
+                                "changes": [{"path": "src/generated.py", "change": "added"}],
+                            },
+                        }
+                    ],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "verify_after_mutation"
+    assert workframe.changed_sources.paths == ("src/generated.py",)
+    assert workframe.required_next
+    assert workframe.required_next.kind == "run_verifier"
+
+
+def test_workframe_phase4_shell_source_side_effect_with_later_verifier_can_finish() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-2",
+            task_id="task-1",
+            objective="Finish after verifier covers shell source side effects.",
+            sidecar_events=(
+                {
+                    "kind": "run_command",
+                    "event_sequence": 1,
+                    "event_id": "cmd-shell-write",
+                    "status": "passed",
+                    "source_tree_mutation": True,
+                    "changed_files": ["src/generated.py"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 2,
+                    "event_id": "verify-2",
+                    "status": "passed",
+                    "typed_evidence_id": "ev:verify-2",
+                    "execution_contract_normalized": {
+                        "id": "contract:verify-2",
+                        "role": "verify",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "finish_ready"
+    assert workframe.changed_sources.paths == ("src/generated.py",)
+    assert workframe.verifier_state.fresh_after_latest_source_mutation is True
+    assert workframe.required_next
+    assert workframe.required_next.kind == "finish"
+
+
+def test_workframe_phase4_blocked_shell_source_mutation_projects_write_repair() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-2",
+            task_id="task-1",
+            objective="Repair blocked shell source mutation.",
+            sidecar_events=(
+                {
+                    "kind": "run_command",
+                    "event_sequence": 1,
+                    "event_id": "cmd-blocked-shell-write",
+                    "status": "invalid",
+                    "policy_blocked_source_mutation": True,
+                    "source_mutation": {"path": "src/generated.py"},
+                    "family": "run_command_source_mutation_verifier_compound",
+                    "summary": "shell command mixed source mutation and verifier in one action",
+                    "evidence_refs": ["ev:shell-mutation-blocked"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "repair_after_write_failure"
+    assert workframe.changed_sources.paths == ()
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.generic_family == "write_failure"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+
+
+def test_workframe_phase4_blocked_status_projects_write_repair_not_verify() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-2",
+            task_id="task-1",
+            objective="Blocked shell source mutation should be repaired, not verified.",
+            sidecar_events=(
+                {
+                    "kind": "run_command",
+                    "event_sequence": 1,
+                    "event_id": "cmd-blocked-shell-write",
+                    "status": "blocked",
+                    "policy_blocked_source_mutation": True,
+                    "source_mutation": {"path": "src/generated.py"},
+                    "summary": "shell source mutation was blocked by policy",
+                    "evidence_refs": ["ev:shell-mutation-blocked"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "repair_after_write_failure"
+    assert workframe.changed_sources.paths == ()
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+
+
 @pytest.mark.parametrize(
     ("event", "expected_generic", "expected_next"),
     [

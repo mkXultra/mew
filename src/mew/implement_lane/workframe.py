@@ -86,6 +86,8 @@ _VOLATILE_CANONICAL_KEYS = frozenset(
     }
 )
 
+_SOURCE_MUTATION_FAILURE_STATUSES = frozenset({"failed", "interrupted", "invalid", "blocked"})
+
 
 @dataclass(frozen=True)
 class WorkFrameTrace:
@@ -604,9 +606,8 @@ def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
     payload = _mapping(canonical_inputs.get("payload"))
     events = [event for event in payload.get("sidecar_events") or [] if isinstance(event, dict)]
     evidence_index = _evidence_index(events)
-    mutation_kinds = {"source_mutation", "write", "edit", "apply_patch"}
-    mutation = _latest_successful_event(events, kinds=mutation_kinds)
-    write_failure = _latest_failed_event(events, kinds=mutation_kinds)
+    mutation = _latest_source_mutation_event(events)
+    write_failure = _latest_source_mutation_failure_event(events)
     verifier = _latest_event(events, kinds={"strict_verifier", "verifier", "run_tests"})
     finish_proof = _latest_finish_proof_event(events)
     changed_paths = tuple(sorted(_event_paths(mutation))) if mutation else ()
@@ -926,25 +927,107 @@ def _latest_failed_event(events: list[dict[str, object]], *, kinds: set[str]) ->
     return max(matches, key=_event_sequence) if matches else None
 
 
+def _latest_source_mutation_event(events: list[dict[str, object]]) -> dict[str, object] | None:
+    matches = [
+        event
+        for event in events
+        if _event_is_source_mutation_surface(event) and not _event_source_mutation_failed(event)
+    ]
+    return max(matches, key=_event_sequence) if matches else None
+
+
+def _latest_source_mutation_failure_event(events: list[dict[str, object]]) -> dict[str, object] | None:
+    matches = [
+        event
+        for event in events
+        if _event_is_source_mutation_surface(event) and _event_source_mutation_failed(event)
+    ]
+    return max(matches, key=_event_sequence) if matches else None
+
+
+def _event_is_source_mutation_surface(event: dict[str, object]) -> bool:
+    if _event_kind(event) in {"source_mutation", "source_tree_mutation", "write", "edit", "apply_patch"}:
+        return True
+    return _event_has_shell_source_side_effect(event)
+
+
+def _event_source_mutation_failed(event: dict[str, object]) -> bool:
+    return _event_status(event) in _SOURCE_MUTATION_FAILURE_STATUSES
+
+
+def _event_has_shell_source_side_effect(event: dict[str, object]) -> bool:
+    if _event_kind(event) == "source_tree_mutation":
+        return True
+    if _event_kind(event) not in {"run_command", "run_tests", "command", "managed_command"}:
+        return _event_has_nested_source_tree_mutation(event)
+    for key in (
+        "source_side_effect",
+        "source_mutation_detected",
+        "source_tree_mutation",
+        "shell_source_side_effect",
+        "writes_source",
+        "mutates_source",
+        "policy_blocked_source_mutation",
+    ):
+        if bool(event.get(key)):
+            return True
+    source_mutation = event.get("source_mutation")
+    if isinstance(source_mutation, dict) and source_mutation:
+        return True
+    source_mutations = event.get("source_mutations")
+    if isinstance(source_mutations, (list, tuple)) and any(isinstance(item, dict) for item in source_mutations):
+        return True
+    return _event_has_nested_source_tree_mutation(event)
+
+
+def _event_has_nested_source_tree_mutation(event: dict[str, object]) -> bool:
+    record = event.get("record")
+    if isinstance(record, dict) and _source_tree_record_has_changes(record):
+        return True
+    side_effects = event.get("side_effects")
+    if not isinstance(side_effects, (list, tuple)):
+        return False
+    for effect in side_effects:
+        if not isinstance(effect, dict):
+            continue
+        if str(effect.get("kind") or "") != "source_tree_mutation":
+            continue
+        record = effect.get("record")
+        if isinstance(record, dict) and _source_tree_record_has_changes(record):
+            return True
+    return False
+
+
+def _source_tree_record_has_changes(record: dict[str, object]) -> bool:
+    if _first_int(record.get("changed_count")) > 0:
+        return True
+    changes = record.get("changes")
+    return isinstance(changes, (list, tuple)) and any(isinstance(item, dict) for item in changes)
+
+
 def _latest_failure_event(events: list[dict[str, object]], *, min_sequence: int = -1) -> dict[str, object] | None:
     failures = [
         event
         for event in events
-        if _event_kind(event)
-        in {
-            "failure",
-            "latest_failure",
-            "verifier",
-            "strict_verifier",
-            "run_tests",
-            "verifier_result",
-            "structured_finish_gate",
-            "source_mutation",
-            "write",
-            "edit",
-            "apply_patch",
-        }
-        and _event_status(event) in {"failed", "interrupted", "invalid"}
+        if (
+            _event_kind(event)
+            in {
+                "failure",
+                "latest_failure",
+                "verifier",
+                "strict_verifier",
+                "run_tests",
+                "verifier_result",
+                "structured_finish_gate",
+                "source_mutation",
+                "source_tree_mutation",
+                "write",
+                "edit",
+                "apply_patch",
+            }
+            or _event_has_shell_source_side_effect(event)
+        )
+        and (_event_status(event) in {"failed", "interrupted", "invalid"} or _event_source_mutation_failed(event))
         and _event_sequence(event) >= min_sequence
     ]
     return max(failures, key=_event_sequence) if failures else None
@@ -1121,14 +1204,45 @@ def _event_paths(event: object) -> set[str]:
     if not isinstance(event, dict):
         return set()
     paths: set[str] = set()
-    for key in ("path", "target_path", "source_path"):
+    for key in ("path", "target_path", "source_path", "changed_path"):
         value = str(event.get(key) or "").strip()
         if value:
             paths.add(value)
-    for key in ("paths", "target_paths", "changed_paths"):
+    for key in ("paths", "target_paths", "changed_paths", "changed_files", "source_paths"):
         value = event.get(key)
         if isinstance(value, (list, tuple)):
             paths.update(str(item).strip() for item in value if str(item).strip())
+    source_mutation = event.get("source_mutation")
+    if isinstance(source_mutation, dict):
+        paths.update(_event_paths(source_mutation))
+    source_mutations = event.get("source_mutations")
+    if isinstance(source_mutations, (list, tuple)):
+        for item in source_mutations:
+            paths.update(_event_paths(item))
+    record = event.get("record")
+    if isinstance(record, dict):
+        paths.update(_source_tree_record_paths(record))
+    side_effects = event.get("side_effects")
+    if isinstance(side_effects, (list, tuple)):
+        for effect in side_effects:
+            if not isinstance(effect, dict) or str(effect.get("kind") or "") != "source_tree_mutation":
+                continue
+            effect_record = effect.get("record")
+            if isinstance(effect_record, dict):
+                paths.update(_source_tree_record_paths(effect_record))
+    return paths
+
+
+def _source_tree_record_paths(record: dict[str, object]) -> set[str]:
+    paths: set[str] = set()
+    changes = record.get("changes")
+    if isinstance(changes, (list, tuple)):
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            path = str(change.get("path") or "").strip()
+            if path:
+                paths.add(path)
     return paths
 
 
@@ -1193,7 +1307,9 @@ def _generic_failure_family(event: dict[str, object]) -> str:
     combined = f"{family_text} {detail_text}"
     if "first_write_due" in combined or "write_repair_required" in combined:
         return "write_required"
-    if kind in {"write", "edit", "apply_patch", "source_mutation"} and status in {"failed", "interrupted", "invalid"}:
+    if _event_has_shell_source_side_effect(event) and _event_source_mutation_failed(event):
+        return "write_failure"
+    if kind in {"write", "edit", "apply_patch", "source_mutation", "source_tree_mutation"} and _event_source_mutation_failed(event):
         return "write_failure"
     if exit_code == 127 or "command not found" in combined or "executable not found" in combined:
         return "command_not_found"
