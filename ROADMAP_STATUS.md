@@ -338,6 +338,16 @@ Status as of 2026-05-10: **not closeable**. The design has several implemented
 slices, but the Phase 0-6 contract is not yet closed. Treat any future context
 reentry that assumes HOT_PATH_COLLAPSE is done as drift.
 
+Redesign note: after many same-shape polish commits across frontier/todo/
+evidence/contract/finish/closeout boundaries, a reviewed no-backward-
+compatibility WorkFrame redesign now exists at
+`docs/DESIGN_2026-05-10_M6_24_IMPLEMENT_V2_WORKFRAME_REDESIGN.md`, with
+paper-grounded support in
+`docs/REVIEW_2026-05-10_M6_24_WORKFRAME_LITERATURE_REVIEW.md`. The review loop
+resolved round-1 findings and round 2 returned no remaining `needs_fix`
+findings. If M6.24 continues to expose boundary leaks, prefer implementing this
+WorkFrame reducer in phases over another long polish loop.
+
 | Phase | Status | Current evidence / remaining gap |
 |---|---|---|
 | Phase 0 baseline/metrics | partial | `hot_path_projection` and `resident_sidecar_state` metrics exist. `docs/M6_24_HOT_PATH_PHASE0_BASELINE.json` now records the required Phase 0 baseline fields, and `scripts/check_implement_v2_hot_path.py` uses baseline-relative sidecar caps by default. The `20260510-005032` artifact confirms the resident-sidecar compaction is effective: total `269,166` bytes and per-turn growth `29,907` bytes, both green against Phase 0 caps. Still partial until the next changed artifact also stays green/yellow without widening model-visible state. |
