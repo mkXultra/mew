@@ -1,0 +1,1077 @@
+"""Phase-0 WorkFrame substrate for implement_v2.
+
+This module is intentionally runtime-adjacent, not yet runtime-active.  Phase 0
+needs a deterministic schema, canonical fixture reducer, prompt inventory
+checks, and baseline metric recording before any prompt cutover happens.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+import hashlib
+import json
+import posixpath
+from typing import Iterable, Literal
+
+WORKFRAME_SCHEMA_VERSION = 1
+WORKFRAME_REDUCER_SCHEMA_VERSION = 1
+WORKFRAME_CANONICALIZER_VERSION = 1
+WORKFRAME_PHASE0_SCHEMA_VERSION = 1
+WORKFRAME_TARGET_MAX_BYTES = 4096
+WORKFRAME_RED_MAX_BYTES = 6144
+
+WorkFramePhase = Literal[
+    "orient",
+    "cheap_probe",
+    "prewrite_blocked",
+    "ready_to_patch",
+    "repair_after_write_failure",
+    "verify_after_mutation",
+    "repair_after_verifier_failure",
+    "finish_ready",
+    "finish_blocked",
+    "controller_closeout",
+    "blocked",
+]
+
+WorkFrameNextKind = Literal[
+    "cheap_probe",
+    "inspect_latest_failure",
+    "patch_or_edit",
+    "run_verifier",
+    "finish",
+    "blocked",
+]
+
+LEGACY_PROMPT_PROJECTION_IDS = (
+    "implement_v2_active_work_todo",
+    "implement_v2_hard_runtime_frontier_state",
+    "implement_v2_repair_history",
+)
+
+WORKFRAME_DEBUG_BUNDLE_FILES = (
+    "reducer_inputs.json",
+    "reducer_output.workframe.json",
+    "reducer_trace.jsonl",
+    "invariant_report.json",
+    "prompt_render_inventory.json",
+    "prompt_visible_workframe.json",
+    "workframe_diff.json",
+    "evidence_ref_index.json",
+    "workframe_cursor.json",
+    "failure_taxonomy.json",
+)
+
+_VOLATILE_CANONICAL_KEYS = frozenset(
+    {
+        "timestamp",
+        "created_at",
+        "updated_at",
+        "received_at",
+        "started_at",
+        "finished_at",
+        "pid",
+        "ppid",
+        "hostname",
+        "host",
+        "user",
+        "username",
+        "mtime",
+        "mtime_ns",
+        "provider_latency",
+        "provider_latency_ms",
+        "latency_ms",
+        "duration_ms",
+        "elapsed_ms",
+    }
+)
+
+
+@dataclass(frozen=True)
+class WorkFrameTrace:
+    attempt_id: str
+    turn_id: str
+    workframe_id: str
+    input_hash: str
+    output_hash: str = ""
+    reducer_schema_version: int = WORKFRAME_REDUCER_SCHEMA_VERSION
+    canonicalizer_version: int = WORKFRAME_CANONICALIZER_VERSION
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "attempt_id": self.attempt_id,
+            "turn_id": self.turn_id,
+            "workframe_id": self.workframe_id,
+            "input_hash": self.input_hash,
+            "output_hash": self.output_hash,
+            "reducer_schema_version": self.reducer_schema_version,
+            "canonicalizer_version": self.canonicalizer_version,
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameGoal:
+    task_id: str
+    objective: str
+    success_contract_ref: str = ""
+    constraints: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "task_id": self.task_id,
+            "objective": self.objective,
+            "success_contract_ref": self.success_contract_ref,
+            "constraints": list(self.constraints),
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameLatestActionable:
+    family: str
+    summary: str
+    source_ref: str = ""
+    evidence_refs: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "family": self.family,
+            "summary": self.summary,
+            "source_ref": self.source_ref,
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameRequiredNext:
+    kind: WorkFrameNextKind
+    reason: str
+    target_paths: tuple[str, ...] = ()
+    after: str = ""
+    evidence_refs: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "reason": self.reason,
+            "target_paths": list(self.target_paths),
+            "after": self.after,
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameForbiddenNext:
+    kind: str
+    reason: str
+    evidence_refs: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind,
+            "reason": self.reason,
+            "evidence_refs": list(self.evidence_refs),
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameChangedSources:
+    paths: tuple[str, ...] = ()
+    latest_mutation_ref: str = ""
+    since_last_strict_verifier: bool = False
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "paths": list(self.paths),
+            "latest_mutation_ref": self.latest_mutation_ref,
+            "since_last_strict_verifier": self.since_last_strict_verifier,
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameVerifierState:
+    configured_verifier_ref: str = ""
+    last_strict_verifier_ref: str = ""
+    status: str = "unknown"
+    fresh_after_latest_source_mutation: bool = False
+    budget_closeout_required: bool = False
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "configured_verifier_ref": self.configured_verifier_ref,
+            "last_strict_verifier_ref": self.last_strict_verifier_ref,
+            "status": self.status,
+            "fresh_after_latest_source_mutation": self.fresh_after_latest_source_mutation,
+            "budget_closeout_required": self.budget_closeout_required,
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameFinishReadiness:
+    state: Literal["not_ready", "ready", "blocked"] = "not_ready"
+    blockers: tuple[str, ...] = ()
+    required_evidence_refs: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "state": self.state,
+            "blockers": list(self.blockers),
+            "required_evidence_refs": list(self.required_evidence_refs),
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameEvidenceRefs:
+    typed: tuple[str, ...] = ()
+    sidecar: tuple[str, ...] = ()
+    replay: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "typed": list(self.typed),
+            "sidecar": list(self.sidecar),
+            "replay": list(self.replay),
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrame:
+    trace: WorkFrameTrace
+    goal: WorkFrameGoal
+    current_phase: WorkFramePhase
+    latest_actionable: WorkFrameLatestActionable | None = None
+    required_next: WorkFrameRequiredNext | None = None
+    forbidden_next: tuple[WorkFrameForbiddenNext, ...] = ()
+    changed_sources: WorkFrameChangedSources = field(default_factory=WorkFrameChangedSources)
+    verifier_state: WorkFrameVerifierState = field(default_factory=WorkFrameVerifierState)
+    finish_readiness: WorkFrameFinishReadiness = field(default_factory=WorkFrameFinishReadiness)
+    evidence_refs: WorkFrameEvidenceRefs = field(default_factory=WorkFrameEvidenceRefs)
+    schema_version: int = WORKFRAME_SCHEMA_VERSION
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "trace": self.trace.as_dict(),
+            "goal": self.goal.as_dict(),
+            "current_phase": self.current_phase,
+            "latest_actionable": self.latest_actionable.as_dict() if self.latest_actionable else None,
+            "required_next": self.required_next.as_dict() if self.required_next else None,
+            "forbidden_next": [item.as_dict() for item in self.forbidden_next],
+            "changed_sources": self.changed_sources.as_dict(),
+            "verifier_state": self.verifier_state.as_dict(),
+            "finish_readiness": self.finish_readiness.as_dict(),
+            "evidence_refs": self.evidence_refs.as_dict(),
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameInputs:
+    attempt_id: str
+    turn_id: str
+    task_id: str
+    objective: str
+    success_contract_ref: str = ""
+    constraints: tuple[str, ...] = ()
+    sidecar_events: tuple[dict[str, object], ...] = ()
+    prompt_inventory: tuple[dict[str, object], ...] = ()
+    baseline_metrics: dict[str, object] = field(default_factory=dict)
+    previous_workframe_hash: str = ""
+    workspace_root: str = ""
+    artifact_root: str = ""
+    schema_version: int = WORKFRAME_PHASE0_SCHEMA_VERSION
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "attempt_id": self.attempt_id,
+            "turn_id": self.turn_id,
+            "task_id": self.task_id,
+            "objective": self.objective,
+            "success_contract_ref": self.success_contract_ref,
+            "constraints": list(self.constraints),
+            "sidecar_events": [dict(event) for event in self.sidecar_events],
+            "prompt_inventory": [dict(item) for item in self.prompt_inventory],
+            "baseline_metrics": dict(self.baseline_metrics),
+            "previous_workframe_hash": self.previous_workframe_hash,
+            "workspace_root": self.workspace_root,
+            "artifact_root": self.artifact_root,
+        }
+
+
+@dataclass(frozen=True)
+class WorkFrameInvariantReport:
+    status: Literal["pass", "fail"]
+    passed: tuple[str, ...] = ()
+    failed: tuple[dict[str, object], ...] = ()
+    warnings: tuple[dict[str, object], ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "passed": list(self.passed),
+            "failed": [dict(item) for item in self.failed],
+            "warnings": [dict(item) for item in self.warnings],
+        }
+
+
+def reduce_workframe(inputs: WorkFrameInputs) -> tuple[WorkFrame, WorkFrameInvariantReport]:
+    """Reduce canonical sidecar fixture facts into one WorkFrame.
+
+    This is deliberately fixture-only in Phase 0. Live runtime cutover belongs to
+    later phases once prompt and replay fastchecks exist.
+    """
+
+    canonical = canonicalize_workframe_inputs(inputs)
+    input_hash = _sha256_json(canonical)
+    facts = _extract_facts(canonical)
+    trace = WorkFrameTrace(
+        attempt_id=inputs.attempt_id,
+        turn_id=inputs.turn_id,
+        workframe_id=f"wf-{input_hash[7:19]}",
+        input_hash=input_hash,
+    )
+    goal = WorkFrameGoal(
+        task_id=inputs.task_id,
+        objective=inputs.objective,
+        success_contract_ref=inputs.success_contract_ref,
+        constraints=tuple(sorted(_string_set(inputs.constraints))),
+    )
+    changed_sources = WorkFrameChangedSources(
+        paths=tuple(facts["changed_paths"]),
+        latest_mutation_ref=str(facts["latest_mutation_ref"]),
+        since_last_strict_verifier=bool(facts["source_changed_since_verifier"]),
+    )
+    verifier_state = WorkFrameVerifierState(
+        configured_verifier_ref=str(facts["configured_verifier_ref"]),
+        last_strict_verifier_ref=str(facts["last_verifier_ref"]),
+        status=str(facts["verifier_status"]),
+        fresh_after_latest_source_mutation=bool(facts["verifier_fresh"]),
+        budget_closeout_required=bool(facts["budget_closeout_required"]),
+    )
+    latest_actionable = _latest_actionable_from_facts(facts)
+    finish_readiness = _finish_readiness_from_facts(facts)
+    required_next = _required_next_from_facts(facts, latest_actionable, finish_readiness)
+    forbidden_next = tuple(_forbidden_next_from_facts(facts, finish_readiness))
+    workframe = WorkFrame(
+        trace=trace,
+        goal=goal,
+        current_phase=_phase_from_facts(facts, finish_readiness, required_next),
+        latest_actionable=latest_actionable,
+        required_next=required_next,
+        forbidden_next=forbidden_next,
+        changed_sources=changed_sources,
+        verifier_state=verifier_state,
+        finish_readiness=finish_readiness,
+        evidence_refs=WorkFrameEvidenceRefs(
+            typed=tuple(facts["typed_refs"]),
+            sidecar=tuple(facts["sidecar_refs"]),
+            replay=tuple(facts["replay_refs"]),
+        ),
+    )
+    workframe = replace(workframe, trace=replace(workframe.trace, output_hash=workframe_output_hash(workframe)))
+    return workframe, validate_workframe(workframe, inputs=inputs)
+
+
+def canonicalize_workframe_inputs(inputs: WorkFrameInputs) -> dict[str, object]:
+    """Return byte-stable reducer inputs suitable for hashing/replay."""
+
+    workspace_root = _normalize_root(inputs.workspace_root)
+    artifact_root = _normalize_root(inputs.artifact_root)
+    events = [
+        _canonical_event(event, index, workspace_root=workspace_root, artifact_root=artifact_root)
+        for index, event in enumerate(inputs.sidecar_events)
+    ]
+    events.sort(key=lambda event: (int(event["event_sequence"]), str(event["event_id"])))
+    return {
+        "reducer_schema_version": WORKFRAME_REDUCER_SCHEMA_VERSION,
+        "workframe_schema_version": WORKFRAME_SCHEMA_VERSION,
+        "canonicalizer_version": WORKFRAME_CANONICALIZER_VERSION,
+        "payload": {
+            "schema_version": inputs.schema_version,
+            "attempt_id": str(inputs.attempt_id),
+            "turn_id": str(inputs.turn_id),
+            "task_id": str(inputs.task_id),
+            "objective": str(inputs.objective),
+            "success_contract_ref": str(inputs.success_contract_ref),
+            "constraints": sorted(_string_set(inputs.constraints)),
+            "sidecar_events": events,
+            "prompt_inventory": [
+                _canonical_mapping(item, workspace_root=workspace_root, artifact_root=artifact_root)
+                for item in inputs.prompt_inventory
+            ],
+            "baseline_metrics": _canonical_mapping(
+                inputs.baseline_metrics,
+                workspace_root=workspace_root,
+                artifact_root=artifact_root,
+            ),
+            "previous_workframe_hash": str(inputs.previous_workframe_hash),
+        },
+    }
+
+
+def validate_workframe(workframe: WorkFrame, *, inputs: WorkFrameInputs) -> WorkFrameInvariantReport:
+    passed: list[str] = []
+    failed: list[dict[str, object]] = []
+    warnings: list[dict[str, object]] = []
+    frame_bytes = len(canonical_json(workframe.as_dict()).encode("utf-8"))
+    if frame_bytes <= WORKFRAME_RED_MAX_BYTES:
+        passed.append("workframe_size_within_red_cap")
+    else:
+        failed.append({"code": "workframe_size_over_cap", "bytes": frame_bytes, "cap": WORKFRAME_RED_MAX_BYTES})
+    if workframe.required_next and not workframe.required_next.reason:
+        failed.append({"code": "required_next_unjustified", "field": "reason"})
+    else:
+        passed.append("required_next_has_reason_or_absent")
+    if workframe.required_next and not workframe.required_next.evidence_refs and workframe.latest_actionable:
+        failed.append({"code": "required_next_unjustified", "field": "evidence_refs"})
+    else:
+        passed.append("required_next_has_evidence_or_not_needed")
+    if workframe.finish_readiness.state == "ready" and workframe.changed_sources.since_last_strict_verifier:
+        failed.append({"code": "finish_false_positive", "reason": "source mutation lacks fresh verifier"})
+    else:
+        passed.append("finish_not_ready_when_verifier_stale")
+    if _has_conflicting_event_sequences(inputs.sidecar_events):
+        failed.append({"code": "reducer_input_conflicting_event_sequence"})
+    else:
+        passed.append("event_sequences_unique_or_identical")
+    if frame_bytes <= WORKFRAME_TARGET_MAX_BYTES:
+        passed.append("workframe_size_within_target_cap")
+    elif frame_bytes <= WORKFRAME_RED_MAX_BYTES:
+        warnings.append(
+            {
+                "code": "workframe_size_yellow",
+                "bytes": frame_bytes,
+                "target_cap": WORKFRAME_TARGET_MAX_BYTES,
+                "red_cap": WORKFRAME_RED_MAX_BYTES,
+            }
+        )
+    if not inputs.objective.strip():
+        warnings.append({"code": "workframe_goal_objective_empty"})
+    return WorkFrameInvariantReport(
+        status="fail" if failed else "pass",
+        passed=tuple(passed),
+        failed=tuple(failed),
+        warnings=tuple(warnings),
+    )
+
+
+def check_phase0_prompt_inventory(
+    inventory: Iterable[dict[str, object]],
+    *,
+    required_legacy_ids: Iterable[str] = LEGACY_PROMPT_PROJECTION_IDS,
+) -> dict[str, object]:
+    """Verify legacy prompt projections are detectable before Phase-1 cutover."""
+
+    ordinary_ids = tuple(
+        str(item.get("id") or "")
+        for item in inventory
+        if isinstance(item, dict) and str(item.get("visibility") or "ordinary") == "ordinary"
+    )
+    required = tuple(str(item) for item in required_legacy_ids if str(item))
+    present = tuple(item for item in required if item in ordinary_ids)
+    missing = tuple(item for item in required if item not in ordinary_ids)
+    return {
+        "schema_version": WORKFRAME_PHASE0_SCHEMA_VERSION,
+        "status": "pass" if not missing else "fail",
+        "required_legacy_ids": list(required),
+        "present_legacy_ids": list(present),
+        "missing_legacy_ids": list(missing),
+        "ordinary_section_ids": list(ordinary_ids),
+    }
+
+
+def record_phase0_baseline_metrics(
+    manifest: dict[str, object],
+    history: Iterable[dict[str, object]],
+    *,
+    workframe: WorkFrame | None = None,
+) -> dict[str, object]:
+    """Record WorkFrame Phase-0 baseline metrics from a saved manifest/history."""
+
+    metrics = _mapping(manifest.get("metrics"))
+    hot_path = _mapping(metrics.get("hot_path_projection"))
+    sidecar = _mapping(metrics.get("resident_sidecar_state"))
+    history_items = [dict(item) for item in history if isinstance(item, dict)]
+    first_edit = _first_tool_turn(history_items, {"write_file", "edit_file", "apply_patch"})
+    first_verifier = _first_verifier_turn(history_items)
+    tool_calls = _count_tool_calls(history_items)
+    same_family_repeats = _same_family_repeats(history_items)
+    workframe_bytes = len(canonical_json(workframe.as_dict()).encode("utf-8")) if workframe else 0
+    baseline = {
+        "schema_version": WORKFRAME_PHASE0_SCHEMA_VERSION,
+        "B_prompt_normal_total": _first_int(
+            hot_path.get("normal_full_prompt_bytes_total"),
+            hot_path.get("normal_full_prompt_bytes"),
+            hot_path.get("normal_prompt_section_bytes"),
+        ),
+        "B_prompt_dynamic_hot_path": _first_int(hot_path.get("normal_dynamic_hot_path_bytes")),
+        "B_tool_result_p95": _first_int(hot_path.get("provider_visible_tool_result_bytes")),
+        "B_sidecar_total": _first_int(sidecar.get("total_bytes")),
+        "B_sidecar_per_turn_growth": _first_float(sidecar.get("per_turn_growth_bytes")),
+        "B_first_edit_turn": first_edit["turn"],
+        "B_first_edit_seconds": first_edit["seconds"],
+        "B_first_verifier_turn": first_verifier["turn"],
+        "B_first_verifier_seconds": first_verifier["seconds"],
+        "B_model_turns_10m": len(history_items),
+        "B_tool_calls_10m": tool_calls,
+        "B_same_family_repeats_10m": same_family_repeats,
+        "B_required_next_adherence": _first_float(hot_path.get("required_next_adherence")),
+        "B_workframe_bytes": workframe_bytes,
+    }
+    zero_allowed = {"B_same_family_repeats_10m"}
+    missing = [
+        key
+        for key, value in baseline.items()
+        if key.startswith("B_") and (value in (None, "") or (key not in zero_allowed and value in (0, 0.0)))
+    ]
+    return {
+        "schema_version": WORKFRAME_PHASE0_SCHEMA_VERSION,
+        "status": "pass" if not missing else "fail",
+        "baseline": baseline,
+        "missing_fields": missing,
+        "bands": phase0_baseline_bands(),
+    }
+
+
+def phase0_baseline_bands() -> dict[str, dict[str, object]]:
+    return {
+        "B_prompt_normal_total": {"green": "<=70% baseline", "yellow": "<=80% baseline", "red": ">80% baseline"},
+        "B_prompt_dynamic_hot_path": {"green": "<=45% baseline", "yellow": "<=60% baseline", "red": ">60% baseline"},
+        "B_tool_result_p95": {"green": "<=40% baseline", "yellow": "<=55% baseline", "red": ">55% baseline"},
+        "B_sidecar_total": {"green": "<=110% baseline", "yellow": "<=125% baseline", "red": ">125% baseline"},
+        "B_sidecar_per_turn_growth": {"green": "<=110% baseline", "yellow": "<=150% baseline", "red": ">150% baseline"},
+        "B_first_edit_turn": {"green": "<=75% baseline", "yellow": "<=100% baseline", "red": ">100% baseline"},
+        "B_first_edit_seconds": {"green": "<=75% baseline", "yellow": "<=100% baseline", "red": ">100% baseline"},
+        "B_first_verifier_turn": {"green": "<=90% baseline", "yellow": "<=110% baseline", "red": ">110% baseline"},
+        "B_first_verifier_seconds": {"green": "<=90% baseline", "yellow": "<=110% baseline", "red": ">110% baseline"},
+        "B_model_turns_10m": {"green": "<=90% baseline", "yellow": "<=100% baseline", "red": ">100% baseline"},
+        "B_tool_calls_10m": {"green": "<=100% baseline", "yellow": "<=115% baseline", "red": ">115% baseline"},
+        "B_same_family_repeats_10m": {"green": "<=50% baseline", "yellow": "<=baseline", "red": ">baseline"},
+        "B_required_next_adherence": {"green": ">=90%", "yellow": ">=75%", "red": "<75%"},
+        "B_workframe_bytes": {"green": "<=4096", "yellow": "<=6144", "red": ">6144"},
+    }
+
+
+def workframe_debug_bundle_format() -> dict[str, object]:
+    return {
+        "schema_version": WORKFRAME_PHASE0_SCHEMA_VERSION,
+        "root": "implement_v2/workframes/turn-XXXX/",
+        "files": list(WORKFRAME_DEBUG_BUNDLE_FILES),
+    }
+
+
+def canonical_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+
+
+def workframe_output_hash(workframe: WorkFrame) -> str:
+    """Hash a WorkFrame with trace.output_hash excluded from the preimage."""
+
+    payload = workframe.as_dict()
+    trace = _mapping(payload.get("trace"))
+    trace["output_hash"] = ""
+    payload["trace"] = trace
+    return _sha256_json(payload)
+
+
+def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
+    payload = _mapping(canonical_inputs.get("payload"))
+    events = [event for event in payload.get("sidecar_events") or [] if isinstance(event, dict)]
+    evidence_index = _evidence_index(events)
+    mutation_kinds = {"source_mutation", "write", "edit", "apply_patch"}
+    mutation = _latest_successful_event(events, kinds=mutation_kinds)
+    write_failure = _latest_failed_event(events, kinds=mutation_kinds)
+    verifier = _latest_event(events, kinds={"strict_verifier", "verifier", "run_tests"})
+    changed_paths = tuple(sorted(_event_paths(mutation))) if mutation else ()
+    mutation_seq = _event_sequence(mutation) if mutation else -1
+    verifier_seq = _event_sequence(verifier) if verifier else -1
+    failure = _latest_failure_event(events, min_sequence=mutation_seq)
+    failure_seq = _event_sequence(failure) if failure else -1
+    verifier_status = _event_status(verifier) if verifier else "unknown"
+    verifier_fresh = verifier_seq >= mutation_seq and verifier_status == "passed" if verifier else False
+    source_changed_since_verifier = bool(mutation and (not verifier or mutation_seq > verifier_seq or verifier_status != "passed"))
+    configured_verifier_ref = str(payload.get("success_contract_ref") or "")
+    closeout_required = bool(source_changed_since_verifier and _has_low_budget_event(events))
+    return {
+        "events": events,
+        "evidence_index": evidence_index,
+        "latest_mutation_ref": _event_ref(mutation),
+        "changed_paths": changed_paths,
+        "last_verifier_ref": _event_ref(verifier),
+        "verifier_status": verifier_status,
+        "verifier_fresh": verifier_fresh,
+        "source_changed_since_verifier": source_changed_since_verifier,
+        "configured_verifier_ref": configured_verifier_ref,
+        "budget_closeout_required": closeout_required,
+        "latest_failure": failure,
+        "latest_write_failure_ref": _event_ref(write_failure),
+        "latest_write_failure_sequence": _event_sequence(write_failure) if write_failure else -1,
+        "latest_failure_sequence": failure_seq,
+        "latest_mutation_sequence": mutation_seq,
+        "last_verifier_sequence": verifier_seq,
+        "typed_refs": tuple(ref for ref in evidence_index if ref.startswith("ev:")),
+        "sidecar_refs": tuple(ref for ref in evidence_index if ref.startswith("sidecar:") or ref.startswith("cmd:")),
+        "replay_refs": tuple(ref for ref in evidence_index if ref.startswith("replay:")),
+    }
+
+
+def _latest_actionable_from_facts(facts: dict[str, object]) -> WorkFrameLatestActionable | None:
+    failure = facts.get("latest_failure")
+    if isinstance(failure, dict):
+        evidence_refs = _event_evidence_refs(failure)
+        return WorkFrameLatestActionable(
+            family=str(failure.get("family") or failure.get("failure_class") or failure.get("class") or "unknown"),
+            summary=str(failure.get("summary") or failure.get("message") or failure.get("status") or "failure"),
+            source_ref=_event_ref(failure),
+            evidence_refs=evidence_refs,
+        )
+    if facts.get("source_changed_since_verifier"):
+        return WorkFrameLatestActionable(
+            family="verifier_stale_after_mutation",
+            summary="source changed without a fresh passing strict verifier",
+            source_ref=str(facts.get("latest_mutation_ref") or ""),
+            evidence_refs=(str(facts.get("latest_mutation_ref") or ""),),
+        )
+    return None
+
+
+def _finish_readiness_from_facts(facts: dict[str, object]) -> WorkFrameFinishReadiness:
+    if facts.get("verifier_fresh"):
+        refs = tuple(ref for ref in (str(facts.get("last_verifier_ref") or ""),) if ref)
+        return WorkFrameFinishReadiness(state="ready", required_evidence_refs=refs)
+    blockers: list[str] = []
+    if facts.get("source_changed_since_verifier"):
+        blockers.append("verifier_stale_after_mutation")
+    if facts.get("verifier_status") in {"failed", "interrupted", "invalid"}:
+        blockers.append("verifier_failed")
+    if not blockers:
+        blockers.append("missing_passing_verifier")
+    return WorkFrameFinishReadiness(state="not_ready", blockers=tuple(blockers))
+
+
+def _required_next_from_facts(
+    facts: dict[str, object],
+    latest_actionable: WorkFrameLatestActionable | None,
+    finish_readiness: WorkFrameFinishReadiness,
+) -> WorkFrameRequiredNext | None:
+    if finish_readiness.state == "ready":
+        return WorkFrameRequiredNext(
+            kind="finish",
+            reason="fresh passing verifier evidence is available",
+            evidence_refs=finish_readiness.required_evidence_refs,
+        )
+    if facts.get("budget_closeout_required"):
+        return WorkFrameRequiredNext(
+            kind="run_verifier",
+            reason="latest source mutation has no fresh strict verifier and budget requires closeout",
+            after="finish_or_block",
+            evidence_refs=tuple(ref for ref in (str(facts.get("latest_mutation_ref") or ""),) if ref),
+        )
+    if latest_actionable and latest_actionable.family != "verifier_stale_after_mutation":
+        return WorkFrameRequiredNext(
+            kind="patch_or_edit",
+            reason="latest actionable failure should drive one focused repair",
+            target_paths=_paths_from_failure(facts.get("latest_failure")),
+            after="run_configured_verifier",
+            evidence_refs=latest_actionable.evidence_refs or (latest_actionable.source_ref,),
+        )
+    if facts.get("source_changed_since_verifier"):
+        return WorkFrameRequiredNext(
+            kind="run_verifier",
+            reason="source changed and no fresh strict verifier is available",
+            evidence_refs=tuple(ref for ref in (str(facts.get("latest_mutation_ref") or ""),) if ref),
+        )
+    return WorkFrameRequiredNext(kind="cheap_probe", reason="no actionable source or verifier evidence yet")
+
+
+def _forbidden_next_from_facts(
+    facts: dict[str, object],
+    finish_readiness: WorkFrameFinishReadiness,
+) -> list[WorkFrameForbiddenNext]:
+    forbidden: list[WorkFrameForbiddenNext] = []
+    if finish_readiness.state != "ready":
+        forbidden.append(
+            WorkFrameForbiddenNext(
+                kind="finish",
+                reason="finish requires fresh passing verifier evidence",
+                evidence_refs=finish_readiness.required_evidence_refs,
+            )
+        )
+    if _latest_failure_is_current(facts):
+        forbidden.append(
+            WorkFrameForbiddenNext(
+                kind="broad_rediscovery",
+                reason="latest_actionable already identifies a repair surface",
+                evidence_refs=_event_evidence_refs(facts["latest_failure"]),
+            )
+        )
+    return forbidden
+
+
+def _phase_from_facts(
+    facts: dict[str, object],
+    finish_readiness: WorkFrameFinishReadiness,
+    required_next: WorkFrameRequiredNext | None,
+) -> WorkFramePhase:
+    if finish_readiness.state == "ready":
+        return "finish_ready"
+    if required_next and required_next.kind == "run_verifier" and facts.get("budget_closeout_required"):
+        return "controller_closeout"
+    if required_next and required_next.kind == "run_verifier":
+        return "verify_after_mutation"
+    if _latest_failure_is_current(facts):
+        if _event_ref(facts.get("latest_failure")) == facts.get("latest_write_failure_ref"):
+            return "repair_after_write_failure"
+        return "repair_after_verifier_failure"
+    if required_next and required_next.kind == "cheap_probe":
+        return "cheap_probe"
+    return "orient"
+
+
+def _canonical_event(
+    event: dict[str, object],
+    fallback_sequence: int,
+    *,
+    workspace_root: str = "",
+    artifact_root: str = "",
+) -> dict[str, object]:
+    canonical = _canonical_mapping(event, workspace_root=workspace_root, artifact_root=artifact_root)
+    sequence = _first_int(canonical.get("event_sequence"), canonical.get("sequence"), fallback_sequence + 1)
+    canonical["event_sequence"] = sequence
+    canonical.setdefault("event_id", f"event-{sequence}")
+    return canonical
+
+
+def _canonical_mapping(value: object, *, workspace_root: str = "", artifact_root: str = "") -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, object] = {}
+    for key, item in sorted(value.items(), key=lambda pair: str(pair[0])):
+        canonical_key = str(key)
+        if canonical_key in _VOLATILE_CANONICAL_KEYS:
+            continue
+        result[canonical_key] = _canonical_value(
+            item,
+            key=canonical_key,
+            workspace_root=workspace_root,
+            artifact_root=artifact_root,
+        )
+    return result
+
+
+def _canonical_value(value: object, *, key: str = "", workspace_root: str = "", artifact_root: str = "") -> object:
+    if isinstance(value, dict):
+        return _canonical_mapping(value, workspace_root=workspace_root, artifact_root=artifact_root)
+    if isinstance(value, (list, tuple)):
+        return [
+            _canonical_value(item, key=key, workspace_root=workspace_root, artifact_root=artifact_root)
+            for item in value
+        ]
+    if isinstance(value, str):
+        normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+        if _is_path_like_key(key) or _looks_like_path(normalized):
+            return _normalize_path_value(normalized, workspace_root=workspace_root, artifact_root=artifact_root)
+        return normalized
+    if isinstance(value, float):
+        return f"{value:.6f}"
+    return value
+
+
+def _sha256_json(value: object) -> str:
+    return "sha256:" + hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _mapping(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _string_set(values: Iterable[object]) -> set[str]:
+    return {str(value).strip() for value in values if str(value).strip()}
+
+
+def _event_sequence(event: object) -> int:
+    if not isinstance(event, dict):
+        return -1
+    return _first_int(event.get("event_sequence"), event.get("sequence"), -1)
+
+
+def _event_ref(event: object) -> str:
+    if not isinstance(event, dict):
+        return ""
+    for key in ("evidence_ref", "event_ref", "command_run_id", "typed_evidence_id", "event_id"):
+        value = str(event.get(key) or "").strip()
+        if value:
+            return value
+    sequence = _event_sequence(event)
+    return f"sidecar:event:{sequence}" if sequence >= 0 else ""
+
+
+def _event_kind(event: dict[str, object]) -> str:
+    return str(event.get("kind") or event.get("type") or event.get("event_kind") or "").strip()
+
+
+def _event_status(event: object) -> str:
+    if not isinstance(event, dict):
+        return "unknown"
+    status = str(event.get("status") or event.get("outcome") or "").lower().strip()
+    if status in {"pass", "passed", "success", "succeeded", "completed"}:
+        return "passed"
+    if status in {"fail", "failed", "failure", "nonzero", "rejected"}:
+        return "failed"
+    if status in {"interrupted", "killed", "timeout"}:
+        return "interrupted"
+    if status in {"invalid", "denied"}:
+        return "invalid"
+    return status or "unknown"
+
+
+def _latest_event(events: list[dict[str, object]], *, kinds: set[str]) -> dict[str, object] | None:
+    matches = [event for event in events if _event_kind(event) in kinds]
+    return max(matches, key=_event_sequence) if matches else None
+
+
+def _latest_successful_event(events: list[dict[str, object]], *, kinds: set[str]) -> dict[str, object] | None:
+    matches = [
+        event
+        for event in events
+        if _event_kind(event) in kinds and _event_status(event) not in {"failed", "interrupted", "invalid"}
+    ]
+    return max(matches, key=_event_sequence) if matches else None
+
+
+def _latest_failed_event(events: list[dict[str, object]], *, kinds: set[str]) -> dict[str, object] | None:
+    matches = [
+        event
+        for event in events
+        if _event_kind(event) in kinds and _event_status(event) in {"failed", "interrupted", "invalid"}
+    ]
+    return max(matches, key=_event_sequence) if matches else None
+
+
+def _latest_failure_event(events: list[dict[str, object]], *, min_sequence: int = -1) -> dict[str, object] | None:
+    failures = [
+        event
+        for event in events
+        if _event_kind(event)
+        in {
+            "failure",
+            "latest_failure",
+            "verifier",
+            "strict_verifier",
+            "run_tests",
+            "source_mutation",
+            "write",
+            "edit",
+            "apply_patch",
+        }
+        and _event_status(event) in {"failed", "interrupted", "invalid"}
+        and _event_sequence(event) >= min_sequence
+    ]
+    return max(failures, key=_event_sequence) if failures else None
+
+
+def _latest_failure_is_current(facts: dict[str, object]) -> bool:
+    return bool(facts.get("latest_failure")) and int(facts.get("latest_failure_sequence") or -1) >= int(
+        facts.get("latest_mutation_sequence") or -1
+    )
+
+
+def _event_paths(event: object) -> set[str]:
+    if not isinstance(event, dict):
+        return set()
+    paths: set[str] = set()
+    for key in ("path", "target_path", "source_path"):
+        value = str(event.get(key) or "").strip()
+        if value:
+            paths.add(value)
+    for key in ("paths", "target_paths", "changed_paths"):
+        value = event.get(key)
+        if isinstance(value, (list, tuple)):
+            paths.update(str(item).strip() for item in value if str(item).strip())
+    return paths
+
+
+def _event_evidence_refs(event: object) -> tuple[str, ...]:
+    if not isinstance(event, dict):
+        return ()
+    refs = set()
+    for key in ("evidence_ref", "event_ref", "command_run_id", "typed_evidence_id", "event_id"):
+        value = str(event.get(key) or "").strip()
+        if value:
+            refs.add(value)
+    raw = event.get("evidence_refs")
+    if isinstance(raw, (list, tuple)):
+        refs.update(str(item).strip() for item in raw if str(item).strip())
+    return tuple(sorted(refs))
+
+
+def _evidence_index(events: list[dict[str, object]]) -> tuple[str, ...]:
+    refs = set()
+    for event in events:
+        refs.update(_event_evidence_refs(event))
+        ref = _event_ref(event)
+        if ref:
+            refs.add(ref)
+    return tuple(sorted(refs))
+
+
+def _paths_from_failure(value: object) -> tuple[str, ...]:
+    return tuple(sorted(_event_paths(value)))
+
+
+def _has_low_budget_event(events: list[dict[str, object]]) -> bool:
+    for event in events:
+        if str(event.get("budget_class") or "").lower() in {"low", "closeout"}:
+            return True
+        if bool(event.get("budget_closeout_required")):
+            return True
+    return False
+
+
+def _has_conflicting_event_sequences(events: Iterable[dict[str, object]]) -> bool:
+    seen: dict[int, str] = {}
+    for index, event in enumerate(events):
+        sequence = _event_sequence(event)
+        if sequence < 0:
+            continue
+        fingerprint = canonical_json(_canonical_event(event, index))
+        if sequence in seen and seen[sequence] != fingerprint:
+            return True
+        seen[sequence] = fingerprint
+    return False
+
+
+def _normalize_root(value: str) -> str:
+    normalized = str(value or "").replace("\\", "/").rstrip("/")
+    return normalized
+
+
+def _is_path_like_key(key: str) -> bool:
+    lowered = key.lower()
+    return lowered in {"path", "cwd", "workspace", "artifact", "filename", "file"} or lowered.endswith(
+        ("_path", "_paths", "_file", "_files", "_dir", "_root")
+    )
+
+
+def _looks_like_path(value: str) -> bool:
+    if not value or "\n" in value:
+        return False
+    normalized = value.replace("\\", "/")
+    return normalized.startswith("/") or normalized.startswith("./") or normalized.startswith("../")
+
+
+def _normalize_path_value(value: str, *, workspace_root: str = "", artifact_root: str = "") -> str:
+    normalized = value.replace("\\", "/")
+    if workspace_root and (normalized == workspace_root or normalized.startswith(workspace_root + "/")):
+        return _join_placeholder_path("$WORKSPACE", normalized.removeprefix(workspace_root).lstrip("/"))
+    if artifact_root and (normalized == artifact_root or normalized.startswith(artifact_root + "/")):
+        return _join_placeholder_path("$ARTIFACT", normalized.removeprefix(artifact_root).lstrip("/"))
+    if normalized.startswith("/"):
+        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+        return _join_placeholder_path(f"$ABSOLUTE/{digest}", posixpath.basename(normalized.rstrip("/")))
+    return posixpath.normpath(normalized) if "/" in normalized else normalized
+
+
+def _join_placeholder_path(prefix: str, relative: str) -> str:
+    if not relative:
+        return prefix
+    return prefix + "/" + posixpath.normpath(relative)
+
+
+def _first_tool_turn(history: list[dict[str, object]], tools: set[str]) -> dict[str, object]:
+    for fallback_index, entry in enumerate(history, start=1):
+        turn = _first_int(entry.get("turn"), entry.get("turn_index"), fallback_index)
+        for call in entry.get("tool_calls") or []:
+            if isinstance(call, dict) and str(call.get("tool_name") or call.get("name") or "") in tools:
+                return {"turn": turn, "seconds": _first_float(entry.get("elapsed_seconds"), call.get("elapsed_seconds"))}
+    return {"turn": 0, "seconds": 0.0}
+
+
+def _first_verifier_turn(history: list[dict[str, object]]) -> dict[str, object]:
+    verifier_tools = {"run_tests"}
+    for fallback_index, entry in enumerate(history, start=1):
+        turn = _first_int(entry.get("turn"), entry.get("turn_index"), fallback_index)
+        for call in entry.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            tool_name = str(call.get("tool_name") or call.get("name") or "")
+            arguments = _mapping(call.get("arguments"))
+            command = str(arguments.get("command") or arguments.get("cmd") or "").lower()
+            intent = str(arguments.get("command_intent") or "").lower()
+            if tool_name in verifier_tools or "verify" in intent or "test" in intent or "pytest" in command:
+                return {"turn": turn, "seconds": _first_float(entry.get("elapsed_seconds"), call.get("elapsed_seconds"))}
+    return {"turn": 0, "seconds": 0.0}
+
+
+def _count_tool_calls(history: list[dict[str, object]]) -> int:
+    return sum(len(entry.get("tool_calls") or []) for entry in history)
+
+
+def _same_family_repeats(history: list[dict[str, object]]) -> int:
+    families: list[str] = []
+    for entry in history:
+        for result in entry.get("tool_results") or []:
+            if not isinstance(result, dict):
+                continue
+            content = result.get("content")
+            if isinstance(content, dict):
+                latest = content.get("latest_failure")
+                if isinstance(latest, dict):
+                    families.append(str(latest.get("class") or latest.get("family") or latest.get("kind") or "unknown"))
+    counts: dict[str, int] = {}
+    for family in families:
+        counts[family] = counts.get(family, 0) + 1
+    return sum(max(0, count - 1) for count in counts.values())
+
+
+def _first_int(*values: object) -> int:
+    for value in values:
+        try:
+            if value is None or value == "":
+                continue
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _first_float(*values: object) -> float:
+    for value in values:
+        try:
+            if value is None or value == "":
+                continue
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+__all__ = [
+    "LEGACY_PROMPT_PROJECTION_IDS",
+    "WORKFRAME_CANONICALIZER_VERSION",
+    "WORKFRAME_DEBUG_BUNDLE_FILES",
+    "WORKFRAME_PHASE0_SCHEMA_VERSION",
+    "WORKFRAME_REDUCER_SCHEMA_VERSION",
+    "WORKFRAME_SCHEMA_VERSION",
+    "WORKFRAME_TARGET_MAX_BYTES",
+    "WORKFRAME_RED_MAX_BYTES",
+    "WorkFrame",
+    "WorkFrameChangedSources",
+    "WorkFrameEvidenceRefs",
+    "WorkFrameFinishReadiness",
+    "WorkFrameForbiddenNext",
+    "WorkFrameGoal",
+    "WorkFrameInputs",
+    "WorkFrameInvariantReport",
+    "WorkFrameLatestActionable",
+    "WorkFrameRequiredNext",
+    "WorkFrameTrace",
+    "canonical_json",
+    "canonicalize_workframe_inputs",
+    "check_phase0_prompt_inventory",
+    "phase0_baseline_bands",
+    "record_phase0_baseline_metrics",
+    "reduce_workframe",
+    "validate_workframe",
+    "workframe_output_hash",
+    "workframe_debug_bundle_format",
+]

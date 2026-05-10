@@ -37,6 +37,18 @@ from .v2_runtime import (
     run_fake_write_implement_v2,
     run_unavailable_implement_v2,
 )
+from .workframe import (
+    WorkFrame,
+    WorkFrameInputs,
+    WorkFrameInvariantReport,
+    WorkFrameTrace,
+    canonicalize_workframe_inputs,
+    check_phase0_prompt_inventory,
+    record_phase0_baseline_metrics,
+    reduce_workframe,
+    workframe_output_hash,
+    workframe_debug_bundle_format,
+)
 from .write_runtime import ImplementV2WriteRuntime
 
 __all__ = [
@@ -57,9 +69,15 @@ __all__ = [
     "PairingValidationResult",
     "ToolCallEnvelope",
     "ToolResultEnvelope",
+    "WorkFrame",
+    "WorkFrameInputs",
+    "WorkFrameInvariantReport",
+    "WorkFrameTrace",
     "build_implement_v2_prompt_sections",
     "build_transcript_event",
     "build_invalid_tool_result",
+    "canonicalize_workframe_inputs",
+    "check_phase0_prompt_inventory",
     "describe_implement_v1_adapter",
     "describe_implement_v2_runtime",
     "evaluate_m6_24_reentry_ab_gate",
@@ -71,6 +89,8 @@ __all__ = [
     "list_v2_base_tool_specs",
     "list_v2_tool_specs_for_mode",
     "implement_v2_prompt_section_metrics",
+    "record_phase0_baseline_metrics",
+    "reduce_workframe",
     "run_fake_exec_implement_v2",
     "run_fake_read_only_implement_v2",
     "run_fake_write_implement_v2",
@@ -79,4 +99,6 @@ __all__ = [
     "select_implement_lane_runtime",
     "validate_proof_manifest_pairing",
     "validate_tool_result_pairing",
+    "workframe_output_hash",
+    "workframe_debug_bundle_format",
 ]
