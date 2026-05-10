@@ -19,6 +19,7 @@ WORKFRAME_CANONICALIZER_VERSION = 1
 WORKFRAME_PHASE0_SCHEMA_VERSION = 1
 WORKFRAME_TARGET_MAX_BYTES = 4096
 WORKFRAME_RED_MAX_BYTES = 6144
+_PATCH_TARGET_FALLBACK_GENERIC_FAMILIES = frozenset({"runtime_diagnostic", "verifier_failure"})
 
 WorkFramePhase = Literal[
     "orient",
@@ -431,6 +432,17 @@ def validate_workframe(workframe: WorkFrame, *, inputs: WorkFrameInputs) -> Work
         failed.append({"code": "required_next_unjustified", "field": "evidence_refs"})
     else:
         passed.append("required_next_has_evidence_or_not_needed")
+    if (
+        workframe.required_next
+        and workframe.required_next.kind == "patch_or_edit"
+        and workframe.changed_sources.paths
+        and workframe.latest_actionable
+        and workframe.latest_actionable.generic_family in _PATCH_TARGET_FALLBACK_GENERIC_FAMILIES
+        and not workframe.required_next.target_paths
+    ):
+        failed.append({"code": "patch_required_next_missing_target_path"})
+    else:
+        passed.append("patch_required_next_has_target_path_or_not_needed")
     if workframe.latest_actionable and _is_generic_actionable_summary(workframe.latest_actionable.summary):
         failed.append(
             {
@@ -756,7 +768,11 @@ def _required_next_from_facts(
         return WorkFrameRequiredNext(
             kind=next_kind,
             reason=_required_next_reason_for_generic_family(latest_actionable.generic_family),
-            target_paths=_paths_from_failure(facts.get("latest_failure")),
+            target_paths=(
+                _required_next_target_paths(facts, generic_family=latest_actionable.generic_family)
+                if next_kind == "patch_or_edit"
+                else ()
+            ),
             after="run_configured_verifier" if next_kind == "patch_or_edit" else "patch_or_edit_or_block",
             evidence_refs=latest_actionable.evidence_refs or (latest_actionable.source_ref,),
         )
@@ -1309,6 +1325,33 @@ def _evidence_index(events: list[dict[str, object]]) -> tuple[str, ...]:
 
 def _paths_from_failure(value: object) -> tuple[str, ...]:
     return tuple(sorted(_event_paths(value)))
+
+
+def _required_next_target_paths(facts: dict[str, object], *, generic_family: str) -> tuple[str, ...]:
+    failure_paths = _paths_from_failure(facts.get("latest_failure"))
+    if failure_paths:
+        return failure_paths
+    if generic_family not in _PATCH_TARGET_FALLBACK_GENERIC_FAMILIES:
+        return ()
+    if not _latest_failure_is_current(facts):
+        return ()
+    changed_paths = facts.get("changed_paths")
+    if not isinstance(changed_paths, (list, tuple)):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            _model_visible_workspace_path(path)
+            for path in changed_paths
+            if _model_visible_workspace_path(path)
+        )
+    )
+
+
+def _model_visible_workspace_path(value: object) -> str:
+    path = str(value or "").strip()
+    if path.startswith("$WORKSPACE/"):
+        return path.removeprefix("$WORKSPACE/").strip()
+    return path
 
 
 def _generic_failure_family(event: dict[str, object]) -> str:

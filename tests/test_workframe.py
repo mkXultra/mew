@@ -78,6 +78,81 @@ def test_workframe_reducer_is_deterministic_and_evidence_referenced() -> None:
     }
 
 
+def test_workframe_patch_required_next_uses_changed_source_when_failure_has_no_path() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-3",
+            task_id="task-1",
+            objective="Repair the workspace to satisfy the configured verifier.",
+            workspace_root="/tmp/work",
+            sidecar_events=(
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 1,
+                    "event_id": "write-vm",
+                    "path": "/tmp/work/vm.js",
+                    "evidence_refs": ["sidecar:write-vm"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 2,
+                    "event_id": "verify-vm",
+                    "status": "failed",
+                    "family": "runtime_failure",
+                    "summary": "VM error: unsupported syscall 0 at 0x0043a8d8",
+                    "command_run_id": "cmd:verify-vm",
+                    "evidence_refs": ["ev:verify-vm"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "repair_after_verifier_failure"
+    assert workframe.changed_sources.paths == ("$WORKSPACE/vm.js",)
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+    assert workframe.required_next.target_paths == ("vm.js",)
+
+
+def test_workframe_pathless_write_failure_does_not_inherit_previous_changed_source() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-3",
+            task_id="task-1",
+            objective="Repair the failed source mutation itself.",
+            sidecar_events=(
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 1,
+                    "event_id": "write-existing",
+                    "path": "src/previous.py",
+                    "evidence_refs": ["sidecar:write-existing"],
+                },
+                {
+                    "kind": "apply_patch",
+                    "event_sequence": 2,
+                    "event_id": "patch-failed-without-path",
+                    "status": "failed",
+                    "family": "write_payload_invalid",
+                    "summary": "patch anchor not found",
+                    "evidence_refs": ["ev:patch-failed"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "repair_after_write_failure"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.generic_family == "write_failure"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+    assert workframe.required_next.target_paths == ()
+
+
 def test_workframe_canonicalization_removes_volatile_fields_and_is_stable() -> None:
     inputs = _workframe_inputs()
     canonical = canonicalize_workframe_inputs(inputs)
