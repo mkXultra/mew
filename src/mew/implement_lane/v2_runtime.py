@@ -2822,6 +2822,10 @@ def _workframe_failure_summary(
             value = _frontier_clip_text(latest_failure.get(key), limit=220)
             if value and not _workframe_summary_is_generic(value):
                 return value
+    for key in ("stderr_tail", "stdout_tail", "stderr", "stdout"):
+        diagnostic = _first_actionable_terminal_line(payload.get(key), require_signal=True)
+        if diagnostic:
+            return _frontier_clip_text(diagnostic, limit=220)
     for key in ("stderr_tail", "stdout_tail", "stderr", "stdout", "reason", "error", "message"):
         value = _frontier_clip_text(payload.get(key), limit=220)
         if value:
@@ -3199,6 +3203,8 @@ def _has_focused_runtime_diagnostic_patch_surface(workframe: dict[str, object]) 
         return False
     if summary.casefold() in {"exit code 1", "nonzero exit", "command failed", "runtime failure"}:
         return False
+    if _is_low_detail_runtime_diagnostic_summary(summary):
+        return False
     if re.search(r"\b[A-Za-z_]+(?:Error|Exception)\b", summary):
         return True
     return _text_matches_any(
@@ -3210,6 +3216,41 @@ def _has_focused_runtime_diagnostic_patch_surface(workframe: dict[str, object]) 
             r"\b(?:pc=|program counter|signal\s+\d+|exit code\s+[2-9]\d*)\b",
         ),
     )
+
+
+def _is_low_detail_runtime_diagnostic_summary(summary: str) -> bool:
+    normalized = " ".join(summary.casefold().replace("_", " ").replace("-", " ").split())
+    if "\n" in summary and not _first_actionable_terminal_line(summary, require_signal=True):
+        return True
+    if normalized in {
+        "abort",
+        "assert",
+        "cannot",
+        "error",
+        "failed",
+        "failure",
+        "fault",
+        "invalid",
+        "missing",
+        "not found",
+        "null reference",
+        "panic",
+        "program counter",
+        "runtime error",
+        "runtime failure",
+        "segfault",
+        "segv",
+        "test failed",
+        "traceback",
+        "unknown",
+        "unsupported",
+        "verifier failed",
+    }:
+        return True
+    tokens = normalized.split()
+    if len(tokens) <= 2 and not re.search(r"(?:\d|0x|[:=/\\()'\"`])", summary):
+        return True
+    return False
 
 
 def _has_hard_runtime_budget_sensitive_surface(lane_input: ImplementLaneInput) -> bool:
@@ -7568,6 +7609,9 @@ def _frontier_failure_summary(payload: dict[str, object]) -> str:
     for key in ("stderr_tail", "stderr", "stdout_tail", "stdout"):
         text = str(payload.get(key) or "").strip()
         if text:
+            diagnostic = _first_actionable_terminal_line(text, require_signal=True)
+            if diagnostic:
+                return _frontier_clip_text(diagnostic)
             return _frontier_clip_text(next((line.strip() for line in text.splitlines() if line.strip()), text))
     status = str(payload.get("status") or "failed")
     exit_code = payload.get("exit_code")
@@ -8589,10 +8633,16 @@ def _terminal_line_is_stack_context(raw_line: str, line: str) -> bool:
 
 
 def _terminal_line_has_diagnostic_signal(line: str) -> bool:
+    if re.search(
+        r"\b(?:assert|fault|segv|panic)\b",
+        line,
+        re.IGNORECASE,
+    ) and re.search(r"(?:\d|0x|[:=/\\()'\"`]|failed|failure|error|exception)", line, re.IGNORECASE):
+        return True
     return bool(
         re.search(
             r"\b(?:[A-Za-z]*Error|[A-Za-z]*Exception|AssertionError|Traceback|unsupported|missing|not found|"
-            r"cannot|failed|failure|segmentation|segfault|panic|abort|invalid)\b",
+            r"cannot|failed|failure|segmentation|segfault|abort|invalid)\b",
             line,
             re.IGNORECASE,
         )

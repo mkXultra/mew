@@ -7805,6 +7805,144 @@ def test_implement_v2_allows_near_threshold_required_patch_turn(tmp_path) -> Non
     assert too_short_focused_runtime_block["minimum_enforced_model_timeout_seconds"] == 120.0
 
 
+def test_implement_v2_allows_short_syntax_error_repair_patch_turn(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "description": "Implement a VM runtime from provided source that produces frame.bmp.",
+            "max_wall_seconds": 660,
+        },
+        lane_config={
+            "mode": "full",
+            "allowed_read_roots": [str(tmp_path)],
+            "allowed_write_roots": [str(tmp_path)],
+            "allow_shell": True,
+        },
+    )
+    syntax_failure = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="verify-node-vm-js",
+        mew_tool_call_id="tool-verify-node-vm-js",
+        tool_name="run_tests",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr_tail": (
+                    "/app/vm.js:464\n"
+                    "    let addr = this.sym('DG_ScreenBuffer') || this.sym('screenbuffer') "
+                    "|| this.sym'I_VideoBuffer');\n"
+                    "                                                                                  ^^^^^^^^^^^^^^^\n"
+                    "\n"
+                    "SyntaxError: Unexpected string\n"
+                    "    at internalCompileFunction (node:internal/vm:76:18)\n"
+                ),
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "exit code 1",
+                },
+            },
+        ),
+        evidence_refs=("ev:verify-node-vm-js",),
+    )
+
+    block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
+        hard_runtime_frontier_state={},
+        tool_results=(syntax_failure,),
+        run_started=time.monotonic() - 424,
+        next_turn=9,
+        next_model_timeout_seconds=176,
+        requested_timeout=600,
+    )
+
+    assert block == {}
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "invalid",
+        "cannot",
+        "panic",
+        "assert",
+        "traceback",
+        pytest.param("no fault injection\ninvalid", id="banner-fault-then-invalid"),
+    ],
+)
+def test_implement_v2_blocks_short_low_detail_runtime_diagnostic_patch_turn(tmp_path, diagnostic: str) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "description": "Implement a VM runtime from provided source that produces frame.bmp.",
+            "max_wall_seconds": 660,
+        },
+        lane_config={
+            "mode": "full",
+            "allowed_read_roots": [str(tmp_path)],
+            "allowed_write_roots": [str(tmp_path)],
+            "allow_shell": True,
+        },
+    )
+    vague_failure = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="verify-node-vm-js",
+        mew_tool_call_id="tool-verify-node-vm-js",
+        tool_name="run_tests",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr_tail": f"checking runtime output\n{diagnostic}\n",
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "medium",
+                    "summary": "exit code 1",
+                },
+            },
+        ),
+        evidence_refs=("ev:verify-node-vm-js",),
+    )
+
+    block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
+        hard_runtime_frontier_state={},
+        tool_results=(vague_failure,),
+        run_started=time.monotonic() - 424,
+        next_turn=9,
+        next_model_timeout_seconds=176,
+        requested_timeout=600,
+    )
+
+    assert block["failure_class"] == "model_budget_insufficient_for_required_patch"
+    assert block["minimum_enforced_model_timeout_seconds"] == 240.0
+
+
 def test_implement_v2_allows_short_recovery_hint_write_failure_patch_turn(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
@@ -10712,6 +10850,64 @@ def test_implement_v2_workframe_uses_runtime_sidecar_before_prompt_frontier() ->
     )
     assert "prompt-frontier-failure" not in json.dumps(bundle["reducer_inputs"], sort_keys=True)
     assert "memory access 0x00000000+4 outside mapped range" in workframe["latest_actionable"]["summary"]
+    assert workframe["required_next"]["kind"] == "patch_or_edit"
+
+
+def test_implement_v2_workframe_prefers_actionable_terminal_error_line() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Repair the current verifier failure."},
+        lane_config={"mode": "full"},
+    )
+    runtime_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-runtime-verifier",
+        mew_tool_call_id="tool-runtime-verifier",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr_tail": (
+                    "/app/vm.js:464\n"
+                    "    let addr = this.sym('DG_ScreenBuffer') || this.sym('screenbuffer') "
+                    "|| this.sym'I_VideoBuffer');\n"
+                    "                                                                                  ^^^^^^^^^^^^^^^\n"
+                    "\n"
+                    "SyntaxError: Unexpected string\n"
+                    "    at internalCompileFunction (node:internal/vm:76:18)\n"
+                ),
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "nonzero_exit",
+                    "class": "runtime_failure",
+                    "confidence": "high",
+                    "summary": "exit code 1",
+                },
+                "execution_contract_normalized": {
+                    "role": "runtime",
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                    "affected_paths": ["vm.js"],
+                },
+            },
+        ),
+        evidence_refs=("ev:runtime-verifier",),
+        content_refs=("cmd:runtime-output",),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((runtime_result,))
+    bundle = build_implement_v2_workframe_debug_bundle(lane_input, sidecar_events=events)
+    workframe = bundle["reducer_output"]
+
+    assert events[0]["summary"] == "SyntaxError: Unexpected string"
+    assert workframe["latest_actionable"]["summary"] == "SyntaxError: Unexpected string"
     assert workframe["required_next"]["kind"] == "patch_or_edit"
 
 
