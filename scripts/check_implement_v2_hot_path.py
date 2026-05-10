@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--expected-category",
         action="append",
         default=[],
-        choices=("patch/edit", "run_verifier", "inspect_latest_failure", "cheap_probe"),
+        choices=("patch/edit", "run_verifier", "inspect_latest_failure", "cheap_probe", "finish_with_evidence", "blocked"),
         help="allowed passing micro next-action category; may be repeated",
     )
     parser.add_argument("--max-active-todo-bytes", type=int, default=2048)

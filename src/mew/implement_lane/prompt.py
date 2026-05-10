@@ -17,7 +17,7 @@ from ..prompt_sections import (
 )
 from .tool_policy import ImplementLaneToolSpec, list_v2_tool_specs_for_mode
 from .types import ImplementLaneInput
-from .workframe import WorkFrameInputs, reduce_workframe
+from .workframe import WorkFrameInputs, canonicalize_workframe_inputs, reduce_workframe
 
 HOT_PATH_PROJECTION_SURFACE = "hot_path_projection"
 ORDINARY_RESIDENT_SUMMARY_SURFACE = "ordinary_resident_summary"
@@ -268,6 +268,71 @@ def implement_v2_prompt_section_metrics(lane_input: ImplementLaneInput) -> dict[
     return metrics
 
 
+def build_implement_v2_workframe_debug_bundle(
+    lane_input: ImplementLaneInput,
+    *,
+    active_work_todo: dict[str, object] | None = None,
+    hard_runtime_frontier: dict[str, object] | None = None,
+    repair_history: dict[str, object] | None = None,
+    prompt_inventory: tuple[dict[str, object], ...] = (),
+    turn_id: str = "prompt",
+) -> dict[str, object]:
+    """Build the WorkFrame replay/debug bundle from the same reducer used by the prompt."""
+
+    todo = _active_work_todo_state(lane_input.persisted_lane_state) if active_work_todo is None else dict(active_work_todo)
+    frontier = (
+        _hard_runtime_frontier_state(lane_input.persisted_lane_state)
+        if hard_runtime_frontier is None
+        else dict(hard_runtime_frontier)
+    )
+    history = _repair_history_state(lane_input.persisted_lane_state) if repair_history is None else dict(repair_history)
+    inputs = WorkFrameInputs(
+        attempt_id=lane_input.work_session_id or "implement-v2-prompt",
+        turn_id=turn_id,
+        task_id=lane_input.task_id,
+        objective=_task_objective(lane_input),
+        success_contract_ref=_success_contract_ref(lane_input),
+        constraints=("model_visible_workframe_only",),
+        sidecar_events=_workframe_prompt_sidecar_events(
+            active_work_todo=todo,
+            hard_runtime_frontier=frontier,
+            repair_history=history,
+        ),
+        prompt_inventory=prompt_inventory,
+        workspace_root=lane_input.workspace,
+        artifact_root=str(lane_input.lane_config.get("artifact_dir") or ""),
+    )
+    workframe, report = reduce_workframe(inputs)
+    visible = _workframe_visible_payload(workframe.as_dict())
+    return {
+        "schema_version": 1,
+        "turn_id": turn_id,
+        "reducer_inputs": {
+            "schema_version": 1,
+            "workframe_inputs": inputs.as_dict(),
+            "canonical": canonicalize_workframe_inputs(inputs),
+        },
+        "reducer_output": workframe.as_dict(),
+        "invariant_report": report.as_dict(),
+        "prompt_visible_workframe": visible,
+        "prompt_render_inventory": {
+            "schema_version": 1,
+            "sections": [dict(item) for item in prompt_inventory],
+        },
+        "workframe_cursor": {
+            "schema_version": 1,
+            "attempt_id": inputs.attempt_id,
+            "turn_id": turn_id,
+            "workframe_id": workframe.trace.workframe_id,
+            "input_hash": workframe.trace.input_hash,
+            "output_hash": workframe.trace.output_hash,
+            "reducer_schema_version": workframe.trace.reducer_schema_version,
+            "canonicalizer_version": workframe.trace.canonicalizer_version,
+            "previous_workframe_hash": inputs.previous_workframe_hash,
+        },
+    }
+
+
 def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, object]:
     sections = metrics.get("sections") if isinstance(metrics.get("sections"), list) else []
     inventory: list[dict[str, object]] = []
@@ -348,32 +413,26 @@ def _workframe_section_content(
     hard_runtime_frontier: dict[str, object],
     repair_history: dict[str, object],
 ) -> str:
-    workframe, _report = reduce_workframe(
-        WorkFrameInputs(
-            attempt_id=lane_input.work_session_id or "implement-v2-prompt",
-            turn_id="prompt",
-            task_id=lane_input.task_id,
-            objective=_task_objective(lane_input),
-            success_contract_ref=_success_contract_ref(lane_input),
-            constraints=("model_visible_workframe_only",),
-            sidecar_events=_workframe_prompt_sidecar_events(
-                active_work_todo=active_work_todo,
-                hard_runtime_frontier=hard_runtime_frontier,
-                repair_history=repair_history,
-            ),
-            workspace_root=lane_input.workspace,
-        )
+    bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        active_work_todo=active_work_todo,
+        hard_runtime_frontier=hard_runtime_frontier,
+        repair_history=repair_history,
     )
     return _bounded_compact_json(
-        {
-            "workframe": workframe.as_dict(),
-            "rule": (
-                "This is the only ordinary dynamic state object. Follow required_next, "
-                "avoid forbidden_next, and cite evidence refs when finishing."
-            ),
-        },
+        bundle["prompt_visible_workframe"],
         max_chars=4096,
     )
+
+
+def _workframe_visible_payload(workframe: dict[str, object]) -> dict[str, object]:
+    return {
+        "workframe": dict(workframe),
+        "rule": (
+            "This is the only ordinary dynamic state object. Follow required_next, "
+            "avoid forbidden_next, and cite evidence refs when finishing."
+        ),
+    }
 
 
 def _workframe_prompt_sidecar_events(
@@ -1046,6 +1105,7 @@ def _drop_empty_dict_values(value: dict[str, object]) -> dict[str, object]:
 
 
 __all__ = [
+    "build_implement_v2_workframe_debug_bundle",
     "build_implement_v2_prompt_sections",
     "FINISH_REPLAY_RECOVERY_SURFACE",
     "HOT_PATH_PROJECTION_SURFACE",

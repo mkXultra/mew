@@ -4152,7 +4152,9 @@ def test_implement_v2_does_not_classify_tmp_artifact_missing_read_as_first_write
 
     assert result.metrics["model_error"]["failure_class"] == "model_timeout"
     assert "semantic_failure_class" not in result.metrics["model_error"]
-    assert "lane_hard_runtime_frontier" not in result.updated_lane_state
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier", {})
+    assert "latest_build_failure" not in frontier
+    assert "fake failure" not in json.dumps(frontier, sort_keys=True)
 
 
 def test_implement_v2_runs_configured_final_verifier_closeout_before_low_budget_model_turn(tmp_path) -> None:
@@ -5298,7 +5300,9 @@ def test_implement_v2_live_json_ignores_model_frontier_update_by_default(tmp_pat
         max_turns=1,
     )
 
-    assert "lane_hard_runtime_frontier" not in result.updated_lane_state
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier", {})
+    assert "latest_build_failure" not in frontier
+    assert "fake failure" not in json.dumps(frontier, sort_keys=True)
     assert result.metrics["ignored_model_frontier_state_updates"] == 1
     detail_turn = result.updated_lane_state["proof_manifest"]["metrics"]["integration_observation"]["summary"]
     assert detail_turn["model_turns"] == 1
@@ -15773,9 +15777,12 @@ def test_implement_v2_ignores_model_frontier_update_even_with_tool_calls(tmp_pat
     frontier = result.updated_lane_state.get("lane_hard_runtime_frontier", {})
 
     assert result.metrics["ignored_model_frontier_state_updates"] == 1
+    assert result.metrics["legacy_projection_field_rejected_count"] == 1
     assert "source_roles" not in frontier
     assert "doomgeneric_img.c" not in json.dumps(frontier, sort_keys=True)
-    assert result.updated_lane_state["proof_manifest"]["tool_results"][0]["status"] == "completed"
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    assert tool_result["status"] == "invalid"
+    assert tool_result["content"][0]["failure_class"] == "legacy_projection_field_rejected"
 
 
 def test_implement_v2_frontier_runtime_failure_overrides_model_claim(tmp_path) -> None:
@@ -15841,14 +15848,13 @@ def test_implement_v2_frontier_runtime_failure_overrides_model_claim(tmp_path) -
         max_turns=1,
     )
 
-    failure = result.updated_lane_state["lane_hard_runtime_frontier"]["latest_build_failure"]
-
-    assert failure["command_run_id"] != "fabricated"
-    assert "build-1" in failure["command_run_id"]
-    assert failure["exit_code"] == 2
-    assert "real linker error" in failure["stderr_tail"]
-    assert result.updated_lane_state["lane_hard_runtime_frontier"]["build_target"]["target"] == "doomgeneric_mips"
-    assert result.updated_lane_state["lane_hard_runtime_frontier"]["final_artifact"]["path"] == "build/doomgeneric_mips"
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier", {})
+    assert "latest_build_failure" not in frontier
+    assert "fake failure" not in json.dumps(frontier, sort_keys=True)
+    assert result.metrics["legacy_projection_field_rejected_count"] == 1
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    assert tool_result["status"] == "invalid"
+    assert tool_result["content"][0]["failure_class"] == "legacy_projection_field_rejected"
 
 
 def test_implement_v2_frontier_demotes_marker_only_runtime_artifact_contract_mismatch(tmp_path) -> None:
@@ -17562,8 +17568,9 @@ def test_implement_v2_model_frontier_update_no_longer_infers_same_turn_expected_
     payload = tool_result["content"][0]
 
     assert result.metrics["ignored_model_frontier_state_updates"] == 1
-    assert payload["artifact_evidence"] == []
-    assert tool_result["status"] == "completed"
+    assert result.metrics["legacy_projection_field_rejected_count"] == 1
+    assert payload["failure_class"] == "legacy_projection_field_rejected"
+    assert tool_result["status"] == "invalid"
     assert "lane_hard_runtime_frontier" not in result.updated_lane_state
 
 
@@ -17617,8 +17624,8 @@ def test_implement_v2_model_frontier_update_no_longer_infers_from_read_only_plus
     exec_payload = result.updated_lane_state["proof_manifest"]["tool_results"][1]["content"][0]
 
     assert result.metrics["ignored_model_frontier_state_updates"] == 1
-    assert exec_payload["artifact_evidence"] == []
-    assert exec_payload["execution_contract_normalized"]["expected_artifacts"] == []
+    assert result.metrics["legacy_projection_field_rejected_count"] == 1
+    assert exec_payload["failure_class"] == "legacy_projection_field_rejected"
 
 
 def test_implement_v2_frontier_update_does_not_infer_artifact_for_mixed_no_contract_exec_turn(tmp_path) -> None:
@@ -17665,8 +17672,11 @@ def test_implement_v2_frontier_update_does_not_infer_artifact_for_mixed_no_contr
     )
     payloads = [item["content"][0] for item in result.updated_lane_state["proof_manifest"]["tool_results"]]
 
-    assert [payload["artifact_evidence"] for payload in payloads] == [[], []]
-    assert all(payload["execution_contract_normalized"]["expected_artifacts"] == [] for payload in payloads)
+    assert [payload["failure_class"] for payload in payloads] == [
+        "legacy_projection_field_rejected",
+        "legacy_projection_field_rejected",
+    ]
+    assert result.metrics["legacy_projection_field_rejected_count"] == 1
 
 
 def test_implement_v2_frontier_does_not_classify_build_artifact_missing_as_runtime(tmp_path) -> None:
@@ -17935,8 +17945,9 @@ def test_implement_v2_frontier_state_does_not_satisfy_finish_gate_without_termin
     assert result.status == "blocked"
     assert result.metrics["terminal_evidence_count"] == 0
     assert result.metrics["ignored_model_frontier_state_updates"] == 1
+    assert result.metrics["legacy_projection_field_rejected_count"] == 1
     assert "final_artifact" not in frontier
-    assert result.metrics["finish_gate_decision"]["decision"] != "allow_complete"
+    assert result.metrics["finish_gate_decision"].get("decision") != "allow_complete"
 
 
 def test_implement_v2_exec_task_complete_claim_is_blocked_even_with_terminal_evidence(tmp_path) -> None:

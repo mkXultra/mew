@@ -29,6 +29,7 @@ from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from ..prompt_sections import render_prompt_sections
 from .prompt import (
+    build_implement_v2_workframe_debug_bundle,
     build_implement_v2_prompt_sections,
     implement_v2_prompt_section_metrics,
     is_deep_probe_hard_runtime_task,
@@ -386,6 +387,7 @@ def run_live_json_implement_v2(
     )
     hard_runtime_progress_continuation_turns_used = 0
     ignored_model_frontier_state_updates = 0
+    legacy_projection_field_rejected_count = 0
     hard_runtime_progress_signatures_seen: set[str] = set()
     tool_contract_recovery_turn_limit = _tool_contract_recovery_turn_limit(lane_input)
     tool_contract_recovery_turns_used = 0
@@ -760,18 +762,81 @@ def run_live_json_implement_v2(
             raw_frontier_state_update = (
                 normalized.get("frontier_state_update") if isinstance(normalized.get("frontier_state_update"), dict) else {}
             )
+            raw_tool_calls = normalized.get("tool_calls") or ()
             if raw_frontier_state_update:
                 ignored_model_frontier_state_updates += 1
+                legacy_projection_field_rejected_count += 1
                 if model_turn_observations:
                     model_turn_observations[-1].setdefault("debug_events", []).append(
                         {
-                            "class": "legacy_projection_field_ignored",
+                            "class": "legacy_projection_field_rejected",
                             "field": "frontier_state_update",
-                            "reason": "model-authored frontier updates are not part of the WorkFrame response contract",
+                            "reason": "deleted model-authored WorkFrame-adjacent state fields are hard-rejected",
                         }
                     )
+                legacy_reason = (
+                    "legacy_projection_field_rejected: frontier_state_update is not part of the WorkFrame "
+                    "response contract"
+                )
+                current_calls = adapter.normalize_tool_calls(
+                    lane_attempt_id=lane_attempt_id,
+                    turn_index=turn_index,
+                    calls=raw_tool_calls,
+                )
+                current_results = tuple(
+                    build_invalid_tool_result(
+                        call,
+                        reason=legacy_reason,
+                        extra_content={
+                            "failure_class": "legacy_projection_field_rejected",
+                            "field": "frontier_state_update",
+                        },
+                    )
+                    for call in current_calls
+                )
+                tool_calls.extend(current_calls)
+                tool_results.extend(current_results)
+                transcript.extend(
+                    adapter.transcript_events_for_turn(
+                        lane=IMPLEMENT_V2_LANE,
+                        lane_attempt_id=lane_attempt_id,
+                        turn_id=turn_id,
+                        text=str(normalized.get("summary") or ""),
+                        tool_calls=current_calls,
+                    )
+                )
+                transcript.extend(
+                    _tool_result_transcript_events(
+                        lane_attempt_id=lane_attempt_id,
+                        turn_id=turn_id,
+                        tool_results=current_results,
+                    )
+                )
+                history_entry = {
+                    "turn": turn_index,
+                    "summary": str(normalized.get("summary") or ""),
+                    "legacy_projection_field_rejected": {
+                        "field": "frontier_state_update",
+                        "reason": legacy_reason,
+                    },
+                    "tool_calls": [call.as_dict() for call in current_calls],
+                    "tool_results": [_full_tool_result_for_history(result) for result in current_results],
+                }
+                prompt_history_entry = {
+                    "turn": history_entry["turn"],
+                    "summary": history_entry["summary"],
+                    "tool_calls": [_provider_visible_tool_call_for_history(call) for call in current_calls],
+                    "tool_results": [_provider_visible_tool_result_for_history(result) for result in current_results],
+                }
+                history.append(history_entry)
+                prompt_history.append(prompt_history_entry)
+                finish_arguments = {
+                    "outcome": "blocked",
+                    "summary": legacy_reason,
+                    "failure_class": "legacy_projection_field_rejected",
+                }
+                break
             frontier_state_update: dict[str, object] = {}
-            raw_tool_calls = normalized.get("tool_calls") or ()
             if raw_tool_calls and frontier_state_update:
                 hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
                     existing=hard_runtime_frontier_state,
@@ -1334,13 +1399,31 @@ def run_live_json_implement_v2(
             else ""
         ),
     )
-    prompt_metrics = implement_v2_prompt_section_metrics(
-        _lane_input_with_runtime_prompt_state(
-            lane_input,
-            active_work_todo_state=active_work_todo_state,
-            hard_runtime_frontier_state=hard_runtime_frontier_state,
-        )
+    runtime_prompt_lane_input = _lane_input_with_runtime_prompt_state(
+        lane_input,
+        active_work_todo_state=active_work_todo_state,
+        hard_runtime_frontier_state=hard_runtime_frontier_state,
     )
+    prompt_metrics = implement_v2_prompt_section_metrics(runtime_prompt_lane_input)
+    hot_path_prompt_metrics = _dict_or_empty(prompt_metrics.get("hot_path_collapse"))
+    prompt_inventory = tuple(
+        dict(item)
+        for item in (
+            hot_path_prompt_metrics.get("normal_section_inventory")
+            if isinstance(hot_path_prompt_metrics.get("normal_section_inventory"), list)
+            else []
+        )
+        if isinstance(item, dict)
+    )
+    workframe_debug_bundle = build_implement_v2_workframe_debug_bundle(
+        runtime_prompt_lane_input,
+        active_work_todo=active_work_todo_state,
+        hard_runtime_frontier=hard_runtime_frontier_state,
+        prompt_inventory=prompt_inventory,
+        turn_id=f"turn-{model_turns}-final",
+    )
+    workframe_output = _dict_or_empty(workframe_debug_bundle.get("reducer_output"))
+    workframe_trace = _dict_or_empty(workframe_output.get("trace"))
     hot_path_projection_metrics = _hot_path_projection_runtime_metrics(
         prompt_metrics,
         model_turn_observations=tuple(model_turn_observations),
@@ -1378,6 +1461,7 @@ def run_live_json_implement_v2(
             "hard_runtime_progress_continuation_turn_limit": hard_runtime_progress_continuation_turn_limit,
             "hard_runtime_progress_continuation_turns_used": hard_runtime_progress_continuation_turns_used,
             "ignored_model_frontier_state_updates": ignored_model_frontier_state_updates,
+            "legacy_projection_field_rejected_count": legacy_projection_field_rejected_count,
             "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "command_closeout_count": len(closeout_payloads),
@@ -1396,6 +1480,15 @@ def run_live_json_implement_v2(
             "integration_observation": integration_observation,
             "hot_path_projection": hot_path_projection_metrics,
             "resident_sidecar_state": resident_sidecar_metrics,
+            "workframe": {
+                "schema_version": 1,
+                "phase": "m6_24_workframe_redesign_phase_6",
+                "input_hash": workframe_trace.get("input_hash"),
+                "output_hash": workframe_trace.get("output_hash"),
+                "invariant_status": _dict_or_empty(workframe_debug_bundle.get("invariant_report")).get("status"),
+                "current_phase": workframe_output.get("current_phase"),
+                "bundle_root": f"workframes/{workframe_debug_bundle.get('turn_id')}",
+            },
         },
     )
     validation = _validate_write_proof_manifest(manifest)
@@ -1410,6 +1503,7 @@ def run_live_json_implement_v2(
         transcript=tuple(transcript),
         history=tuple(history),
         integration_observation_detail=tuple(model_turn_observations),
+        workframe_debug_bundle=workframe_debug_bundle,
     )
     summary = str(finish_arguments.get("summary") or "").strip() or _live_status_summary(status)
     return ImplementLaneResult(
@@ -1454,6 +1548,7 @@ def run_live_json_implement_v2(
             "hard_runtime_progress_continuation_turn_limit": hard_runtime_progress_continuation_turn_limit,
             "hard_runtime_progress_continuation_turns_used": hard_runtime_progress_continuation_turns_used,
             "ignored_model_frontier_state_updates": ignored_model_frontier_state_updates,
+            "legacy_projection_field_rejected_count": legacy_projection_field_rejected_count,
             "tool_contract_recovery_turn_limit": tool_contract_recovery_turn_limit,
             "tool_contract_recovery_turns_used": tool_contract_recovery_turns_used,
             "finish_gate_block_count": finish_gate_block_count,
@@ -9749,6 +9844,7 @@ def _write_live_json_artifacts(
     transcript: tuple[ImplementLaneTranscriptEvent, ...],
     history: tuple[dict[str, object], ...],
     integration_observation_detail: tuple[dict[str, object], ...] = (),
+    workframe_debug_bundle: dict[str, object] | None = None,
 ) -> tuple[str, ...]:
     artifact_dir = str(lane_input.lane_config.get("artifact_dir") or "").strip()
     if not artifact_dir:
@@ -9766,6 +9862,25 @@ def _write_live_json_artifacts(
     )
     history_path.write_text(json.dumps(list(history), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     paths = [str(manifest_path), str(transcript_path), str(history_path)]
+    if workframe_debug_bundle:
+        turn_id = str(workframe_debug_bundle.get("turn_id") or "turn-final").strip() or "turn-final"
+        workframe_root = root / "workframes" / _safe_artifact_segment(turn_id)
+        workframe_root.mkdir(parents=True, exist_ok=True)
+        bundle_files = {
+            "reducer_inputs.json": workframe_debug_bundle.get("reducer_inputs"),
+            "reducer_output.workframe.json": workframe_debug_bundle.get("reducer_output"),
+            "invariant_report.json": workframe_debug_bundle.get("invariant_report"),
+            "prompt_visible_workframe.json": workframe_debug_bundle.get("prompt_visible_workframe"),
+            "prompt_render_inventory.json": workframe_debug_bundle.get("prompt_render_inventory"),
+            "workframe_cursor.json": workframe_debug_bundle.get("workframe_cursor"),
+        }
+        for filename, payload in bundle_files.items():
+            path = workframe_root / filename
+            path.write_text(
+                json.dumps(payload or {}, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            paths.append(str(path))
     if _should_write_integration_observation_detail(lane_input):
         integration_observation_path.write_text(
             json.dumps(
@@ -9778,6 +9893,15 @@ def _write_live_json_artifacts(
         )
         paths.append(str(integration_observation_path))
     return tuple(paths)
+
+
+def _dict_or_empty(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _safe_artifact_segment(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.:-]+", "-", value.strip())
+    return cleaned.strip(".-") or "artifact"
 
 
 __all__ = [
