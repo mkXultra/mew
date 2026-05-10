@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-09
+Last updated: 2026-05-10
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -345,8 +345,10 @@ compatibility WorkFrame redesign now exists at
 paper-grounded support in
 `docs/REVIEW_2026-05-10_M6_24_WORKFRAME_LITERATURE_REVIEW.md`. The review loop
 resolved round-1 findings and round 2 returned no remaining `needs_fix`
-findings. If M6.24 continues to expose boundary leaks, prefer implementing this
-WorkFrame reducer in phases over another long polish loop.
+findings. Active decision as of 2026-05-10: start WorkFrame Phase 0. This
+supersedes older same-shape `step-check-10min` / `speed_1` / `proof_5`
+next-action rows until Phase 0 closes. See
+`docs/M6_24_WORKFRAME_PHASE0_PREP_2026-05-10.md`.
 
 | Phase | Status | Current evidence / remaining gap |
 |---|---|---|
@@ -358,7 +360,8 @@ WorkFrame reducer in phases over another long polish loop.
 | Phase 5 finish cited evidence | active/partial | Typed-evidence acceptance and visual/runtime finish gates are substantially implemented. The `20260510-064431` diagnostic exposed a finish-recovery shape issue: a raw `command_run` id was invalid as a typed evidence ref, then the visual-quality blocker pushed the model toward a self-authored verifier instead of task-provided tests/reference/expected-output markers. The current reviewed repair resolves safe raw evidence aliases to typed events and tightens the visual-quality recovery prompt. Legacy/string gates remain guardrails; do not remove or close until typed evidence proves equivalent or stricter coverage. |
 | Phase 6 replay/dogfood/emulator/step-shape gate | active/open | The fastcheck command exists and the current saved `make-mips-interpreter` artifact passes manifest, prompt-leak, baseline sidecar, latest-failure, and micro next-action checks. The `20260510-074203` step-shape moved past the prewrite stall but exposed low-wall final verification closeout after a late source mutation. The close path remains: focused UT -> HOT_PATH fastcheck -> exactly one same-shape 10min step-shape -> reference-step comparison. |
 
-Phase implementation order:
+Historical HOT_PATH implementation order, superseded while WorkFrame Phase 0 is
+active:
 
 1. Close Phase 2 first. `latest_actionable_failure_shape` is the active red
    contract, and unstable latest-failure projection makes every later model
@@ -373,22 +376,12 @@ Phase implementation order:
    should not be expanded while latest-actionable-failure projection is still
    unreliable.
 
-Immediate next action for this phase: commit the reviewed generic
-final-verifier closeout repair exposed by
-`mew-make-mips-interpreter-step-check-10min-20260510-074203`. The repair does
-not add MIPS/VM solver logic. It detects a latest completed source mutation
-without a later strict configured verifier and, only under low wall/model
-budget, runs one deterministic configured `verify_command` closeout.
-Non-verifier diagnostics do not suppress it, the closeout does not increment
-`model_turns`, and the finish event is attached to the closeout turn.
-Validation passed: full `tests/test_implement_lane.py` (`400 passed`),
-`tests/test_hot_path_fastcheck.py tests/test_execution_evidence.py
-tests/test_acceptance.py` (`210 passed`), focused closeout tests (`16 passed`),
-HOT_PATH fastcheck on `074203`, scoped ruff, and diff-check. Codex-ultra review
-session `019e0f00-c659-7172-8a2d-a5955bbe142a` returned `STATUS: APPROVE`.
-After commit and context save, run exactly one same-shape
-`make-mips-interpreter` `step-check-10min`. Do not run `speed_1` / `proof_5`
-before that fresh step-shape comparison loop.
+Immediate next action for this phase: implement WorkFrame Phase 0 from
+`docs/DESIGN_2026-05-10_M6_24_IMPLEMENT_V2_WORKFRAME_REDESIGN.md`. The target
+is schema plus fixture-only deterministic reducer, prompt inventory checks,
+debug bundle documentation, and baseline metric recording. Do not run live
+Harbor, same-shape `step-check-10min`, `speed_1`, or `proof_5` while Phase 0 is
+open.
 
 ## Historical Evidence
 
@@ -408,27 +401,19 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. Continue the `implement_v2` scoped rebaseline from
-   `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`; `make-doom-for-mips` is
-   recorded/deferred and should not pull the session into another same-shape
-   proof loop.
-2. For the current generic `make-mips-interpreter` repair, do not spend another
-   live `step-check-10min` as the first detector. Implement and run the
-   HOT_PATH fast inner loop from
-   `docs/DESIGN_2026-05-08_M6_24_IMPLEMENT_V2_HOT_PATH_COLLAPSE.md` first:
-   focused UT, saved-artifact replay, prompt leak checks, sidecar/projection
-   checks, latest-actionable-failure shape checks, and a required hash-bound
-   micro next-action check that reuses current fixture evidence or refreshes it
-   with one bounded live `auth.json` LLM call. Only after that fastcheck is
-   green should the session run one same-shape 10min step-shape proof with
-   `selected_lane=implement_v2`, `--max-wall-seconds 600`, complete artifact
-   capture, and integration observation enabled when comparing to Codex steps.
-3. If the pre-speed gate is green and the 10min step-shape proof is Codex-like
-   enough, run exactly one same-shape `make-mips-interpreter
-   selected_lane=implement_v2` speed_1 with task-correct cwd and complete
-   artifact capture.
-4. If any run misses, is harness-invalid, lacks replayable artifacts, or exposes
-   a structural lane gap, stop measuring unrelated tasks and repair via
-   replay/dogfood/emulator before rerunning the same shape.
+1. WorkFrame Phase 0 is the active M6.24 focus. Implement the schema,
+   fixture-only reducer, prompt inventory checks, debug bundle documentation,
+   and baseline metric recording from
+   `docs/DESIGN_2026-05-10_M6_24_IMPLEMENT_V2_WORKFRAME_REDESIGN.md`.
+2. Use `docs/M6_24_WORKFRAME_PHASE0_PREP_2026-05-10.md` as the reentry guard.
+   It supersedes older HOT_PATH polish rows that point to a same-shape
+   diagnostic.
+3. Phase 0 validation is local only: focused UT, deterministic fixture
+   recomputation, prompt inventory checks, baseline band checks, and
+   `git diff --check`. No live Harbor, `step-check-10min`, `speed_1`, or
+   `proof_5`.
+4. After Phase 0 closes, decide the next WorkFrame phase from the design. Do not
+   silently return to old frontier/todo/evidence patching unless the WorkFrame
+   close gate explicitly fails and the failure is recorded.
 5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.
