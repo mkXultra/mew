@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_implement_v2_scoped_rebaseline`.
+Current controller mode: `m6_24_workframe_proof_gate`.
 
 Scope:
 
