@@ -942,10 +942,13 @@ def test_workframe_phase3_missing_obligations_block_fresh_verifier_finish() -> N
     )
 
     assert report.status == "pass"
-    assert workframe.current_phase == "cheap_probe"
-    assert workframe.finish_readiness.state == "not_ready"
+    assert workframe.current_phase == "finish_blocked"
+    assert workframe.finish_readiness.state == "blocked"
     assert workframe.finish_readiness.blockers == ("missing_typed_obligations",)
     assert workframe.finish_readiness.missing_obligations == ("oracle:artifact-fresh",)
+    assert workframe.required_next
+    assert workframe.required_next.kind == "run_verifier"
+    assert workframe.required_next.evidence_refs == ("oracle:artifact-fresh",)
 
 
 def test_workframe_phase3_diagnostic_artifact_contract_is_non_proof_sidecar() -> None:
@@ -1011,10 +1014,123 @@ def test_workframe_phase3_projects_missing_obligation_refs_only() -> None:
     )
 
     assert report.status == "pass"
+    assert workframe.current_phase == "finish_blocked"
+    assert workframe.finish_readiness.state == "blocked"
     assert workframe.finish_readiness.missing_obligations == ("contract:verify", "oracle:verify-pass")
+    assert workframe.required_next
+    assert workframe.required_next.kind == "run_verifier"
+    assert workframe.required_next.evidence_refs == ("contract:verify", "oracle:verify-pass")
     serialized = json.dumps(workframe.as_dict(), sort_keys=True)
     assert "verifier_pass" not in serialized
     assert "missing_obligations" in serialized
+
+
+def test_workframe_phase5_low_budget_source_mutation_schedules_controller_closeout() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-2",
+            task_id="task-1",
+            objective="Close out source mutation under low budget.",
+            success_contract_ref="task-contract:pytest",
+            sidecar_events=(
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 1,
+                    "event_id": "patch-1",
+                    "status": "passed",
+                    "path": "src/app.py",
+                    "budget_class": "low",
+                    "evidence_refs": ["sidecar:patch-1"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "controller_closeout"
+    assert workframe.verifier_state.configured_verifier_ref == "task-contract:pytest"
+    assert workframe.verifier_state.budget_closeout_required is True
+    assert workframe.required_next
+    assert workframe.required_next.kind == "run_verifier"
+    assert workframe.required_next.after == "finish_or_block"
+    assert workframe.required_next.evidence_refs == ("sidecar:patch-1",)
+    assert "finish" in [item.kind for item in workframe.forbidden_next]
+
+
+def test_workframe_phase5_low_budget_does_not_mask_later_verifier_failure() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-2",
+            task_id="task-1",
+            objective="Repair the real verifier failure before closeout.",
+            success_contract_ref="task-contract:pytest",
+            sidecar_events=(
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 1,
+                    "event_id": "patch-1",
+                    "status": "passed",
+                    "path": "src/app.py",
+                    "budget_class": "low",
+                    "evidence_refs": ["sidecar:patch-1"],
+                },
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 2,
+                    "event_id": "verify-2",
+                    "status": "failed",
+                    "summary": "pytest reports assertion failure in test_app",
+                    "typed_evidence_id": "ev:verify-2",
+                    "execution_contract_normalized": {
+                        "id": "contract:verify-2",
+                        "role": "verify",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "repair_after_verifier_failure"
+    assert workframe.verifier_state.budget_closeout_required is True
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.source_ref == "ev:verify-2"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "patch_or_edit"
+
+
+def test_workframe_phase5_non_low_budget_source_mutation_requires_configured_verifier() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-2",
+            task_id="task-1",
+            objective="Verify source mutation before finish.",
+            success_contract_ref="task-contract:pytest",
+            sidecar_events=(
+                {
+                    "kind": "source_mutation",
+                    "event_sequence": 1,
+                    "event_id": "patch-1",
+                    "status": "passed",
+                    "path": "src/app.py",
+                    "evidence_refs": ["sidecar:patch-1"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "verify_after_mutation"
+    assert workframe.verifier_state.configured_verifier_ref == "task-contract:pytest"
+    assert workframe.verifier_state.budget_closeout_required is False
+    assert workframe.required_next
+    assert workframe.required_next.kind == "run_verifier"
+    assert workframe.required_next.evidence_refs == ("sidecar:patch-1",)
 
 
 def test_workframe_phase0_prompt_inventory_checker_detects_legacy_projection_presence() -> None:

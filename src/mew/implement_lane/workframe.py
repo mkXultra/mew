@@ -446,6 +446,12 @@ def validate_workframe(workframe: WorkFrame, *, inputs: WorkFrameInputs) -> Work
         failed.append({"code": "finish_false_positive", "reason": "source mutation lacks fresh verifier"})
     else:
         passed.append("finish_not_ready_when_verifier_stale")
+    if workframe.current_phase == "finish_ready" and (
+        not workframe.required_next or workframe.required_next.kind != "finish" or not workframe.required_next.evidence_refs
+    ):
+        failed.append({"code": "finish_ready_missing_evidence_refs"})
+    else:
+        passed.append("finish_ready_requires_evidence_refs")
     if _has_conflicting_event_sequences(inputs.sidecar_events):
         failed.append({"code": "reducer_input_conflicting_event_sequence"})
     else:
@@ -691,7 +697,7 @@ def _finish_readiness_from_facts(facts: dict[str, object]) -> WorkFrameFinishRea
     missing_obligations = tuple(str(item) for item in facts.get("missing_obligations") or () if str(item))
     if missing_obligations:
         return WorkFrameFinishReadiness(
-            state="not_ready",
+            state="blocked",
             blockers=("missing_typed_obligations",),
             missing_obligations=missing_obligations,
         )
@@ -738,12 +744,12 @@ def _required_next_from_facts(
             reason="fresh passing verifier evidence is available",
             evidence_refs=finish_readiness.required_evidence_refs,
         )
-    if facts.get("budget_closeout_required"):
+    if finish_readiness.state == "blocked" and finish_readiness.missing_obligations:
         return WorkFrameRequiredNext(
             kind="run_verifier",
-            reason="latest source mutation has no fresh strict verifier and budget requires closeout",
+            reason="finish is blocked by missing typed obligations; collect and cite verifier evidence",
             after="finish_or_block",
-            evidence_refs=tuple(ref for ref in (str(facts.get("latest_mutation_ref") or ""),) if ref),
+            evidence_refs=finish_readiness.missing_obligations,
         )
     if latest_actionable and latest_actionable.family != "verifier_stale_after_mutation":
         next_kind = _required_next_kind_for_generic_family(latest_actionable.generic_family)
@@ -753,6 +759,13 @@ def _required_next_from_facts(
             target_paths=_paths_from_failure(facts.get("latest_failure")),
             after="run_configured_verifier" if next_kind == "patch_or_edit" else "patch_or_edit_or_block",
             evidence_refs=latest_actionable.evidence_refs or (latest_actionable.source_ref,),
+        )
+    if facts.get("budget_closeout_required"):
+        return WorkFrameRequiredNext(
+            kind="run_verifier",
+            reason="latest source mutation has no fresh strict verifier and budget requires closeout",
+            after="finish_or_block",
+            evidence_refs=tuple(ref for ref in (str(facts.get("latest_mutation_ref") or ""),) if ref),
         )
     if facts.get("source_changed_since_verifier"):
         return WorkFrameRequiredNext(
@@ -794,6 +807,8 @@ def _phase_from_facts(
 ) -> WorkFramePhase:
     if finish_readiness.state == "ready":
         return "finish_ready"
+    if finish_readiness.state == "blocked":
+        return "finish_blocked"
     if required_next and required_next.kind == "run_verifier" and facts.get("budget_closeout_required"):
         return "controller_closeout"
     if required_next and required_next.kind == "run_verifier":
@@ -877,10 +892,19 @@ def _event_sequence(event: object) -> int:
 def _event_ref(event: object) -> str:
     if not isinstance(event, dict):
         return ""
-    for key in ("evidence_ref", "event_ref", "command_run_id", "typed_evidence_id", "id", "event_id"):
+    for key in ("evidence_ref", "event_ref", "command_run_id", "typed_evidence_id", "id"):
         value = str(event.get(key) or "").strip()
         if value:
             return value
+    raw_refs = event.get("evidence_refs")
+    if isinstance(raw_refs, (list, tuple)):
+        for item in raw_refs:
+            value = str(item or "").strip()
+            if value:
+                return value
+    event_id = str(event.get("event_id") or "").strip()
+    if event_id:
+        return event_id
     sequence = _event_sequence(event)
     return f"sidecar:event:{sequence}" if sequence >= 0 else ""
 
