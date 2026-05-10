@@ -4105,8 +4105,9 @@ def test_implement_v2_active_work_todo_first_write_due_is_visible_next_turn(tmp_
     readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
 
     assert len(prompts) == 2
-    assert '"first_write_due":true' in prompts[1]
-    assert "Implement V2 Active Work Todo" in prompts[1]
+    assert "first_write_due" in prompts[1]
+    assert '"kind":"patch_or_edit"' in prompts[1]
+    assert "Implement V2 WorkFrame" in prompts[1]
     assert target.read_text(encoding="utf-8") == "print('done')\n"
     assert readiness["status"] == "written"
     assert readiness["first_write_attempt_turn"] == 2
@@ -5070,7 +5071,7 @@ def test_implement_v2_prompt_sections_include_active_coding_rhythm() -> None:
     assert "run_command otherwise for probes, builds, runtime execution, and verification" in section.content
 
 
-def test_implement_v2_prompt_sections_include_active_work_todo_readiness() -> None:
+def test_implement_v2_prompt_sections_include_single_dynamic_workframe_state() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -5097,16 +5098,23 @@ def test_implement_v2_prompt_sections_include_active_work_todo_readiness() -> No
     )
 
     sections = build_implement_v2_prompt_sections(lane_input)
-    section = next(item for item in sections if item.id == "implement_v2_active_work_todo")
+    by_id = {section.id: section for section in sections}
+    dynamic_sections = [section for section in sections if section.stability == "dynamic"]
+    section = by_id["implement_v2_workframe"]
 
+    assert [item.id for item in dynamic_sections] == ["implement_v2_workframe"]
+    assert "implement_v2_active_work_todo" not in by_id
+    assert "implement_v2_repair_history" not in by_id
+    assert "implement_v2_hard_runtime_frontier_state" not in by_id
     assert section.cache_policy == "dynamic"
     assert section.stability == "dynamic"
-    assert "current_work" in section.content
-    assert "first_write_due" in section.content
-    assert "required_next_action" in section.content
+    assert '"workframe":' in section.content
+    assert '"required_next":' in section.content
     assert "stale_exact_edit" in section.content
-    assert '"target_paths":' in section.content
     assert '"src/app.py"' in section.content
+    assert "sidecar:active_work_todo" not in section.content
+    assert "sidecar:lane_hard_runtime_frontier" not in section.content
+    assert "sidecar:lane_repair_history" not in section.content
 
 
 def test_implement_v2_live_json_prompt_omits_frontier_update_contract_without_frontier(tmp_path) -> None:
@@ -5130,6 +5138,11 @@ def test_implement_v2_live_json_prompt_omits_frontier_update_contract_without_fr
 
     assert '"frontier_state_update"' not in prompt
     assert "implement_v2_hard_runtime_frontier_state" not in prompt
+    assert "implement_v2_active_work_todo" not in prompt
+    assert "implement_v2_repair_history" not in prompt
+    assert "sidecar:active_work_todo" not in prompt
+    assert "sidecar:lane_hard_runtime_frontier" not in prompt
+    assert "sidecar:lane_repair_history" not in prompt
     assert '"evidence_refs"' in prompt
     assert '"oracle_refs": [\n      "oracle:..."\n    ]' in prompt
     assert '"acceptance_evidence"' not in prompt
@@ -5228,7 +5241,7 @@ def test_implement_v2_live_json_prompt_hides_frontier_update_contract_by_default
     assert "mew derives the latest failure from paired tool results" not in prompt
 
 
-def test_implement_v2_live_json_prompt_adds_frontier_update_contract_with_debug_opt_in(tmp_path) -> None:
+def test_implement_v2_live_json_prompt_hides_frontier_update_contract_even_with_legacy_debug_opt_in(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -5248,13 +5261,13 @@ def test_implement_v2_live_json_prompt_adds_frontier_update_contract_with_debug_
         history=(),
     )
 
-    assert '"frontier_state_update"' in prompt
-    assert '"use_only_when": "a hard-runtime or compatibility frontier genuinely changed"' in prompt
-    assert "mew derives the latest failure from paired tool results" in prompt
+    assert '"frontier_state_update"' not in prompt
+    assert '"use_only_when": "a hard-runtime or compatibility frontier genuinely changed"' not in prompt
+    assert "mew derives the latest failure from paired tool results" not in prompt
     assert '"latest_failure"' not in prompt
     assert '"latest_runtime_failure"' not in prompt
     assert '"latest_build_failure"' not in prompt
-    assert '"next_verifier_shaped_command"' in prompt
+    assert '"next_verifier_shaped_command"' not in prompt
     assert '"source_roles"' not in prompt
 
 
@@ -5287,6 +5300,8 @@ def test_implement_v2_live_json_ignores_model_frontier_update_by_default(tmp_pat
 
     assert "lane_hard_runtime_frontier" not in result.updated_lane_state
     assert result.metrics["ignored_model_frontier_state_updates"] == 1
+    detail_turn = result.updated_lane_state["proof_manifest"]["metrics"]["integration_observation"]["summary"]
+    assert detail_turn["model_turns"] == 1
 
 
 def test_implement_v2_integration_observation_summary_is_state_safe_by_default(tmp_path) -> None:
@@ -5330,11 +5345,11 @@ def test_implement_v2_integration_observation_summary_is_state_safe_by_default(t
     assert "model_turns" not in observation
     assert secret not in serialized
     assert len(serialized.encode("utf-8")) < 8192
-    assert hot_path["phase"] == "m6_24_hot_path_collapse_phase_0"
+    assert hot_path["phase"] == "m6_24_workframe_redesign_phase_1"
     assert hot_path["normal_full_prompt_bytes"] > 0
     assert hot_path["normal_full_prompt_bytes"] >= hot_path["normal_prompt_section_bytes"]
     assert hot_path["provider_visible_tool_result_bytes"] == 0
-    assert sidecar["phase"] == "m6_24_hot_path_collapse_phase_0"
+    assert sidecar["phase"] == "m6_24_workframe_redesign_phase_1"
     assert sidecar["surface"] == "resident_sidecar_state"
     assert sidecar["total_bytes"] > 0
     assert sidecar["per_turn_growth_bytes"] > 0
@@ -9202,10 +9217,11 @@ def test_implement_v2_prompt_metrics_are_memory_light_by_default() -> None:
     assert by_id["implement_v2_lane_base"]["cache_hint"] == "cacheable_prefix"
     assert by_id["implement_v2_execution_artifact_contract"]["cache_hint"] == "cacheable_prefix"
     assert by_id["implement_v2_compatibility_frontier"]["cache_hint"] == "cacheable_prefix"
-    assert by_id["implement_v2_lane_state"]["cache_hint"] == "dynamic"
+    assert by_id["implement_v2_lane_state"]["cache_hint"] == "session_specific"
+    assert by_id["implement_v2_workframe"]["cache_hint"] == "dynamic"
 
 
-def test_implement_v2_prompt_metrics_include_hot_path_collapse_phase0_inventory() -> None:
+def test_implement_v2_prompt_metrics_include_workframe_phase1_inventory() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -9228,25 +9244,28 @@ def test_implement_v2_prompt_metrics_include_hot_path_collapse_phase0_inventory(
     inventory = {section["id"]: section for section in collapse["normal_section_inventory"]}
 
     assert collapse["schema_version"] == 1
-    assert collapse["phase"] == "m6_24_hot_path_collapse_phase_0"
+    assert collapse["phase"] == "m6_24_workframe_redesign_phase_1"
     assert collapse["surfaces"]["hot_path_projection"] == "hot_path_projection"
     assert collapse["surfaces"]["resident_sidecar_state"] == "resident_sidecar_state"
     assert collapse["surfaces"]["finish_replay_recovery"] == "finish_replay_recovery"
     assert "normal_full_prompt_bytes" not in collapse
     assert collapse["normal_prompt_section_bytes"] == metrics["total_chars"]
     assert collapse["normal_static_cacheable_bytes"] > 0
-    assert collapse["ordinary_resident_summary_bytes"] > 0
+    assert collapse["ordinary_resident_summary_bytes"] == 0
     assert collapse["resident_model_visible_bytes"] == 0
     assert inventory["implement_v2_lane_base"]["surface"] == "hot_path_projection"
-    assert inventory["implement_v2_active_work_todo"]["surface"] == "ordinary_resident_summary"
-    assert inventory["implement_v2_hard_runtime_frontier_state"]["surface"] == "ordinary_resident_summary"
+    assert inventory["implement_v2_workframe"]["surface"] == "hot_path_projection"
+    assert inventory["implement_v2_workframe"]["cache_policy"] == "dynamic"
+    assert "implement_v2_active_work_todo" not in inventory
+    assert "implement_v2_hard_runtime_frontier_state" not in inventory
+    assert "implement_v2_repair_history" not in inventory
     assert inventory["implement_v2_execution_artifact_contract"]["surface"] == "finish_replay_recovery"
     ordinary_resident_bytes = sum(
         section["bytes"]
         for section in collapse["normal_section_inventory"]
         if section["surface"] == "ordinary_resident_summary"
     )
-    assert ordinary_resident_bytes <= 1536
+    assert ordinary_resident_bytes == 0
 
 
 def test_implement_v2_active_coding_rhythm_requires_probe_fallbacks() -> None:
@@ -9324,7 +9343,7 @@ def test_implement_v2_v0_filters_memory_even_when_memory_summary_exists() -> Non
     assert "do-not-leak" not in lane_state.content
 
 
-def test_implement_v2_prompt_adds_dynamic_repair_history_section() -> None:
+def test_implement_v2_prompt_folds_repair_history_into_workframe_section() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -9344,17 +9363,17 @@ def test_implement_v2_prompt_adds_dynamic_repair_history_section() -> None:
     metrics = implement_v2_prompt_section_metrics(lane_input)
     by_id = {section["id"]: section for section in metrics["sections"]}
     sections = build_implement_v2_prompt_sections(lane_input)
-    repair_section = next(section for section in sections if section.id == "implement_v2_repair_history")
+    workframe_section = next(section for section in sections if section.id == "implement_v2_workframe")
     lane_state = next(section for section in sections if section.id == "implement_v2_lane_state")
 
-    assert by_id["implement_v2_repair_history"]["cache_hint"] == "dynamic"
-    assert "repair_card" in repair_section.content
-    assert "avoid_repeated_repairs" in repair_section.content
-    assert "latest runtime trace" in repair_section.content
+    assert "implement_v2_repair_history" not in by_id
+    assert by_id["implement_v2_workframe"]["cache_hint"] == "dynamic"
+    assert "repair_history" in workframe_section.content
+    assert "latest runtime trace" in workframe_section.content
     assert "lane_repair_history" not in lane_state.content
 
 
-def test_implement_v2_repair_history_section_is_bounded() -> None:
+def test_implement_v2_workframe_section_is_bounded_with_large_repair_history() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -9366,15 +9385,13 @@ def test_implement_v2_repair_history_section_is_bounded() -> None:
     )
 
     sections = build_implement_v2_prompt_sections(lane_input)
-    repair_section = next(section for section in sections if section.id == "implement_v2_repair_history")
+    workframe_section = next(section for section in sections if section.id == "implement_v2_workframe")
 
-    assert len(repair_section.content) <= 1536
-    assert "__mew_truncated__" in repair_section.content
-    assert "preview" not in repair_section.content
-    assert "quoted" not in repair_section.content
+    assert len(workframe_section.content) <= 4096
+    assert "quoted" not in workframe_section.content
 
 
-def test_implement_v2_repair_history_omits_nested_summary_payloads() -> None:
+def test_implement_v2_workframe_omits_nested_repair_history_payloads() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -9393,16 +9410,14 @@ def test_implement_v2_repair_history_omits_nested_summary_payloads() -> None:
     )
 
     sections = build_implement_v2_prompt_sections(lane_input)
-    repair_section = next(section for section in sections if section.id == "implement_v2_repair_history")
+    workframe_section = next(section for section in sections if section.id == "implement_v2_workframe")
 
-    assert "repair_card" in repair_section.content
-    assert "runtime" in repair_section.content
-    assert "proof_object" not in repair_section.content
-    assert "evidence" not in repair_section.content
-    assert "do-not-leak" not in repair_section.content
+    assert "repair_history" in workframe_section.content
+    assert "proof_object" not in workframe_section.content
+    assert "do-not-leak" not in workframe_section.content
 
 
-def test_implement_v2_active_work_todo_card_preserves_next_action_under_budget() -> None:
+def test_implement_v2_workframe_preserves_active_work_next_action_under_budget() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -9446,17 +9461,17 @@ def test_implement_v2_active_work_todo_card_preserves_next_action_under_budget()
     )
 
     sections = build_implement_v2_prompt_sections(lane_input)
-    active_section = next(section for section in sections if section.id == "implement_v2_active_work_todo")
+    by_id = {section.id: section for section in sections}
+    workframe_section = by_id["implement_v2_workframe"]
 
-    assert len(active_section.content) <= 640
-    assert "__mew_truncated__" not in active_section.content
-    assert '"first_write_due":true' in active_section.content
-    assert '"target_paths":' in active_section.content
-    assert "required_next_action" in active_section.content
-    assert "repair the failed edit" in active_section.content
+    assert "implement_v2_active_work_todo" not in by_id
+    assert len(workframe_section.content) <= 4096
+    assert "required_next" in workframe_section.content
+    assert "stale_exact_edit" in workframe_section.content
+    assert "repair the failed edit" in workframe_section.content
 
 
-def test_implement_v2_active_work_todo_omits_nested_next_action_payloads() -> None:
+def test_implement_v2_workframe_omits_nested_active_work_payloads() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -9488,18 +9503,14 @@ def test_implement_v2_active_work_todo_omits_nested_next_action_payloads() -> No
     )
 
     sections = build_implement_v2_prompt_sections(lane_input)
-    active_section = next(section for section in sections if section.id == "implement_v2_active_work_todo")
-    frontier_section = next(section for section in sections if section.id == "implement_v2_hard_runtime_frontier_state")
+    by_id = {section.id: section for section in sections}
+    workframe_section = by_id["implement_v2_workframe"]
 
-    assert '"first_write_due":true' in active_section.content
-    assert "src/app.py" in active_section.content
-    assert "safe bounded failure tail" in active_section.content
-    assert "proof_object" not in active_section.content
-    assert "evidence" not in active_section.content
-    assert "frontier" not in active_section.content
-    assert "do-not-leak" not in active_section.content
-    assert '"frontier":"do-not-leak"' not in frontier_section.content
-    assert "do-not-leak" not in frontier_section.content
+    assert "implement_v2_active_work_todo" not in by_id
+    assert "implement_v2_hard_runtime_frontier_state" not in by_id
+    assert "safe bounded failure tail" in workframe_section.content
+    assert "proof_object" not in workframe_section.content
+    assert "do-not-leak" not in workframe_section.content
 
 
 def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() -> None:
@@ -9529,9 +9540,8 @@ def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() ->
     assert "substitute for executing or interpreting" in by_id["implement_v2_hard_runtime_profile"].content
     assert "run one verifier" in by_id["implement_v2_hard_runtime_profile"].content
     assert "fresh runtime/verifier evidence" in by_id["implement_v2_hard_runtime_profile"].content
-    assert "implement_v2_hard_runtime_frontier_state" in by_id
-    assert "Do not finish from this state alone" in by_id["implement_v2_hard_runtime_frontier_state"].content
-    assert len(by_id["implement_v2_hard_runtime_frontier_state"].content) <= 1536
+    assert "implement_v2_hard_runtime_frontier_state" not in by_id
+    assert "implement_v2_workframe" in by_id
 
 
 def test_implement_v2_hard_runtime_profile_expands_terminal_reaction_budget() -> None:
@@ -9713,7 +9723,7 @@ def test_implement_v2_hard_runtime_progress_continuation_rejects_seen_signature(
     )
 
 
-def test_implement_v2_prompt_adds_dynamic_frontier_state_when_persisted() -> None:
+def test_implement_v2_prompt_folds_persisted_frontier_state_into_workframe() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -9738,18 +9748,17 @@ def test_implement_v2_prompt_adds_dynamic_frontier_state_when_persisted() -> Non
     metrics = implement_v2_prompt_section_metrics(lane_input)
     by_id = {section["id"]: section for section in metrics["sections"]}
     sections = build_implement_v2_prompt_sections(lane_input)
-    frontier_section = next(section for section in sections if section.id == "implement_v2_hard_runtime_frontier_state")
+    workframe_section = next(section for section in sections if section.id == "implement_v2_workframe")
     lane_state = next(section for section in sections if section.id == "implement_v2_lane_state")
 
     assert "implement_v2_hard_runtime_profile" not in by_id
-    assert by_id["implement_v2_hard_runtime_frontier_state"]["cache_hint"] == "dynamic"
+    assert "implement_v2_hard_runtime_frontier_state" not in by_id
+    assert by_id["implement_v2_workframe"]["cache_hint"] == "dynamic"
     assert "lane_hard_runtime_frontier" not in lane_state.content
     assert "runtime_artifact_contract_mismatch" not in lane_state.content
-    assert "preserve source-backed artifact proof" in frontier_section.content
-    assert "vm.js" in frontier_section.content
-    assert "runtime_artifact_contract_mismatch" in frontier_section.content
-    assert "artifact ABI/ISA/endianness/entrypoint" in frontier_section.content
-    assert len(frontier_section.content) <= 1536
+    assert "artifact ABI/ISA/endianness/entrypoint" in workframe_section.content
+    assert "wf:frontier_failure" in workframe_section.content
+    assert len(workframe_section.content) <= 4096
 
 
 def test_implement_v2_prompt_omits_hard_runtime_profile_for_simple_task() -> None:
@@ -9766,6 +9775,7 @@ def test_implement_v2_prompt_omits_hard_runtime_profile_for_simple_task() -> Non
 
     assert "implement_v2_hard_runtime_profile" not in {section.id for section in sections}
     assert "implement_v2_hard_runtime_frontier_state" not in {section.id for section in sections}
+    assert "implement_v2_workframe" in {section.id for section in sections}
 
 
 def test_implement_v2_hard_runtime_profile_requires_fail_fast_runtime_unknowns() -> None:
@@ -15647,7 +15657,7 @@ def test_implement_v2_run_tests_resident_mew_loop_rejection_wins_before_tool_con
     assert "failure_class" not in payload
 
 
-def test_implement_v2_frontier_drops_fabricated_refs_and_keeps_valid_refs(tmp_path) -> None:
+def test_implement_v2_ignores_model_frontier_update_even_with_tool_calls(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {
             "summary": "probe source frontier",
@@ -15715,14 +15725,12 @@ def test_implement_v2_frontier_drops_fabricated_refs_and_keeps_valid_refs(tmp_pa
         max_turns=1,
     )
 
-    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
-    by_path = {item["path"]: item for item in frontier["source_roles"]}
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier", {})
 
-    assert frontier["schema_version"] == 1
-    assert by_path["doomgeneric_img.c"]["state"] == "grounded"
-    assert by_path["doomgeneric_img.c"]["evidence_refs"] == [{"kind": "provider_call", "id": "probe-1"}]
-    assert by_path["fake.c"]["state"] == "hypothesis"
-    assert by_path["fake.c"].get("evidence_refs", []) == []
+    assert result.metrics["ignored_model_frontier_state_updates"] == 1
+    assert "source_roles" not in frontier
+    assert "doomgeneric_img.c" not in json.dumps(frontier, sort_keys=True)
+    assert result.updated_lane_state["proof_manifest"]["tool_results"][0]["status"] == "completed"
 
 
 def test_implement_v2_frontier_runtime_failure_overrides_model_claim(tmp_path) -> None:
@@ -17462,7 +17470,7 @@ def test_implement_v2_frontier_drops_stale_runtime_mismatch_key_after_contract_e
     assert frontier["latest_runtime_failure"]["failure_class"] == "runtime_artifact_missing"
 
 
-def test_implement_v2_frontier_update_can_infer_same_turn_expected_artifact(tmp_path) -> None:
+def test_implement_v2_model_frontier_update_no_longer_infers_same_turn_expected_artifact(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {
             "summary": "declare final artifact then run verifier",
@@ -17508,16 +17516,13 @@ def test_implement_v2_frontier_update_can_infer_same_turn_expected_artifact(tmp_
     tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
     payload = tool_result["content"][0]
 
-    assert payload["artifact_evidence"][0]["artifact_id"] == "frame.bmp"
-    assert payload["artifact_evidence"][0]["source"] == "runtime_inferred"
-    assert tool_result["status"] == "failed"
-    assert result.updated_lane_state["lane_hard_runtime_frontier"]["latest_runtime_failure"]["failure_class"] == (
-        "artifact_validation_failure"
-    )
-    assert "latest_build_failure" not in result.updated_lane_state["lane_hard_runtime_frontier"]
+    assert result.metrics["ignored_model_frontier_state_updates"] == 1
+    assert payload["artifact_evidence"] == []
+    assert tool_result["status"] == "completed"
+    assert "lane_hard_runtime_frontier" not in result.updated_lane_state
 
 
-def test_implement_v2_frontier_update_can_infer_with_read_only_evidence_plus_single_no_contract_exec(tmp_path) -> None:
+def test_implement_v2_model_frontier_update_no_longer_infers_from_read_only_plus_exec(tmp_path) -> None:
     (tmp_path / "README.md").write_text("frame target\n", encoding="utf-8")
 
     def fake_model(*_args, **_kwargs):
@@ -17566,8 +17571,9 @@ def test_implement_v2_frontier_update_can_infer_with_read_only_evidence_plus_sin
     )
     exec_payload = result.updated_lane_state["proof_manifest"]["tool_results"][1]["content"][0]
 
-    assert exec_payload["artifact_evidence"][0]["artifact_id"] == "frame.bmp"
-    assert exec_payload["execution_contract_normalized"]["expected_artifacts"][0]["path"] == "frame.bmp"
+    assert result.metrics["ignored_model_frontier_state_updates"] == 1
+    assert exec_payload["artifact_evidence"] == []
+    assert exec_payload["execution_contract_normalized"]["expected_artifacts"] == []
 
 
 def test_implement_v2_frontier_update_does_not_infer_artifact_for_mixed_no_contract_exec_turn(tmp_path) -> None:
@@ -17686,7 +17692,7 @@ def test_implement_v2_frontier_does_not_classify_build_artifact_missing_as_runti
     assert frontier["latest_build_failure"]["failure_summary"] == "link failed before binary existed"
 
 
-def test_implement_v2_frontier_drops_model_only_latest_failures_and_prefix_artifact_refs(tmp_path) -> None:
+def test_implement_v2_ignores_model_only_frontier_failures_and_artifact_refs(tmp_path) -> None:
     def fake_model(*_args, **_kwargs):
         return {
             "summary": "model only frontier",
@@ -17762,18 +17768,12 @@ def test_implement_v2_frontier_drops_model_only_latest_failures_and_prefix_artif
         max_turns=1,
     )
 
-    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
-    by_path = {item["path"]: item for item in frontier["source_roles"]}
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier", {})
 
+    assert result.metrics["ignored_model_frontier_state_updates"] == 1
     assert "latest_build_failure" not in frontier
-    assert by_path["manifest"]["state"] == "grounded"
-    assert by_path["manifest"]["evidence_refs"] == [
-        {"kind": "proof_artifact", "path": "implement-lane/implement_v2/ws-1/task-1/proof-manifest.json"}
-    ]
-    assert by_path["evil"]["state"] == "hypothesis"
-    assert by_path["evil"].get("evidence_refs", []) == []
-    assert by_path["traversal"]["state"] == "hypothesis"
-    assert by_path["traversal"].get("evidence_refs", []) == []
+    assert "source_roles" not in frontier
+    assert "implement-lane/implement_v2/ws-1/task-1" not in json.dumps(frontier, sort_keys=True)
 
 
 def test_implement_v2_frontier_tracks_routed_tool_contract_next_verifier(tmp_path) -> None:
@@ -17885,11 +17885,12 @@ def test_implement_v2_frontier_state_does_not_satisfy_finish_gate_without_termin
         max_turns=1,
     )
 
-    frontier = result.updated_lane_state["lane_hard_runtime_frontier"]
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier", {})
 
     assert result.status == "blocked"
     assert result.metrics["terminal_evidence_count"] == 0
-    assert frontier["final_artifact"].get("evidence_refs", []) == []
+    assert result.metrics["ignored_model_frontier_state_updates"] == 1
+    assert "final_artifact" not in frontier
     assert result.metrics["finish_gate_decision"]["decision"] != "allow_complete"
 
 

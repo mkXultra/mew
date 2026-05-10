@@ -1,7 +1,5 @@
 import json
 
-from mew.implement_lane.prompt import implement_v2_prompt_section_metrics
-from mew.implement_lane.types import ImplementLaneInput
 from mew.implement_lane.workframe import (
     LEGACY_PROMPT_PROJECTION_IDS,
     WorkFrameInputs,
@@ -250,51 +248,11 @@ def test_workframe_ignores_stale_verifier_failure_after_source_mutation() -> Non
     assert "old_runtime_failure" not in json.dumps(workframe.as_dict(), sort_keys=True)
 
 
-def test_workframe_prompt_inventory_checks_real_legacy_projection_presence(tmp_path) -> None:
-    lane_input = ImplementLaneInput(
-        work_session_id="ws-1",
-        task_id="task-1",
-        workspace=str(tmp_path),
-        lane="implement_v2",
-        model_backend="openai",
-        model="gpt-5.5",
-        effort="high",
-        task_contract={
-            "description": "Repair a runtime artifact produced from source and verify the compiled output.",
-            "acceptance": "run verifier",
-        },
-        lane_config={"mode": "full"},
-        persisted_lane_state={
-            "active_work_todo": {
-                "id": "todo-1",
-                "lane": "implement_v2",
-                "status": "active",
-                "source": {
-                    "plan_item": "Patch vm.js and run the configured verifier.",
-                    "target_paths": ["vm.js"],
-                    "verify_command": "node vm.js",
-                },
-            },
-            "lane_hard_runtime_frontier": {
-                "schema_version": 1,
-                "status": "active",
-                "latest_failure": {
-                    "class": "runtime_failure",
-                    "summary": "TypeError in runtime verifier",
-                },
-            },
-            "lane_repair_history": {
-                "items": [
-                    {
-                        "failure_class": "runtime_failure",
-                        "repair": "patch runtime dispatch",
-                    }
-                ]
-            },
-        },
-    )
-    metrics = implement_v2_prompt_section_metrics(lane_input)
-    inventory = metrics["hot_path_collapse"]["normal_section_inventory"]
+def test_workframe_phase0_prompt_inventory_checker_detects_legacy_projection_presence() -> None:
+    inventory = [
+        {"id": section_id, "visibility": "ordinary", "bytes": 32}
+        for section_id in LEGACY_PROMPT_PROJECTION_IDS
+    ]
 
     passing = check_phase0_prompt_inventory(inventory)
     assert passing["status"] == "pass"

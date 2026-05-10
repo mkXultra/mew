@@ -17,6 +17,7 @@ from ..prompt_sections import (
 )
 from .tool_policy import ImplementLaneToolSpec, list_v2_tool_specs_for_mode
 from .types import ImplementLaneInput
+from .workframe import WorkFrameInputs, reduce_workframe
 
 HOT_PATH_PROJECTION_SURFACE = "hot_path_projection"
 ORDINARY_RESIDENT_SUMMARY_SURFACE = "ordinary_resident_summary"
@@ -31,14 +32,12 @@ _HOT_PATH_SECTION_IDS = frozenset(
         "implement_v2_tool_surface",
         "implement_v2_task_contract",
         "implement_v2_lane_state",
+        "implement_v2_workframe",
     }
 )
 _ORDINARY_RESIDENT_SUMMARY_SECTION_IDS = frozenset(
     {
-        "implement_v2_active_work_todo",
-        "implement_v2_hard_runtime_frontier_state",
         "implement_v2_hard_runtime_profile",
-        "implement_v2_repair_history",
     }
 )
 _RESIDENT_SIDECAR_SECTION_IDS = frozenset()
@@ -186,18 +185,6 @@ def build_implement_v2_prompt_sections(
     active_work_todo = _active_work_todo_state(lane_input.persisted_lane_state)
     hard_runtime_frontier = _hard_runtime_frontier_state(lane_input.persisted_lane_state)
     repair_history = _repair_history_state(lane_input.persisted_lane_state)
-    if active_work_todo:
-        sections.append(
-            PromptSection(
-                id="implement_v2_active_work_todo",
-                version="v0",
-                title="Implement V2 Active Work Todo",
-                content=_active_work_hot_path_content(active_work_todo, hard_runtime_frontier),
-                stability=STABILITY_DYNAMIC,
-                cache_policy=CACHE_POLICY_DYNAMIC,
-                profile="implement_v2",
-            )
-        )
     if hard_runtime_profile_active:
         sections.append(
             PromptSection(
@@ -221,44 +208,22 @@ def build_implement_v2_prompt_sections(
                 profile="implement_v2",
             )
         )
-    if repair_history:
-        sections.append(
-            PromptSection(
-                id="implement_v2_repair_history",
-                version="v0",
-                title="Implement V2 Repair History",
-                content=_bounded_compact_json(
-                        {
-                            "repair_card": _repair_history_hot_path_card(repair_history),
-                        },
-                    max_chars=_REPAIR_HISTORY_CARD_BYTE_CAP,
-                ),
-                stability=STABILITY_DYNAMIC,
-                cache_policy=CACHE_POLICY_DYNAMIC,
-                profile="implement_v2",
-            )
+    sections.append(
+        PromptSection(
+            id="implement_v2_workframe",
+            version="v0",
+            title="Implement V2 WorkFrame",
+            content=_workframe_section_content(
+                lane_input,
+                active_work_todo=active_work_todo,
+                hard_runtime_frontier=hard_runtime_frontier,
+                repair_history=repair_history,
+            ),
+            stability=STABILITY_DYNAMIC,
+            cache_policy=CACHE_POLICY_DYNAMIC,
+            profile="implement_v2",
         )
-    if hard_runtime_profile_active or hard_runtime_frontier:
-        sections.append(
-            PromptSection(
-                id="implement_v2_hard_runtime_frontier_state",
-                version="v0",
-                title="Implement V2 Hard Runtime Frontier State",
-                content=_bounded_compact_json(
-                    {
-                        "rule": "Do not finish from this state alone.",
-                        "frontier_card": _hard_runtime_frontier_hot_path_card(
-                            hard_runtime_frontier
-                            or {"schema_version": 1, "status": "active", "source": "not_yet_populated"}
-                        ),
-                    },
-                    max_chars=_HARD_RUNTIME_FRONTIER_CARD_BYTE_CAP,
-                ),
-                stability=STABILITY_DYNAMIC,
-                cache_policy=CACHE_POLICY_DYNAMIC,
-                profile="implement_v2",
-            )
-        )
+    )
     sections.extend(
         [
             PromptSection(
@@ -286,8 +251,8 @@ def build_implement_v2_prompt_sections(
                         "lane_local_state": _lane_local_state(lane_input.persisted_lane_state),
                     }
                 ),
-                stability=STABILITY_DYNAMIC,
-                cache_policy=CACHE_POLICY_DYNAMIC,
+                stability=STABILITY_SEMI_STATIC,
+                cache_policy=CACHE_POLICY_SESSION,
                 profile="implement_v2",
             ),
         ]
@@ -360,7 +325,7 @@ def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, o
         "resident_model_visible_bytes": resident_model_visible_bytes,
         "finish_replay_recovery_bytes": finish_replay_recovery_bytes,
         "provider_visible_tool_result_bytes": 0,
-        "phase": "m6_24_hot_path_collapse_phase_0",
+        "phase": "m6_24_workframe_redesign_phase_1",
     }
 
 
@@ -374,6 +339,163 @@ def _section_surface(section_id: str) -> str:
     if section_id in _HOT_PATH_SECTION_IDS:
         return HOT_PATH_PROJECTION_SURFACE
     return HOT_PATH_PROJECTION_SURFACE
+
+
+def _workframe_section_content(
+    lane_input: ImplementLaneInput,
+    *,
+    active_work_todo: dict[str, object],
+    hard_runtime_frontier: dict[str, object],
+    repair_history: dict[str, object],
+) -> str:
+    workframe, _report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id=lane_input.work_session_id or "implement-v2-prompt",
+            turn_id="prompt",
+            task_id=lane_input.task_id,
+            objective=_task_objective(lane_input),
+            success_contract_ref=_success_contract_ref(lane_input),
+            constraints=("model_visible_workframe_only",),
+            sidecar_events=_workframe_prompt_sidecar_events(
+                active_work_todo=active_work_todo,
+                hard_runtime_frontier=hard_runtime_frontier,
+                repair_history=repair_history,
+            ),
+            workspace_root=lane_input.workspace,
+        )
+    )
+    return _bounded_compact_json(
+        {
+            "workframe": workframe.as_dict(),
+            "rule": (
+                "This is the only ordinary dynamic state object. Follow required_next, "
+                "avoid forbidden_next, and cite evidence refs when finishing."
+            ),
+        },
+        max_chars=4096,
+    )
+
+
+def _workframe_prompt_sidecar_events(
+    *,
+    active_work_todo: dict[str, object],
+    hard_runtime_frontier: dict[str, object],
+    repair_history: dict[str, object],
+) -> tuple[dict[str, object], ...]:
+    events: list[dict[str, object]] = []
+    sequence = 1
+    write_repair = active_work_todo.get("write_repair") if isinstance(active_work_todo.get("write_repair"), dict) else {}
+    has_write_repair_signal = bool(
+        _clip_text(write_repair.get("failure_kind"), 120)
+        or _clip_text(write_repair.get("path"), 240)
+        or _clip_text(write_repair.get("required_next_action"), 240)
+    )
+    if has_write_repair_signal:
+        events.append(
+            {
+                "kind": "write",
+                "event_sequence": sequence,
+                "event_id": "prompt-write-repair",
+                "status": "failed",
+                "family": _clip_text(write_repair.get("failure_kind") or "write_repair_required", 120),
+                "summary": _clip_text(write_repair.get("required_next_action") or "repair failed source mutation", 240),
+                "path": _clip_text(write_repair.get("path"), 240),
+                "evidence_refs": ["wf:write_repair"],
+            }
+        )
+        sequence += 1
+    failure = _frontier_latest_failure_card(hard_runtime_frontier)
+    if failure and not has_write_repair_signal:
+        required_next_action = _frontier_required_next_action(hard_runtime_frontier)
+        events.append(
+            {
+                "kind": "failure",
+                "event_sequence": sequence,
+                "event_id": "prompt-frontier-failure",
+                "status": "failed",
+                "family": _clip_text(
+                    failure.get("failure_class")
+                    or failure.get("failure_kind")
+                    or failure.get("class")
+                    or "runtime_failure",
+                    120,
+                ),
+                "summary": _clip_text(
+                    required_next_action or failure.get("required_next_action") or failure.get("summary")
+                    or "latest runtime frontier failure",
+                    240,
+                ),
+                "target_paths": _active_work_todo_target_paths(active_work_todo),
+                "evidence_refs": ["wf:frontier_failure"],
+            }
+        )
+        sequence += 1
+    readiness = (
+        active_work_todo.get("first_write_readiness")
+        if isinstance(active_work_todo.get("first_write_readiness"), dict)
+        else {}
+    )
+    if readiness and bool(readiness.get("first_write_due")) and not events:
+        events.append(
+            {
+                "kind": "latest_failure",
+                "event_sequence": sequence,
+                "event_id": "prompt-first-write-due",
+                "status": "failed",
+                "family": "first_write_due",
+                "summary": _clip_text(readiness.get("required_next_action") or "make one scoped source mutation", 240),
+                "target_paths": _active_work_todo_target_paths(active_work_todo),
+                "evidence_refs": ["wf:first_write_readiness"],
+            }
+        )
+        sequence += 1
+    if repair_history and not events:
+        events.append(
+            {
+                "kind": "latest_failure",
+                "event_sequence": sequence,
+                "event_id": "prompt-repair-history",
+                "status": "failed",
+                "family": _clip_text(
+                    repair_history.get("failure_class") or repair_history.get("failure_kind") or "repair_history",
+                    120,
+                ),
+                "summary": _clip_text(
+                    repair_history.get("required_next_action")
+                    or repair_history.get("next_generic_probe")
+                    or repair_history.get("summary")
+                    or repair_history.get("notes")
+                    or "continue from repair history",
+                    240,
+                ),
+                "evidence_refs": ["wf:repair_history"],
+            }
+        )
+    return tuple(events)
+
+
+def _task_objective(lane_input: ImplementLaneInput) -> str:
+    contract = lane_input.task_contract
+    for key in ("objective", "description", "goal", "task", "prompt"):
+        value = contract.get(key) if isinstance(contract, dict) else None
+        if isinstance(value, str) and value.strip():
+            return _clip_text(value, 360)
+    return _clip_text(_contract_text(contract), 360) or "Repair the workspace to satisfy the configured verifier."
+
+
+def _success_contract_ref(lane_input: ImplementLaneInput) -> str:
+    contract = lane_input.task_contract
+    if isinstance(contract, dict):
+        for key in ("verify_command", "acceptance", "success_contract_ref"):
+            value = contract.get(key)
+            if isinstance(value, str) and value.strip():
+                return _clip_text(value, 160)
+    return ""
+
+
+def _active_work_todo_target_paths(active_work_todo: dict[str, object]) -> list[str]:
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    return _clip_string_list(source.get("target_paths"), max_items=4, max_chars=240)
 
 
 def _active_work_hot_path_card(
@@ -582,10 +704,17 @@ def _frontier_latest_failure_card(frontier: dict[str, object]) -> dict[str, obje
                         failure.get("failure_summary")
                         or failure.get("summary")
                         or failure.get("message")
+                        or failure.get("required_next_action")
                         or failure.get("stderr_tail")
                         or failure.get("stdout_tail")
                         or failure.get("required_next_probe"),
                         140,
+                    ),
+                    "required_next_action": _clip_text(
+                        failure.get("required_next_action")
+                        or failure.get("required_next_probe")
+                        or failure.get("recovery_action"),
+                        220,
                     ),
                     "recovery_mode": _clip_text(failure.get("recovery_mode"), 80),
                     "post_failure_probe_count": _safe_numeric(failure.get("post_failure_probe_count")),

@@ -760,11 +760,17 @@ def run_live_json_implement_v2(
             raw_frontier_state_update = (
                 normalized.get("frontier_state_update") if isinstance(normalized.get("frontier_state_update"), dict) else {}
             )
-            if raw_frontier_state_update and not _model_frontier_update_enabled(lane_input):
+            if raw_frontier_state_update:
                 ignored_model_frontier_state_updates += 1
-            frontier_state_update = raw_frontier_state_update if _model_frontier_update_enabled(lane_input) else {}
-            if frontier_state_update:
-                hard_runtime_frontier_enabled = True
+                if model_turn_observations:
+                    model_turn_observations[-1].setdefault("debug_events", []).append(
+                        {
+                            "class": "legacy_projection_field_ignored",
+                            "field": "frontier_state_update",
+                            "reason": "model-authored frontier updates are not part of the WorkFrame response contract",
+                        }
+                    )
+            frontier_state_update: dict[str, object] = {}
             raw_tool_calls = normalized.get("tool_calls") or ()
             if raw_tool_calls and frontier_state_update:
                 hard_runtime_frontier_state = _merge_hard_runtime_frontier_state(
@@ -6771,23 +6777,6 @@ def _live_json_prompt(
         )
     if tool_surface_notes:
         response_contract["tool_surface_note"] = " ".join(tool_surface_notes)
-    if hard_runtime_frontier_state and _model_frontier_update_enabled(lane_input):
-        response_contract["frontier_state_update"] = {
-            "optional": True,
-            "use_only_when": "a hard-runtime or compatibility frontier genuinely changed",
-            "derived_failure_note": (
-                "Do not author latest_runtime_failure/latest_build_failure; "
-                "mew derives the latest failure from paired tool results."
-            ),
-            "status": "active | blocked | resolved",
-            "objective": "short objective when it prevents rediscovery or false completion",
-            "next_verifier_shaped_command": {
-                "tool": "run_command",
-                "cwd": ".",
-                "command": "short verifier command",
-                "use_shell": True,
-            },
-        }
     recovery_instruction_section = ""
     if tool_contract_recovery_instruction:
         recovery_instruction_section = f"tool_contract_recovery_instruction:\n{tool_contract_recovery_instruction}"
@@ -6824,10 +6813,6 @@ def _live_json_prompt(
         f"history_json:\n{_render_prompt_history_json(history)}\n"
         "[/section:implement_v2_live_json_transport]"
     )
-
-
-def _model_frontier_update_enabled(lane_input: ImplementLaneInput) -> bool:
-    return bool(lane_input.lane_config.get("debug_model_frontier_update"))
 
 
 def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str, object] | None) -> str:
@@ -9627,7 +9612,7 @@ def _resident_sidecar_state_metrics(
             "red_per_turn_growth_ratio": 1.50,
             "baseline_required": True,
         },
-        "phase": "m6_24_hot_path_collapse_phase_0",
+        "phase": "m6_24_workframe_redesign_phase_1",
     }
 
 
