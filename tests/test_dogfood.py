@@ -1704,6 +1704,23 @@ class DogfoodTests(unittest.TestCase):
             self.assertTrue(Path(scenario["artifacts"]["fixture_path"]).is_file())
             self.assertIn("m6_24-final-verifier-budget-emulator: pass", text)
 
+    def test_run_dogfood_m6_24_final_verifier_budget_emulator_default_fixture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-final-verifier-budget-emulator",
+                cleanup=False,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["name"], "m6_24-final-verifier-budget-emulator")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["summary"]["stop_reason"], "long_command_budget_blocked")
+            self.assertEqual(scenario["artifacts"]["summary"]["stage"], "verification")
+
     def test_run_dogfood_m6_24_same_family_compatibility_emulator_scenario(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(

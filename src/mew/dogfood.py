@@ -15839,6 +15839,116 @@ FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError
     return job_dir
 
 
+def _write_final_verifier_budget_emulator_job_fixture(workspace, *, task="build-cython-ext"):
+    """Write a minimal Harbor-shaped final-verifier budget fixture.
+
+    This deliberately starts from the repository-tail fixture so replay has a
+    complete Terminal-Bench job shape, then replaces the final step with the
+    historical budget-blocked final-verifier action. The default
+    `m6_24-final-verifier-budget-emulator` path must exercise that shape; using
+    an unmodified repository-tail fixture makes the scenario validate the wrong
+    failure family.
+    """
+
+    job_dir = _write_repository_test_tail_emulator_fixture(workspace, task=task)
+    report_path = next(Path(job_dir).rglob("mew-report.json"))
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    final_command = (
+        "cd /tmp && python - <<'PY'\n"
+        "import pyknotid\n"
+        "from pyknotid.spacecurves import chelpers, ccomplexity\n"
+        "from pyknotid import cinvariants\n"
+        "print('final smoke')\n"
+        "PY\n"
+        "python -m pytest -q /app/pyknotid/tests "
+        "--ignore=/app/pyknotid/tests/test_random_curves.py "
+        "--ignore=/app/pyknotid/tests/test_catalogue.py"
+    )
+    final_contract = {
+        "schema_version": 2,
+        "purpose": "verification",
+        "stage": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "candidate_final_proof",
+        "risk_class": "read_only",
+        "continuation_policy": {
+            "mode": "managed",
+            "resume_policy": "same_resume_identity",
+            "terminal_required_for_acceptance": True,
+            "yield_after_seconds": 60,
+            "final_proof_reserve_seconds": 60,
+        },
+        "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+        "declared_target_refs": [
+            {"kind": "source_tree", "path": "/app/pyknotid", "ref": "source-tree:primary"},
+            {
+                "kind": "artifact",
+                "path": "/usr/local/lib/python3.13/site-packages/pyknotid",
+                "ref": "global-python-install",
+            },
+        ],
+    }
+    raw_action = {
+        "type": "run_tests",
+        "cwd": "/app",
+        "command": final_command,
+        "timeout": 180,
+        "foreground_budget_seconds": 60,
+        "execution_contract": final_contract,
+        "task_done": False,
+    }
+    blocked_action = dict(raw_action)
+    blocked_action.update(
+        {
+            "timeout": 4.658,
+            "long_command_budget": {
+                "action_kind": "start_long_command",
+                "stage": "verification",
+                "requested_timeout_seconds": 180.0,
+                "effective_timeout_seconds": 4.658,
+                "minimum_timeout_seconds": 61.0,
+                "diagnostic_budget": False,
+            },
+            "wall_timeout_ceiling": {
+                "blocked": True,
+                "stop_reason": "long_command_budget_blocked",
+                "reason": "long-command effective timeout cannot satisfy yield_after < effective_timeout_seconds",
+                "available_tool_timeout_seconds": 4.658,
+                "remaining_seconds": 64.658,
+                "reserve_seconds": 60.0,
+            },
+        }
+    )
+    payload["work_report"]["stop_reason"] = "long_command_budget_blocked"
+    payload["work_report"]["wall_timeout"] = True
+    payload["resume"]["active_compatibility_frontier"] = {}
+    payload["resume"]["next_action"] = "verify the world and review side-effecting work before retry"
+    payload["work_report"]["steps"].append(
+        {
+            "index": 3,
+            "status": "blocked",
+            "action": {"type": "wait", "reason": blocked_action["wall_timeout_ceiling"]["reason"]},
+            "model_turn": {
+                "id": 3,
+                "status": "failed",
+                "error": blocked_action["wall_timeout_ceiling"]["reason"],
+                "action_plan": {
+                    "summary": "Run the final verifier after repair and smoke evidence.",
+                    "action": raw_action,
+                },
+                "action": {
+                    "type": "wait",
+                    "reason": blocked_action["wall_timeout_ceiling"]["reason"],
+                    "blocked_action": blocked_action,
+                },
+            },
+            "wall_timeout": blocked_action["wall_timeout_ceiling"],
+        }
+    )
+    report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return job_dir
+
+
 def _compile_compcert_task_description():
     return (
         "Under /tmp/CompCert/, build the CompCert C verified compiler from source. "
@@ -17125,7 +17235,7 @@ def run_m6_24_final_verifier_budget_emulator_scenario(
     source = (
         Path(job_dir).expanduser()
         if job_dir
-        else _write_repository_test_tail_emulator_fixture(workspace, task=task_filter)
+        else _write_final_verifier_budget_emulator_job_fixture(workspace, task=task_filter)
     )
     replay = replay_terminal_bench_job(
         source,
