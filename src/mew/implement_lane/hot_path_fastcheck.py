@@ -1174,25 +1174,64 @@ def _latest_failure_families(projected_history: object) -> list[str]:
             continue
         latest_failure = value.get("latest_failure")
         if isinstance(latest_failure, dict):
-            family = _latest_failure_family(latest_failure)
+            family = _latest_failure_family(latest_failure, context=value)
             if family:
                 families.append(family)
         latest_failures = value.get("latest_failures")
         if isinstance(latest_failures, list):
             for item in latest_failures:
                 if isinstance(item, dict):
-                    family = _latest_failure_family(item)
+                    family = _latest_failure_family(item, context=value)
                     if family:
                         families.append(family)
     return families
 
 
-def _latest_failure_family(latest_failure: dict[str, object]) -> str:
+def _latest_failure_family(latest_failure: dict[str, object], *, context: dict[str, object] | None = None) -> str:
     failure_class = str(latest_failure.get("class") or latest_failure.get("failure_class") or "").strip()
     failure_kind = str(latest_failure.get("kind") or "").strip()
-    summary = str(latest_failure.get("summary") or latest_failure.get("required_next_action") or "").strip()
-    identity = summary[:120] if summary else "unknown"
+    provider_identity = str(latest_failure.get("provider_family_identity") or "").strip()
+    artifact_identity = provider_identity or _latest_failure_artifact_identity(latest_failure, context=context)
+    if artifact_identity:
+        identity = artifact_identity
+    else:
+        summary = str(latest_failure.get("summary") or latest_failure.get("required_next_action") or "").strip()
+        identity = f"summary:{summary[:120]}" if summary else "unknown"
     return f"{failure_class or 'unknown'}:{failure_kind or 'unknown'}:{identity}"
+
+
+def _latest_failure_artifact_identity(
+    latest_failure: dict[str, object],
+    *,
+    context: dict[str, object] | None = None,
+) -> str:
+    for source in (context, latest_failure):
+        if not isinstance(source, dict):
+            continue
+        digest = source.get("execution_evidence_digest")
+        if isinstance(digest, dict):
+            artifact_misses = digest.get("artifact_miss")
+            if isinstance(artifact_misses, list):
+                for artifact in artifact_misses:
+                    if not isinstance(artifact, dict):
+                        continue
+                    artifact_id = str(artifact.get("artifact_id") or "").strip()
+                    path = str(artifact.get("path") or "").strip()
+                    if artifact_id or path:
+                        return f"artifact:{artifact_id}:{path}"
+        artifact_evidence = source.get("artifact_evidence")
+        if isinstance(artifact_evidence, list):
+            for artifact in artifact_evidence:
+                if not isinstance(artifact, dict):
+                    continue
+                if artifact.get("status") in {"passed", "completed"} or artifact.get("blocking") is False:
+                    continue
+                artifact_id = str(artifact.get("artifact_id") or "").strip()
+                path = str(artifact.get("path") or "").strip()
+                if artifact_id or path:
+                    return f"artifact:{artifact_id}:{path}"
+    path = str(latest_failure.get("path") or "").strip()
+    return f"path:{path}" if path else ""
 
 
 def _generic_runtime_failure_summaries(projected_history: object) -> list[dict[str, object]]:

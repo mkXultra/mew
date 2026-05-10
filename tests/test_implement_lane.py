@@ -12676,6 +12676,64 @@ def test_implement_v2_prompt_history_keeps_different_artifact_failures() -> None
     assert rendered[1]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"] == "log miss"
 
 
+def test_implement_v2_prompt_history_preserves_family_identity_for_compacted_artifact_failures() -> None:
+    def artifact_failure(provider_call_id: str, artifact_id: str, path: str) -> dict[str, object]:
+        return {
+            "provider_call_id": provider_call_id,
+            "tool_name": "run_command",
+            "status": "failed",
+            "content": {
+                "content": [
+                    {
+                        "provider_history_projection": "terminal_result_v0",
+                        "latest_failure": {
+                            "class": "runtime_failure",
+                            "kind": "nonzero_exit",
+                            "summary": "Error: memory access 0x00000000+4 outside mapped range",
+                        },
+                        "execution_evidence_digest": {
+                            "artifact_miss": [{"artifact_id": artifact_id, "path": path}]
+                        },
+                    }
+                ]
+            },
+        }
+
+    prompt_history = [
+        {
+            "turn": 1,
+            "summary": "first artifact",
+            "tool_calls": [],
+            "tool_results": [artifact_failure("call-frame", "frame", "/tmp/frame.bmp")],
+        },
+        {
+            "turn": 2,
+            "summary": "second artifact",
+            "tool_calls": [],
+            "tool_results": [artifact_failure("call-log", "log", "/tmp/run.log")],
+        },
+        {
+            "turn": 3,
+            "summary": "latest artifact",
+            "tool_calls": [],
+            "tool_results": [artifact_failure("call-json", "json", "/tmp/result.json")],
+        },
+    ]
+
+    rendered = json.loads(_render_prompt_history_json(prompt_history))
+
+    assert rendered[0]["tool_results"][0]["latest_failures"][0]["provider_family_identity"] == (
+        "artifact:frame:/tmp/frame.bmp"
+    )
+    assert rendered[1]["tool_results"][0]["latest_failures"][0]["provider_family_identity"] == (
+        "artifact:log:/tmp/run.log"
+    )
+    assert (
+        rendered[2]["tool_results"][0]["content"]["content"][0]["latest_failure"]["summary"]
+        == "Error: memory access 0x00000000+4 outside mapped range"
+    )
+
+
 def test_implement_v2_prompt_history_projects_raw_structured_failure_classification() -> None:
     prompt_history = [
         {

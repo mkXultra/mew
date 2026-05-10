@@ -9701,7 +9701,11 @@ def _latest_failures_from_provider_history_content(content: dict[str, object]) -
             continue
         latest_failure = _provider_history_latest_failure(item)
         if latest_failure:
-            failures.append(_frontier_compact_mapping(latest_failure))
+            compact_failure = _frontier_compact_mapping(latest_failure)
+            family_identity = _provider_latest_failure_identity(item)
+            if family_identity:
+                compact_failure["provider_family_identity"] = family_identity
+            failures.append(compact_failure)
         if len(failures) >= 2:
             break
     return failures

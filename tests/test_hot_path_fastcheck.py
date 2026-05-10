@@ -497,6 +497,145 @@ def test_hot_path_fastcheck_rejects_generic_runtime_killed_projection(tmp_path):
     assert result["micro_next_action_refresh"]["mode"] == "skipped"
 
 
+def test_hot_path_fastcheck_allows_same_summary_failures_with_distinct_paths(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    history_path = artifact / "implement_v2" / "history.json"
+    history = [
+        {
+            "turn": 1,
+            "summary": "runtime verifier failed before artifact contract",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-runtime-before",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "command_run_id": "cmd-runtime-before",
+                                "output_ref": "out-runtime-before",
+                                "latest_failure": {
+                                    "phase": "runtime",
+                                    "kind": "nonzero_exit",
+                                    "class": "runtime_failure",
+                                    "summary": "Error: memory access 0x00000000+4 outside mapped range",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+        {
+            "turn": 2,
+            "summary": "runtime verifier failed with artifact contract",
+            "tool_calls": [],
+            "tool_results": [
+                {
+                    "provider_call_id": "call-runtime-after",
+                    "tool_name": "run_command",
+                    "status": "failed",
+                    "content": {
+                        "content": [
+                            {
+                                "provider_history_projection": "terminal_result_v0",
+                                "command_run_id": "cmd-runtime-after",
+                                "output_ref": "out-runtime-after",
+                                "latest_failure": {
+                                    "phase": "runtime",
+                                    "kind": "nonzero_exit",
+                                    "class": "runtime_failure",
+                                    "summary": "Error: memory access 0x00000000+4 outside mapped range",
+                                    "path": "/tmp/frame.bmp",
+                                },
+                            }
+                        ]
+                    },
+                }
+            ],
+        },
+    ]
+    history_path.write_text(json.dumps(history), encoding="utf-8")
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        expected_categories=("patch/edit",),
+        micro_model_callable=lambda _prompt: {"category": "patch/edit", "reason": "repair latest runtime failure"},
+    )
+
+    assert result["status"] == "pass"
+    latest_failure = [check for check in result["checks"] if check["name"] == "latest_actionable_failure_shape"][0]
+    assert latest_failure["status"] == "pass"
+    assert latest_failure["details"]["duplicate_families"] == []
+
+
+def test_hot_path_fastcheck_allows_same_summary_failures_with_distinct_artifact_identities(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    history_path = artifact / "implement_v2" / "history.json"
+
+    def runtime_failure(provider_call_id: str, artifact_id: str, path: str) -> dict[str, object]:
+        return {
+            "provider_call_id": provider_call_id,
+            "tool_name": "run_command",
+            "status": "failed",
+            "content": {
+                "content": [
+                    {
+                        "provider_history_projection": "terminal_result_v0",
+                        "command_run_id": f"cmd-{provider_call_id}",
+                        "output_ref": f"out-{provider_call_id}",
+                        "latest_failure": {
+                            "phase": "runtime",
+                            "kind": "nonzero_exit",
+                            "class": "runtime_failure",
+                            "summary": "Error: memory access 0x00000000+4 outside mapped range",
+                        },
+                        "execution_evidence_digest": {
+                            "artifact_miss": [{"artifact_id": artifact_id, "path": path}]
+                        },
+                    }
+                ]
+            },
+        }
+
+    history = [
+        {
+            "turn": 1,
+            "summary": "first artifact verifier failed",
+            "tool_calls": [],
+            "tool_results": [runtime_failure("call-runtime-frame", "frame", "/tmp/frame.bmp")],
+        },
+        {
+            "turn": 2,
+            "summary": "second artifact verifier failed",
+            "tool_calls": [],
+            "tool_results": [runtime_failure("call-runtime-log", "log", "/tmp/run.log")],
+        },
+        {
+            "turn": 3,
+            "summary": "third artifact verifier failed",
+            "tool_calls": [],
+            "tool_results": [runtime_failure("call-runtime-json", "json", "/tmp/result.json")],
+        },
+    ]
+    history_path.write_text(json.dumps(history), encoding="utf-8")
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        expected_categories=("patch/edit",),
+        micro_model_callable=lambda _prompt: {"category": "patch/edit", "reason": "repair latest artifact failure"},
+    )
+
+    assert result["status"] == "pass"
+    latest_failure = [check for check in result["checks"] if check["name"] == "latest_actionable_failure_shape"][0]
+    assert latest_failure["status"] == "pass"
+    assert latest_failure["details"]["duplicate_families"] == []
+
+
 def test_hot_path_fastcheck_skips_live_micro_when_static_checks_fail(tmp_path):
     artifact = _write_artifact(tmp_path)
     manifest_path = artifact / "implement_v2" / "proof-manifest.json"
