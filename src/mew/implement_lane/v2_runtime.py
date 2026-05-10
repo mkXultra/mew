@@ -2595,8 +2595,26 @@ def _workframe_sidecar_event_from_tool_result(
 
     if result.tool_name in EXEC_TOOL_NAMES:
         verifier_like = _result_is_configured_verifier_step(result)
+        diagnostic_like = _result_is_diagnostic_command_step(result, payload, contract=contract)
+        diagnostic_summary = _workframe_diagnostic_summary(result, payload) if diagnostic_like else ""
+        diagnostic_failed = diagnostic_like and _diagnostic_command_failed(payload)
         if verifier_like:
             event["kind"] = "verifier"
+        elif diagnostic_failed and _diagnostic_summary_has_runtime_signal(diagnostic_summary):
+            event["kind"] = "latest_failure"
+            event["status"] = "failed"
+            event["family"] = "runtime_diagnostic"
+            event["failure_kind"] = "diagnostic_runtime_signal"
+            event["summary"] = diagnostic_summary
+            event["command_run_id"] = _result_command_run_id(result)
+            event["command"] = _frontier_clip_text(_result_command_text(result), limit=_FRONTIER_COMMAND_TEXT_LIMIT)
+            return _drop_empty_frontier_values(event)
+        elif diagnostic_like and result.status == "completed":
+            event["kind"] = "inspection"
+            event["summary"] = diagnostic_summary or "diagnostic command completed"
+            event["command_run_id"] = _result_command_run_id(result)
+            event["command"] = _frontier_clip_text(_result_command_text(result), limit=_FRONTIER_COMMAND_TEXT_LIMIT)
+            return _drop_empty_frontier_values(event)
         elif result.status in {"failed", "interrupted", "invalid"} or result.is_error:
             event["kind"] = "latest_failure"
         elif _source_tree_mutation_from_result(result):
@@ -2620,6 +2638,68 @@ def _workframe_sidecar_event_from_tool_result(
         return _drop_empty_frontier_values(event)
 
     return {}
+
+
+def _result_is_diagnostic_command_step(
+    result: ToolResultEnvelope,
+    payload: dict[str, object],
+    *,
+    contract: dict[str, object],
+) -> bool:
+    if result.tool_name not in EXEC_TOOL_NAMES:
+        return False
+    intent = str(payload.get("command_intent") or "").strip().lower()
+    role = str(contract.get("role") or "").strip().lower()
+    stage = str(contract.get("stage") or "").strip().lower()
+    purpose = str(contract.get("purpose") or "").strip().lower()
+    proof_role = str(contract.get("proof_role") or "").strip().lower()
+    acceptance_kind = str(contract.get("acceptance_kind") or "").strip().lower()
+    diagnostic_surface = intent in {"diagnostic", "debug"} or role == "diagnostic" or stage == "diagnostic"
+    return (
+        diagnostic_surface
+        or purpose == "diagnostic"
+        or proof_role == "negative_diagnostic"
+        or (acceptance_kind == "not_acceptance" and diagnostic_surface)
+    )
+
+
+def _diagnostic_command_failed(payload: dict[str, object]) -> bool:
+    status = str(payload.get("status") or "").strip().lower()
+    exit_code = payload.get("exit_code")
+    return status in {"failed", "interrupted", "killed"} or (isinstance(exit_code, int) and exit_code != 0)
+
+
+def _workframe_diagnostic_summary(result: ToolResultEnvelope, payload: dict[str, object]) -> str:
+    for key in ("stderr_tail", "stdout_tail", "stderr", "stdout", "output_tail", "output"):
+        diagnostic = _first_actionable_terminal_line(payload.get(key), require_signal=True)
+        if diagnostic:
+            return _frontier_clip_text(diagnostic, limit=220)
+    for key in ("stderr_tail", "stdout_tail", "stderr", "stdout", "reason", "message"):
+        value = _frontier_clip_text(payload.get(key), limit=220)
+        if value:
+            return value
+    if result.status:
+        return f"{result.tool_name} {result.status}"
+    return ""
+
+
+def _diagnostic_summary_has_runtime_signal(summary: str) -> bool:
+    text = str(summary or "").strip().lower()
+    if not text:
+        return False
+    if re.search(r"\bsyscall\b", text) and re.search(r"\b(?:pc|program counter|0x[0-9a-f]+)\b", text):
+        return True
+    if re.search(r"\b(?:[a-z_][\w.]*error|[a-z_][\w.]*exception):\s*\S", text):
+        return True
+    return _text_matches_any(
+        text,
+        (
+            r"\b(?:traceback|assert|fault|segv|panic)\b",
+            r"\b(?:unsupported|unknown|missing|not found|invalid)\b",
+            r"\b(?:not a function|cannot|undefined|null reference)\b",
+            r"\b(?:program terminated|pc=|program counter|signal\s+\d+|exit code\s+[2-9]\d*)\b",
+        ),
+    )
 
 
 def _workframe_write_event_kind(tool_name: str) -> str:

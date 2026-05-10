@@ -11274,6 +11274,218 @@ def test_implement_v2_workframe_projects_completed_read_command_output_as_inspec
     assert events[0]["evidence_refs"] == ["ev:read-command-output"]
 
 
+def test_implement_v2_workframe_projects_failed_diagnostic_command_as_runtime_failure() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Implement a runtime that writes an artifact."},
+        lane_config={"mode": "full"},
+    )
+    diagnostic_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="diagnose-runtime",
+        mew_tool_call_id="tool-diagnose-runtime",
+        tool_name="run_command",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "command": "node vm.js --trace",
+                "command_intent": "diagnostic",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr_tail": "syscall 1 pc 0x0043adf0\n",
+                "stdout_tail": "checked runtime trace\n",
+                "execution_contract_normalized": {
+                    "id": "contract:diagnose-runtime",
+                    "role": "diagnostic",
+                    "stage": "diagnostic",
+                    "purpose": "diagnostic",
+                    "proof_role": "negative_diagnostic",
+                    "acceptance_kind": "not_acceptance",
+                    "affected_paths": ["vm.js"],
+                    "expected_exit": {"mode": "any"},
+                },
+            },
+        ),
+        evidence_refs=("ev:diagnose-runtime",),
+        content_refs=("cmd:diagnose-runtime",),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((diagnostic_result,))
+    bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        sidecar_events=(
+            {
+                "kind": "write",
+                "event_sequence": 1,
+                "event_id": "tool-result:write-vm",
+                "status": "completed",
+                "path": "vm.js",
+                "target_paths": ["vm.js"],
+                "evidence_refs": ["ev:write-vm"],
+            },
+            {
+                "kind": "verifier",
+                "event_sequence": 2,
+                "event_id": "tool-result:verify-vm",
+                "status": "failed",
+                "family": "runtime_artifact_missing",
+                "failure_kind": "missing_artifact",
+                "summary": "required artifact /tmp/frame.bmp failed structured checks",
+                "evidence_refs": ["ev:verify-vm"],
+            },
+            {
+                "kind": "inspection",
+                "event_sequence": 3,
+                "event_id": "tool-result:read-vm",
+                "status": "completed",
+                "target_paths": ["vm.js"],
+                "evidence_refs": ["ev:read-vm"],
+                "summary": "Read file vm.js",
+            },
+        )
+        + events,
+    )
+    workframe = bundle["reducer_output"]
+
+    assert events[0]["kind"] == "latest_failure"
+    assert events[0]["status"] == "failed"
+    assert events[0]["family"] == "runtime_diagnostic"
+    assert events[0]["failure_kind"] == "diagnostic_runtime_signal"
+    assert events[0]["summary"] == "syscall 1 pc 0x0043adf0"
+    assert events[0]["command_intent"] == "diagnostic"
+    assert events[0]["target_paths"] == ["vm.js"]
+    assert events[0]["evidence_refs"] == ["ev:diagnose-runtime"]
+    assert workframe["latest_actionable"]["generic_family"] == "runtime_diagnostic"
+    assert workframe["latest_actionable"]["summary"] == "syscall 1 pc 0x0043adf0"
+    assert workframe["required_next"]["kind"] == "patch_or_edit"
+    assert workframe["required_next"]["target_paths"] == ["vm.js"]
+
+
+def test_implement_v2_workframe_projects_failed_exception_diagnostic_command_as_runtime_failure() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="diagnose-runtime-exception",
+        mew_tool_call_id="tool-diagnose-runtime-exception",
+        tool_name="run_command",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "command": "node vm.js --trace",
+                "command_intent": "diagnostic",
+                "status": "failed",
+                "exit_code": 1,
+                "stderr_tail": "TypeError: broken runtime state\n",
+                "execution_contract_normalized": {
+                    "id": "contract:diagnose-runtime-exception",
+                    "role": "diagnostic",
+                    "stage": "diagnostic",
+                    "purpose": "diagnostic",
+                    "proof_role": "negative_diagnostic",
+                    "acceptance_kind": "not_acceptance",
+                    "affected_paths": ["vm.js"],
+                    "expected_exit": {"mode": "any"},
+                },
+            },
+        ),
+        evidence_refs=("ev:diagnose-runtime-exception",),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+
+    assert events[0]["kind"] == "latest_failure"
+    assert events[0]["status"] == "failed"
+    assert events[0]["family"] == "runtime_diagnostic"
+    assert events[0]["failure_kind"] == "diagnostic_runtime_signal"
+    assert events[0]["summary"] == "TypeError: broken runtime state"
+    assert events[0]["target_paths"] == ["vm.js"]
+
+
+def test_implement_v2_workframe_projects_successful_diagnostic_command_as_inspection() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="diagnose-producer",
+        mew_tool_call_id="tool-diagnose-producer",
+        tool_name="run_command",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "command": "node inspect-producer.js",
+                "command_intent": "diagnostic",
+                "status": "completed",
+                "exit_code": 0,
+                "stdout_tail": "producer branch inspected; frame writer is reachable\n",
+                "execution_contract_normalized": {
+                    "id": "contract:diagnose-producer",
+                    "role": "diagnostic",
+                    "stage": "diagnostic",
+                    "purpose": "diagnostic",
+                    "proof_role": "negative_diagnostic",
+                    "acceptance_kind": "not_acceptance",
+                    "affected_paths": ["vm.js"],
+                },
+            },
+        ),
+        evidence_refs=("ev:diagnose-producer",),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+
+    assert events[0]["kind"] == "inspection"
+    assert events[0]["status"] == "completed"
+    assert events[0]["command_intent"] == "diagnostic"
+    assert events[0]["target_paths"] == ["vm.js"]
+    assert "producer branch inspected" in events[0]["summary"]
+
+
+def test_implement_v2_workframe_keeps_progress_build_mutation_as_run_command() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="progress-build",
+        mew_tool_call_id="tool-progress-build",
+        tool_name="run_command",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "command": "python generate.py",
+                "status": "completed",
+                "summary": "generated runtime source",
+                "execution_contract_normalized": {
+                    "id": "contract:progress-build",
+                    "role": "build",
+                    "stage": "build",
+                    "purpose": "build",
+                    "proof_role": "target_build",
+                    "acceptance_kind": "progress_only",
+                    "affected_paths": ["vm.js"],
+                },
+            },
+        ),
+        side_effects=(
+            {
+                "kind": "source_tree_mutation",
+                "record": {
+                    "changed_count": 1,
+                    "changes": [{"path": "vm.js"}],
+                },
+            },
+        ),
+        evidence_refs=("ev:progress-build",),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+
+    assert events[0]["kind"] == "run_command"
+    assert events[0]["target_paths"] == ["vm.js"]
+    assert events[0]["summary"] == "generated runtime source"
+
+
 def test_implement_v2_workframe_requires_failure_tied_artifact_missing_inspection_before_patch() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
