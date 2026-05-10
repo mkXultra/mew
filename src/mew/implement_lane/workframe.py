@@ -129,6 +129,7 @@ class WorkFrameGoal:
 class WorkFrameLatestActionable:
     family: str
     summary: str
+    generic_family: str = ""
     source_ref: str = ""
     evidence_refs: tuple[str, ...] = ()
 
@@ -136,6 +137,7 @@ class WorkFrameLatestActionable:
         return {
             "family": self.family,
             "summary": self.summary,
+            "generic_family": self.generic_family,
             "source_ref": self.source_ref,
             "evidence_refs": list(self.evidence_refs),
         }
@@ -425,6 +427,17 @@ def validate_workframe(workframe: WorkFrame, *, inputs: WorkFrameInputs) -> Work
         failed.append({"code": "required_next_unjustified", "field": "evidence_refs"})
     else:
         passed.append("required_next_has_evidence_or_not_needed")
+    if workframe.latest_actionable and _is_generic_actionable_summary(workframe.latest_actionable.summary):
+        failed.append(
+            {
+                "code": "latest_actionable_generic",
+                "family": workframe.latest_actionable.family,
+                "generic_family": workframe.latest_actionable.generic_family,
+                "summary": workframe.latest_actionable.summary,
+            }
+        )
+    else:
+        passed.append("latest_actionable_summary_is_specific_or_absent")
     if workframe.finish_readiness.state == "ready" and workframe.changed_sources.since_last_strict_verifier:
         failed.append({"code": "finish_false_positive", "reason": "source mutation lacks fresh verifier"})
     else:
@@ -618,9 +631,17 @@ def _latest_actionable_from_facts(facts: dict[str, object]) -> WorkFrameLatestAc
     failure = facts.get("latest_failure")
     if isinstance(failure, dict):
         evidence_refs = _event_evidence_refs(failure)
+        raw_family = str(
+            failure.get("family")
+            or failure.get("failure_class")
+            or failure.get("class")
+            or failure.get("failure_kind")
+            or "unknown"
+        )
         return WorkFrameLatestActionable(
-            family=str(failure.get("family") or failure.get("failure_class") or failure.get("class") or "unknown"),
-            summary=str(failure.get("summary") or failure.get("message") or failure.get("status") or "failure"),
+            family=raw_family,
+            generic_family=_generic_failure_family(failure),
+            summary=_actionable_summary(failure),
             source_ref=_event_ref(failure),
             evidence_refs=evidence_refs,
         )
@@ -628,6 +649,7 @@ def _latest_actionable_from_facts(facts: dict[str, object]) -> WorkFrameLatestAc
         return WorkFrameLatestActionable(
             family="verifier_stale_after_mutation",
             summary="source changed without a fresh passing strict verifier",
+            generic_family="verifier_stale_after_mutation",
             source_ref=str(facts.get("latest_mutation_ref") or ""),
             evidence_refs=(str(facts.get("latest_mutation_ref") or ""),),
         )
@@ -667,11 +689,12 @@ def _required_next_from_facts(
             evidence_refs=tuple(ref for ref in (str(facts.get("latest_mutation_ref") or ""),) if ref),
         )
     if latest_actionable and latest_actionable.family != "verifier_stale_after_mutation":
+        next_kind = _required_next_kind_for_generic_family(latest_actionable.generic_family)
         return WorkFrameRequiredNext(
-            kind="patch_or_edit",
-            reason="latest actionable failure should drive one focused repair",
+            kind=next_kind,
+            reason=_required_next_reason_for_generic_family(latest_actionable.generic_family),
             target_paths=_paths_from_failure(facts.get("latest_failure")),
-            after="run_configured_verifier",
+            after="run_configured_verifier" if next_kind == "patch_or_edit" else "patch_or_edit_or_block",
             evidence_refs=latest_actionable.evidence_refs or (latest_actionable.source_ref,),
         )
     if facts.get("source_changed_since_verifier"):
@@ -916,6 +939,126 @@ def _evidence_index(events: list[dict[str, object]]) -> tuple[str, ...]:
 
 def _paths_from_failure(value: object) -> tuple[str, ...]:
     return tuple(sorted(_event_paths(value)))
+
+
+def _generic_failure_family(event: dict[str, object]) -> str:
+    status = _event_status(event)
+    kind = _event_kind(event)
+    exit_code = _first_int(event.get("exit_code"), event.get("returncode"), -1)
+    family_text = " ".join(
+        str(event.get(key) or "")
+        for key in (
+            "family",
+            "failure_class",
+            "class",
+            "failure_kind",
+            "kind",
+            "reason",
+            "terminal_status",
+        )
+    ).lower()
+    detail_text = _event_detail_text(event).lower()
+    combined = f"{family_text} {detail_text}"
+    if "first_write_due" in combined or "write_repair_required" in combined:
+        return "write_required"
+    if kind in {"write", "edit", "apply_patch", "source_mutation"} and status in {"failed", "interrupted", "invalid"}:
+        return "write_failure"
+    if exit_code == 127 or "command not found" in combined or "executable not found" in combined:
+        return "command_not_found"
+    if "artifact" in combined and any(term in combined for term in ("missing", "not created", "not found", "absent")):
+        return "artifact_missing"
+    if status in {"interrupted"} or any(term in combined for term in ("killed", "timeout", "timed out", "no output")):
+        return "command_no_output_or_interrupted"
+    if any(term in combined for term in ("runtime", "traceback", "segmentation fault", "opcode", " pc=", "program terminated")):
+        return "runtime_diagnostic"
+    if exit_code > 0 or "nonzero" in combined or "exit code" in combined:
+        return "command_nonzero"
+    if kind in {"verifier", "strict_verifier", "run_tests"} and status == "failed":
+        return "verifier_failure"
+    if status == "failed":
+        return "command_nonzero"
+    return "unknown_failure"
+
+
+def _required_next_kind_for_generic_family(generic_family: str) -> WorkFrameNextKind:
+    if generic_family == "command_not_found":
+        return "cheap_probe"
+    if generic_family in {"command_nonzero", "command_no_output_or_interrupted", "artifact_missing"}:
+        return "inspect_latest_failure"
+    return "patch_or_edit"
+
+
+def _required_next_reason_for_generic_family(generic_family: str) -> str:
+    if generic_family == "command_not_found":
+        return "latest command was unavailable; choose an available fallback probe before repair"
+    if generic_family == "command_nonzero":
+        return "latest command failed generically; inspect the concrete failure before patching"
+    if generic_family == "command_no_output_or_interrupted":
+        return "latest command ended without enough output; inspect bounded command evidence before patching"
+    if generic_family == "artifact_missing":
+        return "expected artifact is missing; inspect producer or artifact path before repair"
+    return "latest actionable failure should drive one focused repair"
+
+
+def _actionable_summary(event: dict[str, object]) -> str:
+    generic_candidate = ""
+    for key in ("summary", "message", "failure_summary", "reason", "status"):
+        value = str(event.get(key) or "").strip()
+        if not value:
+            continue
+        if not _is_generic_actionable_summary(value):
+            return value
+        generic_candidate = generic_candidate or value
+    for key in ("stderr_tail", "stdout_tail", "required_next_action", "required_next_probe", "diagnostic"):
+        value = str(event.get(key) or "").strip()
+        if value and not _is_generic_actionable_summary(value):
+            return value
+    return generic_candidate or "failure without actionable detail"
+
+
+def _event_detail_text(event: dict[str, object]) -> str:
+    parts: list[str] = []
+    for key in (
+        "summary",
+        "message",
+        "failure_summary",
+        "reason",
+        "stderr_tail",
+        "stdout_tail",
+        "required_next_action",
+        "required_next_probe",
+        "diagnostic",
+    ):
+        value = event.get(key)
+        if isinstance(value, (str, int, float, bool)):
+            parts.append(str(value))
+    return "\n".join(parts)
+
+
+def _is_generic_actionable_summary(summary: str) -> bool:
+    text = str(summary or "").strip().lower()
+    if not text:
+        return True
+    normalized = " ".join(text.replace("_", " ").replace("-", " ").split())
+    generic = {
+        "failed",
+        "failure",
+        "error",
+        "unknown",
+        "nonzero",
+        "nonzero exit",
+        "exit code 1",
+        "exit status 1",
+        "killed",
+        "timeout",
+        "timed out",
+        "interrupted",
+    }
+    if normalized in generic:
+        return True
+    if normalized.startswith("exit code ") and len(normalized.split()) <= 3:
+        return True
+    return False
 
 
 def _has_low_budget_event(events: list[dict[str, object]]) -> bool:

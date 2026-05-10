@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from mew.implement_lane.workframe import (
     LEGACY_PROMPT_PROJECTION_IDS,
     WorkFrameInputs,
@@ -246,6 +248,177 @@ def test_workframe_ignores_stale_verifier_failure_after_source_mutation() -> Non
     assert workframe.required_next
     assert workframe.required_next.kind == "run_verifier"
     assert "old_runtime_failure" not in json.dumps(workframe.as_dict(), sort_keys=True)
+
+
+@pytest.mark.parametrize(
+    ("event", "expected_generic", "expected_next"),
+    [
+        (
+            {
+                "kind": "verifier",
+                "status": "failed",
+                "exit_code": 127,
+                "stderr_tail": "sh: rg: command not found",
+            },
+            "command_not_found",
+            "cheap_probe",
+        ),
+        (
+            {
+                "kind": "verifier",
+                "status": "failed",
+                "exit_code": 2,
+                "stderr_tail": "unit test failed in parser fixture",
+            },
+            "command_nonzero",
+            "inspect_latest_failure",
+        ),
+        (
+            {
+                "kind": "verifier",
+                "status": "killed",
+                "reason": "no observable output before managed command budget",
+            },
+            "command_no_output_or_interrupted",
+            "inspect_latest_failure",
+        ),
+        (
+            {
+                "kind": "verifier",
+                "status": "failed",
+                "stderr_tail": "Program terminated at PC=0x40c848 after unsupported opcode",
+            },
+            "runtime_diagnostic",
+            "patch_or_edit",
+        ),
+        (
+            {
+                "kind": "verifier",
+                "status": "failed",
+                "failure_class": "artifact_validation_failure",
+                "summary": "expected artifact frame.bmp was missing after verifier",
+            },
+            "artifact_missing",
+            "inspect_latest_failure",
+        ),
+        (
+            {
+                "kind": "write",
+                "status": "failed",
+                "summary": "edit_file old text did not match current source",
+                "path": "vm.js",
+            },
+            "write_failure",
+            "patch_or_edit",
+        ),
+    ],
+)
+def test_workframe_phase2_latest_actionable_reduces_to_generic_category(
+    event: dict[str, object], expected_generic: str, expected_next: str
+) -> None:
+    event = {
+        "event_sequence": 1,
+        "event_id": "event-1",
+        "evidence_refs": ["ev:event-1"],
+        **event,
+    }
+
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Repair the current failure.",
+            sidecar_events=(event,),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.generic_family == expected_generic
+    assert workframe.required_next
+    assert workframe.required_next.kind == expected_next
+    assert workframe.required_next.evidence_refs == ("ev:event-1", "event-1")
+
+
+def test_workframe_phase2_verifier_pass_reduces_to_finish_ready() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Finish after a passing verifier.",
+            sidecar_events=(
+                {
+                    "kind": "strict_verifier",
+                    "event_sequence": 1,
+                    "event_id": "verify-1",
+                    "status": "passed",
+                    "evidence_refs": ["ev:verify-1"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "finish_ready"
+    assert workframe.latest_actionable is None
+    assert workframe.required_next
+    assert workframe.required_next.kind == "finish"
+    assert workframe.finish_readiness.state == "ready"
+
+
+def test_workframe_phase2_fastcheck_rejects_generic_latest_actionable_summary() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Repair the current failure.",
+            sidecar_events=(
+                {
+                    "kind": "verifier",
+                    "event_sequence": 1,
+                    "event_id": "verify-1",
+                    "status": "failed",
+                    "summary": "exit code 1",
+                    "evidence_refs": ["ev:verify-1"],
+                },
+            ),
+        )
+    )
+
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.summary == "exit code 1"
+    assert report.status == "fail"
+    assert {item["code"] for item in report.failed} == {"latest_actionable_generic"}
+
+
+def test_workframe_phase2_generic_family_fallback_does_not_emit_task_specific_name() -> None:
+    workframe, report = reduce_workframe(
+        WorkFrameInputs(
+            attempt_id="attempt-1",
+            turn_id="turn-1",
+            task_id="task-1",
+            objective="Handle an invalid failure record.",
+            sidecar_events=(
+                {
+                    "kind": "failure",
+                    "event_sequence": 1,
+                    "event_id": "failure-1",
+                    "status": "invalid",
+                    "family": "compile_compcert_special_case",
+                    "summary": "failure record was malformed but current",
+                    "evidence_refs": ["ev:failure-1"],
+                },
+            ),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.latest_actionable
+    assert workframe.latest_actionable.family == "compile_compcert_special_case"
+    assert workframe.latest_actionable.generic_family == "unknown_failure"
 
 
 def test_workframe_phase0_prompt_inventory_checker_detects_legacy_projection_presence() -> None:
