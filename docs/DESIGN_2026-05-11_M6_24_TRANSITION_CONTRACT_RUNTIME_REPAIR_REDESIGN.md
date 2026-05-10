@@ -1,6 +1,22 @@
 # Design 2026-05-11 - M6.24 Transition Contract Runtime Repair Redesign
 
-Status: design only.
+Status: implementation in progress.
+
+Implementation note 2026-05-11:
+
+- Phase 0 was committed in `f90c779`.
+- Phase 1-3 are implemented in the reducer path:
+  - saved runtime-artifact repeat fixture:
+    `tests/fixtures/implement_v2/transition_contract_runtime_artifact_missing.json`;
+  - typed `runtime_artifact_missing` normalization;
+  - same-key repeat budget and required-next transitions;
+  - post-failure inspection collapse from "diagnose" to patch/block decision.
+- Phase 4 has an initial implementation for prompt-visible WorkFrame slimming:
+  full reducer output stays in sidecar/debug artifacts, while the normal prompt
+  gets only the compact current phase, latest actionable, required-next,
+  forbidden-next, verifier, and finish-readiness card.
+- Phase 5/6 are not closed yet. Before live spend, run focused tests, saved
+  replay/micro checks, and a 10 minute step-shape diagnostic.
 
 Scope: `implement_v2` `transition_contract` runtime repair loop only,
 specifically the conversion from runtime failure evidence to WorkFrame

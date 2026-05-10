@@ -453,13 +453,201 @@ def _workframe_section_content(
 
 
 def _workframe_visible_payload(workframe: dict[str, object]) -> dict[str, object]:
+    prompt_workframe = _compact_prompt_workframe(workframe)
     return {
-        "workframe": dict(workframe),
+        "workframe": prompt_workframe,
         "rule": (
             "This is the only ordinary dynamic state object. Follow required_next, "
             "avoid forbidden_next, and cite evidence refs when finishing."
         ),
     }
+
+
+def _compact_prompt_workframe(workframe: dict[str, object]) -> dict[str, object]:
+    """Keep prompt WorkFrame actionable while leaving full state in sidecar artifacts."""
+
+    return _drop_empty_dict_values(
+        {
+            "schema_version": workframe.get("schema_version"),
+            "trace": _compact_workframe_trace(workframe.get("trace")),
+            "goal": _compact_workframe_goal(workframe.get("goal")),
+            "current_phase": _clip_text(workframe.get("current_phase"), 80),
+            "latest_actionable": _compact_workframe_latest_actionable(workframe.get("latest_actionable")),
+            "required_next": _compact_workframe_required_next(workframe.get("required_next")),
+            "forbidden_next": _compact_workframe_forbidden_next(workframe.get("forbidden_next")),
+            "changed_sources": _compact_workframe_changed_sources(workframe.get("changed_sources")),
+            "verifier_state": _compact_workframe_verifier_state(workframe.get("verifier_state")),
+            "finish_readiness": _compact_workframe_finish_readiness(workframe.get("finish_readiness")),
+        }
+    )
+
+
+def _compact_workframe_trace(value: object) -> dict[str, object]:
+    trace = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "turn_id": _clip_text(trace.get("turn_id"), 80),
+            "workframe_id": _clip_text(trace.get("workframe_id"), 80),
+            "output_hash": _clip_text(trace.get("output_hash"), 96),
+        }
+    )
+
+
+def _compact_workframe_goal(value: object) -> dict[str, object]:
+    goal = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "task_id": _clip_text(goal.get("task_id"), 120),
+            "objective": _clip_text(goal.get("objective"), 240),
+            "success_contract_ref": _clip_text(goal.get("success_contract_ref"), 160),
+        }
+    )
+
+
+def _compact_workframe_latest_actionable(value: object) -> dict[str, object]:
+    latest = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "family": _clip_text(latest.get("family"), 120),
+            "generic_family": _clip_text(latest.get("generic_family"), 120),
+            "summary": _clip_text(latest.get("summary"), 240),
+            "source_ref": _clip_text(latest.get("source_ref"), 160),
+            "evidence_refs": _compact_workframe_refs(latest.get("evidence_refs")),
+            "transition_contract": _compact_workframe_transition_contract(
+                (latest.get("recovery_hint") if isinstance(latest.get("recovery_hint"), dict) else {}).get(
+                    "transition_contract"
+                )
+            ),
+        }
+    )
+
+
+def _compact_workframe_required_next(value: object) -> dict[str, object]:
+    required = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "kind": _clip_text(required.get("kind"), 80),
+            "reason": _clip_text(required.get("reason"), 260),
+            "target_paths": _clip_string_list(required.get("target_paths"), max_items=4, max_chars=120),
+            "after": _clip_text(required.get("after"), 160),
+            "evidence_refs": _compact_workframe_refs(required.get("evidence_refs")),
+            "inspection_target_paths": _clip_string_list(
+                required.get("inspection_target_paths"), max_items=4, max_chars=120
+            ),
+            "inspection_evidence_refs": _compact_workframe_refs(required.get("inspection_evidence_refs")),
+        }
+    )
+
+
+def _compact_workframe_refs(value: object, *, max_items: int = 3, max_chars: int = 96) -> list[object]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    clipped: list[object] = []
+    for item in value[:max_items]:
+        if isinstance(item, dict):
+            ref: dict[str, object] = {}
+            for key in ("kind", "id", "ref"):
+                if key in item:
+                    ref[key] = _clip_text(item.get(key), max_chars)
+            if ref:
+                clipped.append(ref)
+        elif isinstance(item, str):
+            clipped.append(_clip_text(item, max_chars))
+        elif isinstance(item, (int, float, bool)):
+            clipped.append(item)
+    if len(value) > max_items:
+        clipped.append({"omitted_ref_count": len(value) - max_items})
+    return clipped
+
+
+def _compact_workframe_forbidden_next(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, object]] = []
+    for item in value[:4]:
+        if not isinstance(item, dict):
+            continue
+        compact = _drop_empty_dict_values(
+            {
+                "kind": _clip_text(item.get("kind"), 80),
+                "reason": _clip_text(item.get("reason"), 180),
+            }
+        )
+        if compact:
+            items.append(compact)
+    return items
+
+
+def _compact_workframe_transition_contract(value: object) -> dict[str, object]:
+    contract = value if isinstance(value, dict) else {}
+    state_transition = contract.get("state_transition") if isinstance(contract.get("state_transition"), dict) else {}
+    runtime_transition = (
+        contract.get("runtime_artifact_transition")
+        if isinstance(contract.get("runtime_artifact_transition"), dict)
+        else {}
+    )
+    next_action = (
+        contract.get("next_action_contract") if isinstance(contract.get("next_action_contract"), dict) else {}
+    )
+    return _drop_empty_dict_values(
+        {
+            "rule_id": _clip_text(state_transition.get("rule_id"), 160),
+            "transition_reason": _clip_text(state_transition.get("reason"), 220),
+            "runtime_artifact_transition": _drop_empty_dict_values(
+                {
+                    "rule_id": _clip_text(runtime_transition.get("rule_id"), 160),
+                    "artifact_path": _clip_text(runtime_transition.get("artifact_path"), 160),
+                    "repeat_key": _clip_text(runtime_transition.get("repeat_key"), 180),
+                    "repeat_count": runtime_transition.get("repeat_count"),
+                    "required_next": _clip_text(runtime_transition.get("required_next"), 80),
+                }
+            ),
+            "next_action_contract": _drop_empty_dict_values(
+                {
+                    "kind": _clip_text(next_action.get("kind"), 80),
+                    "reason": _clip_text(next_action.get("reason"), 220),
+                    "target_paths": _clip_string_list(next_action.get("target_paths"), max_items=4, max_chars=120),
+                    "after": _clip_text(next_action.get("after"), 160),
+                }
+            ),
+        }
+    )
+
+
+def _compact_workframe_changed_sources(value: object) -> dict[str, object]:
+    changed = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "paths": _clip_string_list(changed.get("paths"), max_items=4, max_chars=120),
+            "latest_mutation_ref": _clip_text(changed.get("latest_mutation_ref"), 160),
+            "since_last_strict_verifier": changed.get("since_last_strict_verifier"),
+        }
+    )
+
+
+def _compact_workframe_verifier_state(value: object) -> dict[str, object]:
+    verifier = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "last_strict_verifier_ref": _clip_text(verifier.get("last_strict_verifier_ref"), 160),
+            "status": _clip_text(verifier.get("status"), 80),
+            "fresh_after_latest_source_mutation": verifier.get("fresh_after_latest_source_mutation"),
+            "budget_closeout_required": verifier.get("budget_closeout_required"),
+        }
+    )
+
+
+def _compact_workframe_finish_readiness(value: object) -> dict[str, object]:
+    readiness = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "state": _clip_text(readiness.get("state"), 80),
+            "blockers": _clip_string_list(readiness.get("blockers"), max_items=4, max_chars=120),
+            "missing_obligations": _clip_string_list(
+                readiness.get("missing_obligations"), max_items=4, max_chars=120
+            ),
+        }
+    )
 
 
 def _merge_workframe_sidecar_events(

@@ -1,9 +1,15 @@
+import json
+from pathlib import Path
+
 from mew.implement_lane.workframe import WorkFrameInputs, reduce_workframe, workframe_output_hash
 from mew.implement_lane.workframe_variants import DEFAULT_WORKFRAME_VARIANT, reduce_workframe_with_variant
 from mew.implement_lane.workframe_variant_transition_contract import (
     VARIANT_NAME,
     reduce_transition_contract_workframe,
 )
+
+
+FIXTURES = Path(__file__).parent / "fixtures" / "implement_v2"
 
 
 def _verifier_failure_after_mutation_inputs() -> WorkFrameInputs:
@@ -138,3 +144,293 @@ def test_default_variant_dispatches_transition_contract_and_current_alias_dispat
     assert current_report.status == "pass"
     assert default.as_dict() == transition.as_dict()
     assert explicit_current.as_dict() == current.as_dict()
+
+
+def _runtime_artifact_repeat_fixture() -> tuple[WorkFrameInputs, dict[str, object]]:
+    payload = json.loads((FIXTURES / "transition_contract_runtime_artifact_missing.json").read_text())
+    raw = payload["workframe_inputs"]
+    return (
+        WorkFrameInputs(
+            attempt_id=raw["attempt_id"],
+            turn_id=raw["turn_id"],
+            task_id=raw["task_id"],
+            objective=raw["objective"],
+            success_contract_ref=raw["success_contract_ref"],
+            sidecar_events=tuple(raw["sidecar_events"]),
+        ),
+        payload["expected"],
+    )
+
+
+def test_transition_contract_fixture_identifies_runtime_artifact_repeat() -> None:
+    inputs, expected = _runtime_artifact_repeat_fixture()
+
+    workframe, report = reduce_transition_contract_workframe(inputs)
+
+    assert report.status == "pass"
+    assert workframe.required_next
+    assert workframe.required_next.kind == expected["required_next_kind"]
+    assert workframe.required_next.inspection_target_paths == ("vm.js", "first_frame.ppm")
+    assert "forbidden by transition_contract.runtime_artifact_missing.repeat_requires_inspection" in {
+        item.reason for item in workframe.forbidden_next
+    }
+    contract = workframe.latest_actionable.recovery_hint["transition_contract"]
+    runtime_transition = contract["runtime_artifact_transition"]
+    assert runtime_transition["rule_id"] == expected["rule_id"]
+    assert runtime_transition["artifact_path"] == expected["artifact_path"]
+    assert runtime_transition["producer_paths"] == [expected["producer_path"]]
+    assert runtime_transition["repeat_count"] == expected["repeat_count"]
+    assert runtime_transition["repeat_key"] == expected["repeat_key"]
+
+
+def test_transition_contract_blocks_runtime_artifact_repeat_beyond_budget() -> None:
+    inputs, _expected = _runtime_artifact_repeat_fixture()
+    events = list(inputs.sidecar_events)
+    for sequence in (51, 52):
+        repeated = dict(events[-1])
+        repeated["event_id"] = f"tool-result:call-{sequence}-verify-first-frame"
+        repeated["event_sequence"] = sequence
+        repeated["command_run_id"] = f"command:call-{sequence}"
+        repeated["evidence_refs"] = [
+            f"tool-run-record:call-{sequence}:interrupted",
+            f"artifact-evidence:/app/first_frame.ppm:call-{sequence}",
+        ]
+        events.append(repeated)
+
+    workframe, report = reduce_transition_contract_workframe(
+        WorkFrameInputs(
+            attempt_id=inputs.attempt_id,
+            turn_id=inputs.turn_id,
+            task_id=inputs.task_id,
+            objective=inputs.objective,
+            success_contract_ref=inputs.success_contract_ref,
+            sidecar_events=tuple(events),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "blocked"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "blocked"
+    contract = workframe.latest_actionable.recovery_hint["transition_contract"]
+    runtime_transition = contract["runtime_artifact_transition"]
+    assert runtime_transition["rule_id"] == "transition_contract.runtime_artifact_missing.repeat_budget_exhausted"
+    assert runtime_transition["repeat_count"] == 4
+    assert {"patch_or_edit", "run_verifier", "finish"} <= {item.kind for item in workframe.forbidden_next}
+
+
+def test_transition_contract_does_not_reopen_runtime_artifact_miss_after_passing_verifier() -> None:
+    inputs, _expected = _runtime_artifact_repeat_fixture()
+    events = list(inputs.sidecar_events[:2])
+    events.append(
+        {
+            "event_id": "tool-result:call-48-fix-producer",
+            "event_sequence": 48,
+            "evidence_refs": ["implement-v2-write://attempt/call-48/mutation"],
+            "kind": "apply_patch",
+            "path": "$WORKSPACE/vm.js",
+            "status": "completed",
+            "target_paths": ["$WORKSPACE/vm.js"],
+        }
+    )
+    events.append(
+        {
+            "event_id": "tool-result:call-49-verify-first-frame",
+            "event_sequence": 49,
+            "evidence_refs": ["ev:verify-pass"],
+            "kind": "strict_verifier",
+            "status": "passed",
+            "typed_evidence_id": "ev:verify-pass",
+            "execution_contract_normalized": {
+                "id": "contract:call-49",
+                "role": "verify",
+                "proof_role": "verifier",
+                "acceptance_kind": "external_verifier",
+            },
+        }
+    )
+
+    workframe, report = reduce_transition_contract_workframe(
+        WorkFrameInputs(
+            attempt_id=inputs.attempt_id,
+            turn_id=inputs.turn_id,
+            task_id=inputs.task_id,
+            objective=inputs.objective,
+            success_contract_ref=inputs.success_contract_ref,
+            sidecar_events=tuple(events),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "finish_ready"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "finish"
+
+
+def test_transition_contract_does_not_reopen_runtime_artifact_miss_after_shell_source_mutation() -> None:
+    _assert_runtime_miss_resolved_by_source_mutation(
+        {
+            "event_id": "tool-result:call-48-generate-vm",
+            "event_sequence": 48,
+            "evidence_refs": ["command:call-48", "source-tree-mutation:call-48"],
+            "kind": "run_command",
+            "status": "passed",
+            "source_tree_mutation": True,
+            "changed_files": ["$WORKSPACE/vm.js"],
+            "summary": "generated vm.js from shell command",
+        }
+    )
+
+
+def test_transition_contract_does_not_reopen_runtime_artifact_miss_after_truthy_shell_mutation_payload() -> None:
+    _assert_runtime_miss_resolved_by_source_mutation(
+        {
+            "event_id": "tool-result:call-48-generate-vm",
+            "event_sequence": 48,
+            "evidence_refs": ["command:call-48", "source-tree-mutation:call-48"],
+            "kind": "run_command",
+            "status": "passed",
+            "source_tree_mutation": {"path": "$WORKSPACE/vm.js"},
+            "summary": "generated vm.js from shell command",
+        }
+    )
+
+
+def test_transition_contract_does_not_reopen_runtime_artifact_miss_after_source_mutations_list() -> None:
+    _assert_runtime_miss_resolved_by_source_mutation(
+        {
+            "event_id": "tool-result:call-48-generate-vm",
+            "event_sequence": 48,
+            "evidence_refs": ["command:call-48", "source-tree-mutation:call-48"],
+            "kind": "run_command",
+            "status": "passed",
+            "source_mutations": [{"path": "$WORKSPACE/vm.js"}],
+            "summary": "generated vm.js from shell command",
+        }
+    )
+
+
+def _assert_runtime_miss_resolved_by_source_mutation(mutation_event: dict[str, object]) -> None:
+    inputs, _expected = _runtime_artifact_repeat_fixture()
+    events = list(inputs.sidecar_events[:2])
+    events.append(mutation_event)
+
+    workframe, report = reduce_transition_contract_workframe(
+        WorkFrameInputs(
+            attempt_id=inputs.attempt_id,
+            turn_id=inputs.turn_id,
+            task_id=inputs.task_id,
+            objective=inputs.objective,
+            success_contract_ref=inputs.success_contract_ref,
+            sidecar_events=tuple(events),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.current_phase == "verify_after_mutation"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "run_verifier"
+
+
+def test_transition_contract_ignores_unrelated_post_failure_inspection() -> None:
+    inputs, _expected = _runtime_artifact_repeat_fixture()
+    events = list(inputs.sidecar_events[:2])
+    events.append(
+        {
+            "event_id": "tool-result:call-48-read-readme",
+            "event_sequence": 48,
+            "evidence_refs": ["inspect:readme"],
+            "kind": "inspection",
+            "status": "completed",
+            "summary": "read README.md for unrelated setup notes",
+            "target_paths": ["$WORKSPACE/README.md"],
+        }
+    )
+
+    workframe, report = reduce_transition_contract_workframe(
+        WorkFrameInputs(
+            attempt_id=inputs.attempt_id,
+            turn_id=inputs.turn_id,
+            task_id=inputs.task_id,
+            objective=inputs.objective,
+            success_contract_ref=inputs.success_contract_ref,
+            sidecar_events=tuple(events),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "inspect_latest_failure"
+    contract = workframe.latest_actionable.recovery_hint["transition_contract"]
+    runtime_transition = contract["runtime_artifact_transition"]
+    assert runtime_transition["rule_id"] == "transition_contract.runtime_artifact_missing.unrelated_inspection_requires_tied_inspection"
+    assert "README" not in workframe.required_next.reason
+
+
+def test_transition_contract_does_not_match_unrelated_short_artifact_stem() -> None:
+    inputs, _expected = _runtime_artifact_repeat_fixture()
+    events = list(inputs.sidecar_events[:2])
+    events.append(
+        {
+            "event_id": "tool-result:call-48-read-framework-notes",
+            "event_sequence": 48,
+            "evidence_refs": ["inspect:framework-notes"],
+            "kind": "inspection",
+            "status": "completed",
+            "summary": "read framework setup notes from README.md",
+            "target_paths": ["$WORKSPACE/README.md"],
+        }
+    )
+
+    workframe, report = reduce_transition_contract_workframe(
+        WorkFrameInputs(
+            attempt_id=inputs.attempt_id,
+            turn_id=inputs.turn_id,
+            task_id=inputs.task_id,
+            objective=inputs.objective,
+            success_contract_ref=inputs.success_contract_ref,
+            sidecar_events=tuple(events),
+        )
+    )
+
+    assert report.status == "pass"
+    assert workframe.required_next
+    assert workframe.required_next.kind == "inspect_latest_failure"
+    contract = workframe.latest_actionable.recovery_hint["transition_contract"]
+    assert (
+        contract["runtime_artifact_transition"]["rule_id"]
+        == "transition_contract.runtime_artifact_missing.unrelated_inspection_requires_tied_inspection"
+    )
+
+
+def test_transition_contract_ties_workspace_prefixed_artifact_inspection_by_path_key() -> None:
+    inputs, _expected = _runtime_artifact_repeat_fixture()
+    events = list(inputs.sidecar_events[:2])
+    events.append(
+        {
+            "event_id": "tool-result:call-48-read-first-frame",
+            "event_sequence": 48,
+            "evidence_refs": ["inspect:first-frame"],
+            "kind": "inspection",
+            "status": "completed",
+            "summary": "read file",
+            "target_paths": ["$WORKSPACE/first_frame.ppm"],
+        }
+    )
+
+    workframe, report = reduce_transition_contract_workframe(
+        WorkFrameInputs(
+            attempt_id=inputs.attempt_id,
+            turn_id=inputs.turn_id,
+            task_id=inputs.task_id,
+            objective=inputs.objective,
+            success_contract_ref=inputs.success_contract_ref,
+            sidecar_events=tuple(events),
+        )
+    )
+
+    assert report.status == "pass"
+    contract = workframe.latest_actionable.recovery_hint["transition_contract"]
+    runtime_transition = contract["runtime_artifact_transition"]
+    assert runtime_transition["rule_id"] == "transition_contract.runtime_artifact_missing.inspection_enables_patch"
+    assert "first_frame.ppm" in workframe.required_next.inspection_target_paths
