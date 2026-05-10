@@ -1012,6 +1012,7 @@ def _resolvable_refs_from_event(event: dict[str, object]) -> set[str]:
             "event_id",
             "event_ref",
             "evidence_ref",
+            "evidence_id",
             "command_run_id",
             "typed_evidence_id",
             "id",
@@ -1035,7 +1036,7 @@ def _refs_from_nested_mapping(value: object) -> set[str]:
     refs: set[str] = set()
     if not isinstance(value, dict):
         return refs
-    for key in ("id", "ref", "contract_id", "finish_gate_id", "oracle_bundle_id"):
+    for key in ("id", "ref", "evidence_id", "contract_id", "finish_gate_id", "oracle_bundle_id"):
         ref = str(value.get(key) or "").strip()
         if ref:
             refs.add(ref)
@@ -1298,7 +1299,7 @@ def _walk(value: object) -> Iterable[object]:
     if isinstance(value, dict):
         for child in value.values():
             yield from _walk(child)
-    elif isinstance(value, list):
+    elif isinstance(value, (list, tuple)):
         for child in value:
             yield from _walk(child)
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from mew.implement_lane.hot_path_fastcheck import run_hot_path_fastcheck
+from mew.implement_lane.hot_path_fastcheck import _workframe_resolvable_refs, run_hot_path_fastcheck
 from mew.implement_lane.workframe import WorkFrameInputs, canonicalize_workframe_inputs, reduce_workframe
 
 
@@ -381,6 +381,31 @@ def test_hot_path_fastcheck_resolves_nested_missing_obligation_refs(tmp_path):
     assert result["status"] == "pass"
     evidence = [check for check in result["checks"] if check["name"] == "workframe_evidence_ref_policy"][0]
     assert evidence["status"] == "pass"
+
+
+def test_hot_path_fastcheck_resolver_includes_nested_evidence_id() -> None:
+    refs = _workframe_resolvable_refs(
+        _workframe_inputs(
+            sidecar_events=(
+                {
+                    "kind": "verifier",
+                    "event_sequence": 1,
+                    "event_id": "verify-1",
+                    "status": "failed",
+                    "side_effects": (
+                        {
+                            "kind": "artifact_evidence",
+                            "record": {
+                                "evidence_id": "artifact-evidence:/app/frame.bmp:tool-run-record:verify-1",
+                            },
+                        },
+                    ),
+                },
+            )
+        )
+    )
+
+    assert "artifact-evidence:/app/frame.bmp:tool-run-record:verify-1" in refs
 
 
 def test_hot_path_fastcheck_rejects_model_supplied_unknown_category(tmp_path):
