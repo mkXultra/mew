@@ -3169,6 +3169,8 @@ def _required_patch_model_turn_effective_min_seconds(minimum_seconds: float, *, 
         return min(120.0, minimum_seconds)
     if _has_focused_runtime_diagnostic_patch_surface(workframe):
         return min(120.0, minimum_seconds)
+    if _has_inspected_artifact_missing_patch_surface(workframe):
+        return min(120.0, minimum_seconds)
     material_shortfall_ratio = 0.8
     material_shortfall_seconds = 60.0
     return max(
@@ -3216,6 +3218,59 @@ def _has_focused_runtime_diagnostic_patch_surface(workframe: dict[str, object]) 
             r"\b(?:pc=|program counter|signal\s+\d+|exit code\s+[2-9]\d*)\b",
         ),
     )
+
+
+def _has_inspected_artifact_missing_patch_surface(workframe: dict[str, object]) -> bool:
+    latest = _dict_or_empty(workframe.get("latest_actionable"))
+    if str(latest.get("generic_family") or "") != "artifact_missing":
+        return False
+    required_next = _dict_or_empty(workframe.get("required_next"))
+    if str(required_next.get("kind") or "") != "patch_or_edit":
+        return False
+    if str(workframe.get("current_phase") or "") != "repair_after_verifier_failure":
+        return False
+    target_paths = required_next.get("target_paths")
+    if not isinstance(target_paths, (list, tuple)) or not any(str(path or "").strip() for path in target_paths):
+        return False
+    evidence_refs = required_next.get("evidence_refs")
+    if not isinstance(evidence_refs, (list, tuple)) or not evidence_refs:
+        return False
+    inspection_paths = required_next.get("inspection_target_paths")
+    if not isinstance(inspection_paths, (list, tuple)) or not any(
+        str(path or "").strip() for path in inspection_paths
+    ):
+        return False
+    inspection_refs = required_next.get("inspection_evidence_refs")
+    if not isinstance(inspection_refs, (list, tuple)) or not inspection_refs:
+        return False
+    return _path_lists_overlap(target_paths, inspection_paths)
+
+
+def _path_lists_overlap(left: object, right: object) -> bool:
+    if not isinstance(left, (list, tuple, set)) or not isinstance(right, (list, tuple, set)):
+        return False
+    left_keys = {_path_match_key(path) for path in left if _path_match_key(path)}
+    right_keys = {_path_match_key(path) for path in right if _path_match_key(path)}
+    if not left_keys or not right_keys:
+        return False
+    if left_keys & right_keys:
+        return True
+    for left_key in left_keys:
+        for right_key in right_keys:
+            if left_key.startswith(f"{right_key}/") or right_key.startswith(f"{left_key}/"):
+                return True
+    return False
+
+
+def _path_match_key(value: object) -> str:
+    path = str(value or "").strip()
+    if path.startswith("$WORKSPACE/"):
+        path = path.removeprefix("$WORKSPACE/")
+    if path.startswith("/app/"):
+        path = path.removeprefix("/app/")
+    if path.startswith("./"):
+        path = path.removeprefix("./")
+    return path.strip("/")
 
 
 def _is_low_detail_runtime_diagnostic_summary(summary: str) -> bool:

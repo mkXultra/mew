@@ -158,15 +158,22 @@ class WorkFrameRequiredNext:
     target_paths: tuple[str, ...] = ()
     after: str = ""
     evidence_refs: tuple[str, ...] = ()
+    inspection_target_paths: tuple[str, ...] = ()
+    inspection_evidence_refs: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        payload = {
             "kind": self.kind,
             "reason": self.reason,
             "target_paths": list(self.target_paths),
             "after": self.after,
             "evidence_refs": list(self.evidence_refs),
         }
+        if self.inspection_target_paths:
+            payload["inspection_target_paths"] = list(self.inspection_target_paths)
+        if self.inspection_evidence_refs:
+            payload["inspection_evidence_refs"] = list(self.inspection_evidence_refs)
+        return payload
 
 
 @dataclass(frozen=True)
@@ -643,10 +650,14 @@ def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
             failure = write_failure
     failure_seq = _event_sequence(failure) if failure else -1
     failure_generic_family = _generic_failure_family(failure) if isinstance(failure, dict) else ""
-    latest_failure_inspection_seq = _latest_relevant_failure_inspection_sequence(
+    failure_target_paths = _failure_patch_target_paths(failure, changed_paths=changed_paths)
+    latest_failure_inspection = _latest_relevant_failure_inspection_event(
         events,
         generic_family=failure_generic_family,
+        min_sequence=failure_seq,
+        target_paths=failure_target_paths,
     )
+    latest_failure_inspection_seq = _event_sequence(latest_failure_inspection) if latest_failure_inspection else -1
     latest_resolved_failure_seq = max(
         latest_failure_inspection_seq,
         verifier_seq if finish_proof and _event_status(finish_proof) == "passed" else -1,
@@ -683,6 +694,14 @@ def _extract_facts(canonical_inputs: dict[str, object]) -> dict[str, object]:
             min_sequence=latest_resolved_failure_seq,
         ),
         "latest_failure_inspection_sequence": latest_failure_inspection_seq,
+        "latest_failure_inspection_target_paths": tuple(
+            sorted(_model_visible_workspace_path(path) for path in _event_paths(latest_failure_inspection))
+        )
+        if latest_failure_inspection
+        else (),
+        "latest_failure_inspection_evidence_refs": _event_evidence_refs(latest_failure_inspection)
+        if latest_failure_inspection
+        else (),
         "latest_resolved_failure_sequence": latest_resolved_failure_seq,
         "latest_write_failure_ref": _event_ref(write_failure),
         "latest_write_failure_sequence": _event_sequence(write_failure) if write_failure else -1,
@@ -821,6 +840,16 @@ def _required_next_from_facts(
             ),
             after="run_configured_verifier" if next_kind == "patch_or_edit" else "patch_or_edit_or_block",
             evidence_refs=latest_actionable.evidence_refs or (latest_actionable.source_ref,),
+            inspection_target_paths=(
+                tuple(str(path) for path in facts.get("latest_failure_inspection_target_paths") or () if str(path))
+                if inspected_enough_for_patch
+                else ()
+            ),
+            inspection_evidence_refs=(
+                tuple(str(ref) for ref in facts.get("latest_failure_inspection_evidence_refs") or () if str(ref))
+                if inspected_enough_for_patch
+                else ()
+            ),
         )
     if facts.get("budget_closeout_required"):
         return WorkFrameRequiredNext(
@@ -852,6 +881,10 @@ def _failure_inspected_enough_for_patch(
     latest_actionable: WorkFrameLatestActionable,
 ) -> bool:
     if latest_actionable.generic_family != "artifact_missing":
+        return False
+    if not facts.get("latest_failure_inspection_target_paths"):
+        return False
+    if not facts.get("latest_failure_inspection_evidence_refs"):
         return False
     return int(facts.get("latest_failure_inspection_sequence") or -1) > int(
         facts.get("latest_failure_sequence") or -1
@@ -1402,6 +1435,18 @@ def _paths_from_failure(value: object) -> tuple[str, ...]:
     return tuple(sorted(_event_paths(value)))
 
 
+def _failure_patch_target_paths(failure: object, *, changed_paths: tuple[str, ...]) -> tuple[str, ...]:
+    failure_paths = _paths_from_failure(failure)
+    raw_paths = failure_paths or changed_paths
+    return tuple(
+        dict.fromkeys(
+            _model_visible_workspace_path(path)
+            for path in raw_paths
+            if _model_visible_workspace_path(path)
+        )
+    )
+
+
 def _required_next_target_paths(facts: dict[str, object], *, generic_family: str) -> tuple[str, ...]:
     failure_paths = _paths_from_failure(facts.get("latest_failure"))
     if failure_paths:
@@ -1432,7 +1477,30 @@ def _model_visible_workspace_path(value: object) -> str:
     path = str(value or "").strip()
     if path.startswith("$WORKSPACE/"):
         return path.removeprefix("$WORKSPACE/").strip()
+    if path.startswith("/app/"):
+        return path.removeprefix("/app/").strip()
     return path
+
+
+def _path_match_key(value: object) -> str:
+    path = _model_visible_workspace_path(value)
+    if path.startswith("./"):
+        path = path.removeprefix("./")
+    return path.strip("/")
+
+
+def _paths_overlap(left: Iterable[object], right: Iterable[object]) -> bool:
+    left_keys = {_path_match_key(path) for path in left if _path_match_key(path)}
+    right_keys = {_path_match_key(path) for path in right if _path_match_key(path)}
+    if not left_keys or not right_keys:
+        return False
+    if left_keys & right_keys:
+        return True
+    for left_key in left_keys:
+        for right_key in right_keys:
+            if left_key.startswith(f"{right_key}/") or right_key.startswith(f"{left_key}/"):
+                return True
+    return False
 
 
 def _generic_failure_family(event: dict[str, object]) -> str:
@@ -1490,32 +1558,48 @@ def _generic_failure_repeat_count(events: list[dict[str, object]], generic_famil
     return count
 
 
-def _latest_relevant_failure_inspection_sequence(events: list[dict[str, object]], *, generic_family: str) -> int:
+def _latest_relevant_failure_inspection_event(
+    events: list[dict[str, object]],
+    *,
+    generic_family: str,
+    min_sequence: int = -1,
+    target_paths: tuple[str, ...] = (),
+) -> dict[str, object] | None:
     if generic_family not in {"artifact_missing", "command_no_output_or_interrupted", "runtime_diagnostic"}:
-        return -1
+        return None
     matches = [
-        _event_sequence(event)
+        event
         for event in events
-        if _event_inspects_failure_pattern(event, generic_family=generic_family)
+        if _event_sequence(event) > min_sequence
+        and _event_inspects_failure_pattern(event, generic_family=generic_family, target_paths=target_paths)
     ]
-    return max(matches) if matches else -1
+    if not matches:
+        return None
+    return max(matches, key=_event_sequence)
 
 
-def _event_inspects_failure_pattern(event: dict[str, object], *, generic_family: str) -> bool:
+def _event_inspects_failure_pattern(
+    event: dict[str, object],
+    *,
+    generic_family: str,
+    target_paths: tuple[str, ...],
+) -> bool:
     if _event_status(event) in {"failed", "interrupted", "invalid"} or _event_source_mutation_failed(event):
         return False
     if _event_is_source_mutation_surface(event):
         return False
     detail = _event_detail_text(event).lower()
     if _event_kind(event) == "inspection" and generic_family == "artifact_missing":
-        return True
+        return _paths_overlap(_event_paths(event), target_paths)
     if _event_kind(event) == "inspection" and generic_family == "command_no_output_or_interrupted":
         return any(term in detail for term in ("command", "output", "log", "stdout", "stderr", "file", "path"))
     intent = _event_execution_intent(event)
     if intent not in {"cheap_probe", "diagnostic"}:
         return False
     if generic_family == "artifact_missing":
-        return any(term in detail for term in ("artifact", "frame", "output", "producer", "path", "file"))
+        return _paths_overlap(_event_paths(event), target_paths) and any(
+            term in detail for term in ("artifact", "frame", "output", "producer", "path", "file")
+        )
     return any(term in detail for term in ("runtime", "trace", "opcode", "syscall", " pc=", "program terminated"))
 
 

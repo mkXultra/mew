@@ -7943,6 +7943,108 @@ def test_implement_v2_blocks_short_low_detail_runtime_diagnostic_patch_turn(tmp_
     assert block["minimum_enforced_model_timeout_seconds"] == 240.0
 
 
+def test_implement_v2_allows_short_inspected_artifact_missing_repair_patch_turn(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "description": "Implement a VM runtime from provided source that produces frame.bmp.",
+            "max_wall_seconds": 660,
+        },
+        lane_config={
+            "mode": "full",
+            "allowed_read_roots": [str(tmp_path)],
+            "allowed_write_roots": [str(tmp_path)],
+            "allow_shell": True,
+        },
+    )
+    write_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="write-vm",
+        mew_tool_call_id="tool-write-vm",
+        tool_name="write_file",
+        status="completed",
+        content=({"path": "vm.js", "summary": "source written"},),
+        side_effects=(
+            {
+                "kind": "file_write",
+                "operation": "write_file",
+                "path": "vm.js",
+                "written": True,
+            },
+        ),
+        evidence_refs=("ev:write-vm",),
+    )
+    no_output_failure = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="verify-node-vm-js",
+        mew_tool_call_id="tool-verify-node-vm-js",
+        tool_name="run_tests",
+        status="interrupted",
+        is_error=True,
+        content=(
+            {
+                "command": "node vm.js",
+                "status": "killed",
+                "exit_code": None,
+                "reason": "implement_v2 hard-runtime verifier had no observable output or expected-artifact progress",
+                "failure_classification": {
+                    "phase": "runtime",
+                    "kind": "missing_artifact",
+                    "class": "runtime_artifact_missing",
+                    "confidence": "high",
+                    "summary": "expected artifact missing after no-output verifier",
+                    "secondary_kinds": ["interrupted"],
+                },
+                "execution_contract_normalized": {
+                    "role": "runtime",
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                    "affected_paths": ["vm.js"],
+                    "expected_artifacts": [{"path": "frame.bmp", "kind": "file", "required": True}],
+                },
+            },
+        ),
+        evidence_refs=("ev:verify-node-vm-js",),
+    )
+    inspect_output = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="inspect-verifier-output",
+        mew_tool_call_id="tool-inspect-verifier-output",
+        tool_name="read_command_output",
+        status="completed",
+        content=({"command_run_id": "verify-node-vm-js", "content": "", "status": "completed"},),
+        evidence_refs=("ev:inspect-output",),
+    )
+    read_producer = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="read-vm",
+        mew_tool_call_id="tool-read-vm",
+        tool_name="read_file",
+        status="completed",
+        content=({"path": "vm.js", "summary": "Read file vm.js size=100 chars"},),
+        evidence_refs=("ev:read-vm",),
+    )
+
+    block = _required_patch_model_turn_budget_block(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        active_work_todo_state={"source": {"target_paths": ["vm.js"]}},
+        hard_runtime_frontier_state={},
+        tool_results=(write_result, no_output_failure, inspect_output, read_producer),
+        run_started=time.monotonic() - 409,
+        next_turn=11,
+        next_model_timeout_seconds=191,
+        requested_timeout=600,
+    )
+
+    assert block == {}
+
+
 def test_implement_v2_allows_short_recovery_hint_write_failure_patch_turn(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
@@ -11104,6 +11206,73 @@ def test_implement_v2_workframe_projects_completed_read_command_output_as_inspec
     assert events[0]["kind"] == "inspection"
     assert events[0]["summary"] == "read_command_output cmd-1"
     assert events[0]["evidence_refs"] == ["ev:read-command-output"]
+
+
+def test_implement_v2_workframe_requires_failure_tied_artifact_missing_inspection_before_patch() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Implement a runtime that writes an artifact."},
+        lane_config={"mode": "full"},
+    )
+    base_events = (
+        {
+            "kind": "write",
+            "event_sequence": 1,
+            "event_id": "tool-result:write-vm",
+            "status": "completed",
+            "path": "vm.js",
+            "target_paths": ["vm.js"],
+            "evidence_refs": ["ev:write-vm"],
+        },
+        {
+            "kind": "verifier",
+            "event_sequence": 2,
+            "event_id": "tool-result:verify-vm",
+            "status": "interrupted",
+            "family": "runtime_artifact_missing",
+            "failure_kind": "missing_artifact",
+            "summary": "expected artifact missing after no-output verifier",
+            "evidence_refs": ["ev:verify-vm"],
+        },
+    )
+    unrelated_read = {
+        "kind": "inspection",
+        "event_sequence": 3,
+        "event_id": "tool-result:read-readme",
+        "status": "completed",
+        "target_paths": ["README.md"],
+        "evidence_refs": ["ev:read-readme"],
+        "summary": "Read file README.md",
+    }
+    unrelated_bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        sidecar_events=base_events + (unrelated_read,),
+    )
+
+    assert unrelated_bundle["reducer_output"]["required_next"]["kind"] == "inspect_latest_failure"
+
+    related_read = {
+        "kind": "inspection",
+        "event_sequence": 4,
+        "event_id": "tool-result:read-vm",
+        "status": "completed",
+        "target_paths": ["vm.js"],
+        "evidence_refs": ["ev:read-vm"],
+        "summary": "Read file vm.js",
+    }
+    related_bundle = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        sidecar_events=base_events + (unrelated_read, related_read),
+    )
+    required_next = related_bundle["reducer_output"]["required_next"]
+
+    assert required_next["kind"] == "patch_or_edit"
+    assert required_next["target_paths"] == ["vm.js"]
+    assert required_next["inspection_target_paths"] == ["vm.js"]
+    assert required_next["inspection_evidence_refs"] == ["ev:read-vm", "tool-result:read-vm"]
 
 
 def test_implement_v2_workframe_does_not_extract_missing_path_reason_for_non_write() -> None:
