@@ -577,6 +577,214 @@ def test_native_harness_first_write_control_suppressed_by_explicit_verifier_inte
     assert "native_loop_control" not in json.dumps(provider.requests[1]["input_items"], sort_keys=True)
 
 
+def test_native_harness_adds_repair_control_after_failed_verifier_probe_budget(tmp_path: Path) -> None:
+    command_run_id = _command_run_id("verify-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("write-1", "write_file", {"path": "vm.js", "content": "bad\n"}, output_index=0),
+                fake_call(
+                    "verify-1",
+                    "run_tests",
+                    {"command": "false", "cwd": ".", "command_intent": "verifier"},
+                    output_index=1,
+                ),
+            ],
+            [
+                fake_call(
+                    "read-failure",
+                    "read_command_output",
+                    {"command_run_id": command_run_id, "max_chars": 2000},
+                    output_index=0,
+                ),
+                fake_call(
+                    "probe-after-failure",
+                    "run_command",
+                    {"command": "printf diagnose", "cwd": ".", "command_intent": "diagnostic"},
+                    output_index=1,
+                ),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    third_request = provider.requests[2]
+    control_text = third_request["input_items"][-1]["content"][0]["text"]
+    payload = json.loads(control_text)
+    assert payload["native_loop_control"]["verifier_repair_due"] is True
+    assert payload["native_loop_control"]["first_write_due"] is False
+    assert payload["native_loop_control"]["post_failure_probe_count"] == 2
+    assert payload["native_loop_control"]["post_failure_write_count"] == 0
+    assert payload["native_loop_control"]["next_action_policy"] == "patch_or_blocked_finish_after_failed_verifier"
+    assert payload["native_loop_control"]["max_additional_probe_turns"] == 0
+    assert payload["native_loop_control"]["latest_failed_verifier"]["call_id"] == "verify-1"
+
+
+def test_native_harness_adds_repair_control_after_yielded_verifier_poll_failure(tmp_path: Path) -> None:
+    command_run_id = _command_run_id("verify-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("write-1", "write_file", {"path": "vm.js", "content": "bad\n"}, output_index=0),
+                fake_call(
+                    "verify-1",
+                    "run_tests",
+                    {
+                        "command": "sleep 0.2; false",
+                        "cwd": ".",
+                        "command_intent": "verifier",
+                        "foreground_budget_seconds": 0.01,
+                    },
+                    output_index=1,
+                ),
+            ],
+            [
+                fake_call(
+                    "poll-failure",
+                    "poll_command",
+                    {"command_run_id": command_run_id, "wait_seconds": 1},
+                    output_index=0,
+                )
+            ],
+            [
+                fake_call(
+                    "read-failure",
+                    "read_command_output",
+                    {"command_run_id": command_run_id, "max_chars": 2000},
+                    output_index=0,
+                ),
+                fake_call(
+                    "probe-after-failure",
+                    "run_command",
+                    {"command": "printf diagnose", "cwd": ".", "command_intent": "diagnostic"},
+                    output_index=1,
+                ),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=4)
+
+    payload = json.loads(provider.requests[3]["input_items"][-1]["content"][0]["text"])
+    assert payload["native_loop_control"]["verifier_repair_due"] is True
+    assert payload["native_loop_control"]["latest_failed_verifier"]["call_id"] == "poll-failure"
+    assert payload["native_loop_control"]["latest_failed_verifier"]["status"] == "failed"
+
+
+def test_native_harness_repair_control_suppressed_after_later_passing_verifier(tmp_path: Path) -> None:
+    command_run_id = _command_run_id("verify-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("write-1", "write_file", {"path": "vm.js", "content": "bad\n"}, output_index=0),
+                fake_call(
+                    "verify-1",
+                    "run_tests",
+                    {"command": "false", "cwd": ".", "command_intent": "verifier"},
+                    output_index=1,
+                ),
+            ],
+            [
+                fake_call(
+                    "verify-2",
+                    "run_tests",
+                    {"command": "true", "cwd": ".", "command_intent": "verifier"},
+                    output_index=0,
+                ),
+                fake_call(
+                    "read-old-failure",
+                    "read_command_output",
+                    {"command_run_id": command_run_id, "max_chars": 2000},
+                    output_index=1,
+                ),
+                fake_call(
+                    "probe-after-pass",
+                    "run_command",
+                    {"command": "printf diagnose", "cwd": ".", "command_intent": "diagnostic"},
+                    output_index=2,
+                ),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    assert "native_loop_control" not in json.dumps(provider.requests[2]["input_items"], sort_keys=True)
+
+
+def test_native_harness_run_command_verifier_intent_triggers_repair_control(tmp_path: Path) -> None:
+    command_run_id = _command_run_id("verify-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("write-1", "write_file", {"path": "vm.js", "content": "bad\n"}, output_index=0),
+                fake_call(
+                    "verify-1",
+                    "run_command",
+                    {"command": "false", "cwd": ".", "command_intent": "verifier"},
+                    output_index=1,
+                ),
+            ],
+            [
+                fake_call(
+                    "read-failure",
+                    "read_command_output",
+                    {"command_run_id": command_run_id, "max_chars": 2000},
+                    output_index=0,
+                ),
+                fake_call(
+                    "probe-after-failure",
+                    "run_command",
+                    {"command": "printf diagnose", "cwd": ".", "command_intent": "diagnostic"},
+                    output_index=1,
+                ),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    payload = json.loads(provider.requests[2]["input_items"][-1]["content"][0]["text"])
+    assert payload["native_loop_control"]["verifier_repair_due"] is True
+    assert payload["native_loop_control"]["latest_failed_verifier"]["call_id"] == "verify-1"
+
+
+def test_native_harness_repair_control_suppressed_after_failed_verifier_write(tmp_path: Path) -> None:
+    command_run_id = _command_run_id("verify-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("write-1", "write_file", {"path": "vm.js", "content": "bad\n"}, output_index=0),
+                fake_call(
+                    "verify-1",
+                    "run_tests",
+                    {"command": "false", "cwd": ".", "command_intent": "verifier"},
+                    output_index=1,
+                ),
+            ],
+            [
+                fake_call(
+                    "read-failure",
+                    "read_command_output",
+                    {"command_run_id": command_run_id, "max_chars": 2000},
+                    output_index=0,
+                ),
+                fake_call("write-2", "edit_file", {"path": "vm.js", "old": "bad", "new": "good"}, output_index=1),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    assert "native_loop_control" not in json.dumps(provider.requests[2]["input_items"], sort_keys=True)
+
+
 def _native_item_from_payload(payload: dict[str, object]) -> NativeTranscriptItem:
     fields = {
         "sequence",

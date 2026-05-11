@@ -24,6 +24,7 @@ from .native_transcript import (
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
     NativeTranscript,
     NativeTranscriptItem,
+    OUTPUT_ITEM_KINDS,
     build_synthetic_error_output,
     native_transcript_hash,
     normalize_codex_response_items,
@@ -52,6 +53,9 @@ PHASE3_NATIVE_SURFACE = {
 }
 _FIRST_WRITE_DUE_PROBE_THRESHOLD = 10
 _FIRST_WRITE_DUE_TURN_THRESHOLD = 6
+_FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
+_CONTROL_FAILURE_SUMMARY_LIMIT = 700
+_COMMAND_RUN_ID_RE = re.compile(r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)")
 
 
 @dataclass(frozen=True)
@@ -624,7 +628,9 @@ def _responses_input_items(
         converted = _responses_input_item_from_transcript_item(item)
         if converted:
             items.append(converted)
-    if native_loop_control and native_loop_control.get("first_write_due"):
+    if native_loop_control and (
+        native_loop_control.get("first_write_due") or native_loop_control.get("verifier_repair_due")
+    ):
         items.append(_native_loop_control_input_item(native_loop_control))
     return items
 
@@ -641,6 +647,11 @@ def _native_loop_control_state(
     command_count = sum(1 for item in calls if item.tool_name in EXEC_TOOL_NAMES)
     read_output_count = sum(1 for item in calls if item.tool_name == "read_command_output")
     turn_count = len({item.turn_id for item in transcript_items if item.turn_id})
+    latest_failed_verifier = _latest_failed_verifier_output(transcript_items)
+    post_failure_calls = _calls_after_sequence(calls, latest_failed_verifier.sequence if latest_failed_verifier else 0)
+    post_failure_write_count = sum(1 for item in post_failure_calls if item.tool_name in WRITE_TOOL_NAMES)
+    post_failure_probe_count = sum(1 for item in post_failure_calls if _native_call_is_probe_or_exec(item))
+    post_failure_verifier_count = sum(1 for item in post_failure_calls if _native_call_is_verifier(item))
     first_write_due = bool(
         write_count == 0
         and verifier_count == 0
@@ -649,6 +660,16 @@ def _native_loop_control_state(
             or current_turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD
         )
     )
+    verifier_repair_due = bool(
+        latest_failed_verifier
+        and post_failure_write_count == 0
+        and post_failure_probe_count >= _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD
+    )
+    next_action_policy = "continue_transcript_driven_work"
+    if verifier_repair_due:
+        next_action_policy = "patch_or_blocked_finish_after_failed_verifier"
+    elif first_write_due:
+        next_action_policy = "source_mutation_or_verifier_or_blocked_finish"
     return {
         "schema_version": 1,
         "surface": "native_loop_control",
@@ -661,12 +682,13 @@ def _native_loop_control_state(
         "write_count": write_count,
         "verifier_count": verifier_count,
         "first_write_due": first_write_due,
-        "next_action_policy": (
-            "source_mutation_or_verifier_or_blocked_finish"
-            if first_write_due
-            else "continue_transcript_driven_work"
-        ),
-        "max_additional_probe_turns": 1 if first_write_due else None,
+        "verifier_repair_due": verifier_repair_due,
+        "latest_failed_verifier": _failed_verifier_payload(latest_failed_verifier),
+        "post_failure_probe_count": post_failure_probe_count,
+        "post_failure_verifier_count": post_failure_verifier_count,
+        "post_failure_write_count": post_failure_write_count,
+        "next_action_policy": next_action_policy,
+        "max_additional_probe_turns": 0 if verifier_repair_due else (1 if first_write_due else None),
     }
 
 
@@ -674,11 +696,12 @@ def _native_loop_control_input_item(state: Mapping[str, object]) -> dict[str, ob
     payload = {
         "native_loop_control": dict(state),
         "instruction": (
-            "The native loop has enough read/probe evidence without a source mutation or verifier. "
-            "On the next turn, choose one bounded action: patch/edit/write the best current hypothesis, "
+            "The native loop has enough evidence for a bounded transition. "
+            "If first_write_due is true, choose one action: patch/edit/write the best current hypothesis, "
             "run a verifier that proves or falsifies it, or finish blocked with the exact missing fact. "
-            "Do not continue broad source/binary exploration; at most one focused probe is acceptable "
-            "before a mutation or verifier."
+            "If verifier_repair_due is true, the latest verifier already failed and enough post-failure "
+            "diagnosis has been collected; next action must repair with edit/write/apply_patch or finish "
+            "blocked with the exact missing fact. Do not continue broad exploration."
         ),
     }
     return {
@@ -696,6 +719,114 @@ def _native_call_is_probe_or_exec(item: NativeTranscriptItem) -> bool:
     return item.tool_name in READ_ONLY_TOOL_NAMES or item.tool_name in EXEC_TOOL_NAMES
 
 
+def _calls_after_sequence(calls: list[NativeTranscriptItem], sequence: int) -> list[NativeTranscriptItem]:
+    if sequence <= 0:
+        return []
+    return [item for item in calls if item.sequence > sequence]
+
+
+def _latest_failed_verifier_output(transcript_items: list[NativeTranscriptItem]) -> NativeTranscriptItem | None:
+    calls_by_id = {
+        item.call_id: item
+        for item in transcript_items
+        if item.kind in CALL_ITEM_KINDS and item.call_id and _native_call_is_verifier(item)
+    }
+    verifier_command_run_ids = _verifier_command_run_ids(transcript_items, verifier_call_ids=set(calls_by_id))
+    all_calls_by_id = {
+        item.call_id: item
+        for item in transcript_items
+        if item.kind in CALL_ITEM_KINDS and item.call_id
+    }
+    for item in reversed(transcript_items):
+        if item.kind not in OUTPUT_ITEM_KINDS:
+            continue
+        if not _output_belongs_to_verifier(
+            item,
+            verifier_call_ids=set(calls_by_id),
+            verifier_command_run_ids=verifier_command_run_ids,
+            calls_by_id=all_calls_by_id,
+        ):
+            continue
+        if not _native_output_is_terminal(item):
+            continue
+        return item if _native_output_is_failure(item) else None
+    return None
+
+
+def _verifier_command_run_ids(
+    transcript_items: list[NativeTranscriptItem],
+    *,
+    verifier_call_ids: set[str],
+) -> set[str]:
+    command_run_ids: set[str] = set()
+    for item in transcript_items:
+        if item.kind not in OUTPUT_ITEM_KINDS or item.call_id not in verifier_call_ids:
+            continue
+        command_run_id = _command_run_id_from_output_text(item.output_text_or_ref)
+        if command_run_id:
+            command_run_ids.add(command_run_id)
+    return command_run_ids
+
+
+def _output_belongs_to_verifier(
+    item: NativeTranscriptItem,
+    *,
+    verifier_call_ids: set[str],
+    verifier_command_run_ids: set[str],
+    calls_by_id: Mapping[str, NativeTranscriptItem],
+) -> bool:
+    if item.call_id in verifier_call_ids:
+        return True
+    call = calls_by_id.get(item.call_id)
+    if call is None or call.tool_name not in {"poll_command", "cancel_command"}:
+        return False
+    return _command_run_id_from_call(call) in verifier_command_run_ids
+
+
+def _command_run_id_from_call(item: NativeTranscriptItem) -> str:
+    arguments, error = _arguments(item)
+    if error:
+        return ""
+    return str(arguments.get("command_run_id") or "").strip()
+
+
+def _command_run_id_from_output_text(value: str) -> str:
+    match = _COMMAND_RUN_ID_RE.search(str(value or ""))
+    if not match:
+        return ""
+    return match.group("id").strip()
+
+
+def _native_output_is_terminal(item: NativeTranscriptItem) -> bool:
+    status = str(item.status or "").strip().casefold()
+    return bool(status and status not in {"yielded", "running", "pending"})
+
+
+def _native_output_is_failure(item: NativeTranscriptItem) -> bool:
+    status = str(item.status or "").strip().casefold()
+    return bool(item.is_error or status in {"failed", "interrupted", "invalid", "blocked", "timed_out", "killed", "orphaned"})
+
+
+def _failed_verifier_payload(item: NativeTranscriptItem | None) -> dict[str, object] | None:
+    if item is None:
+        return None
+    return {
+        "turn_id": item.turn_id,
+        "call_id": item.call_id,
+        "tool_name": item.tool_name,
+        "status": item.status,
+        "summary": _truncate_control_text(item.output_text_or_ref),
+        "evidence_refs": list(item.evidence_refs[:6]),
+    }
+
+
+def _truncate_control_text(value: str) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= _CONTROL_FAILURE_SUMMARY_LIMIT:
+        return text
+    return text[: _CONTROL_FAILURE_SUMMARY_LIMIT - 1].rstrip() + "…"
+
+
 def _native_call_is_verifier(item: NativeTranscriptItem) -> bool:
     if item.tool_name == "run_tests":
         return True
@@ -703,7 +834,7 @@ def _native_call_is_verifier(item: NativeTranscriptItem) -> bool:
         return False
     arguments, _ = _arguments(item)
     command_intent = str(arguments.get("command_intent") or arguments.get("intent") or "").strip().casefold()
-    if command_intent in {"verify", "verification", "finish_verifier", "test", "acceptance"}:
+    if command_intent in {"verify", "verifier", "verification", "finish_verifier", "test", "acceptance"}:
         return True
     command = str(arguments.get("command") or arguments.get("cmd") or "")
     lowered = command.casefold()
