@@ -356,16 +356,17 @@ default path gate:
 
 以下は現時点で semantic-ish control として扱い、実装時に移行先または保持理由を明示する。
 
-| 現行 control | 現在の問題 | 移行先 |
-| --- | --- | --- |
-| `finish_call` result が `status == "completed"` のとき lane status を `completed` にする処理 | transcript pairing と semantic completion が混ざる | `CompletionResolver` |
-| `_native_final_verifier_closeout` | harness 内で verifier 実行と completion 上書きを行う。現行 non-finish/max-turn path も直接 completion し得る | finish-time 実行 dispatch は harness/tool runtime、判定は `CompletionResolver`。non-finish/max-turn closeout は direct completion 禁止 |
-| `structured_finish_gate` / `apply_finish_gate()` | tool runtime の execution evidence と lane finish 判定が近すぎる | typed evidence producer として残し、authority は `CompletionResolver` |
-| `native_loop_control.first_write_due` / `verifier_repair_due` | 有用な loop-shape signal だが policy と混ざっている | `loop_signals` として `attention_hints` / `finish_readiness` に folded preserve |
-| `native_loop_control.next_action_policy` | provider-visible な prescriptive policy になっている | 削除。必要な事実だけ `attention_hints` / metrics digest へ縮約 |
-| `native_loop_control` instruction text | model に next action を命令している | bounded hint に変更し、hard policy 文を削る |
-| `native_sidecar_projection` todo digest の `required_next_kind` 依存 | ordinary repair required_next を復活させる | digest status を finish/verifier/blocker/readiness 中心に変更 |
-| request `task_payload.persisted_lane_state` | 旧 frontier/todo/proof state を provider-visible に広げる | 最小 digest fields のみ `compact_sidecar_digest` に fold |
+| 現行 control | 現在の問題 | Owner phase | 移行先 | 残す場合の compatibility 理由 |
+| --- | --- | --- | --- | --- |
+| `finish_call` result が `status == "completed"` のとき lane status を `completed` にする処理 | transcript pairing と semantic completion が混ざる | Phase 3 | `CompletionResolver` | Phase 0-2 では current control inventory としてだけ保持。Phase 3 以降は resolver decision を authority にする |
+| `_native_final_verifier_closeout` | harness 内で verifier 実行と completion 上書きを行う。現行 non-finish/max-turn path も直接 completion し得る | Phase 3 | finish-time 実行 dispatch は harness/tool runtime、判定は `CompletionResolver`。non-finish/max-turn closeout は direct completion 禁止 | verifier dispatch path を壊さないため、resolver 導入まで call site を残す |
+| `structured_finish_gate` / `apply_finish_gate()` | tool runtime の execution evidence と lane finish 判定が近すぎる | Phase 3 | typed evidence producer として残し、authority は `CompletionResolver` | typed evidence producer は残す。completion authority としては使わない |
+| `native_loop_control.first_write_due` / `verifier_repair_due` | 有用な loop-shape signal だが policy と混ざっている | Phase 1 | `loop_signals` として `attention_hints` / `finish_readiness` に folded preserve | signal 自体は step-shape diagnostic に必要なので bounded booleans として保持 |
+| `native_loop_control.next_action_policy` | provider-visible な prescriptive policy になっている | Phase 1 | 削除。必要な事実だけ `attention_hints` / metrics digest へ縮約 | なし。Phase 1 で provider-visible path から削除 |
+| `native_loop_control` instruction text | model に next action を命令している | Phase 1 | bounded hint に変更し、hard policy 文を削る | なし。bounded hint と metrics へ移す |
+| `native_sidecar_projection` todo digest の `required_next_kind` 依存 | ordinary repair required_next を復活させる | Phase 1-2 | digest status を finish/verifier/blocker/readiness 中心に変更 | transition_contract compatibility only。default native path では count 0 を close gate にする |
+| `_prompt_visible_workframe.required_next` | WorkFrame が model-visible decision object として残る | Phase 1-2 | debug/sidecar projection に退避し、provider-visible digest は bounded fields だけにする | transition_contract compatibility only。default native path では provider-visible から外す |
+| request `task_payload.persisted_lane_state` | 旧 frontier/todo/proof state を provider-visible に広げる | Phase 1 | 最小 digest fields のみ `compact_sidecar_digest` に fold | なし。debug artifacts / persisted runtime state と provider input を分離する |
 
 `native_loop_control` の hard policy と bounded hint は次の基準で分ける。
 
@@ -381,20 +382,23 @@ default path gate:
 作業:
 
 - この設計を基準に `native_tool_harness.py`、`native_sidecar_projection.py`、`native_workframe_projection.py`、`exec_runtime.py`、`execution_evidence.py` の current controls を棚卸しする。
-- code change を伴わない場合は `git diff --check` と changed-file scope check を必須確認にする。
+- audit code を追加または更新する場合は、変更範囲を static audit 本体、CLI wrapper、focused tests、この設計書に限定する。
+- code change を伴わない docs/artifacts-only 変更の場合だけ `git diff --check` と changed-file scope check を必須確認にする。
 - migration table の各 item に owner phase、移行先、残す場合の compatibility 理由を付ける。
 
 Close gate:
 
 - semantic-ish controls の migration table が実装 issue または design checklist として追跡できる。
+- audit-code change なら changed files が `src/mew/implement_lane/native_boundary_audit.py`、`scripts/check_native_tool_loop_boundary.py`、`tests/test_native_boundary_audit.py`、この設計書に限定される。
 - docs-only change なら changed files が `docs/` と `.codex-artifacts/` だけである。
-- source/test/package/config file が変わっていないことを `git status --short --untracked-files=all` または同等の scope check で確認する。
+- audit 対象の runtime source (`native_tool_harness.py`、`native_sidecar_projection.py`、`native_workframe_projection.py`、`exec_runtime.py`、`execution_evidence.py`) を変更していないことを `git status --short --untracked-files=all` または同等の scope check で確認する。
 
 Tests:
 
 - `git diff --check`
-- changed-file scope check: docs/artifacts-only
+- changed-file scope check: docs/artifacts-only or audit-code-only
 - migration table checklist audit
+- focused audit tests
 
 ### Phase 1: Compact Sidecar Digest Boundary
 
