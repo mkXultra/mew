@@ -46,7 +46,7 @@ from .types import (
 )
 from .v1_adapter import ImplementV1AdapterDescriptor, describe_implement_v1_adapter
 from .v2_runtime import describe_implement_v2_runtime
-from .native_tool_harness import run_native_implement_v2, run_unavailable_native_implement_v2
+from .native_tool_harness import run_live_native_implement_v2, run_native_implement_v2, run_unavailable_native_implement_v2
 from .workframe import (
     WorkFrame,
     WorkFrameInputs,
@@ -145,6 +145,7 @@ __all__ = [
     "reduce_workframe",
     "reduce_workframe_with_variant",
     "run_native_implement_v2",
+    "run_live_native_implement_v2",
     "run_unavailable_native_implement_v2",
     "select_implement_lane_runtime",
     "validate_native_transcript_pairing",

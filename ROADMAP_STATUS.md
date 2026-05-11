@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-6 scaffolds and Phase 7 legacy model-JSON quarantine slice are committed through `150db0b`; live provider-native execution remains the next gap before any speed/proof evidence can count as native-loop evidence. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, and the live provider-native Responses runtime slice are implemented; next proof step is a bounded native-loop diagnostic that emits authoritative native transcript artifacts before any speed/proof evidence counts. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -360,16 +360,18 @@ Done when:
 
 Status as of 2026-05-11: **in progress**. The active design is
 `docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`.
-Phase 0-6 substrate and Phase 7 legacy public-surface quarantine are committed
-through `150db0b`. Native validation now rejects selected-route, package
-surface, and native-production-path drift back to the old model-JSON v2 symbols.
+Phase 0-7 substrate, legacy public-surface quarantine, and live provider-native
+Responses runtime wiring are implemented. Native validation now rejects
+selected-route, package-surface, and native-production-path drift back to the
+old model-JSON v2 symbols.
 
-Remaining active gap: live provider-native execution is still not fully enabled.
-Do not count legacy `implement_v2_model_json_tool_loop` artifacts as native-loop
-evidence. The next implementation slice should connect the native provider
-adapter/runtime so selected v2 can emit authoritative
-`response_transcript.json`, `response_items.jsonl`, and native proof manifests
-from a live provider-native tool-call turn.
+Remaining active gap: run the native-loop gate and one bounded diagnostic from
+the live provider-native path before counting any `speed_1` or `proof_5`
+evidence. Do not count legacy `implement_v2_model_json_tool_loop` artifacts as
+native-loop evidence. The next implementation slice should preserve
+authoritative `response_transcript.json`, `response_items.jsonl`, and native
+proof manifests from the live provider-native tool-call turn, then compare the
+step shape before broad measurement resumes.
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from mew.implement_lane.native_fake_provider import (
     NativeFakeProvider,
@@ -9,8 +10,11 @@ from mew.implement_lane.native_fake_provider import (
     fake_reasoning,
     model_json_text_non_control_item,
 )
+from mew.implement_lane.native_provider_adapter import NativeResponsesStreamParseResult
 from mew.implement_lane.native_tool_harness import (
+    NativeCodexResponsesProvider,
     PHASE3_NATIVE_SURFACE,
+    run_live_native_implement_v2,
     run_native_implement_v2,
     run_unavailable_native_implement_v2,
 )
@@ -94,6 +98,104 @@ def test_native_harness_read_finish_and_artifacts(tmp_path: Path) -> None:
     assert manifest["native_transport_kind"] == "provider_native"
     assert manifest["metrics"]["transport_kind"] == "fake_native"
     assert manifest["metrics"]["native_transport_kind"] == "provider_native"
+
+
+def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    live_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+            items=(
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id="ws-native:task-native:implement_v2:native",
+                    provider="openai",
+                    model="gpt-5.5",
+                    response_id="resp-live-1",
+                    provider_item_id="item-finish",
+                    output_index=0,
+                    kind="finish_call",
+                    call_id="finish-live",
+                    tool_name="finish",
+                    arguments_json_text='{"outcome":"completed","summary":"live done"}',
+                ),
+            ),
+        ),
+        response_id="resp-live-1",
+        status="completed",
+    )
+    lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        return_value=live_turn,
+    ) as call:
+        result = run_live_native_implement_v2(
+            lane_input,
+            model_auth={"access_token": "x"},
+            base_url="https://example.invalid",
+            timeout=3,
+            max_turns=2,
+        )
+
+    assert result.status == "completed"
+    assert result.metrics["transport_kind"] == "provider_native"
+    assert result.metrics["runtime_id"] == "implement_v2_native_transcript_loop"
+    assert result.metrics["provider_native_tool_loop"] is True
+    descriptor = call.call_args.kwargs["descriptor"]
+    assert descriptor["request_body"]["store"] is False
+    assert descriptor["request_body"]["stream"] is True
+    assert descriptor["request_body"]["input"][0]["role"] == "user"
+    assert (artifact_root / "response_transcript.json").exists()
+    transcript_payload = json.loads((artifact_root / "response_transcript.json").read_text(encoding="utf-8"))
+    assert transcript_payload["items"][0]["kind"] == "finish_call"
+    assert transcript_payload["items"][1]["kind"] == "finish_output"
+    manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["transport_kind"] == "provider_native"
+    assert manifest["metrics"]["transport_kind"] == "provider_native"
+
+
+def test_live_native_input_carry_forward_omits_reasoning_refs_without_sidecar_bytes(tmp_path: Path) -> None:
+    lane_input = _lane_input(tmp_path)
+    descriptor = {
+        "lane_attempt_id": "ws-native:task-native:implement_v2:native",
+        "turn_index": 2,
+        "input_items": [
+            {
+                "type": "reasoning",
+                "id": "rs-1",
+                "summary": "local summary",
+                "encrypted_reasoning_ref": "reasoning_sidecar.json#sha256:abc",
+            }
+        ],
+        "instructions": "test",
+        "transcript_window": [],
+    }
+    provider = NativeCodexResponsesProvider(
+        lane_input=lane_input,
+        auth={"access_token": "x"},
+        base_url="https://example.invalid",
+        timeout=3,
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        return_value=NativeResponsesStreamParseResult(
+            transcript=NativeTranscript(
+                lane_attempt_id="ws-native:task-native:implement_v2:native",
+                provider="openai",
+                model="gpt-5.5",
+            ),
+            status="completed",
+        ),
+    ):
+        provider.next_response(descriptor)
+
+    sent_input = provider.requests[0]["request_body"]["input"]
+    assert all(item.get("type") != "reasoning" for item in sent_input)
 
 
 def test_native_harness_write_apply_patch_exec_poll_cancel_and_read_output(tmp_path: Path) -> None:

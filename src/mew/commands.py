@@ -88,7 +88,7 @@ from .implementation_lane_baseline import (
     format_implementation_lane_baseline_report,
     summarize_implementation_lane_baseline,
 )
-from .implement_lane import IMPLEMENT_V2_NATIVE_RUNTIME_ID, ImplementLaneInput, run_unavailable_native_implement_v2
+from .implement_lane import IMPLEMENT_V2_NATIVE_RUNTIME_ID, ImplementLaneInput, run_live_native_implement_v2
 from .implement_lane.tool_lab import (
     analyze_implement_v2_tool_lab_artifact,
     format_implement_v2_tool_lab_text,
@@ -7475,11 +7475,14 @@ def _run_work_ai_implement_v2(
     if progress:
         progress("selected implement_v2 native transcript runtime; bypassing v1 THINK/ACT")
     try:
-        # Phase 5 must not route selected v2 through the legacy model-JSON
-        # main path. Live provider-native transport is wired in a later phase;
-        # until then selected v2 returns a native unavailable result instead of
-        # silently using the old JSON transport.
-        result = run_unavailable_native_implement_v2(lane_input)
+        result = run_live_native_implement_v2(
+            lane_input,
+            model_auth=model_auth,
+            base_url=base_url,
+            timeout=model_timeout_seconds,
+            max_turns=max_steps,
+            progress=record_implement_v2_progress,
+        )
     except Exception as exc:
         result = None
         error = str(exc)

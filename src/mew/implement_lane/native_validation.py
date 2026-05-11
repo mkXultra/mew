@@ -64,7 +64,7 @@ def validate_native_loop_gate(
     details["command_route"] = command_scan
     checks["command_route_no_live_json_call"] = command_scan.get("run_live_json_implement_v2") is False
     checks["command_route_no_model_json_runtime_literal"] = command_scan.get("model_json_runtime_literal") is False
-    checks["command_route_has_native_runner"] = command_scan.get("run_unavailable_native_implement_v2") is True
+    checks["command_route_has_native_runner"] = command_scan.get("run_live_native_implement_v2") is True
     package_scan = _scan_package_surface(source_path)
     details["package_surface"] = package_scan
     checks["package_surface_exists"] = package_scan.get("exists") is True
@@ -133,6 +133,7 @@ def _scan_command_route(source_root: Path) -> dict[str, object]:
         "run_live_json_implement_v2": "run_live_json_implement_v2" in text,
         "model_json_runtime_literal": "implement_v2_model_json_tool_loop" in text,
         "native_runtime_literal": IMPLEMENT_V2_NATIVE_RUNTIME_ID in text,
+        "run_live_native_implement_v2": "run_live_native_implement_v2" in text,
         "run_unavailable_native_implement_v2": "run_unavailable_native_implement_v2" in text,
     }
 

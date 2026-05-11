@@ -11,12 +11,17 @@ Implementation checkpoint 2026-05-11:
   `mew.implement_lane` public package surface no longer exports legacy
   model-JSON v2 runners or provider adapters, and the native gate rejects those
   symbols in production native paths.
+- Live provider-native execution slice is implemented: CLI-selected
+  `implement_v2` now calls the native Responses runtime, emits provider-native
+  transcript artifacts when an artifact root is supplied, and keeps the old
+  unavailable native stub out of the selected command route.
 - The legacy model-JSON runtime still exists only as explicit quarantine for
   old unit tests, replay compatibility, and dogfood emulators. It is not the
   selected production v2 main path.
-- Live provider-native execution is not yet fully enabled; until that lands,
-  native v2 speed/proof evidence must come from native fixtures/gates, not
-  legacy model-JSON runs.
+- Native v2 speed/proof evidence may now start only after the native-loop gate
+  stays green and the next bounded diagnostic run emits authoritative
+  `response_transcript.json`, `response_items.jsonl`, and `proof-manifest.json`
+  from the live provider-native path.
 
 Scope: no-backward-compatibility redesign of `implement_v2` as a provider-native
 tool/function calling loop. This document does not authorize code changes by

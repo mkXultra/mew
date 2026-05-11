@@ -11026,7 +11026,7 @@ class WorkSessionTests(unittest.TestCase):
                 )
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.commands.plan_work_model_turn") as v1_plan:
-                        with patch("mew.commands.run_unavailable_native_implement_v2", return_value=v2_result) as v2_run:
+                        with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
                             with redirect_stdout(StringIO()) as stdout:
                                 self.assertEqual(
                                     main(
@@ -11105,7 +11105,7 @@ class WorkSessionTests(unittest.TestCase):
                     return v2_result
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.commands.run_unavailable_native_implement_v2", side_effect=fake_v2_run):
+                    with patch("mew.commands.run_live_native_implement_v2", side_effect=fake_v2_run):
                         with redirect_stdout(StringIO()) as stdout:
                             self.assertEqual(
                                 main(
@@ -11181,7 +11181,7 @@ class WorkSessionTests(unittest.TestCase):
                 )
                 guidance = "selected_lane=implement_v2 write_integration_observation_detail=true"
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.commands.run_unavailable_native_implement_v2", return_value=v2_result) as v2_run:
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
                         with redirect_stdout(StringIO()):
                             self.assertEqual(
                                 main(
@@ -11248,7 +11248,7 @@ class WorkSessionTests(unittest.TestCase):
                     }
                 )
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.commands.run_unavailable_native_implement_v2", return_value=v2_result) as v2_run:
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
                         with redirect_stdout(StringIO()):
                             self.assertEqual(
                                 main(
@@ -11317,7 +11317,7 @@ class WorkSessionTests(unittest.TestCase):
                     }
                 )
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.commands.run_unavailable_native_implement_v2", return_value=v2_result) as v2_run:
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
                         with redirect_stdout(StringIO()):
                             self.assertEqual(
                                 main(
