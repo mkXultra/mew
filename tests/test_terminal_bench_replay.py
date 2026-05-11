@@ -13,6 +13,7 @@ from mew.dogfood import (
     _write_runtime_producer_blocked_emulator_fixture,
     _write_terminal_bench_replay_fixture,
 )
+from mew.implement_lane.native_transcript import NativeTranscript, NativeTranscriptItem, write_native_transcript_artifacts
 from mew.terminal_bench_replay import (
     format_terminal_bench_replay,
     replay_terminal_bench_job,
@@ -92,6 +93,185 @@ class TerminalBenchReplayTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        return trial_dir.parent
+
+    def _write_native_transcript_replay_fixture(
+        self,
+        root,
+        *,
+        response_items_drift=False,
+        stale_legacy_dir=False,
+        empty_transcript=False,
+        non_tool_only=False,
+        invalid_manifest_pairing=False,
+        missing_manifest_pairing=False,
+    ):
+        trial_dir = Path(root) / "job" / "make-mips-interpreter__nativefixture"
+        agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+        verifier_dir = trial_dir / "verifier"
+        trace_dir = agent_dir / "normalized-trace"
+        agent_dir.mkdir(parents=True)
+        verifier_dir.mkdir(parents=True)
+        trace_dir.mkdir(parents=True)
+        (trial_dir / "result.json").write_text(
+            json.dumps({"trial_name": "make-mips-interpreter__nativefixture", "verifier_result": {"reward": 0.0}}),
+            encoding="utf-8",
+        )
+        (verifier_dir / "test-stdout.txt").write_text("VM fault: program halted before rendering a frame\n", encoding="utf-8")
+        (agent_dir / "command-transcript.json").write_text(
+            json.dumps({"exit_code": 1, "timed_out": False}),
+            encoding="utf-8",
+        )
+        (agent_dir / "mew-report.json").write_text(
+            json.dumps(
+                {
+                    "work_exit_code": 1,
+                    "resume": {},
+                    "work_report": {
+                        "stop_reason": "implement_v2_blocked",
+                        "selected_lane": "implement_v2",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+                        "implement_lane_result": {
+                            "lane": "implement_v2",
+                            "status": "blocked",
+                            "metrics": {
+                                "runtime_id": "implement_v2_native_transcript_loop",
+                                "provider_native_tool_loop": True,
+                                "transport_kind": "provider_native",
+                                "model_json_main_path_detected": False,
+                            },
+                        },
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        lane_attempt_id = "native-replay:task-1"
+        transcript_items = ()
+        if non_tool_only:
+            transcript_items = (
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="openai",
+                    model="gpt-5.5",
+                    kind="input_message",
+                    output_text_or_ref="task input",
+                ),
+                NativeTranscriptItem(
+                    sequence=2,
+                    turn_id="turn-1",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="openai",
+                    model="gpt-5.5",
+                    kind="assistant_message",
+                    output_text_or_ref="I will inspect the task.",
+                ),
+            )
+        elif not empty_transcript:
+            transcript_items = (
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="openai",
+                    model="gpt-5.5",
+                    kind="function_call",
+                    call_id="call-read",
+                    tool_name="read_file",
+                    arguments_json_text='{"path":"vm.js"}',
+                ),
+                NativeTranscriptItem(
+                    sequence=2,
+                    turn_id="turn-1",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="openai",
+                    model="gpt-5.5",
+                    kind="function_call_output",
+                    call_id="call-read",
+                    tool_name="read_file",
+                    status="completed",
+                    output_text_or_ref="read_file result: completed",
+                ),
+                NativeTranscriptItem(
+                    sequence=3,
+                    turn_id="turn-2",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="openai",
+                    model="gpt-5.5",
+                    kind="function_call",
+                    call_id="call-edit",
+                    tool_name="edit_file",
+                    arguments_json_text='{"path":"vm.js","old_string":"x","new_string":"y"}',
+                ),
+                NativeTranscriptItem(
+                    sequence=4,
+                    turn_id="turn-2",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="openai",
+                    model="gpt-5.5",
+                    kind="function_call_output",
+                    call_id="call-edit",
+                    tool_name="edit_file",
+                    status="completed",
+                    output_text_or_ref="edit_file result: completed",
+                ),
+                NativeTranscriptItem(
+                    sequence=5,
+                    turn_id="turn-3",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="openai",
+                    model="gpt-5.5",
+                    kind="function_call",
+                    call_id="call-test",
+                    tool_name="run_tests",
+                    arguments_json_text='{"command":"node vm.js"}',
+                ),
+                NativeTranscriptItem(
+                    sequence=6,
+                    turn_id="turn-3",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="openai",
+                    model="gpt-5.5",
+                    kind="function_call_output",
+                    call_id="call-test",
+                    tool_name="run_tests",
+                    status="failed",
+                    is_error=True,
+                    output_text_or_ref="run_tests result: failed; exit_code=1; stderr_tail: VM fault",
+                ),
+            )
+        transcript = NativeTranscript(
+            lane_attempt_id=lane_attempt_id,
+            provider="openai",
+            model="gpt-5.5",
+            items=transcript_items,
+        )
+        write_native_transcript_artifacts(agent_dir, transcript)
+        (trace_dir / "summary.json").write_text(
+            json.dumps({"turn_count": 3, "command_count": 1, "edit_count": 1, "verifier_count": 1, "parse_error_count": 0}),
+            encoding="utf-8",
+        )
+        if response_items_drift:
+            (agent_dir / "response_items.jsonl").write_text("", encoding="utf-8")
+        if stale_legacy_dir:
+            stale = agent_dir / "implement_v2"
+            stale.mkdir()
+            (stale / "proof-manifest.json").write_text(json.dumps({"tool_results": []}), encoding="utf-8")
+            (stale / "history.json").write_text("[]", encoding="utf-8")
+        if invalid_manifest_pairing:
+            manifest_path = agent_dir / "proof-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["pairing"] = {"valid": False, "errors": ["forced_invalid"], "call_count": 0, "output_count": 0}
+            manifest["metrics"]["pairing_valid"] = False
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        if missing_manifest_pairing:
+            manifest_path = agent_dir / "proof-manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest.pop("pairing", None)
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True), encoding="utf-8")
         return trial_dir.parent
 
     def _write_implement_v2_model_error_fixture(self, root):
@@ -548,6 +728,149 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertFalse(current_v2["compiled_source_frontier_observed"])
             self.assertIn("compiled/native source frontier", trial["current"]["next_action"])
             self.assertIn("implement_v2:", text)
+
+    def test_replay_terminal_bench_job_accepts_native_transcript_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            trial = report["trials"][0]
+            current_v2 = trial["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertTrue(trial["current"]["recomputed"])
+            self.assertEqual(current_v2["runtime_id"], "implement_v2_native_transcript_loop")
+            self.assertEqual(current_v2["native_transcript"]["response_items_match"], True)
+            self.assertEqual(current_v2["history_turn_count"], 3)
+            self.assertEqual(current_v2["write_evidence_count"], 1)
+            self.assertEqual(current_v2["latest_failure"]["tool_name"], "run_tests")
+            self.assertIn("latest failed run_tests", trial["current"]["next_action"])
+
+    def test_replay_terminal_bench_job_prefers_root_native_artifact_over_stale_legacy_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp, stale_legacy_dir=True)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["runtime_id"], "implement_v2_native_transcript_loop")
+            self.assertEqual(current_v2["native_transcript"]["item_count"], 6)
+
+    def test_replay_terminal_bench_job_keeps_legacy_when_root_native_manifest_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            agent_dir = next(Path(job_dir).rglob("unknown-task"))
+            (agent_dir / "response_transcript.json").write_text(
+                json.dumps({"items": [{"sequence": 1, "kind": "assistant_message"}]}),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["runtime_id"], "implement_v2_model_json_tool_loop")
+            self.assertEqual(current_v2["history_turn_count"], 1)
+
+    def test_replay_terminal_bench_job_keeps_legacy_when_legacy_dir_has_stray_transcript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_implement_v2_replay_fixture(tmp)
+            v2_dir = next(Path(job_dir).rglob("implement_v2"))
+            (v2_dir / "response_transcript.json").write_text(
+                json.dumps({"items": [{"sequence": 1, "kind": "assistant_message"}]}),
+                encoding="utf-8",
+            )
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="build-cython-ext",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["runtime_id"], "implement_v2_model_json_tool_loop")
+            self.assertEqual(current_v2["history_turn_count"], 1)
+
+    def test_replay_terminal_bench_job_rejects_invalid_native_transcript_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp, response_items_drift=True)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            trial = report["trials"][0]
+
+            self.assertEqual(report["status"], "fail")
+            self.assertFalse(trial["current"]["recomputed"])
+            self.assertIn("replay_valid=false", trial["current"]["replay_error"])
+
+    def test_replay_terminal_bench_job_rejects_empty_native_transcript_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp, empty_transcript=True)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+
+            self.assertEqual(report["status"], "fail")
+            self.assertFalse(report["trials"][0]["current"]["recomputed"])
+
+    def test_replay_terminal_bench_job_rejects_non_tool_only_native_transcript_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp, non_tool_only=True)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+
+            self.assertEqual(report["status"], "fail")
+            self.assertFalse(report["trials"][0]["current"]["recomputed"])
+
+    def test_replay_terminal_bench_job_rejects_invalid_native_manifest_pairing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp, invalid_manifest_pairing=True)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+
+            self.assertEqual(report["status"], "fail")
+            self.assertFalse(report["trials"][0]["current"]["recomputed"])
+
+    def test_replay_terminal_bench_job_rejects_missing_native_manifest_pairing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp, missing_manifest_pairing=True)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+
+            self.assertEqual(report["status"], "fail")
+            self.assertFalse(report["trials"][0]["current"]["recomputed"])
 
     def test_replay_terminal_bench_job_recomputes_expected_artifact_classification(self):
         with tempfile.TemporaryDirectory() as tmp:

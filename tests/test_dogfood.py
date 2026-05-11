@@ -47,7 +47,110 @@ from mew.dogfood import (
     validate_m6_13_internalization_review_artifact,
     wait_for_active_agent_runs,
 )
+from mew.implement_lane.native_transcript import NativeTranscript, NativeTranscriptItem, write_native_transcript_artifacts
 from mew.state import add_event, add_outbox_message, default_state
+
+
+def _write_native_terminal_bench_replay_fixture(root):
+    trial_dir = Path(root) / "job" / "make-mips-interpreter__nativefixture"
+    agent_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    verifier_dir = trial_dir / "verifier"
+    trace_dir = agent_dir / "normalized-trace"
+    agent_dir.mkdir(parents=True)
+    verifier_dir.mkdir(parents=True)
+    trace_dir.mkdir(parents=True)
+    (trial_dir / "result.json").write_text(
+        json.dumps({"trial_name": "make-mips-interpreter__nativefixture", "verifier_result": {"reward": 0.0}}),
+        encoding="utf-8",
+    )
+    (verifier_dir / "test-stdout.txt").write_text("VM fault: program halted before rendering a frame\n", encoding="utf-8")
+    (agent_dir / "command-transcript.json").write_text(json.dumps({"exit_code": 1, "timed_out": False}), encoding="utf-8")
+    (agent_dir / "mew-report.json").write_text(
+        json.dumps(
+            {
+                "work_exit_code": 1,
+                "resume": {},
+                "work_report": {
+                    "stop_reason": "implement_v2_blocked",
+                    "selected_lane": "implement_v2",
+                    "runtime_id": "implement_v2_native_transcript_loop",
+                    "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+                    "implement_lane_result": {
+                        "lane": "implement_v2",
+                        "status": "blocked",
+                        "metrics": {
+                            "runtime_id": "implement_v2_native_transcript_loop",
+                            "provider_native_tool_loop": True,
+                            "transport_kind": "provider_native",
+                            "model_json_main_path_detected": False,
+                        },
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    lane_attempt_id = "native-dogfood:task-1"
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider="openai",
+        model="gpt-5.5",
+        items=(
+            NativeTranscriptItem(
+                sequence=1,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="openai",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="call-edit",
+                tool_name="edit_file",
+                arguments_json_text='{"path":"vm.js","old_string":"x","new_string":"y"}',
+            ),
+            NativeTranscriptItem(
+                sequence=2,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="openai",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="call-edit",
+                tool_name="edit_file",
+                status="completed",
+                output_text_or_ref="edit_file result: completed",
+            ),
+            NativeTranscriptItem(
+                sequence=3,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="openai",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="call-test",
+                tool_name="run_tests",
+                arguments_json_text='{"command":"node vm.js"}',
+            ),
+            NativeTranscriptItem(
+                sequence=4,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="openai",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="call-test",
+                tool_name="run_tests",
+                status="failed",
+                is_error=True,
+                output_text_or_ref="run_tests result: failed; exit_code=1; stderr_tail: VM fault",
+            ),
+        ),
+    )
+    write_native_transcript_artifacts(agent_dir, transcript)
+    (trace_dir / "summary.json").write_text(
+        json.dumps({"turn_count": 2, "command_count": 1, "edit_count": 1, "verifier_count": 1, "parse_error_count": 0}),
+        encoding="utf-8",
+    )
+    return trial_dir.parent
 
 
 class DogfoodTests(unittest.TestCase):
@@ -1365,6 +1468,28 @@ class DogfoodTests(unittest.TestCase):
             self.assertTrue(all(item["passed"] for item in scenario["checks"]))
             self.assertEqual(scenario["artifacts"]["task"], "build-cython-ext")
             self.assertEqual(scenario["artifacts"]["first_trial"], "build-cython-ext__fixture")
+
+    def test_run_dogfood_m6_24_terminal_bench_replay_scenario_accepts_native_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _write_native_terminal_bench_replay_fixture(Path(tmp) / "fixture")
+            args = SimpleNamespace(
+                workspace=str(Path(tmp) / "dog"),
+                scenario="m6_24-terminal-bench-replay",
+                cleanup=False,
+                terminal_bench_job_dir=str(fixture),
+                terminal_bench_task="make-mips-interpreter",
+                terminal_bench_assert_mew_exit_code=1,
+                terminal_bench_assert_external_reward=0.0,
+            )
+
+            report = run_dogfood_scenario(args)
+            scenario = report["scenarios"][0]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(scenario["status"], "pass")
+            self.assertTrue(all(item["passed"] for item in scenario["checks"]))
+            self.assertEqual(scenario["artifacts"]["replay_status"], "pass")
+            self.assertEqual(scenario["artifacts"]["structured_execution_replay"]["source"], "native_transcript")
 
     def test_run_dogfood_m6_24_terminal_bench_replay_scenario_accepts_next_action_assertion(self):
         with tempfile.TemporaryDirectory() as tmp:

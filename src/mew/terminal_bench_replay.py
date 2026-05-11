@@ -7,6 +7,15 @@ from .implement_lane.execution_evidence import (
     derive_verifier_evidence,
     normalize_execution_contract,
 )
+from .implement_lane.native_transcript import (
+    CALL_ITEM_KINDS,
+    IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+    OUTPUT_ITEM_KINDS,
+    NativeTranscript,
+    NativeTranscriptItem,
+    native_transcript_hash,
+    validate_native_transcript_pairing,
+)
 from .implement_lane.types import ToolResultEnvelope
 from .implement_lane.v2_runtime import _frontier_evidence_registry, _source_output_contract_from_tool_results
 from .timeutil import now_iso
@@ -206,9 +215,15 @@ def _llm_action_fixtures_from_work_report(report):
 
 
 def _implement_v2_artifact_dir(report_path):
+    parent = Path(report_path).parent
+    parent_manifest = _read_json(parent / "proof-manifest.json")
+    if (parent / "proof-manifest.json").is_file() and _implement_v2_is_native_artifact(parent, parent_manifest):
+        return parent
     direct = Path(report_path).parent / "implement_v2"
     if direct.is_dir():
         return direct
+    if (parent / "proof-manifest.json").is_file():
+        return parent
     return None
 
 
@@ -222,6 +237,8 @@ def _implement_v2_replay_summary(report_path, report):
         return {}
     artifact_dir = _implement_v2_artifact_dir(report_path)
     manifest = _read_json(artifact_dir / "proof-manifest.json") if artifact_dir else {}
+    if _implement_v2_is_native_artifact(artifact_dir, manifest):
+        return _implement_v2_native_replay_summary(report_path, report, artifact_dir=artifact_dir, manifest=manifest)
     history = _read_json(artifact_dir / "history.json", default=[]) if artifact_dir else []
     if not isinstance(history, list):
         history = []
@@ -309,6 +326,263 @@ def _implement_v2_replay_summary(report_path, report):
         "compiled_source_frontier_observed": _implement_v2_history_mentions_compiled_source_frontier(history),
         "artifact_dir": str(artifact_dir) if artifact_dir else "",
     }
+
+
+def _implement_v2_is_native_artifact(artifact_dir, manifest):
+    if not artifact_dir:
+        return False
+    if str(manifest.get("runtime_id") or "") == IMPLEMENT_V2_NATIVE_RUNTIME_ID:
+        return True
+    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    if metrics.get("provider_native_tool_loop") is True:
+        return True
+    if str(manifest.get("transport_kind") or metrics.get("transport_kind") or "") == "provider_native":
+        return True
+    return False
+
+
+def _implement_v2_native_replay_summary(report_path, report, *, artifact_dir, manifest):
+    artifact_dir = Path(artifact_dir) if artifact_dir else None
+    work_report = report.get("work_report") if isinstance(report.get("work_report"), dict) else {}
+    result = work_report.get("implement_lane_result") if isinstance(work_report.get("implement_lane_result"), dict) else {}
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    transcript_error = ""
+    transcript = None
+    try:
+        transcript = _read_native_transcript(artifact_dir)
+    except Exception as exc:
+        transcript_error = str(exc)
+    if transcript is None:
+        return {
+            "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+            "lane": "implement_v2",
+            "lane_status": str(result.get("status") or _implement_v2_step_status(work_report) or ""),
+            "replay_valid": False,
+            "native_transcript": {"valid": False, "error": transcript_error},
+            "artifact_dir": str(artifact_dir) if artifact_dir else "",
+        }
+
+    pairing = validate_native_transcript_pairing(transcript)
+    response_items_match = _native_response_items_match(artifact_dir, transcript)
+    transcript_hash = native_transcript_hash(transcript)
+    manifest_hash_matches = str(manifest.get("transcript_hash") or "") == transcript_hash
+    manifest_pairing_matches = _native_manifest_pairing_matches(manifest, pairing)
+    trace_summary = _native_trace_summary(artifact_dir)
+    calls = [item for item in transcript.items if item.kind in CALL_ITEM_KINDS]
+    outputs = [item for item in transcript.items if item.kind in OUTPUT_ITEM_KINDS]
+    failed_outputs = [
+        item for item in outputs
+        if item.is_error or str(item.status or "").casefold() in {"failed", "interrupted", "invalid", "denied", "synthetic_error", "blocked"}
+    ]
+    terminal_outputs = [
+        item for item in outputs
+        if str(item.tool_name or "") in {*_IMPLEMENT_V2_TERMINAL_TOOLS, "cancel_command", "read_command_output"}
+    ]
+    lane_status = str(result.get("status") or _implement_v2_step_status(work_report) or "")
+    external_reward = _reward_from_trial(_find_parent_with_result(report_path), _read_json(_find_parent_with_result(report_path) / "result.json"))
+    if external_reward == 1.0:
+        lane_status = "completed"
+    replay_valid = bool(
+        transcript.items
+        and pairing.call_count > 0
+        and pairing.output_count > 0
+        and pairing.valid
+        and response_items_match
+        and manifest_hash_matches
+        and manifest_pairing_matches
+    )
+    latest_failure = _implement_v2_native_latest_failure(failed_outputs)
+    return {
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "lane": "implement_v2",
+        "lane_status": lane_status,
+        "replay_valid": replay_valid,
+        "history_turn_count": _safe_int(trace_summary.get("turn_count")) or len({item.turn_id for item in transcript.items if item.turn_id}),
+        "tool_call_count": len(calls),
+        "tool_result_count": len(outputs),
+        "failed_tool_result_count": len(failed_outputs),
+        "terminal_result_count": len(terminal_outputs),
+        "terminal_evidence_count": _safe_int(trace_summary.get("command_count")) or len(terminal_outputs),
+        "write_evidence_count": _safe_int(trace_summary.get("edit_count")) or sum(
+            1 for item in calls if str(item.tool_name or "") in _IMPLEMENT_V2_WRITE_TOOLS
+        ),
+        "latest_failure": latest_failure,
+        "structured_execution_replay": {
+            "classification_count": 0,
+            "stored_classification_count": 0,
+            "missing_stored_classification_count": 0,
+            "mismatch_count": 0,
+            "mismatches": [],
+            "latest_failure_classification": {},
+            "records": [],
+            "source": "native_transcript",
+        },
+        "model_error": _implement_v2_model_error_from_report(report, history=[], metrics=metrics, manifest=manifest),
+        "first_write_frontier_stall": {},
+        "active_command_closeout_failed": False,
+        "tool_contract_shell_surface_misuse": False,
+        "tool_contract_shell_surface_misuse_seen": False,
+        "tool_contract_recovery_observed": False,
+        "runtime_artifact_contract_mismatch": False,
+        "external_expected_artifacts": _external_verifier_expected_artifacts(_find_parent_with_result(report_path)),
+        "external_verifier_missing_artifacts": _external_verifier_missing_artifacts(_find_parent_with_result(report_path)),
+        "passed_structured_artifacts": [],
+        "external_expected_artifact_missing": _external_verifier_missing_artifacts(_find_parent_with_result(report_path)),
+        "source_output_contract_path": "",
+        "stored_source_output_contract_path": "",
+        "post_run_cleanup_present": bool((report.get("post_run_cleanup") or _primary_resume(report).get("post_run_cleanup") or {})),
+        "legacy_runtime_marker_fallback": {},
+        "hard_runtime_frontier_present": bool(latest_failure),
+        # Native transcript replay has already crossed the provider-native
+        # source/probe/edit loop.  Do not route it through the legacy
+        # compiled-source-frontier fallback that only existed for history.json.
+        "compiled_source_frontier_observed": True,
+        "artifact_dir": str(artifact_dir) if artifact_dir else "",
+        "native_transcript": {
+            "valid": replay_valid,
+            "pairing": pairing.as_dict(),
+            "response_items_match": response_items_match,
+            "manifest_hash_matches": manifest_hash_matches,
+            "manifest_pairing_matches": manifest_pairing_matches,
+            "transcript_hash": transcript_hash,
+            "item_count": len(transcript.items),
+            "trace_summary": trace_summary,
+            "error": "",
+        },
+    }
+
+
+def _read_native_transcript(artifact_dir):
+    root = Path(artifact_dir) if artifact_dir else None
+    if root is None:
+        raise FileNotFoundError("missing native artifact dir")
+    payload = _read_json(root / "response_transcript.json")
+    if not isinstance(payload, dict) or not payload:
+        raise FileNotFoundError(f"missing native response_transcript.json under {root}")
+    return NativeTranscript(
+        lane_attempt_id=str(payload.get("lane_attempt_id") or ""),
+        provider=str(payload.get("provider") or ""),
+        model=str(payload.get("model") or ""),
+        items=tuple(
+            _native_transcript_item_from_mapping(item)
+            for item in payload.get("items") or []
+            if isinstance(item, dict)
+        ),
+    )
+
+
+def _native_transcript_item_from_mapping(item):
+    return NativeTranscriptItem(
+        sequence=_safe_int(item.get("sequence")),
+        turn_id=str(item.get("turn_id") or ""),
+        kind=str(item.get("kind") or ""),  # type: ignore[arg-type]
+        lane_attempt_id=str(item.get("lane_attempt_id") or ""),
+        provider=str(item.get("provider") or ""),
+        model=str(item.get("model") or ""),
+        response_id=str(item.get("response_id") or ""),
+        provider_item_id=str(item.get("provider_item_id") or ""),
+        output_index=_safe_int(item.get("output_index")),
+        call_id=str(item.get("call_id") or ""),
+        tool_name=str(item.get("tool_name") or ""),
+        arguments_json_text=str(item.get("arguments_json_text") or ""),
+        custom_input_text=str(item.get("custom_input_text") or ""),
+        output_text_or_ref=str(item.get("output_text_or_ref") or ""),
+        status=str(item.get("status") or ""),
+        is_error=bool(item.get("is_error")),
+        raw_ref=str(item.get("raw_ref") or ""),
+        encrypted_reasoning_ref=str(item.get("encrypted_reasoning_ref") or ""),
+        metrics_ref=str(item.get("metrics_ref") or ""),
+        content_refs=tuple(str(ref) for ref in item.get("content_refs") or ()),
+        evidence_refs=tuple(str(ref) for ref in item.get("evidence_refs") or ()),
+        sidecar_refs=tuple(str(ref) for ref in item.get("sidecar_refs") or ()),
+    )
+
+
+def _native_response_items_match(artifact_dir, transcript):
+    items_path = Path(artifact_dir) / "response_items.jsonl"
+    try:
+        response_items = [json.loads(line) for line in items_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except Exception:
+        return False
+    return response_items == [item.as_dict() for item in transcript.items]
+
+
+def _native_manifest_pairing_matches(manifest, pairing):
+    manifest_pairing = manifest.get("pairing") if isinstance(manifest.get("pairing"), dict) else {}
+    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    if not manifest_pairing:
+        return False
+    if manifest_pairing.get("valid") is not True:
+        return False
+    if list(manifest_pairing.get("errors") or []) != list(pairing.errors):
+        return False
+    for key, value in (
+        ("call_count", pairing.call_count),
+        ("output_count", pairing.output_count),
+        ("non_tool_count", pairing.non_tool_count),
+    ):
+        if _safe_int(manifest_pairing.get(key)) != value:
+            return False
+    if metrics:
+        if metrics.get("pairing_valid") is not True:
+            return False
+        for key, value in (
+            ("call_count", pairing.call_count),
+            ("output_count", pairing.output_count),
+            ("non_tool_count", pairing.non_tool_count),
+        ):
+            if key in metrics and _safe_int(metrics.get(key)) != value:
+                return False
+    return True
+
+
+def _native_trace_summary(artifact_dir):
+    data = _read_json(Path(artifact_dir) / "normalized-trace" / "summary.json")
+    return data if isinstance(data, dict) else {}
+
+
+def _implement_v2_native_latest_failure(failed_outputs):
+    if not failed_outputs:
+        return {}
+    item = failed_outputs[-1]
+    text = str(item.output_text_or_ref or "")
+    return {
+        "provider_call_id": str(item.call_id or ""),
+        "tool_name": str(item.tool_name or ""),
+        "status": str(item.status or ""),
+        "reason": _clip_text(text),
+        "exit_code": _extract_exit_code(text),
+        "timed_out": "timed_out=true" in text.casefold() or "timed out" in text.casefold(),
+        "stderr_tail": _extract_labeled_tail(text, "stderr_tail"),
+        "stdout_tail": _extract_labeled_tail(text, "stdout_tail"),
+        "source": "native_transcript_output",
+    }
+
+
+def _extract_exit_code(text):
+    match = re.search(r"exit_code=([+-]?\d+)", str(text or ""))
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _extract_labeled_tail(text, label):
+    match = re.search(rf"{re.escape(label)}:\s*(.*?)(?:;\s*(?:output_refs|evidence_refs|content|status|exit_code)=|$)", str(text or ""), re.DOTALL)
+    if not match:
+        return ""
+    return _clip_text(match.group(1).strip())
+
+
+def _safe_int(value):
+    if isinstance(value, bool):
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _external_verifier_expected_artifacts(trial_dir):
