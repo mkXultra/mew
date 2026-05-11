@@ -5,12 +5,15 @@ import json
 
 from mew.mew_harbor_runner import (
     MewHarborRun,
+    RUN_MODE_DEFAULTS,
+    build_parser,
     build_harbor_command,
     build_mew_work_command_template,
     collect_mew_trial_summary,
     extract_harbor_reward,
     make_jobs_dir,
     observer_detail_missing,
+    step_budget_preempted,
     summarize_latest_run,
     work_guidance_with_workframe_variant,
 )
@@ -48,6 +51,18 @@ def test_mew_command_template_enables_implement_v2_and_observer_detail(tmp_path)
     assert "{max_wall_seconds_option}" in template
     assert "--report {report_path}" in template
     assert "--artifacts {artifact_dir}" in template
+
+
+def test_run_mode_defaults_have_diagnostic_step_budgets():
+    assert RUN_MODE_DEFAULTS["step-check-10min"].max_steps == 90
+    assert RUN_MODE_DEFAULTS["speed-proof"].max_steps == 120
+    assert RUN_MODE_DEFAULTS["proof-5"].max_steps == 120
+
+
+def test_parser_leaves_max_steps_to_selected_mode_default():
+    args = build_parser().parse_args(["make-mips-interpreter", "--dry-run"])
+
+    assert args.max_steps is None
 
 
 def test_mew_command_template_can_pass_workframe_variant(tmp_path):
@@ -415,6 +430,48 @@ def test_extract_harbor_reward_reads_terminal_bench_v2_shape():
     assert extract_harbor_reward({"reward": 1.0}) == 1.0
 
 
+def test_step_budget_preempted_detects_turn_budget_before_wall_budget():
+    assert step_budget_preempted(
+        {
+            "external_reward": 0.0,
+            "model_turns": 30,
+            "normalized_trace": {"total_seconds": 209.7, "timed_out": False},
+        },
+        max_steps=30,
+        timeout_seconds=660,
+    )
+
+
+def test_step_budget_preempted_ignores_pass_wall_timeout_and_under_budget():
+    assert not step_budget_preempted(
+        {
+            "external_reward": 1.0,
+            "model_turns": 30,
+            "normalized_trace": {"total_seconds": 209.7, "timed_out": False},
+        },
+        max_steps=30,
+        timeout_seconds=660,
+    )
+    assert not step_budget_preempted(
+        {
+            "external_reward": 0.0,
+            "model_turns": 30,
+            "normalized_trace": {"total_seconds": 209.7, "timed_out": True},
+        },
+        max_steps=30,
+        timeout_seconds=660,
+    )
+    assert not step_budget_preempted(
+        {
+            "external_reward": 0.0,
+            "model_turns": 29,
+            "normalized_trace": {"total_seconds": 209.7, "timed_out": False},
+        },
+        max_steps=30,
+        timeout_seconds=660,
+    )
+
+
 def test_summarize_latest_run_normalizes_nested_mew_unknown_task_trace(tmp_path):
     config = _config(tmp_path)
     task_dir = config.jobs_dir / "2026-05-09__07-30-24" / "trial"
@@ -475,6 +532,9 @@ def test_summarize_latest_run_normalizes_nested_mew_unknown_task_trace(tmp_path)
     assert summary["trace_dir"] == str(task_dir / "normalized-trace")
     assert summary["normalized_trace"]["command_count"] == 1
     assert summary["normalized_trace"]["message_count"] == 1
+    assert summary["configured_max_steps"] == 30
+    assert summary["configured_timeout_seconds"] == 660
+    assert summary["step_budget_preempted"] is False
     assert (task_dir / "normalized-trace" / "summary.json").exists()
 
 

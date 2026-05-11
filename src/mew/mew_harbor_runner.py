@@ -31,6 +31,7 @@ class MewHarborRunModeDefaults:
     n: int
     timeout_seconds: int
     timeout_reserve_seconds: int
+    max_steps: int
     work_guidance: str
     require_observer_detail: bool
 
@@ -41,6 +42,7 @@ RUN_MODE_DEFAULTS: dict[str, MewHarborRunModeDefaults] = {
         n=1,
         timeout_seconds=660,
         timeout_reserve_seconds=60,
+        max_steps=90,
         work_guidance=DEFAULT_WORK_GUIDANCE,
         require_observer_detail=True,
     ),
@@ -49,6 +51,7 @@ RUN_MODE_DEFAULTS: dict[str, MewHarborRunModeDefaults] = {
         n=1,
         timeout_seconds=1800,
         timeout_reserve_seconds=60,
+        max_steps=120,
         work_guidance=DEFAULT_WORK_GUIDANCE,
         require_observer_detail=True,
     ),
@@ -57,6 +60,7 @@ RUN_MODE_DEFAULTS: dict[str, MewHarborRunModeDefaults] = {
         n=1,
         timeout_seconds=1800,
         timeout_reserve_seconds=60,
+        max_steps=120,
         work_guidance=DEFAULT_WORK_GUIDANCE,
         require_observer_detail=True,
     ),
@@ -221,6 +225,13 @@ def summarize_latest_run(config: MewHarborRun) -> list[dict[str, object]]:
         summary["task_dir"] = str(task_dir)
         summary["trace_dir"] = str(task_dir / "normalized-trace")
         summary["normalized_trace"] = normalized_summary
+        summary["configured_max_steps"] = config.max_steps
+        summary["configured_timeout_seconds"] = config.timeout_seconds
+        summary["step_budget_preempted"] = step_budget_preempted(
+            summary,
+            max_steps=config.max_steps,
+            timeout_seconds=config.timeout_seconds,
+        )
         summaries.append(summary)
     return summaries
 
@@ -453,6 +464,48 @@ def _int_metric(value: object) -> int | None:
     return None
 
 
+def _float_metric(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def step_budget_preempted(
+    summary: dict[str, object],
+    *,
+    max_steps: int,
+    timeout_seconds: int,
+) -> bool:
+    """Detect diagnostics that ended by model-turn budget before wall budget.
+
+    A 10-minute diagnostic is only useful as a step-shape gate if it can spend
+    most of its wall window. If it reaches max_steps early with reward below
+    pass and without a wall timeout, treat the artifact as a budgeted probe,
+    not as solver failure evidence.
+    """
+
+    model_turns = _int_metric(summary.get("model_turns"))
+    if model_turns is None or model_turns < int(max_steps):
+        return False
+    reward = _float_metric(summary.get("external_reward"))
+    if reward is not None and reward >= 1.0:
+        return False
+    normalized_trace = summary.get("normalized_trace")
+    trace = normalized_trace if isinstance(normalized_trace, dict) else {}
+    if trace.get("timed_out") is True:
+        return False
+    elapsed = _float_metric(trace.get("total_seconds"))
+    if elapsed is None:
+        elapsed = _float_metric(summary.get("wall_elapsed_seconds"))
+    if elapsed is None:
+        return True
+    if timeout_seconds <= 0:
+        return True
+    return elapsed < (float(timeout_seconds) * 0.9)
+
+
 def read_json(path: Path) -> dict[str, object]:
     if not path.exists():
         return {}
@@ -510,7 +563,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-n", type=int)
     parser.add_argument("-m", "--model", default="gpt-5.5")
     parser.add_argument("--model-timeout", type=int, default=600)
-    parser.add_argument("--max-steps", type=int, default=30)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        help="Override mode max-steps. Omit to use the selected mode's diagnostic budget.",
+    )
     parser.add_argument("--timeout-seconds", type=int)
     parser.add_argument("--timeout-reserve-seconds", type=int)
     parser.add_argument("--agent-timeout-multiplier", type=int, default=2)
@@ -551,7 +608,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         n=args.n if args.n is not None else mode_defaults.n,
         model=args.model,
         model_timeout=args.model_timeout,
-        max_steps=args.max_steps,
+        max_steps=args.max_steps if args.max_steps is not None else mode_defaults.max_steps,
         timeout_seconds=args.timeout_seconds if args.timeout_seconds is not None else mode_defaults.timeout_seconds,
         timeout_reserve_seconds=(
             args.timeout_reserve_seconds

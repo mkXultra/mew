@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, live provider-native Responses runtime, tiny live native-loop gate, native-artifact HOT_PATH fastcheck support, search-anchor projection, and final-verifier closeout are green; latest 10min native diagnostic exposed a generic semantic verifier-output gap where a completed verifier process still reported nested runtime failure, so current work is semantic verifier repair before another step-shape diagnostic. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, live provider-native Responses runtime, tiny live native-loop gate, native-artifact HOT_PATH fastcheck support, search-anchor projection, final-verifier closeout, and semantic verifier-output repair are green. Latest 10min native diagnostic improved to internal VM execution but stopped at `model_turns=30` after about `210s` of a `660s` window, so current work is diagnostic runner step-budget repair before another same-shape diagnostic. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -390,15 +390,17 @@ from the live provider-native path moved past final-verifier closeout, wrote
 and patched `vm.js`, then ran a verifier command whose process completed with
 exit code `0` while its own output reported nested runtime failure
 (`vm finished exit=1`). Native loop-control treated that output as a passing
-verifier and drifted into broad probes. The active implementation slice is the
-generic semantic verifier-output repair: completed verifier outputs may still
-count as failed when they contain high-confidence nested runtime or expected
-artifact failure markers, but benign completed output such as `exit=0` or
-`no output expected` must not trigger repair. Do not count legacy
-`implement_v2_model_json_tool_loop` artifacts as native-loop evidence. After
-this repair is reviewed and committed, rerun focused UT, HOT_PATH fastcheck,
-replay/dogfood/emulator if applicable, and exactly one same-shape 10min
-diagnostic before broad measurement resumes.
+verifier and drifted into broad probes. That semantic verifier-output repair is
+now committed. The next current-head diagnostic at
+`mew-make-mips-interpreter-step-check-10min-20260512-050507` moved further: it
+reached internal `node vm.js` success and generated frame files, but still
+missed the external `/tmp/frame.bmp` contract. Do not classify that miss yet:
+the runner stopped at `model_turns=30` after about `210s` of a `660s` 10min
+diagnostic window. Current work is the generic diagnostic-runner repair:
+mode-specific `max_steps` defaults plus `step_budget_preempted` reporting.
+After this repair is reviewed and committed, rerun focused UT, HOT_PATH
+fastcheck, replay/dogfood/emulator if applicable, and exactly one same-shape
+10min diagnostic before broad measurement resumes.
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 
