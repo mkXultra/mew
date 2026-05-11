@@ -228,17 +228,20 @@ def summarize_latest_run(config: MewHarborRun) -> list[dict[str, object]]:
 def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
     report_path = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "mew-report.json"
     report = read_json(report_path)
-    manifest_dir = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "implement_v2"
+    unknown_task_dir = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    manifest_dir = _implement_v2_artifact_dir(unknown_task_dir)
     proof_manifest_path = manifest_dir / "proof-manifest.json"
     history_path = manifest_dir / "history.json"
-    transcript_path = manifest_dir / "transcript.json"
+    transcript_path = _implement_v2_transcript_path(manifest_dir)
     result_path = task_dir / "result.json"
-    command_transcript_path = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task" / "command-transcript.json"
+    command_transcript_path = unknown_task_dir / "command-transcript.json"
     verifier_stdout_path = task_dir / "verifier" / "test-stdout.txt"
     verifier_reward_path = task_dir / "verifier" / "reward.txt"
     manifest = read_json(proof_manifest_path)
     result = read_json(result_path)
-    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    report_metrics = _implement_lane_metrics(report)
+    manifest_metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    metrics = {**manifest_metrics, **report_metrics}
     workframe_metrics = metrics.get("workframe") if isinstance(metrics.get("workframe"), dict) else {}
     observation = metrics.get("integration_observation") if isinstance(metrics.get("integration_observation"), dict) else {}
     observation_summary = (
@@ -248,13 +251,14 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
     )
     artifact_ref = observation.get("artifact_ref") if isinstance(observation.get("artifact_ref"), str) else ""
     detail_path = manifest_dir / artifact_ref if artifact_ref else None
+    native_status = _native_artifact_status(manifest_dir)
     return {
         "external_reward": extract_harbor_reward(result),
         "work_exit_code": report.get("work_exit_code"),
         "stop_reason": ((report.get("work_report") or {}).get("stop_reason") if isinstance(report.get("work_report"), dict) else None),
-        "model_turns": metrics.get("model_turns"),
-        "tool_calls": metrics.get("tool_calls"),
-        "tool_results": metrics.get("tool_results"),
+        "model_turns": metrics.get("model_turns") if metrics.get("model_turns") is not None else metrics.get("turn_count"),
+        "tool_calls": metrics.get("tool_calls") if metrics.get("tool_calls") is not None else metrics.get("call_count"),
+        "tool_results": metrics.get("tool_results") if metrics.get("tool_results") is not None else metrics.get("output_count"),
         "wall_elapsed_seconds": metrics.get("wall_elapsed_seconds"),
         "workframe_variant": workframe_metrics.get("variant"),
         "observer_detail_enabled": bool(observation.get("debug_detail_enabled")),
@@ -262,6 +266,13 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
         "observer_detail_ref": artifact_ref,
         "observer_detail_exists": bool(detail_path and detail_path.exists()),
         "observer_detail_path": str(detail_path) if detail_path else "",
+        "native_observation_present": native_status["valid"],
+        "native_observation_reason": native_status["reason"],
+        "native_transcript_path": str(native_status["transcript_path"]) if native_status["transcript_path"] else "",
+        "native_response_items_path": str(native_status["items_path"]) if native_status["items_path"] else "",
+        "native_pairing_valid": native_status["pairing_valid"],
+        "native_call_count": native_status["call_count"],
+        "native_output_count": native_status["output_count"],
         "proof_manifest_path": str(proof_manifest_path),
         "history_path": str(history_path),
         "transcript_path": str(transcript_path),
@@ -273,6 +284,173 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
         "prompt_chars": observation_summary.get("prompt_chars"),
         "model_elapsed_seconds": observation_summary.get("model_elapsed_seconds"),
     }
+
+
+def _implement_v2_artifact_dir(unknown_task_dir: Path) -> Path:
+    """Return the active implement_v2 artifact directory.
+
+    The legacy model-JSON runtime wrote under ``unknown-task/implement_v2``.
+    The native transcript runtime writes authoritative artifacts directly into
+    the configured artifact root, which is ``unknown-task`` for Harbor.
+    """
+
+    native_dir = unknown_task_dir
+    legacy_dir = unknown_task_dir / "implement_v2"
+    if _native_artifact_status(native_dir)["valid"]:
+        return native_dir
+    if (legacy_dir / "proof-manifest.json").exists():
+        return legacy_dir
+    if (native_dir / "proof-manifest.json").exists():
+        return native_dir
+    return legacy_dir
+
+
+def _implement_v2_transcript_path(manifest_dir: Path) -> Path:
+    native = manifest_dir / "response_transcript.json"
+    if native.exists():
+        return native
+    return manifest_dir / "transcript.json"
+
+
+def _implement_lane_metrics(report: dict[str, object]) -> dict[str, object]:
+    work_report = report.get("work_report") if isinstance(report.get("work_report"), dict) else {}
+    result = work_report.get("implement_lane_result") if isinstance(work_report.get("implement_lane_result"), dict) else {}
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    return dict(metrics)
+
+
+def _native_artifact_status(manifest_dir: Path) -> dict[str, object]:
+    transcript_path = manifest_dir / "response_transcript.json"
+    items_path = manifest_dir / "response_items.jsonl"
+    manifest = read_json(manifest_dir / "proof-manifest.json")
+    if not manifest:
+        return _native_status(False, "missing_manifest", transcript_path, items_path)
+    if manifest.get("runtime_id") != "implement_v2_native_transcript_loop":
+        return _native_status(False, "non_native_runtime", transcript_path, items_path)
+    if manifest.get("transport_kind") != "provider_native":
+        return _native_status(False, "non_native_transport", transcript_path, items_path)
+    if not transcript_path.exists() or not items_path.exists():
+        return _native_status(False, "missing_native_files", transcript_path, items_path)
+
+    transcript = read_json(transcript_path)
+    items = transcript.get("items") if isinstance(transcript.get("items"), list) else []
+    if not items:
+        return _native_status(False, "empty_transcript", transcript_path, items_path)
+    jsonl_items = _read_jsonl_records(items_path)
+    if not jsonl_items:
+        return _native_status(False, "empty_or_invalid_response_items", transcript_path, items_path)
+    if jsonl_items != items:
+        return _native_status(False, "response_items_mismatch", transcript_path, items_path)
+
+    pairing = manifest.get("pairing") if isinstance(manifest.get("pairing"), dict) else {}
+    manifest_call_count = _int_metric(pairing.get("call_count"))
+    manifest_output_count = _int_metric(pairing.get("output_count"))
+    pairing_valid = bool(pairing.get("valid"))
+    pairing_errors = pairing.get("errors") if isinstance(pairing.get("errors"), list) else []
+    call_ids, output_ids, item_errors = _native_call_output_ids(items)
+    if not pairing_valid:
+        return _native_status(False, "invalid_manifest_pairing", transcript_path, items_path)
+    if pairing_errors:
+        return _native_status(False, "manifest_pairing_errors", transcript_path, items_path)
+    if manifest_call_count is None or manifest_output_count is None:
+        return _native_status(False, "missing_manifest_pairing_counts", transcript_path, items_path)
+    if item_errors:
+        return _native_status(False, item_errors[0], transcript_path, items_path)
+    if not call_ids or not output_ids:
+        return _native_status(False, "empty_call_output_pairing", transcript_path, items_path)
+    if len(call_ids) != len(set(call_ids)) or len(output_ids) != len(set(output_ids)):
+        return _native_status(False, "duplicate_call_output_ids", transcript_path, items_path)
+    if set(call_ids) != set(output_ids):
+        return _native_status(False, "call_output_id_mismatch", transcript_path, items_path)
+    if manifest_call_count is not None and manifest_call_count != len(call_ids):
+        return _native_status(False, "manifest_call_count_mismatch", transcript_path, items_path)
+    if manifest_output_count is not None and manifest_output_count != len(output_ids):
+        return _native_status(False, "manifest_output_count_mismatch", transcript_path, items_path)
+    return {
+        **_native_status(True, "ok", transcript_path, items_path),
+        "pairing_valid": True,
+        "call_count": len(call_ids),
+        "output_count": len(output_ids),
+    }
+
+
+def _native_status(valid: bool, reason: str, transcript_path: Path, items_path: Path) -> dict[str, object]:
+    return {
+        "valid": valid,
+        "reason": reason,
+        "transcript_path": transcript_path if transcript_path.exists() else "",
+        "items_path": items_path if items_path.exists() else "",
+        "pairing_valid": False,
+        "call_count": 0,
+        "output_count": 0,
+    }
+
+
+def _read_jsonl_records(path: Path) -> list[object]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    records: list[object] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(payload, dict):
+            return []
+        records.append(payload)
+    return records
+
+
+def _native_call_output_ids(items: list[object]) -> tuple[list[str], list[str], list[str]]:
+    known_non_tool_kinds = {"input_message", "assistant_message", "message", "reasoning"}
+    call_ids: list[str] = []
+    output_ids: list[str] = []
+    errors: list[str] = []
+    call_kind_by_id: dict[str, str] = {}
+    output_kind_by_id: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            errors.append("non_object_transcript_item")
+            continue
+        kind = str(item.get("kind") or "")
+        if kind in {"function_call", "custom_tool_call", "finish_call"}:
+            call_id = str(item.get("call_id") or "")
+            if not call_id:
+                errors.append("missing_call_id")
+                continue
+            call_ids.append(call_id)
+            call_kind_by_id[call_id] = kind
+        elif kind in {"function_call_output", "custom_tool_call_output", "finish_output"}:
+            call_id = str(item.get("call_id") or "")
+            if not call_id:
+                errors.append("missing_output_call_id")
+                continue
+            output_ids.append(call_id)
+            output_kind_by_id[call_id] = kind
+        elif kind not in known_non_tool_kinds:
+            errors.append("unknown_native_item_kind")
+    expected_output_kind = {
+        "function_call": "function_call_output",
+        "custom_tool_call": "custom_tool_call_output",
+        "finish_call": "finish_output",
+    }
+    for call_id, call_kind in call_kind_by_id.items():
+        output_kind = output_kind_by_id.get(call_id)
+        if output_kind and output_kind != expected_output_kind[call_kind]:
+            errors.append("call_output_kind_mismatch")
+    return call_ids, output_ids, errors
+
+
+def _int_metric(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def read_json(path: Path) -> dict[str, object]:
@@ -297,9 +475,14 @@ def observer_detail_missing(summaries: Sequence[dict[str, object]]) -> bool:
     if not summaries:
         return True
     return any(
-        not summary.get("observer_detail_enabled")
-        or not summary.get("observer_detail_written")
-        or not summary.get("observer_detail_exists")
+        not (
+            summary.get("native_observation_present")
+            or (
+                summary.get("observer_detail_enabled")
+                and summary.get("observer_detail_written")
+                and summary.get("observer_detail_exists")
+            )
+        )
         for summary in summaries
     )
 

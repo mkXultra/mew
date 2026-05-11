@@ -195,6 +195,221 @@ def test_collect_mew_trial_summary_reports_observer_detail(tmp_path):
     assert observer_detail_missing([summary]) is False
 
 
+def test_collect_mew_trial_summary_accepts_native_artifacts_at_task_root(tmp_path):
+    task_dir = tmp_path / "run" / "trial"
+    unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    unknown_task.mkdir(parents=True)
+    manifest_path = unknown_task / "proof-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "runtime_id": "implement_v2_native_transcript_loop",
+                "transport_kind": "provider_native",
+                "pairing": {"valid": True, "call_count": 1, "output_count": 1, "errors": []},
+                "metrics": {
+                    "pairing_valid": True,
+                    "provider_native_tool_loop": True,
+                    "model_json_main_path_detected": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    response_items = [
+        {"kind": "function_call", "call_id": "call-1", "tool_name": "inspect_dir"},
+        {"kind": "function_call_output", "call_id": "call-1", "status": "completed"},
+    ]
+    (unknown_task / "response_transcript.json").write_text(json.dumps({"items": response_items}), encoding="utf-8")
+    (unknown_task / "response_items.jsonl").write_text(
+        "\n".join(json.dumps(item) for item in response_items) + "\n",
+        encoding="utf-8",
+    )
+    (unknown_task / "mew-report.json").write_text(
+        json.dumps({"work_exit_code": 1, "work_report": {"stop_reason": "implement_v2_blocked"}}),
+        encoding="utf-8",
+    )
+    (task_dir / "result.json").write_text(json.dumps({"reward": 0.0}), encoding="utf-8")
+
+    summary = collect_mew_trial_summary(task_dir)
+
+    assert summary["proof_manifest_path"] == str(manifest_path)
+    assert summary["transcript_path"] == str(unknown_task / "response_transcript.json")
+    assert summary["native_observation_present"] is True
+    assert summary["native_pairing_valid"] is True
+    assert observer_detail_missing([summary]) is False
+
+
+def test_collect_mew_trial_summary_rejects_empty_native_artifacts(tmp_path):
+    task_dir = tmp_path / "run" / "trial"
+    unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    unknown_task.mkdir(parents=True)
+    manifest_path = unknown_task / "proof-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "runtime_id": "implement_v2_native_transcript_loop",
+                "transport_kind": "provider_native",
+                "pairing": {"valid": True, "call_count": 1, "output_count": 1, "errors": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (unknown_task / "response_transcript.json").write_text(json.dumps({"items": []}), encoding="utf-8")
+    (unknown_task / "response_items.jsonl").write_text("", encoding="utf-8")
+    (unknown_task / "mew-report.json").write_text(json.dumps({"work_exit_code": 1}), encoding="utf-8")
+    (task_dir / "result.json").write_text(json.dumps({"reward": 0.0}), encoding="utf-8")
+
+    summary = collect_mew_trial_summary(task_dir)
+
+    assert summary["proof_manifest_path"] == str(manifest_path)
+    assert summary["native_observation_present"] is False
+    assert summary["native_observation_reason"] == "empty_transcript"
+    assert observer_detail_missing([summary]) is True
+
+
+def test_collect_mew_trial_summary_rejects_mismatched_native_jsonl(tmp_path):
+    task_dir = tmp_path / "run" / "trial"
+    unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    unknown_task.mkdir(parents=True)
+    items = [
+        {"kind": "function_call", "call_id": "call-1", "tool_name": "inspect_dir"},
+        {"kind": "function_call_output", "call_id": "call-1", "status": "completed"},
+    ]
+    (unknown_task / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_id": "implement_v2_native_transcript_loop",
+                "transport_kind": "provider_native",
+                "pairing": {"valid": True, "call_count": 1, "output_count": 1, "errors": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (unknown_task / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    mismatched_items = [
+        {"kind": "function_call", "call_id": "different", "tool_name": "inspect_dir"},
+        {"kind": "function_call_output", "call_id": "different", "status": "completed"},
+    ]
+    (unknown_task / "response_items.jsonl").write_text(
+        "\n".join(json.dumps(item) for item in mismatched_items) + "\n",
+        encoding="utf-8",
+    )
+    (unknown_task / "mew-report.json").write_text(json.dumps({"work_exit_code": 1}), encoding="utf-8")
+    (task_dir / "result.json").write_text(json.dumps({"reward": 0.0}), encoding="utf-8")
+
+    summary = collect_mew_trial_summary(task_dir)
+
+    assert summary["native_observation_present"] is False
+    assert summary["native_observation_reason"] == "response_items_mismatch"
+    assert observer_detail_missing([summary]) is True
+
+
+def test_collect_mew_trial_summary_rejects_non_strict_native_pairing(tmp_path):
+    task_dir = tmp_path / "run" / "trial"
+    unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    unknown_task.mkdir(parents=True)
+    items = [
+        {"kind": "function_call", "call_id": "call-1", "tool_name": "inspect_dir"},
+        {"kind": "function_call_output", "call_id": "call-1", "status": "completed"},
+    ]
+    (unknown_task / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_id": "implement_v2_native_transcript_loop",
+                "transport_kind": "provider_native",
+                "pairing": {"valid": True, "call_count": 1, "output_count": 1, "errors": ["stale"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (unknown_task / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    (unknown_task / "response_items.jsonl").write_text(
+        "\n".join(json.dumps(item) for item in items) + "\n",
+        encoding="utf-8",
+    )
+    (unknown_task / "mew-report.json").write_text(json.dumps({"work_exit_code": 1}), encoding="utf-8")
+    (task_dir / "result.json").write_text(json.dumps({"reward": 0.0}), encoding="utf-8")
+
+    summary = collect_mew_trial_summary(task_dir)
+
+    assert summary["native_observation_present"] is False
+    assert summary["native_observation_reason"] == "manifest_pairing_errors"
+
+
+def test_collect_mew_trial_summary_rejects_unknown_native_item_kind(tmp_path):
+    task_dir = tmp_path / "run" / "trial"
+    unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    unknown_task.mkdir(parents=True)
+    items = [
+        {"kind": "function_call", "call_id": "call-1", "tool_name": "inspect_dir"},
+        {"kind": "function_call_output", "call_id": "call-1", "status": "completed"},
+        {"kind": "unexpected_future_item"},
+    ]
+    (unknown_task / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_id": "implement_v2_native_transcript_loop",
+                "transport_kind": "provider_native",
+                "pairing": {"valid": True, "call_count": 1, "output_count": 1, "errors": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (unknown_task / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    (unknown_task / "response_items.jsonl").write_text(
+        "\n".join(json.dumps(item) for item in items) + "\n",
+        encoding="utf-8",
+    )
+    (unknown_task / "mew-report.json").write_text(json.dumps({"work_exit_code": 1}), encoding="utf-8")
+    (task_dir / "result.json").write_text(json.dumps({"reward": 0.0}), encoding="utf-8")
+
+    summary = collect_mew_trial_summary(task_dir)
+
+    assert summary["native_observation_present"] is False
+    assert summary["native_observation_reason"] == "unknown_native_item_kind"
+
+
+def test_collect_mew_trial_summary_prefers_valid_native_root_over_stale_legacy(tmp_path):
+    task_dir = tmp_path / "run" / "trial"
+    unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    legacy = unknown_task / "implement_v2"
+    legacy.mkdir(parents=True)
+    (legacy / "proof-manifest.json").write_text(
+        json.dumps({"metrics": {"tool_calls": 99, "tool_results": 99}}),
+        encoding="utf-8",
+    )
+    unknown_task.mkdir(parents=True, exist_ok=True)
+    response_items = [
+        {"kind": "function_call", "call_id": "call-native", "tool_name": "inspect_dir"},
+        {"kind": "function_call_output", "call_id": "call-native", "status": "completed"},
+    ]
+    root_manifest = unknown_task / "proof-manifest.json"
+    root_manifest.write_text(
+        json.dumps(
+            {
+                "runtime_id": "implement_v2_native_transcript_loop",
+                "transport_kind": "provider_native",
+                "pairing": {"valid": True, "call_count": 1, "output_count": 1, "errors": []},
+                "metrics": {"turn_count": 1, "call_count": 1, "output_count": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (unknown_task / "response_transcript.json").write_text(json.dumps({"items": response_items}), encoding="utf-8")
+    (unknown_task / "response_items.jsonl").write_text(
+        "\n".join(json.dumps(item) for item in response_items) + "\n",
+        encoding="utf-8",
+    )
+    (unknown_task / "mew-report.json").write_text(json.dumps({"work_exit_code": 1}), encoding="utf-8")
+    (task_dir / "result.json").write_text(json.dumps({"reward": 0.0}), encoding="utf-8")
+
+    summary = collect_mew_trial_summary(task_dir)
+
+    assert summary["proof_manifest_path"] == str(root_manifest)
+    assert summary["native_observation_present"] is True
+    assert summary["tool_calls"] == 1
+
+
 def test_extract_harbor_reward_reads_terminal_bench_v2_shape():
     assert extract_harbor_reward({"verifier_result": {"rewards": {"reward": 0.0}}}) == 0.0
     assert extract_harbor_reward({"reward": 1.0}) == 1.0

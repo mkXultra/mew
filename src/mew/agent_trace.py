@@ -527,6 +527,17 @@ def _event_sort_key(event: dict[str, Any]) -> tuple[str, int, int]:
 
 
 def normalize_mew_report(report_path: Path) -> list[dict[str, Any]]:
+    native_transcript_path = report_path.parent / "response_transcript.json"
+    if native_transcript_path.exists():
+        report = _read_json(report_path)
+        events = normalize_mew_native_response_transcript(
+            transcript_path=native_transcript_path,
+            manifest_path=report_path.parent / "proof-manifest.json",
+            report_metrics=_mew_implement_lane_metrics(report),
+        )
+        if events:
+            return events
+
     history_path = report_path.parent / "implement_v2" / "history.json"
     if history_path.exists():
         events = normalize_mew_implement_v2_history(history_path=history_path, report_path=report_path)
@@ -582,6 +593,247 @@ def normalize_mew_report(report_path: Path) -> list[dict[str, Any]]:
             }
         events.append(event)
     return events
+
+
+def normalize_mew_native_response_transcript(
+    *,
+    transcript_path: Path,
+    manifest_path: Path | None = None,
+    report_metrics: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    transcript = _read_json(transcript_path)
+    items = transcript.get("items") if isinstance(transcript.get("items"), list) else []
+    if not items:
+        return []
+    manifest = _read_json(manifest_path or transcript_path.parent / "proof-manifest.json")
+    latency_by_call = _native_latency_by_call(manifest, report_metrics=report_metrics or {})
+    output_by_call, pairing_errors = _native_output_by_call(items)
+    events: list[dict[str, Any]] = []
+    for message in pairing_errors:
+        events.append(_native_parse_error_event(transcript_path, line_number=1, summary=message))
+    call_index = 0
+    seen_call_ids: set[str] = set()
+    for line_number, item in enumerate(items, 1):
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "")
+        if kind not in {"function_call", "custom_tool_call", "finish_call"}:
+            if kind in {"message", "reasoning"}:
+                event = _base_event(
+                    agent="mew",
+                    source_path=transcript_path,
+                    line_number=line_number,
+                    kind="message",
+                    step_id=_native_turn_index(item),
+                )
+                event["source_role"] = "agent"
+                event["summary"] = kind
+                events.append(event)
+            continue
+        call_index += 1
+        tool = str(item.get("tool_name") or ("finish" if kind == "finish_call" else "tool_call"))
+        call_id = str(item.get("call_id") or item.get("provider_item_id") or f"native-call-{call_index}")
+        duplicate_call = call_id in seen_call_ids
+        if duplicate_call:
+            events.append(
+                _native_parse_error_event(
+                    transcript_path,
+                    line_number=line_number,
+                    summary=f"duplicate native tool call for call_id={call_id}",
+                )
+            )
+        seen_call_ids.add(call_id)
+        arguments, argument_error = _native_arguments(item)
+        if argument_error:
+            events.append(_native_parse_error_event(transcript_path, line_number=line_number, summary=argument_error))
+        output = {} if duplicate_call else output_by_call.get(call_id, {})
+        latency = latency_by_call.get(call_id, {})
+        started_ms = _int_or_none(latency.get("started_ms"))
+        duration_ms = _int_or_none(latency.get("finished_ms"))
+        completed_ms = started_ms + duration_ms if started_ms is not None and duration_ms is not None else started_ms
+        summary = _native_tool_summary(tool=tool, arguments=arguments, output=output)
+        status = str(output.get("status") or "")
+        exit_code = _native_exit_code(output)
+        turn_index = _native_turn_index(item)
+        started = _tool_event(
+            agent="mew",
+            source_path=transcript_path,
+            line_number=line_number,
+            phase="started",
+            tool=tool,
+            tool_id=call_id,
+            summary=summary,
+            elapsed_ms=started_ms,
+            step_id=turn_index,
+        )
+        completed = _tool_event(
+            agent="mew",
+            source_path=transcript_path,
+            line_number=line_number,
+            phase="completed",
+            tool=tool,
+            tool_id=call_id,
+            summary=summary,
+            status=status,
+            exit_code=exit_code,
+            elapsed_ms=completed_ms,
+            step_id=turn_index,
+            duration_ms=duration_ms,
+        )
+        compact_arguments = _compact_mew_tool_arguments(arguments)
+        if compact_arguments:
+            started["arguments"] = compact_arguments
+            completed["arguments"] = compact_arguments
+        if item.get("output_index") is not None:
+            started["sequence_index"] = item.get("output_index")
+            completed["sequence_index"] = item.get("output_index")
+        events.append(started)
+        if output:
+            events.append(completed)
+        else:
+            events.append(
+                _native_parse_error_event(
+                    transcript_path,
+                    line_number=line_number,
+                    summary=f"missing native tool output for call_id={call_id}",
+                )
+            )
+    events.sort(key=_event_sort_key)
+    return events
+
+
+def _native_output_by_call(items: list[Any]) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    call_ids: list[str] = []
+    call_kind_by_id: dict[str, str] = {}
+    output_by_call_candidate: dict[str, dict[str, Any]] = {}
+    output_kind_by_id: dict[str, str] = {}
+    output_by_call: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "")
+        call_id = str(item.get("call_id") or "")
+        if kind in {"function_call", "custom_tool_call", "finish_call"}:
+            if not call_id:
+                errors.append("native tool call is missing call_id")
+                continue
+            if call_id in call_ids:
+                errors.append(f"duplicate native tool call for call_id={call_id}")
+                continue
+            call_ids.append(call_id)
+            call_kind_by_id[call_id] = kind
+            continue
+        if kind not in {"function_call_output", "custom_tool_call_output", "finish_output"}:
+            continue
+        if not call_id:
+            errors.append("native tool output is missing call_id")
+            continue
+        if call_id in output_by_call_candidate:
+            errors.append(f"duplicate native tool output for call_id={call_id}")
+            continue
+        output_by_call_candidate[call_id] = item
+        output_kind_by_id[call_id] = kind
+    call_id_set = set(call_ids)
+    output_id_set = set(output_by_call_candidate)
+    for call_id in sorted(output_id_set - call_id_set):
+        errors.append(f"orphan native tool output for call_id={call_id}")
+    for call_id in sorted(call_id_set - output_id_set):
+        errors.append(f"missing native tool output for call_id={call_id}")
+    expected_output_kind = {
+        "function_call": "function_call_output",
+        "custom_tool_call": "custom_tool_call_output",
+        "finish_call": "finish_output",
+    }
+    for call_id in sorted(call_id_set & output_id_set):
+        call_kind = call_kind_by_id[call_id]
+        output_kind = output_kind_by_id[call_id]
+        if output_kind != expected_output_kind[call_kind]:
+            errors.append(f"native tool call/output kind mismatch for call_id={call_id}")
+            continue
+        output_by_call[call_id] = output_by_call_candidate[call_id]
+    return output_by_call, errors
+
+
+def _native_parse_error_event(source_path: Path, *, line_number: int, summary: str) -> dict[str, Any]:
+    event = _base_event(
+        agent="mew",
+        source_path=source_path,
+        line_number=line_number,
+        kind="parse_error",
+    )
+    event["summary"] = summary
+    return event
+
+
+def _native_latency_by_call(manifest: dict[str, Any], *, report_metrics: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    latencies = metrics.get("tool_latency") if isinstance(metrics.get("tool_latency"), list) else []
+    if not latencies:
+        latencies = report_metrics.get("tool_latency") if isinstance(report_metrics.get("tool_latency"), list) else []
+    return {
+        str(item.get("call_id") or ""): item
+        for item in latencies
+        if isinstance(item, dict) and item.get("call_id")
+    }
+
+
+def _mew_implement_lane_metrics(report: dict[str, Any]) -> dict[str, Any]:
+    work_report = report.get("work_report") if isinstance(report.get("work_report"), dict) else {}
+    result = work_report.get("implement_lane_result") if isinstance(work_report.get("implement_lane_result"), dict) else {}
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    return dict(metrics)
+
+
+def _native_arguments(item: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    raw = item.get("arguments_json_text")
+    if not isinstance(raw, str) or not raw:
+        return {}, ""
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}, "invalid native tool arguments JSON"
+    if not isinstance(payload, dict):
+        return {}, "native tool arguments JSON is not an object"
+    return payload, ""
+
+
+def _native_turn_index(item: dict[str, Any]) -> int | None:
+    turn_id = str(item.get("turn_id") or "")
+    try:
+        return int(turn_id.rsplit("-", 1)[-1])
+    except ValueError:
+        return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    return None
+
+
+def _native_exit_code(output: dict[str, Any]) -> int | None:
+    text = str(output.get("output_text_or_ref") or "")
+    match = re.search(r"\bexit_code=(-?\d+)\b", text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _native_tool_summary(*, tool: str, arguments: dict[str, Any], output: dict[str, Any]) -> Any:
+    for key in ("command", "cmd", "path", "query", "pattern"):
+        value = arguments.get(key)
+        if value:
+            return value
+    text = str(output.get("output_text_or_ref") or "")
+    if text:
+        return text
+    return tool
 
 
 def normalize_mew_implement_v2_history(*, history_path: Path, report_path: Path | None = None) -> list[dict[str, Any]]:
@@ -921,7 +1173,7 @@ def summarize_trace(
     command_events = [
         event
         for event in tool_events
-        if event.get("tool") in {"command_execution", "Bash", "run_command"} or "command" in str(event.get("tool", "")).lower()
+        if event.get("tool") in {"command_execution", "exec_command", "Bash", "run_command", "run_tests"}
     ]
     edit_events = [
         event
@@ -983,6 +1235,8 @@ def _count_invocations(events: Sequence[dict[str, Any]]) -> int:
 
 
 def _is_verifier_event(event: dict[str, Any]) -> bool:
+    if str(event.get("tool") or "").casefold() in {"run_tests", "verifier", "strict_verifier"}:
+        return True
     execution_contract = event.get("execution_contract") if isinstance(event.get("execution_contract"), dict) else {}
     if str(execution_contract.get("proof_role") or "").casefold() in {"verifier", "acceptance", "proof"}:
         return True

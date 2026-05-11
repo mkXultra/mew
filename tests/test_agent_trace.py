@@ -64,6 +64,232 @@ def test_normalize_codex_stdout_tool_calls_and_summary(tmp_path):
     assert summary["stderr_bytes"] == len("warning\n")
 
 
+def test_normalize_mew_native_response_transcript_counts_tools(tmp_path):
+    task_dir = tmp_path / "task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "mew-report.json").write_text(json.dumps({"work_report": {"steps": []}}), encoding="utf-8")
+    (task_dir / "command-transcript.json").write_text(
+        json.dumps({"exit_code": 1, "timed_out": False, "timeout_seconds": 660}),
+        encoding="utf-8",
+    )
+    items = [
+        {"sequence": 1, "kind": "reasoning", "turn_id": "turn-1"},
+        {
+            "sequence": 2,
+            "kind": "function_call",
+            "turn_id": "turn-1",
+            "call_id": "call-read",
+            "tool_name": "inspect_dir",
+            "arguments_json_text": "{\"path\":\".\",\"max_entries\":50}",
+            "output_index": 1,
+        },
+        {
+            "sequence": 3,
+            "kind": "function_call_output",
+            "turn_id": "turn-1",
+            "call_id": "call-read",
+            "tool_name": "inspect_dir",
+            "status": "completed",
+            "output_text_or_ref": "inspect_dir result: completed",
+        },
+        {
+            "sequence": 4,
+            "kind": "function_call",
+            "turn_id": "turn-2",
+            "call_id": "call-write",
+            "tool_name": "write_file",
+            "arguments_json_text": "{\"path\":\"output.txt\"}",
+            "output_index": 1,
+        },
+        {
+            "sequence": 5,
+            "kind": "function_call_output",
+            "turn_id": "turn-2",
+            "call_id": "call-write",
+            "tool_name": "write_file",
+            "status": "completed",
+            "output_text_or_ref": "write_file result: completed",
+        },
+        {
+            "sequence": 6,
+            "kind": "function_call",
+            "turn_id": "turn-3",
+            "call_id": "call-test",
+            "tool_name": "run_tests",
+            "arguments_json_text": "{\"command\":\"grep -qx OK output.txt\"}",
+            "output_index": 1,
+        },
+        {
+            "sequence": 7,
+            "kind": "function_call_output",
+            "turn_id": "turn-3",
+            "call_id": "call-test",
+            "tool_name": "run_tests",
+            "status": "completed",
+            "output_text_or_ref": "run_tests result: completed; exit_code=0",
+        },
+    ]
+    (task_dir / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    (task_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "tool_latency": [
+                        {"call_id": "call-read", "tool_name": "inspect_dir", "started_ms": 1000, "finished_ms": 2},
+                        {"call_id": "call-write", "tool_name": "write_file", "started_ms": 2000, "finished_ms": 3},
+                        {"call_id": "call-test", "tool_name": "run_tests", "started_ms": 3000, "finished_ms": 4},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["tool_call_count"] == 6
+    assert summary["edit_count"] == 1
+    assert summary["verifier_count"] == 1
+    assert summary["first_tool_seconds"] == 1.0
+    assert summary["first_edit_seconds"] == 2.0
+    assert summary["first_verifier_seconds"] == 3.0
+    assert any(event.get("exit_code") == 0 for event in events)
+
+
+def test_normalize_mew_native_response_transcript_reports_pairing_errors(tmp_path):
+    task_dir = tmp_path / "task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "mew-report.json").write_text(json.dumps({"work_report": {"steps": []}}), encoding="utf-8")
+    (task_dir / "command-transcript.json").write_text(json.dumps({}), encoding="utf-8")
+    (task_dir / "response_transcript.json").write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "kind": "function_call",
+                        "turn_id": "turn-1",
+                        "call_id": "call-bad",
+                        "tool_name": "read_file",
+                        "arguments_json_text": "{not json",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (task_dir / "proof-manifest.json").write_text(json.dumps({}), encoding="utf-8")
+
+    events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["parse_error_count"] == 3
+    assert summary["tool_call_started_count"] == 1
+    assert summary["tool_call_completed_count"] == 0
+    assert any("invalid native tool arguments JSON" in event.get("summary", "") for event in events)
+    assert any("missing native tool output" in event.get("summary", "") for event in events)
+
+
+def test_normalize_mew_native_response_transcript_excludes_read_command_output_from_commands(tmp_path):
+    task_dir = tmp_path / "task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "mew-report.json").write_text(json.dumps({"work_report": {"steps": []}}), encoding="utf-8")
+    (task_dir / "command-transcript.json").write_text(json.dumps({}), encoding="utf-8")
+    items = [
+        {
+            "kind": "function_call",
+            "turn_id": "turn-1",
+            "call_id": "call-poll",
+            "tool_name": "read_command_output",
+            "arguments_json_text": "{\"command_id\":\"cmd-1\"}",
+        },
+        {
+            "kind": "function_call_output",
+            "turn_id": "turn-1",
+            "call_id": "call-poll",
+            "tool_name": "read_command_output",
+            "status": "completed",
+            "output_text_or_ref": "still running",
+        },
+    ]
+    (task_dir / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    (task_dir / "proof-manifest.json").write_text(json.dumps({}), encoding="utf-8")
+
+    _events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["tool_call_count"] == 2
+    assert summary["command_count"] == 0
+
+
+def test_normalize_mew_native_response_transcript_flags_duplicate_call_ids(tmp_path):
+    task_dir = tmp_path / "task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "mew-report.json").write_text(json.dumps({"work_report": {"steps": []}}), encoding="utf-8")
+    (task_dir / "command-transcript.json").write_text(json.dumps({}), encoding="utf-8")
+    items = [
+        {
+            "kind": "function_call",
+            "turn_id": "turn-1",
+            "call_id": "call-dup",
+            "tool_name": "inspect_dir",
+            "arguments_json_text": "{\"path\":\".\"}",
+        },
+        {
+            "kind": "function_call",
+            "turn_id": "turn-2",
+            "call_id": "call-dup",
+            "tool_name": "read_file",
+            "arguments_json_text": "{\"path\":\"main.c\"}",
+        },
+        {
+            "kind": "function_call_output",
+            "turn_id": "turn-2",
+            "call_id": "call-dup",
+            "tool_name": "inspect_dir",
+            "status": "completed",
+            "output_text_or_ref": "ok",
+        },
+    ]
+    (task_dir / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    (task_dir / "proof-manifest.json").write_text(json.dumps({}), encoding="utf-8")
+
+    _events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["parse_error_count"] >= 1
+    assert summary["tool_call_started_count"] == 2
+    assert summary["tool_call_completed_count"] == 1
+
+
+def test_normalize_mew_native_response_transcript_flags_call_output_kind_mismatch(tmp_path):
+    task_dir = tmp_path / "task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "mew-report.json").write_text(json.dumps({"work_report": {"steps": []}}), encoding="utf-8")
+    (task_dir / "command-transcript.json").write_text(json.dumps({}), encoding="utf-8")
+    items = [
+        {
+            "kind": "function_call",
+            "turn_id": "turn-1",
+            "call_id": "call-kind",
+            "tool_name": "inspect_dir",
+            "arguments_json_text": "{\"path\":\".\"}",
+        },
+        {
+            "kind": "custom_tool_call_output",
+            "turn_id": "turn-1",
+            "call_id": "call-kind",
+            "tool_name": "inspect_dir",
+            "status": "completed",
+            "output_text_or_ref": "ok",
+        },
+    ]
+    (task_dir / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    (task_dir / "proof-manifest.json").write_text(json.dumps({}), encoding="utf-8")
+
+    _events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["parse_error_count"] >= 1
+    assert summary["tool_call_started_count"] == 1
+    assert summary["tool_call_completed_count"] == 0
+
+
 def test_normalize_claude_stdout_tool_use_and_result(tmp_path):
     task_dir = tmp_path / "task"
     stdout = task_dir / "claude-code.txt"
