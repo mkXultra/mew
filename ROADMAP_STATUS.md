@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the WorkFrame proof gate: Phase 0-6 implementation is committed through `3787e83`, but closure requires current-head WorkFrame-native fastcheck/pre-speed, dogfood/emulator, exactly one same-shape `make-mips-interpreter` `step-check-10min`, and reference-step comparison before any `speed_1`/`proof_5`/broad measurement resumes. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the WorkFrame proof gate plus step-cause breakdown: Phase 0-6 implementation is committed, WorkFrame variant comparison selected `transition_contract` as default, and closure requires targeted fastcheck/micro/replay repair before another same-shape 10 minute diagnostic and reference-step comparison. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,6 +70,16 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode: `m6_24_workframe_proof_gate`.
+
+Current diagnostic mode: `m6_24_step_cause_breakdown`.
+
+Before another live `speed_1`, `proof_5`, or broad measurement, use
+`docs/M6_24_STEP_CAUSE_BREAKDOWN_2026-05-11.md` to classify the gap by cause
+axis. Tool/result plumbing defects are polish-only and should be reproduced by
+UT, tool-lab, replay, dogfood, or emulator before Harbor. The core
+`tool result -> evidence -> WorkFrame transition contract -> required next
+patch/repair action` gap is redesign work inside the WorkFrame reducer, not a
+new frontier/todo/evidence object.
 
 Scope:
 
@@ -235,7 +245,7 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 is still the active M6.24 lane, but measurement is paused while the WorkFrame proof gate is active; run WorkFrame-native fastcheck/pre-speed, dogfood/emulator, exactly one same-shape make-mips-interpreter step-check-10min, then reference-step comparison before any speed_1/proof_5/broad measurement
+selected_lane=implement_v2 is still the active M6.24 lane, but measurement is paused while the WorkFrame proof gate is active; repair the generic transition_contract hot path from docs/M6_24_WORKFRAME_VARIANT_COMPARISON_2026-05-11.md, run focused UT/fastcheck/micro checks, exactly one same-shape transition_contract make-mips-interpreter step-check-10min, then reference-step comparison before any speed_1/proof_5/broad measurement
 ```
 
 Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
@@ -280,7 +290,7 @@ Controller docs:
 Current WorkFrame-gated next action:
 
 ```text
-M6.24 -> WorkFrame Phase 0-6 implementation reviewed/committed -> WorkFrame-native fastcheck/pre-speed artifact -> dogfood/emulator for the same generic failure family -> exactly one make-mips-interpreter step-check-10min -> reference-step comparison
+M6.24 -> WorkFrame Phase 0-7 substrate reviewed/committed -> keep transition_contract as default -> repair generic patch-anchor/runtime-artifact-obligation hot path -> focused UT/fastcheck/micro checks -> exactly one same-shape transition_contract make-mips-interpreter step-check-10min -> reference-step comparison
 ```
 
 Older scoped-rebaseline rows remain historical evidence only until the
@@ -365,17 +375,19 @@ findings. Phases 0-6 were then implemented in small reviewed commits:
 | Phase 3 sidecar-inferred execution contracts | implemented/reviewed | `c3ccfa9` keeps execution contracts, typed evidence, and oracle details sidecar-only while WorkFrame carries compact refs and obligations. |
 | Phase 4 patch/edit as mutation boundary | implemented/reviewed | `3d28412` makes source mutation and verifier freshness reducer-owned WorkFrame facts. |
 | Phase 5 finish cited evidence | implemented/reviewed | `1fff2ab` routes finish readiness and final verifier closeout deterministically through WorkFrame/sidecars instead of finish-continuation proof dumps. |
-| Phase 6 replay/dogfood/emulator/step-shape gate | implemented/reviewed; proof gate pending | `3787e83` extends HOT_PATH fastcheck with WorkFrame replay, invariant, ref-policy, reentry, prompt-leak, hard-reject, and hash-bound micro checks. Focused validation passed (`454 passed`), scoped ruff passed, `git diff --check` passed, and codex-ultra reviewer session `019e0f86-d16a-7da3-ac92-2a39cb825ca6` returned `STATUS: APPROVE`. Remaining gap: run the WorkFrame-native fastcheck/pre-speed operation on a current-head artifact, then exactly one same-shape `make-mips-interpreter` 10 minute diagnostic and reference-step comparison. |
+| Phase 6 replay/dogfood/emulator/step-shape gate | implemented/reviewed; proof gate pending | `3787e83` extends HOT_PATH fastcheck with WorkFrame replay, invariant, ref-policy, reentry, prompt-leak, hard-reject, and hash-bound micro checks. Focused validation passed (`454 passed`), scoped ruff passed, `git diff --check` passed, and codex-ultra reviewer session `019e0f86-d16a-7da3-ac92-2a39cb825ca6` returned `STATUS: APPROVE`. Current remaining gap is superseded by the 2026-05-11 Phase 7 variant comparison: repair `transition_contract` hot-path patch-anchor/runtime-artifact-obligation handling, then rerun focused checks and exactly one same-shape diagnostic. |
 
 Immediate next action for this phase: close the WorkFrame proof gate, not more
 frontier/todo/evidence polish. Required order:
 
 1. Run focused validation if files changed.
-2. Run HOT_PATH fastcheck on a current-head WorkFrame-native artifact or create
-   the smallest same-shape fixture needed for the fastcheck.
-3. Run dogfood/emulator coverage for the same generic failure family when the
-   fastcheck is green.
-4. Spend exactly one same-shape `make-mips-interpreter` `step-check-10min`.
+2. Repair the generic `transition_contract` hot path from the 2026-05-11
+   variant comparison: patch-anchor mismatch should become direct re-anchor or
+   bounded rewrite, and runtime artifact obligations must keep internal
+   WorkFrame artifacts distinct from external Terminal-Bench targets.
+3. Run focused UT/fastcheck/micro checks for that repair.
+4. Spend exactly one same-shape `transition_contract` `make-mips-interpreter`
+   `step-check-10min`.
 5. Compare the step shape against the reference traces and Phase 0 bands.
 
 Do not run `speed_1`, `proof_5`, or broad measurement until this gate is green
@@ -390,6 +402,22 @@ Then compare future variants such as `transcript_first`,
 `transition_contract`, and `minimal` with the same fastcheck, same
 `step-check-10min`, and same analyzer. Do not create a new implement lane unless
 reducer variants cannot explain the step-shape gap.
+
+WorkFrame variant comparison result (2026-05-11): the same-shape
+`make-mips-interpreter` comparison is recorded in
+`docs/M6_24_WORKFRAME_VARIANT_COMPARISON_2026-05-11.md`. The initial comparison
+summary missed Terminal-Bench v2 rewards; commit `3a9c940` fixed reward and
+work-exit classification. Corrected result: all variants remain task-red
+(`reward=0.0`, `work_exit_code=1`), but `transition_contract` is the best
+default candidate and remains selected. `minimal` stays a comparator.
+`transcript_tool_nav` must not be promoted because it exceeded the WorkFrame
+size cap, never edited or verified, and used the largest prompt budget. Next
+repair is generic `transition_contract` hot-path work: turn patch-anchor
+mismatch into direct re-anchor or bounded rewrite action, preserve exact runtime
+artifact obligations from the latest verifier result while keeping internal
+WorkFrame artifact paths distinct from the external Terminal-Bench target, then
+run focused UT/fastcheck/micro checks followed by exactly one same-shape
+`transition_contract` 10 minute diagnostic and reference-step comparison.
 
 ## Historical Evidence
 
@@ -415,9 +443,10 @@ Useful historical files:
 2. Use `docs/M6_24_DECISION_LEDGER.md` and the WorkFrame section above as the
    reentry guard. They supersede older HOT_PATH polish or scoped-rebaseline rows
    that point directly to `speed_1`, `proof_5`, or broad measurement.
-3. Required next order: current-head WorkFrame-native fastcheck/pre-speed
-   artifact, dogfood/emulator coverage for the same generic failure family,
-   exactly one same-shape `make-mips-interpreter` `step-check-10min`, then
+3. Required next order: repair the generic `transition_contract` hot path
+   captured by the 2026-05-11 variant comparison, run focused
+   UT/fastcheck/micro checks, then exactly one same-shape
+   `transition_contract` `make-mips-interpreter` `step-check-10min` and
    reference-step comparison.
 4. If the gate is red, repair the generic WorkFrame/fastcheck/dogfood/emulator
    failure first. Do not add another normal-prompt frontier/todo/evidence

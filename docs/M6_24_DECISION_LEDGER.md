@@ -1431,3 +1431,57 @@ WorkFrame comparison. Once the substrate exists, use parallel same-shape
 latest-result-to-patch turns, prompt/WorkFrame size, block reason, and
 reference-step distance. If reducer variants cannot explain the gap, only then
 consider a separate `implement_v3` lane.
+
+Step-cause breakdown decision 2026-05-11 JST:
+
+After comparing the latest `make-mips-interpreter` mew speed proof with Codex
+and Claude Code reference traces, do not classify the gap as one undifferentiated
+"redesign" or "polish" problem. Use
+`docs/M6_24_STEP_CAUSE_BREAKDOWN_2026-05-11.md` as the active diagnostic split.
+The current split is:
+
+- polish-only: nested tool payload extraction, apply-patch surface bugs,
+  finish-gate plateau, and other focused tool/result plumbing defects that can
+  be reproduced by UT, tool-lab, replay, dogfood, or emulator without Harbor;
+- redesign-lite: source/binary cheap probe depth and exact artifact contract
+  salience inside the active WorkFrame;
+- redesign: the core `tool result -> evidence -> WorkFrame transition contract
+  -> required next patch/repair action` conversion and repeated same-family
+  repair loop control.
+
+Next work must keep the resident-agent advantages, but make the ordinary
+model-visible coding loop Codex-like: cheap source/binary probe -> coherent
+patch -> direct verifier/artifact check -> latest failure repair. Do not add
+another frontier/todo/evidence object to fix this. Continue with
+`transition_contract` as the default WorkFrame variant and collapse state into
+the WorkFrame reducer. After each repair, run fastcheck and micro checks first;
+only then run one 10 minute same-shape step diagnostic and compare against the
+Codex reference step shape.
+
+WorkFrame variant comparison decision 2026-05-11 JST:
+
+The first same-shape WorkFrame variant comparison for `make-mips-interpreter`
+was resummarized after the Harbor reward reader bug was fixed in `3a9c940`.
+The corrected result is: all variants still failed the task (`reward=0.0`,
+`work_exit_code=1`), but the comparison is sufficient to choose the next
+default. Keep `transition_contract` as the default WorkFrame variant. It had the
+best step shape among the measured variants: 11 model turns, 18 tool calls,
+first edit at 211s, first verifier at 227s, 500k prompt chars, WorkFrame 4718
+bytes, and HOT_PATH fastcheck pass. `minimal` remains a useful comparator but
+was slower and timed out near the boundary. Do not promote
+`transcript_tool_nav`: it exceeded the WorkFrame cap (10989 > 6144 bytes), never
+edited or verified, and spent 1.16M prompt chars.
+
+Next repair: do not add a new WorkFrame variant or another normal-prompt
+frontier/todo/evidence projection. Repair the generic `transition_contract` hot
+path: patch-anchor mismatch should become direct re-anchor or bounded rewrite
+action. Exact runtime artifact obligations from the latest verifier result must
+survive into the next patch attempt without conflating internal WorkFrame
+artifacts with the external Terminal-Bench target: this run's WorkFrame failure
+mentions `/app/frame000000.ppm`, while the external verifier failure is missing
+`/tmp/frame.bmp`. Validate with focused UT/fastcheck/micro checks, then exactly
+one same-shape `transition_contract` 10 minute diagnostic and reference-step
+comparison before any `speed_1` or `proof_5`.
+
+Detailed comparison:
+`docs/M6_24_WORKFRAME_VARIANT_COMPARISON_2026-05-11.md`.
