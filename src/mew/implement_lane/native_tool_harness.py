@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path
+import re
 import time
 from typing import Mapping
 
@@ -49,6 +50,8 @@ PHASE3_NATIVE_SURFACE = {
     "provider_native_tool_loop": True,
     "model_json_main_path_detected": False,
 }
+_FIRST_WRITE_DUE_PROBE_THRESHOLD = 10
+_FIRST_WRITE_DUE_TURN_THRESHOLD = 6
 
 
 @dataclass(frozen=True)
@@ -555,7 +558,14 @@ def _request_descriptor(
         "lane_attempt_id": lane_attempt_id,
         "turn_index": turn_index,
         "input_item_count": len(transcript_items),
-        "input_items": _responses_input_items(lane_input, transcript_items),
+        "input_items": _responses_input_items(
+            lane_input,
+            transcript_items,
+            native_loop_control=_native_loop_control_state(
+                transcript_items,
+                current_turn_index=turn_index,
+            ),
+        ),
         "transcript_window": [item.as_dict() for item in transcript_items],
         "instructions": _native_instructions(lane_input),
         "model_json_main_path_detected": False,
@@ -590,6 +600,8 @@ def _native_instructions(lane_input: ImplementLaneInput) -> str:
 def _responses_input_items(
     lane_input: ImplementLaneInput,
     transcript_items: list[NativeTranscriptItem],
+    *,
+    native_loop_control: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     task_payload = {
         "task_contract": dict(lane_input.task_contract),
@@ -612,7 +624,95 @@ def _responses_input_items(
         converted = _responses_input_item_from_transcript_item(item)
         if converted:
             items.append(converted)
+    if native_loop_control and native_loop_control.get("first_write_due"):
+        items.append(_native_loop_control_input_item(native_loop_control))
     return items
+
+
+def _native_loop_control_state(
+    transcript_items: list[NativeTranscriptItem],
+    *,
+    current_turn_index: int,
+) -> dict[str, object]:
+    calls = [item for item in transcript_items if item.kind in CALL_ITEM_KINDS]
+    write_count = sum(1 for item in calls if item.tool_name in WRITE_TOOL_NAMES)
+    verifier_count = sum(1 for item in calls if _native_call_is_verifier(item))
+    probe_count = sum(1 for item in calls if _native_call_is_probe_or_exec(item))
+    command_count = sum(1 for item in calls if item.tool_name in EXEC_TOOL_NAMES)
+    read_output_count = sum(1 for item in calls if item.tool_name == "read_command_output")
+    turn_count = len({item.turn_id for item in transcript_items if item.turn_id})
+    first_write_due = bool(
+        write_count == 0
+        and verifier_count == 0
+        and (
+            probe_count >= _FIRST_WRITE_DUE_PROBE_THRESHOLD
+            or current_turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD
+        )
+    )
+    return {
+        "schema_version": 1,
+        "surface": "native_loop_control",
+        "current_turn_index": current_turn_index,
+        "observed_turn_count": turn_count,
+        "tool_call_count": len(calls),
+        "probe_count_without_write": probe_count if write_count == 0 else 0,
+        "command_count_without_write": command_count if write_count == 0 else 0,
+        "read_output_count_without_write": read_output_count if write_count == 0 else 0,
+        "write_count": write_count,
+        "verifier_count": verifier_count,
+        "first_write_due": first_write_due,
+        "next_action_policy": (
+            "source_mutation_or_verifier_or_blocked_finish"
+            if first_write_due
+            else "continue_transcript_driven_work"
+        ),
+        "max_additional_probe_turns": 1 if first_write_due else None,
+    }
+
+
+def _native_loop_control_input_item(state: Mapping[str, object]) -> dict[str, object]:
+    payload = {
+        "native_loop_control": dict(state),
+        "instruction": (
+            "The native loop has enough read/probe evidence without a source mutation or verifier. "
+            "On the next turn, choose one bounded action: patch/edit/write the best current hypothesis, "
+            "run a verifier that proves or falsifies it, or finish blocked with the exact missing fact. "
+            "Do not continue broad source/binary exploration; at most one focused probe is acceptable "
+            "before a mutation or verifier."
+        ),
+    }
+    return {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+            }
+        ],
+    }
+
+
+def _native_call_is_probe_or_exec(item: NativeTranscriptItem) -> bool:
+    return item.tool_name in READ_ONLY_TOOL_NAMES or item.tool_name in EXEC_TOOL_NAMES
+
+
+def _native_call_is_verifier(item: NativeTranscriptItem) -> bool:
+    if item.tool_name == "run_tests":
+        return True
+    if item.tool_name != "run_command":
+        return False
+    arguments, _ = _arguments(item)
+    command_intent = str(arguments.get("command_intent") or arguments.get("intent") or "").strip().casefold()
+    if command_intent in {"verify", "verification", "finish_verifier", "test", "acceptance"}:
+        return True
+    command = str(arguments.get("command") or arguments.get("cmd") or "")
+    lowered = command.casefold()
+    return bool(
+        re.search(
+            r"(?:^|[\s;&|()])(?:pytest|npm\s+test|cargo\s+test|go\s+test|prove|verifier)(?:$|[\s;&|()])",
+            lowered,
+        )
+    )
 
 
 def _responses_input_item_from_transcript_item(item: NativeTranscriptItem) -> dict[str, object]:

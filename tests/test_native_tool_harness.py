@@ -497,6 +497,86 @@ def test_native_harness_proof_manifest_replays_from_response_transcript(tmp_path
     assert manifest == expected
 
 
+def test_native_harness_adds_first_write_control_after_probe_budget(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(f"read-{index}", "read_file", {"path": f"missing-{index}.txt"}, output_index=index)
+                for index in range(10)
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    second_request = provider.requests[1]
+    assert second_request["input_items"][-1]["role"] == "user"
+    control_items = [
+        item
+        for item in second_request["input_items"]
+        if isinstance(item, dict)
+        and item.get("role") == "user"
+        and "native_loop_control" in json.dumps(item, sort_keys=True)
+    ]
+    assert control_items
+    payload = json.loads(control_items[-1]["content"][0]["text"])
+    assert payload["native_loop_control"]["first_write_due"] is True
+    assert payload["native_loop_control"]["probe_count_without_write"] == 10
+    assert payload["native_loop_control"]["next_action_policy"] == "source_mutation_or_verifier_or_blocked_finish"
+
+
+def test_native_harness_first_write_control_does_not_treat_improve_probe_as_verifier(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    f"probe-{index}",
+                    "run_command",
+                    {"command": "printf self_improve", "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1},
+                    output_index=index,
+                )
+                for index in range(10)
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    control_text = provider.requests[1]["input_items"][-1]["content"][0]["text"]
+    payload = json.loads(control_text)
+    assert payload["native_loop_control"]["first_write_due"] is True
+    assert payload["native_loop_control"]["verifier_count"] == 0
+
+
+def test_native_harness_first_write_control_suppressed_by_explicit_verifier_intent(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    f"verify-{index}",
+                    "run_command",
+                    {
+                        "command": "true",
+                        "cwd": ".",
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "command_intent": "verify",
+                    },
+                    output_index=index,
+                )
+                for index in range(10)
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    assert "native_loop_control" not in json.dumps(provider.requests[1]["input_items"], sort_keys=True)
+
+
 def _native_item_from_payload(payload: dict[str, object]) -> NativeTranscriptItem:
     fields = {
         "sequence",
