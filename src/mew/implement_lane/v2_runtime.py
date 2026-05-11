@@ -38,6 +38,15 @@ from .prompt import (
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .registry import get_implement_lane_runtime_view
 from .replay import build_invalid_tool_result, validate_proof_manifest_pairing, validate_proof_manifest_write_safety
+from .tool_harness_contract import (
+    build_tool_policy_index_artifact,
+    build_tool_registry_artifact,
+    build_tool_result_index_artifact,
+    tool_ref_for_name,
+    tool_results_jsonl_lines,
+    transcript_jsonl_lines,
+    write_jsonl,
+)
 from .tool_policy import ImplementLaneToolSpec, list_v2_base_tool_specs, list_v2_tool_specs_for_mode
 from .transcript import lane_artifact_namespace
 from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
@@ -401,6 +410,10 @@ def run_live_json_implement_v2(
     tool_contract_recovery_turns_used = 0
     tool_contract_recovery_instruction = ""
     turn_index = 0
+    last_model_visible_tool_specs: tuple[ImplementLaneToolSpec, ...] = tuple(
+        list_v2_tool_specs_for_mode(mode)
+    )
+    provider_tool_surface_history: list[dict[str, object]] = []
 
     def extend_for_terminal_failure_reaction_if_available(
         tool_result_slice: tuple[ToolResultEnvelope, ...],
@@ -680,6 +693,19 @@ def run_live_json_implement_v2(
                 prior_tool_calls=tuple(tool_calls),
                 prior_tool_results=tuple(tool_results),
             )
+            last_model_visible_tool_specs = tuple(model_visible_tool_specs)
+            visible_tool_registry = build_tool_registry_artifact(
+                provider=adapter.provider,
+                tool_specs=last_model_visible_tool_specs,
+            )
+            provider_tool_surface_history.append(
+                {
+                    "turn": turn_index,
+                    "tool_names": [spec.name for spec in last_model_visible_tool_specs],
+                    "tool_registry_ref": visible_tool_registry["tool_registry_ref"],
+                    "provider_tool_spec_hash": visible_tool_registry["provider_tool_spec_hash"],
+                }
+            )
             write_repair_lock_state = _write_repair_lock_state(
                 active_work_todo_state=active_work_todo_state,
                 prior_tool_calls=tuple(tool_calls),
@@ -779,13 +805,28 @@ def run_live_json_implement_v2(
                     "summary": str(model_error.get("message") or "model_json call failed"),
                     "failure_class": model_error.get("failure_class") or "model_backend_error",
                 }
+                synthetic_call, synthetic_result = _synthetic_model_error_call_result(
+                    lane_attempt_id=lane_attempt_id,
+                    provider=adapter.provider,
+                    turn_index=turn_index,
+                    model_error=model_error,
+                )
+                tool_calls.append(synthetic_call)
+                tool_results.append(synthetic_result)
                 transcript.extend(
                     adapter.transcript_events_for_turn(
                         lane=IMPLEMENT_V2_LANE,
                         lane_attempt_id=lane_attempt_id,
                         turn_id=turn_id,
                         text=str(model_error.get("message") or ""),
-                        tool_calls=(),
+                        tool_calls=(synthetic_call,),
+                    )
+                )
+                transcript.extend(
+                    _tool_result_transcript_events(
+                        lane_attempt_id=lane_attempt_id,
+                        turn_id=turn_id,
+                        tool_results=(synthetic_result,),
                     )
                 )
                 transcript.append(
@@ -801,11 +842,19 @@ def run_live_json_implement_v2(
                         "turn": turn_index,
                         "summary": "model_json_error",
                         "model_error": dict(model_error),
-                        "tool_calls": [],
-                        "tool_results": [],
+                        "tool_calls": [synthetic_call.as_dict()],
+                        "tool_results": [_full_tool_result_for_history(synthetic_result)],
                     }
                 )
-                prompt_history.append(dict(history[-1]))
+                prompt_history.append(
+                    {
+                        "turn": turn_index,
+                        "summary": "model_json_error",
+                        "model_error": dict(model_error),
+                        "tool_calls": [_provider_visible_tool_call_for_history(synthetic_call)],
+                        "tool_results": [_provider_visible_tool_result_for_history(synthetic_result)],
+                    }
+                )
                 break
             normalized = dict(model_turn_output.normalized_payload)
             finish_arguments = normalized.get("finish") or {}
@@ -1563,6 +1612,10 @@ def run_live_json_implement_v2(
     )
     typed_acceptance_snapshot = _typed_acceptance_session_from_tool_results(tuple(tool_results), lane_input=lane_input)
     typed_metrics = _typed_acceptance_metrics(typed_acceptance_snapshot, finish_gate_decision)
+    tool_registry_artifact = build_tool_registry_artifact(
+        provider=adapter.provider,
+        tool_specs=last_model_visible_tool_specs,
+    )
     manifest = ImplementLaneProofManifest(
         lane=IMPLEMENT_V2_LANE,
         lane_attempt_id=lane_attempt_id,
@@ -1574,6 +1627,11 @@ def run_live_json_implement_v2(
             "transport": adapter.provider,
             "tool_calls": len(tool_calls),
             "tool_results": len(tool_results),
+            "tool_registry_ref": tool_registry_artifact["tool_registry_ref"],
+            "tool_registry_hash": tool_registry_artifact["tool_registry_hash"],
+            "provider_tool_spec_hash": tool_registry_artifact["provider_tool_spec_hash"],
+            "provider_tool_names": [spec.name for spec in last_model_visible_tool_specs],
+            "provider_tool_surface_history": list(provider_tool_surface_history),
             "model_turns": model_turns,
             "model_error": dict(model_error),
             "base_max_turns": base_max_turns,
@@ -4555,10 +4613,70 @@ def _tool_result_transcript_events(
             turn_id=turn_id,
             index=index,
             lane_attempt_id=lane_attempt_id,
-            payload=result.as_dict(),
+            payload=_tool_result_transcript_payload(result),
         )
         for index, result in enumerate(tool_results, start=100)
     )
+
+
+def _tool_result_transcript_payload(result: ToolResultEnvelope) -> dict[str, object]:
+    payload = result.as_dict()
+    payload["tool_ref"] = tool_ref_for_name(result.tool_name)
+    payload["natural_result_text"] = result.natural_result_text()
+    payload["output_refs"] = list(result.content_refs)
+    payload["tool_result_ref"] = f"tool-result:{result.provider_call_id}"
+    return payload
+
+
+def _synthetic_model_error_call_result(
+    *,
+    lane_attempt_id: str,
+    provider: str,
+    turn_index: int,
+    model_error: dict[str, object],
+) -> tuple[ToolCallEnvelope, ToolResultEnvelope]:
+    """Represent model parse/backend errors as a paired synthetic tool result."""
+
+    provider_call_id = f"model-response-error-{turn_index}"
+    mew_tool_call_id = f"{lane_attempt_id}:tool:{turn_index}:0"
+    call = ToolCallEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        provider_message_id=f"model-turn-{turn_index}",
+        provider_call_id=provider_call_id,
+        mew_tool_call_id=mew_tool_call_id,
+        turn_index=turn_index,
+        sequence_index=0,
+        tool_name="model_response_error",
+        arguments={
+            "failure_class": str(model_error.get("failure_class") or "model_backend_error"),
+            "message": str(model_error.get("message") or ""),
+        },
+        status="rejected",
+    )
+    content = {
+        "summary": str(model_error.get("message") or "model_json call failed"),
+        "reason": "provider returned no valid model turn",
+        "failure_class": str(model_error.get("failure_class") or "model_backend_error"),
+        "retry_count": model_error.get("retry_count", 0),
+    }
+    raw_excerpt = str(model_error.get("raw_excerpt") or "").strip()
+    if raw_excerpt:
+        content["raw_excerpt"] = raw_excerpt
+    retry_suppressed_reason = str(model_error.get("retry_suppressed_reason") or "").strip()
+    if retry_suppressed_reason:
+        content["retry_suppressed_reason"] = retry_suppressed_reason
+    result = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=provider_call_id,
+        mew_tool_call_id=mew_tool_call_id,
+        tool_name="model_response_error",
+        status="invalid",
+        is_error=True,
+        content=(content,),
+        evidence_refs=(f"model-error:{provider_call_id}",),
+    )
+    return call, result
 
 
 def _read_only_finish_status(
@@ -10383,6 +10501,8 @@ def _live_finish_status(
         if _latest_acceptance_result_completed(tool_results):
             return "completed"
         return "blocked"
+    if outcome == "failed" and any(result.tool_name == "model_response_error" for result in tool_results):
+        return "failed"
     if any(result.status in {"failed", "interrupted", "invalid", "denied"} for result in tool_results):
         return "blocked"
     if outcome in {"blocked", "failed", "deferred"}:
@@ -11164,9 +11284,24 @@ def _write_live_json_artifacts(
         return ()
     root = Path(artifact_dir).expanduser().resolve(strict=False) / "implement_v2"
     root.mkdir(parents=True, exist_ok=True)
+    tool_registry_artifact = build_tool_registry_artifact(
+        provider=str(manifest.metrics.get("transport") or ""),
+        tool_specs=_tool_specs_from_metric_names(manifest.metrics.get("provider_tool_names")),
+    )
+    tool_policy_index_artifact = build_tool_policy_index_artifact(tool_registry_artifact)
+    tool_result_index_artifact = build_tool_result_index_artifact(
+        manifest.tool_results,
+        tool_registry_ref=str(tool_registry_artifact.get("tool_registry_ref") or ""),
+        provider_tool_spec_hash=str(tool_registry_artifact.get("provider_tool_spec_hash") or ""),
+    )
     manifest_path = root / "proof-manifest.json"
     transcript_path = root / "transcript.json"
     history_path = root / "history.json"
+    tool_registry_path = root / "tool_registry.json"
+    tool_policy_index_path = root / "tool_policy_index.json"
+    natural_transcript_path = root / "natural_transcript.jsonl"
+    tool_results_path = root / "tool_results.jsonl"
+    tool_result_index_path = root / "tool_result_index.json"
     integration_observation_path = root / "integration-observation.json"
     manifest_path.write_text(json.dumps(manifest.as_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     transcript_path.write_text(
@@ -11174,7 +11309,30 @@ def _write_live_json_artifacts(
         encoding="utf-8",
     )
     history_path.write_text(json.dumps(list(history), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    paths = [str(manifest_path), str(transcript_path), str(history_path)]
+    tool_registry_path.write_text(
+        json.dumps(tool_registry_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    tool_policy_index_path.write_text(
+        json.dumps(tool_policy_index_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    write_jsonl(natural_transcript_path, transcript_jsonl_lines(transcript))
+    write_jsonl(tool_results_path, tool_results_jsonl_lines(manifest.tool_results))
+    tool_result_index_path.write_text(
+        json.dumps(tool_result_index_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    paths = [
+        str(manifest_path),
+        str(transcript_path),
+        str(history_path),
+        str(tool_registry_path),
+        str(tool_policy_index_path),
+        str(natural_transcript_path),
+        str(tool_results_path),
+        str(tool_result_index_path),
+    ]
     if workframe_debug_bundle:
         turn_id = str(workframe_debug_bundle.get("turn_id") or "turn-final").strip() or "turn-final"
         workframe_root = root / "workframes" / _safe_artifact_segment(turn_id)
@@ -11210,6 +11368,17 @@ def _write_live_json_artifacts(
         )
         paths.append(str(integration_observation_path))
     return tuple(paths)
+
+
+def _tool_specs_from_metric_names(value: object) -> tuple[ImplementLaneToolSpec, ...]:
+    if not isinstance(value, list):
+        return list_v2_base_tool_specs()
+    requested = [str(item).strip() for item in value if str(item).strip()]
+    if not requested:
+        return list_v2_base_tool_specs()
+    by_name = {spec.name: spec for spec in list_v2_base_tool_specs()}
+    specs = tuple(by_name[name] for name in requested if name in by_name)
+    return specs or list_v2_base_tool_specs()
 
 
 def _dict_or_empty(value: object) -> dict[str, object]:

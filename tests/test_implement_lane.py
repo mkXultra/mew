@@ -7745,10 +7745,19 @@ def test_implement_v2_live_json_model_parse_error_is_replayable_lane_failure(tmp
     assert result.metrics["replay_valid"] is True
     assert result.metrics["model_error"]["failure_class"] == "model_json_parse_error"
     manifest = result.updated_lane_state["proof_manifest"]
-    assert manifest["tool_calls"] == []
-    assert manifest["tool_results"] == []
+    assert len(manifest["tool_calls"]) == 1
+    assert len(manifest["tool_results"]) == 1
+    assert manifest["tool_calls"][0]["tool_name"] == "model_response_error"
+    assert manifest["tool_results"][0]["tool_name"] == "model_response_error"
+    assert manifest["tool_results"][0]["status"] == "invalid"
+    assert manifest["tool_results"][0]["is_error"] is True
     history = json.loads((artifact_dir / "implement_v2" / "history.json").read_text(encoding="utf-8"))
     assert history[0]["model_error"]["failure_class"] == "model_json_parse_error"
+    assert history[0]["tool_results"][0]["content"]["natural_result_text"].startswith(
+        "model_response_error result: invalid"
+    )
+    result_index = json.loads((artifact_dir / "implement_v2" / "tool_result_index.json").read_text(encoding="utf-8"))
+    assert "model-response-error-1" in result_index["by_provider_call_id"]
 
 
 def test_implement_v2_live_json_drains_active_command_at_max_turns(tmp_path) -> None:

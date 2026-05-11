@@ -142,11 +142,50 @@ class ToolResultEnvelope:
         return {
             "mew_status": self.status,
             "acceptance_evidence": bool(self.evidence_refs) and self.status == "completed",
+            "natural_result_text": self.natural_result_text(),
             "content": list(self.content),
             "content_refs": list(self.content_refs),
+            "output_refs": list(self.content_refs),
             "evidence_refs": list(self.evidence_refs),
             "side_effects": [dict(effect) for effect in self.side_effects],
         }
+
+    def natural_result_text(self, *, limit: int = 1200) -> str:
+        """Return a compact natural-language result for the next model turn."""
+
+        parts = [f"{self.tool_name or 'tool'} result: {self.status}"]
+        if self.is_error:
+            parts.append("error=true")
+        payload = self.content[0] if self.content and isinstance(self.content[0], dict) else {}
+        if payload:
+            for key in (
+                "summary",
+                "reason",
+                "status",
+                "exit_code",
+                "path",
+                "command_run_id",
+                "output_ref",
+                "failure_class",
+                "failure_kind",
+            ):
+                value = payload.get(key)
+                if value not in (None, "", [], {}):
+                    parts.append(f"{key}={value}")
+            for key in ("stderr_tail", "stdout_tail", "text", "content"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    compact = " ".join(value.strip().split())
+                    parts.append(f"{key}: {compact}")
+                    break
+        if self.content_refs:
+            parts.append("output_refs=" + ",".join(self.content_refs[:4]))
+        if self.evidence_refs:
+            parts.append("evidence_refs=" + ",".join(self.evidence_refs[:4]))
+        text = "; ".join(str(part) for part in parts if str(part).strip())
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 3)].rstrip() + "..."
 
 
 @dataclass(frozen=True)
