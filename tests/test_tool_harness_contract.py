@@ -5,6 +5,9 @@ from pathlib import Path
 
 from mew.implement_lane.provider import FakeProviderAdapter
 from mew.implement_lane.tool_harness_contract import (
+    build_evidence_ref_index_artifact,
+    build_evidence_sidecar_artifact,
+    build_model_turn_index_artifact,
     build_tool_policy_index_artifact,
     build_tool_registry_artifact,
     build_tool_result_index_artifact,
@@ -77,6 +80,235 @@ def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
     assert index["index_hash"].startswith("sha256:")
 
 
+def test_evidence_sidecar_and_ref_index_cover_hot_path_lookup() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "command_run_id": "cmd-1",
+                "tool_run_record": {
+                    "record_id": "record-1",
+                    "command_run_id": "cmd-1",
+                    "provider_call_id": "call-run",
+                    "tool_name": "run_command",
+                    "contract_id": "contract-1",
+                    "status": "completed",
+                    "exit_code": 0,
+                    "semantic_exit": {"category": "ok"},
+                },
+                "execution_contract_normalized": {
+                    "id": "contract-1",
+                    "acceptance_kind": "candidate_final_proof",
+                    "expected_artifacts": [
+                        {
+                            "id": "frame",
+                            "path": "/tmp/frame.bmp",
+                            "kind": "image",
+                            "freshness": "modified_after_run_start",
+                        }
+                    ],
+                },
+                "artifact_evidence": [
+                    {
+                        "evidence_id": "artifact-1",
+                        "artifact_id": "frame",
+                        "command_run_id": "cmd-1",
+                        "tool_run_record_id": "record-1",
+                        "contract_id": "contract-1",
+                        "path": "/tmp/frame.bmp",
+                        "kind": "image",
+                        "freshness": "modified_after_run_start",
+                        "post_run_stat": {"exists": True},
+                        "status": "passed",
+                    }
+                ],
+                "verifier_evidence": {
+                    "verifier_id": "verifier-1",
+                    "contract_id": "contract-1",
+                    "verdict": "pass",
+                },
+            },
+        ),
+        evidence_refs=("ev:verifier:verifier-1",),
+    )
+
+    sidecar = build_evidence_sidecar_artifact((result,), task_contract={"description": "make a frame"})
+    index = build_evidence_ref_index_artifact(sidecar)
+
+    assert sidecar["event_count"] >= 3
+    assert "tool-result:call-run" in sidecar["by_tool_result_ref"]
+    assert "ev:verifier:verifier-1" in index["by_evidence_ref"]
+    assert "cmd-1" in index["by_command_run_id"]
+    assert "/tmp/frame.bmp" in index["by_path"]
+    assert index["by_tool_ref"][tool_ref_for_name("run_command")]
+    assert index["hot_path_model_turn_search_allowed"] is False
+    assert index["unresolved_evidence_refs"] == []
+    assert sidecar["artifact_obligations"]["obligations"]
+
+
+def test_evidence_sidecar_indexes_plain_read_and_write_mutation_refs() -> None:
+    read_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-read",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="read_file",
+        status="completed",
+        content=({"path": "README.md", "text": "hello"},),
+        content_refs=("file://README.md",),
+    )
+    write_result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-write",
+        mew_tool_call_id="attempt-1:tool:2:1",
+        tool_name="write_file",
+        status="completed",
+        content=({"path": "README.md", "written": True, "dry_run": False},),
+        evidence_refs=("implement-v2-write://attempt-1/call-write/mutation",),
+        side_effects=(
+            {
+                "kind": "file_write",
+                "operation": "write_file",
+                "path": "README.md",
+                "written": True,
+                "dry_run": False,
+            },
+        ),
+    )
+
+    sidecar = build_evidence_sidecar_artifact((read_result, write_result))
+    index = build_evidence_ref_index_artifact(sidecar)
+
+    assert "tool-result:call-read" in sidecar["by_tool_result_ref"]
+    assert "tool-result:call-write" in sidecar["by_tool_result_ref"]
+    assert "file://README.md" in index["by_output_ref"]
+    assert "implement-v2-write://attempt-1/call-write/mutation" in index["by_mutation_ref"]
+    assert "README.md" in index["by_path"]
+    assert index["by_kind"]["source_mutation"]
+    assert index["unresolved_evidence_refs"] == []
+
+
+def test_evidence_sidecar_does_not_treat_non_file_side_effects_as_mutations() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=({"command_run_id": "cmd-1"},),
+        side_effects=({"kind": "command_run", "command_run_id": "cmd-1"},),
+    )
+
+    sidecar = build_evidence_sidecar_artifact((result,))
+    index = build_evidence_ref_index_artifact(sidecar)
+
+    assert "source_mutation" not in index["by_kind"]
+    assert index["by_mutation_ref"] == {}
+
+
+def test_evidence_sidecar_indexes_exec_source_tree_mutations() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=({"command_run_id": "cmd-1"},),
+        side_effects=(
+            {
+                "kind": "source_tree_mutation",
+                "record": {
+                    "command_run_id": "cmd-1",
+                    "provider_call_id": "call-run",
+                    "changed_count": 2,
+                    "changes": [
+                        {"path": "src/main.c", "change": "modified"},
+                        {"path": "src/vm.c", "change": "created"},
+                    ],
+                },
+            },
+        ),
+    )
+
+    sidecar = build_evidence_sidecar_artifact((result,))
+    index = build_evidence_ref_index_artifact(sidecar)
+
+    assert index["by_kind"]["source_mutation"]
+    assert "src/main.c" in index["by_path"]
+    assert "src/vm.c" in index["by_path"]
+    assert "implement-v2-evidence://attempt-1/source_tree_mutation/cmd-1" in index["by_mutation_ref"]
+
+
+def test_evidence_ref_index_reports_missing_internal_evidence_refs() -> None:
+    sidecar = {
+        "sidecar_ref": "evidence-sidecar:test",
+        "sidecar_hash": "sha256:test",
+        "by_tool_result_ref": {"tool-result:known": []},
+        "known_result_evidence_refs": ["ev:known-generic"],
+        "events": [
+            {
+                "id": "ev:root",
+                "kind": "tool_result",
+                "status": "failed",
+                "observed": {},
+                "refs": [
+                    {"kind": "evidence_event", "id": "ev:missing"},
+                    {"kind": "tool_result_ref", "id": "tool-result:missing"},
+                    {"kind": "evidence_ref", "id": "ev:missing-generic"},
+                ],
+            }
+        ],
+    }
+
+    index = build_evidence_ref_index_artifact(sidecar)
+
+    assert index["unresolved_evidence_refs"] == [
+        {"event_id": "ev:root", "missing_ref": "ev:missing"},
+        {"event_id": "ev:root", "missing_ref": "tool-result:missing"},
+        {"event_id": "ev:root", "missing_ref": "ev:missing-generic"},
+    ]
+
+
+def test_model_turn_index_is_debug_recovery_only() -> None:
+    adapter = FakeProviderAdapter()
+    call = adapter.normalize_tool_calls(
+        lane_attempt_id="attempt-1",
+        turn_index=1,
+        calls=({"provider_call_id": "call-1", "tool_name": "read_file", "arguments": {"path": "README.md"}},),
+    )[0]
+    transcript = adapter.transcript_events_for_turn(
+        lane=IMPLEMENT_V2_LANE,
+        lane_attempt_id="attempt-1",
+        turn_id="turn-1",
+        text="reading",
+        tool_calls=(call,),
+    )
+    index = build_model_turn_index_artifact(
+        history=(
+            {
+                "turn": 1,
+                "summary": "reading",
+                "tool_calls": [call.as_dict()],
+                "tool_results": [
+                    {
+                        "provider_call_id": "call-1",
+                        "tool_name": "read_file",
+                        "status": "completed",
+                    }
+                ],
+            },
+        ),
+        transcript=transcript,
+    )
+
+    assert index["index_kind"] == "debug_recovery_only"
+    assert index["hot_path_model_turn_search_allowed"] is False
+    assert index["by_provider_call_id"]["call-1"] == 1
+
+
 def test_live_artifact_writer_emits_phase1_tool_harness_files(tmp_path: Path) -> None:
     adapter = FakeProviderAdapter()
     call = adapter.normalize_tool_calls(
@@ -136,9 +368,14 @@ def test_live_artifact_writer_emits_phase1_tool_harness_files(tmp_path: Path) ->
     assert str(artifact_root / "natural_transcript.jsonl") in paths
     assert str(artifact_root / "tool_results.jsonl") in paths
     assert str(artifact_root / "tool_result_index.json") in paths
+    assert str(artifact_root / "evidence_sidecar.json") in paths
+    assert str(artifact_root / "evidence_ref_index.json") in paths
+    assert str(artifact_root / "model_turn_index.json") in paths
 
     registry = json.loads((artifact_root / "tool_registry.json").read_text(encoding="utf-8"))
     result_index = json.loads((artifact_root / "tool_result_index.json").read_text(encoding="utf-8"))
+    evidence_index = json.loads((artifact_root / "evidence_ref_index.json").read_text(encoding="utf-8"))
+    model_turn_index = json.loads((artifact_root / "model_turn_index.json").read_text(encoding="utf-8"))
     transcript_lines = (artifact_root / "natural_transcript.jsonl").read_text(encoding="utf-8").splitlines()
     result_lines = (artifact_root / "tool_results.jsonl").read_text(encoding="utf-8").splitlines()
 
@@ -152,3 +389,5 @@ def test_live_artifact_writer_emits_phase1_tool_harness_files(tmp_path: Path) ->
     assert result_event_payloads[0]["natural_result_text"].startswith("read_file result: completed")
     assert len(result_lines) == 1
     assert json.loads(result_lines[0])["natural_result_text"].startswith("read_file result: completed")
+    assert evidence_index["hot_path_model_turn_search_allowed"] is False
+    assert model_turn_index["index_kind"] == "debug_recovery_only"

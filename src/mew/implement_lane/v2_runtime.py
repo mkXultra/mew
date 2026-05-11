@@ -39,6 +39,9 @@ from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .registry import get_implement_lane_runtime_view
 from .replay import build_invalid_tool_result, validate_proof_manifest_pairing, validate_proof_manifest_write_safety
 from .tool_harness_contract import (
+    build_evidence_ref_index_artifact,
+    build_evidence_sidecar_artifact,
+    build_model_turn_index_artifact,
     build_tool_policy_index_artifact,
     build_tool_registry_artifact,
     build_tool_result_index_artifact,
@@ -11294,6 +11297,15 @@ def _write_live_json_artifacts(
         tool_registry_ref=str(tool_registry_artifact.get("tool_registry_ref") or ""),
         provider_tool_spec_hash=str(tool_registry_artifact.get("provider_tool_spec_hash") or ""),
     )
+    evidence_sidecar_artifact = build_evidence_sidecar_artifact(
+        manifest.tool_results,
+        task_contract=lane_input.task_contract,
+        finish_gate_decision=manifest.metrics.get("finish_gate_decision")
+        if isinstance(manifest.metrics.get("finish_gate_decision"), dict)
+        else {},
+    )
+    evidence_ref_index_artifact = build_evidence_ref_index_artifact(evidence_sidecar_artifact)
+    model_turn_index_artifact = build_model_turn_index_artifact(history=history, transcript=transcript)
     manifest_path = root / "proof-manifest.json"
     transcript_path = root / "transcript.json"
     history_path = root / "history.json"
@@ -11302,6 +11314,9 @@ def _write_live_json_artifacts(
     natural_transcript_path = root / "natural_transcript.jsonl"
     tool_results_path = root / "tool_results.jsonl"
     tool_result_index_path = root / "tool_result_index.json"
+    evidence_sidecar_path = root / "evidence_sidecar.json"
+    evidence_ref_index_path = root / "evidence_ref_index.json"
+    model_turn_index_path = root / "model_turn_index.json"
     integration_observation_path = root / "integration-observation.json"
     manifest_path.write_text(json.dumps(manifest.as_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     transcript_path.write_text(
@@ -11323,6 +11338,18 @@ def _write_live_json_artifacts(
         json.dumps(tool_result_index_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    evidence_sidecar_path.write_text(
+        json.dumps(evidence_sidecar_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    evidence_ref_index_path.write_text(
+        json.dumps(evidence_ref_index_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    model_turn_index_path.write_text(
+        json.dumps(model_turn_index_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     paths = [
         str(manifest_path),
         str(transcript_path),
@@ -11332,6 +11359,9 @@ def _write_live_json_artifacts(
         str(natural_transcript_path),
         str(tool_results_path),
         str(tool_result_index_path),
+        str(evidence_sidecar_path),
+        str(evidence_ref_index_path),
+        str(model_turn_index_path),
     ]
     if workframe_debug_bundle:
         turn_id = str(workframe_debug_bundle.get("turn_id") or "turn-final").strip() or "turn-final"
