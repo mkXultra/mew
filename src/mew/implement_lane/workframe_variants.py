@@ -20,6 +20,7 @@ from .workframe import (
 )
 from .workframe_variant_minimal import reduce_minimal_workframe
 from .workframe_variant_transcript_first import reduce_transcript_first_workframe
+from .workframe_variant_transcript_tool_nav import reduce_transcript_tool_nav_workframe
 from .workframe_variant_transition_contract import reduce_transition_contract_workframe
 
 COMMON_WORKFRAME_INPUTS_SCHEMA_VERSION = 1
@@ -108,6 +109,10 @@ _VARIANTS: dict[str, WorkFrameReducerVariant] = {
     "transcript_first": WorkFrameReducerVariant(
         name="transcript_first",
         description="Prefers fresh paired transcript/tool evidence over stale prompt-projection fallback.",
+    ),
+    "transcript_tool_nav": WorkFrameReducerVariant(
+        name="transcript_tool_nav",
+        description="Uses natural transcript results as authority while projecting compact tool navigation and safety refs.",
     ),
     "transition_contract": WorkFrameReducerVariant(
         name="transition_contract",
@@ -295,6 +300,8 @@ def _reduce_workframe_variant(
         return reduce_minimal_workframe(inputs)
     if name == "transcript_first":
         return reduce_transcript_first_workframe(inputs)
+    if name == "transcript_tool_nav":
+        return reduce_transcript_tool_nav_workframe(inputs)
     if name == "transition_contract":
         return reduce_transition_contract_workframe(inputs)
     raise UnknownWorkFrameVariantError(f"unimplemented WorkFrame variant {name!r}")

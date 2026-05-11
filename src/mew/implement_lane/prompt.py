@@ -227,6 +227,7 @@ def build_implement_v2_prompt_sections(
                 hard_runtime_frontier=hard_runtime_frontier,
                 repair_history=repair_history,
                 sidecar_events=workframe_sidecar_events,
+                provider_tool_names=tuple(spec.name for spec in specs),
             ),
             stability=STABILITY_DYNAMIC,
             cache_policy=CACHE_POLICY_DYNAMIC,
@@ -285,6 +286,7 @@ def build_implement_v2_workframe_debug_bundle(
     repair_history: dict[str, object] | None = None,
     sidecar_events: tuple[dict[str, object], ...] = (),
     prompt_inventory: tuple[dict[str, object], ...] = (),
+    provider_tool_names: tuple[str, ...] = (),
     turn_id: str = "prompt",
 ) -> dict[str, object]:
     """Build the WorkFrame replay/debug bundle from the same reducer used by the prompt."""
@@ -310,6 +312,7 @@ def build_implement_v2_workframe_debug_bundle(
         success_contract_ref=_success_contract_ref(lane_input),
         constraints=("model_visible_workframe_only",),
         sidecar_events=_merge_workframe_sidecar_events(runtime_events=runtime_events, prompt_events=prompt_events),
+        baseline_metrics=_workframe_baseline_metrics(lane_input, provider_tool_names=provider_tool_names),
         prompt_inventory=(),
         workspace_root=lane_input.workspace,
         artifact_root=str(lane_input.lane_config.get("artifact_dir") or ""),
@@ -462,6 +465,7 @@ def _workframe_section_content(
     hard_runtime_frontier: dict[str, object],
     repair_history: dict[str, object],
     sidecar_events: tuple[dict[str, object], ...] = (),
+    provider_tool_names: tuple[str, ...] = (),
 ) -> str:
     bundle = build_implement_v2_workframe_debug_bundle(
         lane_input,
@@ -469,6 +473,7 @@ def _workframe_section_content(
         hard_runtime_frontier=hard_runtime_frontier,
         repair_history=repair_history,
         sidecar_events=sidecar_events,
+        provider_tool_names=provider_tool_names,
     )
     return _bounded_compact_json(
         bundle["prompt_visible_workframe"],
@@ -502,8 +507,24 @@ def _compact_prompt_workframe(workframe: dict[str, object]) -> dict[str, object]
             "changed_sources": _compact_workframe_changed_sources(workframe.get("changed_sources")),
             "verifier_state": _compact_workframe_verifier_state(workframe.get("verifier_state")),
             "finish_readiness": _compact_workframe_finish_readiness(workframe.get("finish_readiness")),
+            "variant": _compact_workframe_variant(workframe.get("variant")),
+            "tool_context": _compact_workframe_tool_context(workframe.get("tool_context")),
+            "obligations": _compact_workframe_obligations(workframe.get("obligations")),
+            "repair_loop": _compact_workframe_repair_loop(workframe.get("repair_loop")),
         }
     )
+
+
+def _workframe_baseline_metrics(
+    lane_input: ImplementLaneInput,
+    *,
+    provider_tool_names: tuple[str, ...] = (),
+) -> dict[str, object]:
+    mode = str(lane_input.lane_config.get("mode") or "read_only")
+    names = list(provider_tool_names) if provider_tool_names else [spec.name for spec in list_v2_tool_specs_for_mode(mode)]
+    return {
+        "provider_tool_names": names,
+    }
 
 
 def _compact_workframe_trace(value: object) -> dict[str, object]:
@@ -669,6 +690,112 @@ def _compact_workframe_finish_readiness(value: object) -> dict[str, object]:
             "blockers": _clip_string_list(readiness.get("blockers"), max_items=4, max_chars=120),
             "missing_obligations": _clip_string_list(
                 readiness.get("missing_obligations"), max_items=4, max_chars=120
+            ),
+        }
+    )
+
+
+def _compact_workframe_variant(value: object) -> dict[str, object]:
+    variant = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "name": _clip_text(variant.get("name"), 80),
+            "schema_version": variant.get("schema_version"),
+            "policy": _clip_text(variant.get("policy"), 120),
+            "required_next_policy": _clip_text(variant.get("required_next_policy"), 120),
+        }
+    )
+
+
+def _compact_workframe_tool_context(value: object) -> dict[str, object]:
+    context = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "schema_version": context.get("schema_version"),
+            "registry_ref": _clip_text(context.get("registry_ref"), 120),
+            "active_tool_refs": _compact_workframe_refs(context.get("active_tool_refs"), max_items=12, max_chars=80),
+            "recommended_tool_refs": _compact_tool_ref_entries(
+                context.get("recommended_tool_refs"),
+                ref_key="evidence_refs",
+                max_items=4,
+            ),
+            "disabled_tool_refs": _compact_tool_ref_entries(
+                context.get("disabled_tool_refs"),
+                ref_key="until_evidence_refs",
+                max_items=6,
+            ),
+            "policy_refs": _compact_workframe_refs(context.get("policy_refs"), max_items=4, max_chars=120),
+            "fetchable_refs": _compact_workframe_refs(context.get("fetchable_refs"), max_items=4, max_chars=120),
+            "tool_result_search": _compact_workframe_search_policy(context.get("tool_result_search")),
+            "model_turn_search": _compact_workframe_search_policy(context.get("model_turn_search")),
+        }
+    )
+
+
+def _compact_tool_ref_entries(value: object, *, ref_key: str, max_items: int) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, object]] = []
+    for item in value[:max_items]:
+        if not isinstance(item, dict):
+            continue
+        compact = _drop_empty_dict_values(
+            {
+                "tool_ref": _clip_text(item.get("tool_ref"), 80),
+                "reason": _clip_text(item.get("reason"), 180),
+                ref_key: _compact_workframe_refs(item.get(ref_key), max_items=3, max_chars=96),
+            }
+        )
+        if compact:
+            items.append(compact)
+    if len(value) > max_items:
+        items.append({"omitted_tool_ref_count": len(value) - max_items})
+    return items
+
+
+def _compact_workframe_search_policy(value: object) -> dict[str, object]:
+    policy = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "index_ref": _clip_text(policy.get("index_ref"), 120),
+            "primary": policy.get("primary"),
+            "usage": _clip_text(policy.get("usage"), 120),
+            "query_hints": _clip_string_list(policy.get("query_hints"), max_items=6, max_chars=80),
+        }
+    )
+
+
+def _compact_workframe_obligations(value: object) -> dict[str, object]:
+    obligations = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "schema_version": obligations.get("schema_version"),
+            "artifact_obligation_refs": _compact_workframe_refs(
+                obligations.get("artifact_obligation_refs"),
+                max_items=4,
+                max_chars=120,
+            ),
+            "missing_or_stale_refs": _compact_workframe_refs(
+                obligations.get("missing_or_stale_refs"),
+                max_items=4,
+                max_chars=120,
+            ),
+            "finish_blockers": _clip_string_list(obligations.get("finish_blockers"), max_items=4, max_chars=120),
+        }
+    )
+
+
+def _compact_workframe_repair_loop(value: object) -> dict[str, object]:
+    loop = value if isinstance(value, dict) else {}
+    return _drop_empty_dict_values(
+        {
+            "schema_version": loop.get("schema_version"),
+            "state": _clip_text(loop.get("state"), 80),
+            "signature_ref": _clip_text(loop.get("signature_ref"), 120),
+            "disabled_action_families": _clip_string_list(
+                loop.get("disabled_action_families"),
+                max_items=4,
+                max_chars=80,
             ),
         }
     )

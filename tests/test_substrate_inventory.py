@@ -20,6 +20,7 @@ def test_substrate_inventory_lists_current_tools_and_variants(tmp_path: Path) ->
         "current",
         "minimal",
         "transcript_first",
+        "transcript_tool_nav",
         "transition_contract",
     ]
 
@@ -34,7 +35,6 @@ def test_substrate_inventory_reports_phase0_migration_gap(tmp_path: Path) -> Non
         "model turn index",
         "tool registry artifact",
         "natural transcript log",
-        "transcript_tool_nav variant",
     }
     assert inventory["schemas"]["common_workframe_inputs"] == 1
     assert inventory["schemas"]["target_workframe_projection"] == 3
@@ -62,5 +62,6 @@ def test_substrate_inventory_markdown_is_serializable(tmp_path: Path) -> None:
 
     assert "# M6.24 Phase 0 Substrate Inventory" in rendered
     assert "## Tool Surface" in rendered
-    assert "transcript_tool_nav variant" in rendered
+    assert "transcript_tool_nav" in rendered
+    assert "status | current source" in rendered
     json.dumps(inventory, sort_keys=True)

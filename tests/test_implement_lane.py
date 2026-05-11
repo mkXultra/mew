@@ -234,6 +234,7 @@ def test_workframe_variant_registry_exposes_current_alias_and_transition_contrac
         "current",
         "minimal",
         "transcript_first",
+        "transcript_tool_nav",
         "transition_contract",
     ]
     assert DEFAULT_WORKFRAME_VARIANT == "transition_contract"
@@ -374,6 +375,153 @@ def test_workframe_debug_bundle_keeps_prompt_inventory_out_of_shared_substrate_h
     )
     assert with_inventory["reducer_inputs"]["common_workframe_inputs"]["current_workframe_inputs"]["prompt_inventory"] == []
     assert with_inventory["prompt_render_inventory"]["source_prompt_inventory"][0]["id"] == "implement_v2_workframe"
+
+
+def test_transcript_tool_nav_projects_advisory_tool_context_without_default_flip() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-nav",
+        task_id="task-nav",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"mode": "full", "workframe_variant": "transcript_tool_nav"},
+        task_contract={"objective": "Repair the runtime failure."},
+    )
+    runtime_events = (
+        {
+            "kind": "verifier",
+            "event_id": "tool-result:runtime",
+            "event_sequence": 1,
+            "status": "failed",
+            "family": "runtime_failure",
+            "summary": "TypeError: cannot read property 'pc' of undefined",
+            "target_paths": ["vm.js"],
+            "evidence_refs": ["ev:runtime"],
+        },
+    )
+
+    bundle = build_implement_v2_workframe_debug_bundle(lane_input, sidecar_events=runtime_events)
+    workframe = bundle["reducer_output"]
+    visible_workframe = bundle["prompt_visible_workframe"]["workframe"]
+    tool_context = workframe["tool_context"]
+
+    assert DEFAULT_WORKFRAME_VARIANT == "transition_contract"
+    assert workframe["schema_version"] == 3
+    assert workframe["variant"]["name"] == "transcript_tool_nav"
+    assert visible_workframe["variant"]["name"] == "transcript_tool_nav"
+    assert visible_workframe["tool_context"]["recommended_tool_refs"]
+    assert workframe["required_next"] is None
+    assert workframe["latest_actionable"]["summary"] == "TypeError: cannot read property 'pc' of undefined"
+    assert "tool:finish" in {item["tool_ref"] for item in tool_context["disabled_tool_refs"]}
+    assert {"tool:apply_patch", "tool:edit_file"} & {
+        item["tool_ref"] for item in tool_context["recommended_tool_refs"]
+    }
+    assert tool_context["model_turn_search"]["usage"] == "debug_plateau_recovery_only"
+    rendered_tool_context = json.dumps(tool_context).lower()
+    assert "parameters" not in rendered_tool_context
+    assert "implementation" not in rendered_tool_context
+
+
+def test_transcript_tool_nav_uses_active_mode_tool_surface_for_recommendations() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-nav",
+        task_id="task-nav",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"workframe_variant": "transcript_tool_nav"},
+        task_contract={"objective": "Repair the runtime failure."},
+    )
+    runtime_events = (
+        {
+            "kind": "verifier",
+            "event_id": "tool-result:runtime",
+            "event_sequence": 1,
+            "status": "failed",
+            "family": "runtime_failure",
+            "summary": "TypeError: cannot read property 'pc' of undefined",
+            "target_paths": ["vm.js"],
+            "evidence_refs": ["ev:runtime"],
+        },
+    )
+
+    bundle = build_implement_v2_workframe_debug_bundle(lane_input, sidecar_events=runtime_events)
+    tool_context = bundle["reducer_output"]["tool_context"]
+    active_refs = set(tool_context["active_tool_refs"])
+    recommended_refs = {item["tool_ref"] for item in tool_context["recommended_tool_refs"]}
+
+    assert "tool:apply_patch" not in active_refs
+    assert "tool:edit_file" not in active_refs
+    assert "tool:write_file" not in active_refs
+    assert not (recommended_refs & {"tool:apply_patch", "tool:edit_file", "tool:write_file"})
+    assert "tool:read_file" in recommended_refs
+
+
+def test_transcript_tool_nav_respects_explicit_prompt_tool_surface_override() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-nav",
+        task_id="task-nav",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"mode": "full", "workframe_variant": "transcript_tool_nav"},
+        task_contract={"objective": "Repair the runtime failure."},
+    )
+    runtime_events = (
+        {
+            "kind": "verifier",
+            "event_id": "tool-result:runtime",
+            "event_sequence": 1,
+            "status": "failed",
+            "family": "runtime_failure",
+            "summary": "TypeError: cannot read property 'pc' of undefined",
+            "target_paths": ["vm.js"],
+            "evidence_refs": ["ev:runtime"],
+        },
+    )
+    sections = build_implement_v2_prompt_sections(
+        lane_input,
+        tool_specs=list_v2_tool_specs_for_mode("read_only"),
+        workframe_sidecar_events=runtime_events,
+    )
+    workframe_prompt = next(section.content for section in sections if section.id == "implement_v2_workframe")
+
+    assert "tool:read_file" in workframe_prompt
+    assert "tool:apply_patch" not in workframe_prompt
+    assert "tool:edit_file" not in workframe_prompt
+    assert "tool:write_file" not in workframe_prompt
+
+
+def test_transcript_tool_nav_preserves_missing_obligation_controller_required_next() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-nav",
+        task_id="task-nav",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"mode": "full", "workframe_variant": "transcript_tool_nav"},
+        task_contract={"objective": "Do not finish with missing typed obligations."},
+    )
+    verifier_events = (
+        {
+            "kind": "strict_verifier",
+            "event_sequence": 1,
+            "event_id": "verify-1",
+            "status": "passed",
+            "typed_evidence_id": "ev:verify-1",
+            "execution_contract_normalized": {
+                "id": "contract:verify-1",
+                "role": "verify",
+                "proof_role": "verifier",
+                "acceptance_kind": "external_verifier",
+            },
+            "missing_obligations": ["oracle:artifact-fresh"],
+        },
+    )
+
+    bundle = build_implement_v2_workframe_debug_bundle(lane_input, sidecar_events=verifier_events)
+    workframe = bundle["reducer_output"]
+
+    assert workframe["finish_readiness"]["state"] == "blocked"
+    assert workframe["required_next"]["kind"] == "run_verifier"
+    assert workframe["required_next"]["evidence_refs"] == ["oracle:artifact-fresh"]
+    assert workframe["obligations"]["missing_or_stale_refs"] == ["oracle:artifact-fresh"]
 
 
 def test_workframe_variant_is_not_rendered_in_lane_state_prompt() -> None:

@@ -1594,6 +1594,7 @@ def run_live_json_implement_v2(
         hard_runtime_frontier=hard_runtime_frontier_state,
         sidecar_events=_workframe_sidecar_events_from_tool_results(tuple(tool_results)),
         prompt_inventory=prompt_inventory,
+        provider_tool_names=tuple(spec.name for spec in last_model_visible_tool_specs),
         turn_id=f"turn-{model_turns}-final",
     )
     workframe_output = _dict_or_empty(workframe_debug_bundle.get("reducer_output"))

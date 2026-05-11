@@ -270,10 +270,14 @@ class WorkFrame:
     verifier_state: WorkFrameVerifierState = field(default_factory=WorkFrameVerifierState)
     finish_readiness: WorkFrameFinishReadiness = field(default_factory=WorkFrameFinishReadiness)
     evidence_refs: WorkFrameEvidenceRefs = field(default_factory=WorkFrameEvidenceRefs)
+    variant: dict[str, object] = field(default_factory=dict)
+    tool_context: dict[str, object] = field(default_factory=dict)
+    obligations: dict[str, object] = field(default_factory=dict)
+    repair_loop: dict[str, object] = field(default_factory=dict)
     schema_version: int = WORKFRAME_SCHEMA_VERSION
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "trace": self.trace.as_dict(),
             "goal": self.goal.as_dict(),
@@ -286,6 +290,15 @@ class WorkFrame:
             "finish_readiness": self.finish_readiness.as_dict(),
             "evidence_refs": self.evidence_refs.as_dict(),
         }
+        if self.variant:
+            payload["variant"] = dict(self.variant)
+        if self.tool_context:
+            payload["tool_context"] = dict(self.tool_context)
+        if self.obligations:
+            payload["obligations"] = dict(self.obligations)
+        if self.repair_loop:
+            payload["repair_loop"] = dict(self.repair_loop)
+        return payload
 
 
 @dataclass(frozen=True)

@@ -116,10 +116,10 @@ SHARED_SUBSTRATE_SURFACES = (
     },
     {
         "name": "transcript_tool_nav",
-        "current_source": "",
+        "current_source": "src/mew/implement_lane/workframe_variant_transcript_tool_nav.py",
         "phase": 4,
-        "status": "missing",
-        "notes": "Target variant is design-only until Phase 4.",
+        "status": "implemented",
+        "notes": "Transcript-authoritative tool navigation variant is registered behind explicit selector.",
     },
 )
 
@@ -420,12 +420,6 @@ def _missing_for_offline_diagnosis(artifact_coverage: dict[str, dict[str, object
             )
     missing.extend(
         [
-            {
-                "surface": "transcript_tool_nav variant",
-                "filename": "src/mew/implement_lane/workframe_variant_transcript_tool_nav.py",
-                "phase": 4,
-                "reason": "target variant is design-only and not registered yet",
-            },
         ]
     )
     return missing
