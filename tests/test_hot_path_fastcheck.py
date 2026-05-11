@@ -5,6 +5,11 @@ import pytest
 
 from mew.implement_lane.hot_path_fastcheck import _workframe_resolvable_refs, run_hot_path_fastcheck
 from mew.implement_lane.workframe import WorkFrameInputs, canonicalize_workframe_inputs, reduce_workframe
+from mew.implement_lane.workframe_variants import (
+    canonicalize_common_workframe_inputs,
+    common_workframe_inputs_from_workframe_inputs,
+    project_workframe_with_variant,
+)
 
 
 def _write_artifact(tmp_path: Path) -> Path:
@@ -119,6 +124,64 @@ def _write_workframe_bundle(root: Path, inputs: WorkFrameInputs | None = None):
             "attempt_id": inputs.attempt_id,
             "turn_id": inputs.turn_id,
             "workframe_id": workframe.trace.workframe_id,
+            "input_hash": workframe.trace.input_hash,
+            "output_hash": workframe.trace.output_hash,
+        },
+    }
+    for filename, payload in files.items():
+        (root / filename).write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    return workframe
+
+
+def _write_common_workframe_bundle(
+    root: Path,
+    inputs: WorkFrameInputs | None = None,
+    *,
+    variant: str = "transcript_tool_nav",
+):
+    root.mkdir(parents=True, exist_ok=True)
+    inputs = inputs or _workframe_inputs()
+    common = common_workframe_inputs_from_workframe_inputs(inputs)
+    projection = project_workframe_with_variant(common, variant=variant)
+    workframe = projection.workframe
+    report = projection.invariant_report
+    files = {
+        "reducer_inputs.json": {
+            "schema_version": 2,
+            "workframe_variant": variant,
+            "common_workframe_inputs_schema_version": common.schema_version,
+            "workframe_inputs": inputs.as_dict(),
+            "common_workframe_inputs": common.as_dict(),
+            "canonical": canonicalize_common_workframe_inputs(common),
+            "shared_substrate_hash": projection.shared_substrate_hash,
+        },
+        "reducer_output.workframe.json": workframe.as_dict(),
+        "invariant_report.json": report.as_dict(),
+        "prompt_visible_workframe.json": {
+            "workframe": workframe.as_dict(),
+            "rule": "This is the only ordinary dynamic state object.",
+        },
+        "prompt_render_inventory.json": {
+            "schema_version": 2,
+            "static_shape": [
+                "static_instructions",
+                "task_contract_digest",
+                "natural_transcript_tail",
+                "one_workframe_projection",
+            ],
+            "workframe_variant": variant,
+            "shared_substrate_hash": projection.shared_substrate_hash,
+            "projection_hash": projection.projection_hash,
+            "sections": list(inputs.prompt_inventory),
+        },
+        "workframe_cursor.json": {
+            "schema_version": 2,
+            "attempt_id": inputs.attempt_id,
+            "turn_id": inputs.turn_id,
+            "workframe_id": workframe.trace.workframe_id,
+            "workframe_variant": variant,
+            "shared_substrate_hash": projection.shared_substrate_hash,
+            "projection_hash": projection.projection_hash,
             "input_hash": workframe.trace.input_hash,
             "output_hash": workframe.trace.output_hash,
         },
@@ -276,6 +339,129 @@ def test_hot_path_fastcheck_rejects_manifest_workframe_hash_mismatch(tmp_path):
     assert result["status"] == "fail"
     replay = [check for check in result["checks"] if check["name"] == "workframe_replay"][0]
     assert replay["details"]["manifest_output_hash_matches"] is False
+
+
+def test_hot_path_fastcheck_replays_common_workframe_projection_hashes(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    workframe = _write_common_workframe_bundle(artifact / "implement_v2" / "workframes" / "turn-1")
+    _set_manifest_workframe_hashes(artifact, workframe)
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        expected_categories=("patch/edit",),
+        micro_model_callable=lambda _prompt: {"category": "patch/edit", "reason": "common replay"},
+    )
+
+    assert result["status"] == "pass"
+    replay = [check for check in result["checks"] if check["name"] == "workframe_replay"][0]
+    assert replay["details"]["shared_substrate_hash_matches"] is True
+    assert replay["details"]["projection_hash_matches"] is True
+    assert replay["details"]["recomputed_shared_substrate_hash"].startswith("sha256:")
+    assert replay["details"]["recomputed_projection_hash"].startswith("sha256:")
+
+
+def test_hot_path_fastcheck_detects_common_workframe_projection_hash_drift(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    workframe = _write_common_workframe_bundle(artifact / "implement_v2" / "workframes" / "turn-1")
+    _set_manifest_workframe_hashes(artifact, workframe)
+    cursor_path = artifact / "implement_v2" / "workframes" / "turn-1" / "workframe_cursor.json"
+    cursor = json.loads(cursor_path.read_text(encoding="utf-8"))
+    cursor["projection_hash"] = "sha256:wrong"
+    cursor_path.write_text(json.dumps(cursor), encoding="utf-8")
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        expected_categories=("patch/edit",),
+        micro_model_callable=lambda _prompt: {"category": "patch/edit", "reason": "common replay"},
+    )
+
+    assert result["status"] == "fail"
+    replay = [check for check in result["checks"] if check["name"] == "workframe_replay"][0]
+    assert replay["details"]["projection_hash_matches"] is False
+
+
+@pytest.mark.parametrize(
+    ("cursor_field", "detail_field"),
+    (
+        ("shared_substrate_hash", "shared_substrate_hash_matches"),
+        ("projection_hash", "projection_hash_matches"),
+    ),
+)
+def test_hot_path_fastcheck_rejects_missing_common_workframe_cursor_hash(
+    tmp_path,
+    cursor_field,
+    detail_field,
+):
+    artifact = _write_artifact(tmp_path)
+    workframe = _write_common_workframe_bundle(artifact / "implement_v2" / "workframes" / "turn-1")
+    _set_manifest_workframe_hashes(artifact, workframe)
+    cursor_path = artifact / "implement_v2" / "workframes" / "turn-1" / "workframe_cursor.json"
+    cursor = json.loads(cursor_path.read_text(encoding="utf-8"))
+    cursor.pop(cursor_field)
+    cursor_path.write_text(json.dumps(cursor), encoding="utf-8")
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        expected_categories=("patch/edit",),
+        micro_model_callable=lambda _prompt: {"category": "patch/edit", "reason": "common replay"},
+    )
+
+    assert result["status"] == "fail"
+    replay = [check for check in result["checks"] if check["name"] == "workframe_replay"][0]
+    assert replay["details"][detail_field] is False
+
+
+def test_hot_path_fastcheck_rejects_tool_navigation_reentry_drift(tmp_path):
+    artifact = _write_artifact(tmp_path)
+    workframe = _write_common_workframe_bundle(artifact / "implement_v2" / "workframes" / "turn-1")
+    _set_manifest_workframe_hashes(artifact, workframe)
+    reentry_path = artifact / "implement_v2" / "workframes" / "turn-1" / "reentry_fixture.json"
+    before = workframe.as_dict()
+    after = workframe.as_dict()
+    before["tool_context"] = {
+        "active_tool_refs": ["tool:read_file", "tool:apply_patch"],
+        "recommended_tool_refs": [{"tool_ref": "tool:apply_patch"}],
+        "disabled_tool_refs": [],
+        "policy_refs": ["tool-policy:mutation-boundary:v1"],
+        "fetchable_refs": ["tool-result-index:latest"],
+        "tool_result_search": {"index_ref": "tool-result-index:latest"},
+        "model_turn_search": {"index_ref": "model-turn-index:debug"},
+    }
+    after["tool_context"] = {
+        **before["tool_context"],
+        "recommended_tool_refs": [{"tool_ref": "tool:read_file"}],
+    }
+    reentry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "semantic_event_changed": False,
+                "before": before,
+                "after": after,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_hot_path_fastcheck(
+        artifact,
+        micro_next_action=tmp_path / "micro.json",
+        expected_categories=("patch/edit",),
+        micro_model_callable=lambda _prompt: {"category": "patch/edit", "reason": "common replay"},
+    )
+
+    assert result["status"] == "fail"
+    reentry = [check for check in result["checks"] if check["name"] == "workframe_reentry_stability"][0]
+    assert reentry["status"] == "fail"
+    assert reentry["details"]["projection_matches"] is False
+    assert reentry["details"]["before"]["tool_context"]["recommended_tool_refs"] != reentry["details"]["after"][
+        "tool_context"
+    ]["recommended_tool_refs"]
 
 
 def test_hot_path_fastcheck_resolves_configured_verifier_ref(tmp_path):

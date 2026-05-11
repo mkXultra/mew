@@ -37,6 +37,12 @@ from .workframe import (
     workframe_output_hash,
 )
 from .workframe_variants import reduce_workframe_with_variant
+from .workframe_variants import (
+    CommonWorkFrameInputs,
+    canonicalize_common_workframe_inputs,
+    common_workframe_inputs_from_workframe_inputs,
+    project_workframe_with_variant,
+)
 
 HOT_PATH_FASTCHECK_SCHEMA_VERSION = 1
 DEFAULT_HOT_PATH_BASELINE_PATH = (
@@ -343,6 +349,27 @@ def _workframe_inputs_from_mapping(value: object) -> WorkFrameInputs | None:
         previous_workframe_hash=str(raw.get("previous_workframe_hash") or ""),
         workspace_root=str(raw.get("workspace_root") or ""),
         artifact_root=str(raw.get("artifact_root") or ""),
+        schema_version=_nonnegative_int(raw.get("schema_version")) or 1,
+    )
+
+
+def _common_workframe_inputs_from_mapping(value: object) -> CommonWorkFrameInputs | None:
+    data = _safe_mapping(value)
+    inputs = _workframe_inputs_from_mapping(value)
+    if inputs is None:
+        return None
+    raw = _safe_mapping(data.get("common_workframe_inputs"))
+    if not raw:
+        return common_workframe_inputs_from_workframe_inputs(inputs)
+    return CommonWorkFrameInputs(
+        current_workframe_inputs=inputs,
+        attempt=_safe_mapping(raw.get("attempt")),
+        transcript=_safe_mapping(raw.get("transcript")),
+        tool_registry=_safe_mapping(raw.get("tool_registry")),
+        sidecars=_safe_mapping(raw.get("sidecars")),
+        indexes=_safe_mapping(raw.get("indexes")),
+        replay=_safe_mapping(raw.get("replay")),
+        migration=_safe_mapping(raw.get("migration")),
         schema_version=_nonnegative_int(raw.get("schema_version")) or 1,
     )
 
@@ -840,20 +867,42 @@ def _check_workframe_replay(bundle: dict[str, object], manifest: dict[str, objec
     if inputs is None:
         return _check("workframe_replay", False, "invalid reducer_inputs.json", {"bundle_dir": bundle.get("bundle_dir")})
     stored_inputs = _safe_mapping(bundle.get("reducer_inputs"))
+    stored_cursor = _safe_mapping(bundle.get("workframe_cursor"))
     workframe_variant = str(
         stored_inputs.get("workframe_variant")
         or _safe_mapping(_safe_mapping((manifest or {}).get("metrics")).get("workframe")).get("variant")
         or "current"
     )
     stored_canonical = _safe_mapping(stored_inputs.get("canonical"))
-    canonical = canonicalize_workframe_inputs(inputs)
-    workframe, report = reduce_workframe_with_variant(inputs, variant=workframe_variant)
+    common_inputs = _common_workframe_inputs_from_mapping(stored_inputs)
+    if common_inputs is not None and stored_inputs.get("common_workframe_inputs_schema_version"):
+        canonical = canonicalize_common_workframe_inputs(common_inputs)
+        projection = project_workframe_with_variant(common_inputs, variant=workframe_variant)
+        workframe = projection.workframe
+        report = projection.invariant_report
+        shared_substrate_hash = projection.shared_substrate_hash
+        projection_hash = projection.projection_hash
+    else:
+        canonical = canonicalize_workframe_inputs(inputs)
+        workframe, report = reduce_workframe_with_variant(inputs, variant=workframe_variant)
+        shared_substrate_hash = ""
+        projection_hash = ""
     stored_output = _safe_mapping(bundle.get("reducer_output"))
     recomputed_output = workframe.as_dict()
     stored_report = _safe_mapping(bundle.get("invariant_report"))
     manifest_workframe = _safe_mapping(_safe_mapping((manifest or {}).get("metrics")).get("workframe"))
     manifest_input_hash = str(manifest_workframe.get("input_hash") or "")
     manifest_output_hash = str(manifest_workframe.get("output_hash") or "")
+    stored_shared_substrate_hash = str(stored_inputs.get("shared_substrate_hash") or "")
+    cursor_shared_substrate_hash = str(stored_cursor.get("shared_substrate_hash") or "")
+    cursor_projection_hash = str(stored_cursor.get("projection_hash") or "")
+    shared_hash_matches = not shared_substrate_hash or (
+        stored_shared_substrate_hash == shared_substrate_hash
+        and cursor_shared_substrate_hash == shared_substrate_hash
+    )
+    projection_hash_matches = not projection_hash or (
+        cursor_projection_hash == projection_hash
+    )
     ok = (
         bool(stored_canonical)
         and stored_canonical == canonical
@@ -864,6 +913,8 @@ def _check_workframe_replay(bundle: dict[str, object], manifest: dict[str, objec
         and manifest_input_hash == workframe.trace.input_hash
         and manifest_output_hash == workframe.trace.output_hash
         and stored_report.get("status") == report.status
+        and shared_hash_matches
+        and projection_hash_matches
     )
     return _check(
         "workframe_replay",
@@ -887,6 +938,13 @@ def _check_workframe_replay(bundle: dict[str, object], manifest: dict[str, objec
             "output_matches": stored_output == recomputed_output,
             "stored_invariant_status": stored_report.get("status"),
             "recomputed_invariant_status": report.status,
+            "stored_shared_substrate_hash": stored_shared_substrate_hash,
+            "recomputed_shared_substrate_hash": shared_substrate_hash,
+            "cursor_shared_substrate_hash": cursor_shared_substrate_hash,
+            "shared_substrate_hash_matches": shared_hash_matches,
+            "cursor_projection_hash": cursor_projection_hash,
+            "recomputed_projection_hash": projection_hash,
+            "projection_hash_matches": projection_hash_matches,
         },
     )
 
@@ -948,24 +1006,47 @@ def _check_workframe_reentry_stability(bundle: dict[str, object]) -> HotPathChec
         )
     before = _safe_mapping(fixture.get("before") or fixture.get("pre_resume"))
     after = _safe_mapping(fixture.get("after") or fixture.get("post_resume"))
-    before_required = _safe_mapping(before.get("required_next"))
-    after_required = _safe_mapping(after.get("required_next"))
-    before_forbidden = before.get("forbidden_next") if isinstance(before.get("forbidden_next"), list) else []
-    after_forbidden = after.get("forbidden_next") if isinstance(after.get("forbidden_next"), list) else []
+    before_projection = _compression_stability_projection(before)
+    after_projection = _compression_stability_projection(after)
     semantic_changed = bool(fixture.get("semantic_event_changed"))
-    ok = semantic_changed or (before_required == after_required and before_forbidden == after_forbidden)
+    ok = semantic_changed or before_projection == after_projection
     return _check(
         "workframe_reentry_stability",
         ok,
-        "reentry preserved required_next/forbidden_next"
+        "reentry preserved WorkFrame safety/navigation state"
         if ok
-        else "reentry drifted required_next/forbidden_next without semantic event",
+        else "reentry drifted WorkFrame safety/navigation state without semantic event",
         {
             "semantic_event_changed": semantic_changed,
-            "required_next_matches": before_required == after_required,
-            "forbidden_next_matches": before_forbidden == after_forbidden,
+            "projection_matches": before_projection == after_projection,
+            "before": before_projection,
+            "after": after_projection,
         },
     )
+
+
+def _compression_stability_projection(workframe: dict[str, object]) -> dict[str, object]:
+    tool_context = _safe_mapping(workframe.get("tool_context"))
+    return {
+        "required_next": _safe_mapping(workframe.get("required_next")),
+        "forbidden_next": workframe.get("forbidden_next") if isinstance(workframe.get("forbidden_next"), list) else [],
+        "verifier_state": _safe_mapping(workframe.get("verifier_state")),
+        "finish_readiness": _safe_mapping(workframe.get("finish_readiness")),
+        "obligations": _safe_mapping(workframe.get("obligations")),
+        "tool_context": {
+            "active_tool_refs": _list_or_empty(tool_context.get("active_tool_refs")),
+            "recommended_tool_refs": _list_or_empty(tool_context.get("recommended_tool_refs")),
+            "disabled_tool_refs": _list_or_empty(tool_context.get("disabled_tool_refs")),
+            "policy_refs": _list_or_empty(tool_context.get("policy_refs")),
+            "fetchable_refs": _list_or_empty(tool_context.get("fetchable_refs")),
+            "tool_result_search": _safe_mapping(tool_context.get("tool_result_search")),
+            "model_turn_search": _safe_mapping(tool_context.get("model_turn_search")),
+        },
+    }
+
+
+def _list_or_empty(value: object) -> list[object]:
+    return list(value) if isinstance(value, list) else []
 
 
 def _check_legacy_projection_rejected(history: list[dict[str, object]]) -> HotPathCheck:
