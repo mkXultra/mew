@@ -10,7 +10,6 @@ from .registry import (
 from .exec_runtime import ImplementV2ManagedExecRuntime
 from .native_transcript import (
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
-    LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID,
     NativeTranscript,
     NativeTranscriptItem,
     NativeTranscriptValidationResult,
@@ -84,7 +83,6 @@ from .write_runtime import ImplementV2WriteRuntime
 __all__ = [
     "IMPLEMENT_LANE_REGISTRY_VERSION",
     "IMPLEMENT_V2_NATIVE_RUNTIME_ID",
-    "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID",
     "COMMON_WORKFRAME_INPUTS_SCHEMA_VERSION",
     "DEFAULT_WORKFRAME_VARIANT",
     "WORKFRAME_FIXTURE_CONVERSION_VERSION",

@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the WorkFrame proof gate plus step-cause breakdown: Phase 0-6 implementation is committed, WorkFrame variant comparison selected `transition_contract` as default, and closure requires targeted fastcheck/micro/replay repair before another same-shape 10 minute diagnostic and reference-step comparison. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-6 scaffolds and Phase 7 legacy model-JSON quarantine slice are committed through `150db0b`; live provider-native execution remains the next gap before any speed/proof evidence can count as native-loop evidence. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,17 +69,18 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_workframe_proof_gate`.
+Current controller mode: `m6_24_native_transcript_rebuild`.
 
-Current diagnostic mode: `m6_24_step_cause_breakdown`.
+Current diagnostic mode: `m6_24_native_loop_gate`.
 
-Before another live `speed_1`, `proof_5`, or broad measurement, use
-`docs/M6_24_STEP_CAUSE_BREAKDOWN_2026-05-11.md` to classify the gap by cause
-axis. Tool/result plumbing defects are polish-only and should be reproduced by
-UT, tool-lab, replay, dogfood, or emulator before Harbor. The core
-`tool result -> evidence -> WorkFrame transition contract -> required next
-patch/repair action` gap is redesign work inside the WorkFrame reducer, not a
-new frontier/todo/evidence object.
+Before another live `speed_1`, `proof_5`, or broad measurement, complete the
+native transcript rebuild in
+`docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`.
+Native v2 proof evidence must use `runtime_id=implement_v2_native_transcript_loop`,
+`transport_kind=provider_native`, paired native transcript artifacts, and
+`model_json_main_path_detected=false`. Legacy model-JSON runs, WorkFrame-only
+projection work, and prompt/parser repair cannot close the active native-loop
+gate.
 
 Scope:
 
@@ -99,16 +100,18 @@ Scope:
 - `implement_v1` remains the compatibility/default lane, but it was not the
   selected lane for the latest `build-cython-ext` same-shape speed/debug
   attempt.
-- `implement_v2` now has a live `model_json` runtime that bypasses the v1
-  THINK/ACT planner, emits v2 transcript/proof artifacts, and can write/verify
-  through the v2 substrates. It remains explicit-selection only.
-- Provider-specific native tool-call transport is still future work; current
-  v2 proof must be described as `model_json`, not provider-native.
-- M6.24 live proof work resumes only with explicit lane metadata. The active
-  proof lane is `implement_v2`, but the active controller is temporarily the
-  WorkFrame proof gate below, not scoped `speed_1` rebaseline. Historical
-  `implement_v1` and pre-WorkFrame `implement_v2` results remain repair
-  evidence but cannot close the current M6.24 gate.
+- `implement_v2` is being rebuilt as a provider-native transcript runtime. The
+  old live `model_json` runtime is now explicit quarantine for legacy tests,
+  replay compatibility, and dogfood emulators only; it is not the selected
+  production v2 main path.
+- Provider-specific live native tool-call execution is the next implementation
+  gap. Current native-loop credit comes only from native transcript fixtures,
+  native adapter/tool scaffolds, CLI selection, and static validation gates.
+- M6.24 live proof work resumes only after the native-loop gate is green. The
+  active proof lane is still `implement_v2`, but the active controller is the
+  native transcript rebuild, not scoped `speed_1` rebaseline. Historical
+  `implement_v1`, model-JSON `implement_v2`, and pre-native WorkFrame results
+  remain repair evidence but cannot close the current M6.24 gate.
 - The prior scoped rebaseline controller
   (`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`) is suspended until the
   WorkFrame-native fastcheck/dogfood/emulator gate and exactly one same-shape
@@ -236,6 +239,7 @@ Controller docs:
 
 - `docs/DESIGN_2026-05-05_M6_23_2_LANE_ISOLATION_SUBSTRATE.md`
 - `docs/DESIGN_2026-05-05_M6_23_2_IMPLEMENT_V2_NATIVE_TOOL_LOOP.md`
+- `docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`
 - `docs/M6_23_2_PHASE3_READ_ONLY_PROOF_2026-05-05.md`
 - `docs/M6_23_2_PHASE4_MANAGED_EXEC_PROOF_2026-05-05.md`
 - `docs/M6_23_2_PHASE5_WRITE_APPROVAL_PROOF_2026-05-05.md`
@@ -245,7 +249,7 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 is still the active M6.24 lane, but measurement is paused while the WorkFrame proof gate is active; repair the generic transition_contract hot path from docs/M6_24_WORKFRAME_VARIANT_COMPARISON_2026-05-11.md, run focused UT/fastcheck/micro checks, exactly one same-shape transition_contract make-mips-interpreter step-check-10min, then reference-step comparison before any speed_1/proof_5/broad measurement
+selected_lane=implement_v2 is still the active M6.24 lane, but measurement is paused while the native transcript rebuild is active; continue docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md from the latest committed phase, keep legacy model-json only in explicit quarantine, make selected production v2 use provider-native transcript artifacts, then rerun native-loop validation before any speed_1/proof_5/broad measurement
 ```
 
 Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
@@ -255,7 +259,7 @@ Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
 passed with exact replay and terminal-bench replay dogfood. This is historical
 pre-WorkFrame measurement evidence. The current decision is no longer
 "build-cython proof_5 now" or "continue the implement_v2 scoped rebaseline";
-the current decision is the WorkFrame-gated next action above.
+the current decision is the native transcript rebuild above.
 
 ## Active M6.24 Context
 
@@ -282,19 +286,20 @@ Controller docs:
 - `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`
 - `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`
 - `docs/M6_24_REFERENCE_TRACE_BUILD_CYTHON_EXT_2026-05-05.md`
+- `docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`
 - `docs/M6_24_DECISION_LEDGER.md`
 - `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
 
-Current WorkFrame-gated next action:
+Current native-transcript-gated next action:
 
 ```text
-M6.24 -> WorkFrame Phase 0-7 substrate reviewed/committed -> keep transition_contract as default -> repair generic patch-anchor/runtime-artifact-obligation hot path -> focused UT/fastcheck/micro checks -> exactly one same-shape transition_contract make-mips-interpreter step-check-10min -> reference-step comparison
+M6.24 -> native transcript rebuild Phase 0-7 reviewed/committed -> keep old model-json v2 as explicit quarantine only -> implement live provider-native execution and authoritative native transcript artifacts -> native-loop validation gate -> one bounded step-shape diagnostic before speed_1/proof_5/broad measurement
 ```
 
-Older scoped-rebaseline rows remain historical evidence only until the
-WorkFrame proof gate is green or explicitly accepted yellow.
+Older scoped-rebaseline and WorkFrame rows remain historical evidence only until
+the native-loop gate is green or explicitly accepted yellow.
 
 The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
 prior-failure repair is replayable and classified, but codex-ultra marked it
@@ -326,6 +331,11 @@ re-read the scope doc plus decision ledger first.
 
 Done when:
 
+- the `implement_v2` native transcript rebuild has a green native-loop gate:
+  selected production v2 uses `implement_v2_native_transcript_loop`, provider
+  native tool calls and paired outputs are authoritative transcript artifacts,
+  legacy model-JSON v2 is limited to explicit quarantine tests/replay/emulators,
+  and proof metrics reject `model_json_main_path_detected=true`;
 - the `implement_v2` HOT_PATH_COLLAPSE design has explicit Phase 0-6 evidence:
   before any same-shape 10 minute diagnostic, the HOT_PATH fastcheck passes
   focused UT, saved-artifact replay, prompt leak checks, sidecar/projection
@@ -345,6 +355,21 @@ Done when:
   one-run trial boundary, rollback condition, and adopted/rejected decision;
 - no accepted structural blocker remains unaddressed while scoped measurement
   continues.
+
+### M6.24 Native Transcript Rebuild Status
+
+Status as of 2026-05-11: **in progress**. The active design is
+`docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`.
+Phase 0-6 substrate and Phase 7 legacy public-surface quarantine are committed
+through `150db0b`. Native validation now rejects selected-route, package
+surface, and native-production-path drift back to the old model-JSON v2 symbols.
+
+Remaining active gap: live provider-native execution is still not fully enabled.
+Do not count legacy `implement_v2_model_json_tool_loop` artifacts as native-loop
+evidence. The next implementation slice should connect the native provider
+adapter/runtime so selected v2 can emit authoritative
+`response_transcript.json`, `response_items.jsonl`, and native proof manifests
+from a live provider-native tool-call turn.
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 

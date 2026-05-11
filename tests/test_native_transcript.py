@@ -2,7 +2,6 @@ import json
 
 from mew.implement_lane import (
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
-    LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID,
     NativeTranscript,
     NativeTranscriptItem,
     build_synthetic_error_output,
@@ -17,6 +16,7 @@ from mew.implement_lane import (
     WorkFrameInputs,
     write_native_transcript_artifacts,
 )
+from mew.implement_lane.native_transcript import LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID
 
 
 def _read_call_output_transcript() -> NativeTranscript:

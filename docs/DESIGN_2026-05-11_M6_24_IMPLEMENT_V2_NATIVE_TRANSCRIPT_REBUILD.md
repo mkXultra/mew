@@ -1,6 +1,22 @@
 # Design 2026-05-11 - M6.24 Implement V2 Native Transcript Rebuild
 
-Status: design only.
+Status: implementation in progress.
+
+Implementation checkpoint 2026-05-11:
+
+- Phase 0-1 native transcript schema and artifact gates are committed.
+- Phase 2-4 native provider/tool/sidecar scaffolds are committed.
+- Phase 5-6 CLI selection and native validation gates are committed.
+- Phase 7 quarantine slice is committed at `150db0b`: the
+  `mew.implement_lane` public package surface no longer exports legacy
+  model-JSON v2 runners or provider adapters, and the native gate rejects those
+  symbols in production native paths.
+- The legacy model-JSON runtime still exists only as explicit quarantine for
+  old unit tests, replay compatibility, and dogfood emulators. It is not the
+  selected production v2 main path.
+- Live provider-native execution is not yet fully enabled; until that lands,
+  native v2 speed/proof evidence must come from native fixtures/gates, not
+  legacy model-JSON runs.
 
 Scope: no-backward-compatibility redesign of `implement_v2` as a provider-native
 tool/function calling loop. This document does not authorize code changes by

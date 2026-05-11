@@ -70,6 +70,14 @@ def validate_native_loop_gate(
     checks["package_surface_exists"] = package_scan.get("exists") is True
     for symbol, present in _package_surface_banned_symbols(package_scan).items():
         checks[f"package_surface_no_{symbol}"] = present is False
+    production_scan = _scan_native_production_paths(source_path)
+    details["native_production_paths"] = production_scan
+    checks["native_production_paths_exist"] = all(
+        bool(item.get("exists")) for item in production_scan
+    )
+    checks["native_production_paths_no_legacy_symbols"] = not any(
+        item.get("legacy_hits") for item in production_scan
+    )
 
     fixture_manifest = native_proof_manifest_from_transcript(_validation_fixture_transcript())
     fixture_pairing = fixture_manifest.get("pairing") if isinstance(fixture_manifest.get("pairing"), dict) else {}
@@ -156,11 +164,54 @@ def _legacy_public_surface_symbols() -> tuple[str, ...]:
         "JsonModelProviderAdapter",
         "FakeProviderAdapter",
         "FakeProviderToolCall",
+        "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID",
     )
 
 
 def _package_surface_banned_symbols(package_scan: Mapping[str, object]) -> dict[str, object]:
     return {symbol: package_scan.get(symbol) for symbol in _legacy_public_surface_symbols()}
+
+
+def _native_production_relative_paths() -> tuple[str, ...]:
+    return (
+        "src/mew/commands.py",
+        "src/mew/implement_lane/__init__.py",
+        "src/mew/implement_lane/registry.py",
+        "src/mew/implement_lane/native_provider_adapter.py",
+        "src/mew/implement_lane/native_tool_harness.py",
+    )
+
+
+def _native_production_banned_symbols() -> tuple[str, ...]:
+    return (
+        "JsonModelProviderAdapter",
+        "run_live_json_implement_v2",
+        "_live_json_prompt",
+        "_normalize_live_json_payload",
+        "call_codex_json",
+        "call_model_json_with_retries",
+        "implement_v2_model_json_tool_loop",
+        "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID",
+        "history_json:",
+        "frontier_state_update",
+    )
+
+
+def _scan_native_production_paths(source_root: Path) -> tuple[dict[str, object], ...]:
+    scanned: list[dict[str, object]] = []
+    for relative_path in _native_production_relative_paths():
+        path = source_root / relative_path
+        if not path.exists():
+            scanned.append({"path": relative_path, "exists": False, "legacy_hits": {}})
+            continue
+        text = path.read_text(encoding="utf-8")
+        hits = {
+            symbol: text.count(symbol)
+            for symbol in _native_production_banned_symbols()
+            if symbol in text
+        }
+        scanned.append({"path": relative_path, "exists": True, "legacy_hits": hits})
+    return tuple(scanned)
 
 
 def _validation_fixture_transcript() -> NativeTranscript:
