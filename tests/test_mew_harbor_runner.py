@@ -8,6 +8,7 @@ from mew.mew_harbor_runner import (
     build_harbor_command,
     build_mew_work_command_template,
     collect_mew_trial_summary,
+    extract_harbor_reward,
     make_jobs_dir,
     observer_detail_missing,
     summarize_latest_run,
@@ -192,6 +193,11 @@ def test_collect_mew_trial_summary_reports_observer_detail(tmp_path):
     assert summary["workframe_variant"] == "transcript_first"
     assert summary["prompt_chars"] == 123
     assert observer_detail_missing([summary]) is False
+
+
+def test_extract_harbor_reward_reads_terminal_bench_v2_shape():
+    assert extract_harbor_reward({"verifier_result": {"rewards": {"reward": 0.0}}}) == 0.0
+    assert extract_harbor_reward({"reward": 1.0}) == 1.0
 
 
 def test_summarize_latest_run_normalizes_nested_mew_unknown_task_trace(tmp_path):

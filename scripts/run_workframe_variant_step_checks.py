@@ -133,6 +133,10 @@ def _variant_result_row(result: dict[str, object]) -> dict[str, object]:
     numeric_rewards = [_float_or_none(value) for value in rewards]
     numeric_rewards = [value for value in numeric_rewards if value is not None]
     observer_missing_count = sum(1 for summary in summaries if not _observer_detail_ok(summary))
+    work_exit_codes = [summary.get("work_exit_code") for summary in summaries]
+    nonzero_work_exit_codes = [
+        value for value in work_exit_codes if _int_or_none(value) not in (None, 0)
+    ]
     red_reasons: list[str] = []
     if dry_run:
         status = "dry_run"
@@ -141,6 +145,8 @@ def _variant_result_row(result: dict[str, object]) -> dict[str, object]:
             red_reasons.append("summary_missing")
         if returncode not in (None, 0):
             red_reasons.append("runner_returncode_nonzero")
+        if nonzero_work_exit_codes:
+            red_reasons.append("work_exit_code_nonzero")
         if observer_missing_count:
             red_reasons.append("observer_detail_missing")
         if any(value == 0.0 for value in numeric_rewards):
@@ -152,6 +158,8 @@ def _variant_result_row(result: dict[str, object]) -> dict[str, object]:
         "red_reasons": red_reasons,
         "trial_count": len(summaries),
         "returncode": returncode,
+        "work_exit_code": first_summary.get("work_exit_code"),
+        "work_exit_codes": work_exit_codes,
         "elapsed_seconds": result.get("elapsed_seconds"),
         "external_reward": first_summary.get("external_reward"),
         "external_rewards": rewards,
@@ -190,6 +198,15 @@ def _float_or_none(value: object) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_or_none(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None
 

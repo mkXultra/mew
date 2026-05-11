@@ -249,7 +249,7 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
     artifact_ref = observation.get("artifact_ref") if isinstance(observation.get("artifact_ref"), str) else ""
     detail_path = manifest_dir / artifact_ref if artifact_ref else None
     return {
-        "external_reward": result.get("reward"),
+        "external_reward": extract_harbor_reward(result),
         "work_exit_code": report.get("work_exit_code"),
         "stop_reason": ((report.get("work_report") or {}).get("stop_reason") if isinstance(report.get("work_report"), dict) else None),
         "model_turns": metrics.get("model_turns"),
@@ -280,6 +280,17 @@ def read_json(path: Path) -> dict[str, object]:
         return {}
     data = json.loads(path.read_text(encoding="utf-8"))
     return data if isinstance(data, dict) else {}
+
+
+def extract_harbor_reward(result: dict[str, object]) -> object:
+    if "reward" in result:
+        return result.get("reward")
+    verifier_result = result.get("verifier_result")
+    if isinstance(verifier_result, dict):
+        rewards = verifier_result.get("rewards")
+        if isinstance(rewards, dict) and "reward" in rewards:
+            return rewards.get("reward")
+    return None
 
 
 def observer_detail_missing(summaries: Sequence[dict[str, object]]) -> bool:

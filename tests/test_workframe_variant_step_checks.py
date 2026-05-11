@@ -27,6 +27,7 @@ def test_variant_summary_records_green_and_red_same_shape_rows() -> None:
                 "summaries": [
                     {
                         "external_reward": 1.0,
+                        "work_exit_code": 0,
                         "stop_reason": "done",
                         "model_turns": 4,
                         "tool_calls": 6,
@@ -49,6 +50,7 @@ def test_variant_summary_records_green_and_red_same_shape_rows() -> None:
                 "summaries": [
                     {
                         "external_reward": 0.0,
+                        "work_exit_code": 1,
                         "observer_detail_enabled": True,
                         "observer_detail_written": False,
                         "observer_detail_exists": False,
@@ -66,6 +68,7 @@ def test_variant_summary_records_green_and_red_same_shape_rows() -> None:
     assert rows[1]["status"] == "red"
     assert rows[1]["red_reasons"] == [
         "runner_returncode_nonzero",
+        "work_exit_code_nonzero",
         "observer_detail_missing",
         "external_reward_zero",
     ]
@@ -115,12 +118,14 @@ def test_variant_summary_rejects_later_failed_trial() -> None:
                 "summaries": [
                     {
                         "external_reward": 1.0,
+                        "work_exit_code": 0,
                         "observer_detail_enabled": True,
                         "observer_detail_written": True,
                         "observer_detail_exists": True,
                     },
                     {
                         "external_reward": 0.0,
+                        "work_exit_code": 0,
                         "observer_detail_enabled": True,
                         "observer_detail_written": True,
                         "observer_detail_exists": True,
@@ -137,3 +142,28 @@ def test_variant_summary_rejects_later_failed_trial() -> None:
     assert row["min_external_reward"] == 0.0
     assert row["red_reasons"] == ["external_reward_zero"]
     assert summary["green_candidates"] == []
+
+
+def test_variant_summary_rejects_nonzero_work_exit_code() -> None:
+    summary = summarize_variant_results(
+        [
+            {
+                "variant": "transition_contract",
+                "returncode": 0,
+                "summaries": [
+                    {
+                        "external_reward": 1.0,
+                        "work_exit_code": 1,
+                        "observer_detail_enabled": True,
+                        "observer_detail_written": True,
+                        "observer_detail_exists": True,
+                    },
+                ],
+            }
+        ]
+    )
+
+    row = summary["rows"][0]
+    assert row["status"] == "red"
+    assert row["work_exit_codes"] == [1]
+    assert row["red_reasons"] == ["work_exit_code_nonzero"]
