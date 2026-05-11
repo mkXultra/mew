@@ -17856,7 +17856,8 @@ def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
 
 
 def run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(workspace):
-    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .implement_lane import ImplementLaneInput
+    from .implement_lane.v2_runtime import run_live_json_implement_v2
     from .work_lanes import IMPLEMENT_V2_LANE
 
     checks = []
@@ -17992,7 +17993,8 @@ def run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(workspace
 
 
 def run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(workspace):
-    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .implement_lane import ImplementLaneInput
+    from .implement_lane.v2_runtime import run_live_json_implement_v2
     from .work_lanes import IMPLEMENT_V2_LANE
 
     checks = []
@@ -18183,7 +18185,8 @@ def run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(worksp
 
 
 def run_m6_24_implement_v2_hard_runtime_progress_continuation_emulator_scenario(workspace):
-    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .implement_lane import ImplementLaneInput
+    from .implement_lane.v2_runtime import run_live_json_implement_v2
     from .work_lanes import IMPLEMENT_V2_LANE
 
     checks = []
@@ -18372,7 +18375,8 @@ def run_m6_24_implement_v2_hard_runtime_progress_continuation_emulator_scenario(
 
 
 def run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(workspace):
-    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .implement_lane import ImplementLaneInput
+    from .implement_lane.v2_runtime import run_live_json_implement_v2
     from .work_lanes import IMPLEMENT_V2_LANE
 
     checks = []
@@ -18528,7 +18532,8 @@ def run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(w
 
 
 def run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(workspace):
-    from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+    from .implement_lane import ImplementLaneInput
+    from .implement_lane.v2_runtime import run_live_json_implement_v2
     from .work_lanes import IMPLEMENT_V2_LANE
 
     checks = []

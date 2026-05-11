@@ -11,8 +11,6 @@ from mew.errors import ModelBackendError
 from mew.implement_lane import (
     DEFAULT_WORKFRAME_VARIANT,
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
-    FakeProviderAdapter,
-    FakeProviderToolCall,
     ImplementLaneInput,
     ImplementLaneProofManifest,
     ImplementLaneResult,
@@ -34,17 +32,13 @@ from mew.implement_lane import (
     list_v2_base_tool_specs,
     list_v2_tool_specs_for_mode,
     project_workframe_with_variant,
-    run_fake_exec_implement_v2,
-    run_fake_read_only_implement_v2,
-    run_fake_write_implement_v2,
-    run_live_json_implement_v2,
-    run_unavailable_implement_v2,
     select_implement_lane_runtime,
     normalize_workframe_variant,
     validate_proof_manifest_pairing,
     validate_tool_result_pairing,
     validate_workframe_variant_name,
 )
+from mew.implement_lane.provider import FakeProviderAdapter, FakeProviderToolCall
 from mew.implement_lane.v2_runtime import (
     ModelTurnInput,
     _auto_finish_from_structured_final_verifier,
@@ -83,6 +77,11 @@ from mew.implement_lane.v2_runtime import (
     _typed_retired_legacy_blockers_for_bundle,
     _workframe_sidecar_events_from_tool_results,
     _write_result_covers_source_tree_mutation,
+    run_fake_exec_implement_v2,
+    run_fake_read_only_implement_v2,
+    run_fake_write_implement_v2,
+    run_live_json_implement_v2,
+    run_unavailable_implement_v2,
 )
 from mew.implement_lane.prompt import build_implement_v2_workframe_debug_bundle
 from mew.read_tools import read_file

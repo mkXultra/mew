@@ -26,7 +26,6 @@ from .native_transcript import (
     validate_native_transcript_pairing,
     write_native_transcript_artifacts,
 )
-from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from .prompt import build_implement_v2_prompt_sections, implement_v2_prompt_section_metrics
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .reentry_gate import M624ReentryABGateResult, evaluate_m6_24_reentry_ab_gate
@@ -47,14 +46,7 @@ from .types import (
     ToolResultEnvelope,
 )
 from .v1_adapter import ImplementV1AdapterDescriptor, describe_implement_v1_adapter
-from .v2_runtime import (
-    describe_implement_v2_runtime,
-    run_live_json_implement_v2,
-    run_fake_exec_implement_v2,
-    run_fake_read_only_implement_v2,
-    run_fake_write_implement_v2,
-    run_unavailable_implement_v2,
-)
+from .v2_runtime import describe_implement_v2_runtime
 from .native_tool_harness import run_native_implement_v2, run_unavailable_native_implement_v2
 from .workframe import (
     WorkFrame,
@@ -94,8 +86,6 @@ __all__ = [
     "IMPLEMENT_V2_NATIVE_RUNTIME_ID",
     "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID",
     "COMMON_WORKFRAME_INPUTS_SCHEMA_VERSION",
-    "FakeProviderAdapter",
-    "FakeProviderToolCall",
     "DEFAULT_WORKFRAME_VARIANT",
     "WORKFRAME_FIXTURE_CONVERSION_VERSION",
     "WORKFRAME_PROJECTION_SCHEMA_VERSION",
@@ -109,7 +99,6 @@ __all__ = [
     "ImplementV1AdapterDescriptor",
     "ImplementV2ManagedExecRuntime",
     "ImplementV2WriteRuntime",
-    "JsonModelProviderAdapter",
     "M624ReentryABGateResult",
     "NativeTranscript",
     "NativeTranscriptItem",
@@ -157,12 +146,7 @@ __all__ = [
     "record_phase0_baseline_metrics",
     "reduce_workframe",
     "reduce_workframe_with_variant",
-    "run_fake_exec_implement_v2",
-    "run_fake_read_only_implement_v2",
-    "run_fake_write_implement_v2",
-    "run_live_json_implement_v2",
     "run_native_implement_v2",
-    "run_unavailable_implement_v2",
     "run_unavailable_native_implement_v2",
     "select_implement_lane_runtime",
     "validate_native_transcript_pairing",

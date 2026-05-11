@@ -65,6 +65,11 @@ def validate_native_loop_gate(
     checks["command_route_no_live_json_call"] = command_scan.get("run_live_json_implement_v2") is False
     checks["command_route_no_model_json_runtime_literal"] = command_scan.get("model_json_runtime_literal") is False
     checks["command_route_has_native_runner"] = command_scan.get("run_unavailable_native_implement_v2") is True
+    package_scan = _scan_package_surface(source_path)
+    details["package_surface"] = package_scan
+    checks["package_surface_exists"] = package_scan.get("exists") is True
+    for symbol, present in _package_surface_banned_symbols(package_scan).items():
+        checks[f"package_surface_no_{symbol}"] = present is False
 
     fixture_manifest = native_proof_manifest_from_transcript(_validation_fixture_transcript())
     fixture_pairing = fixture_manifest.get("pairing") if isinstance(fixture_manifest.get("pairing"), dict) else {}
@@ -122,6 +127,40 @@ def _scan_command_route(source_root: Path) -> dict[str, object]:
         "native_runtime_literal": IMPLEMENT_V2_NATIVE_RUNTIME_ID in text,
         "run_unavailable_native_implement_v2": "run_unavailable_native_implement_v2" in text,
     }
+
+
+def _scan_package_surface(source_root: Path) -> dict[str, object]:
+    path = source_root / "src" / "mew" / "implement_lane" / "__init__.py"
+    symbols = _legacy_public_surface_symbols()
+    if not path.exists():
+        return {
+            "path": str(path),
+            "exists": False,
+            **{symbol: None for symbol in symbols},
+        }
+    text = path.read_text(encoding="utf-8")
+    return {
+        "path": str(path),
+        "exists": True,
+        **{symbol: symbol in text for symbol in symbols},
+    }
+
+
+def _legacy_public_surface_symbols() -> tuple[str, ...]:
+    return (
+        "run_live_json_implement_v2",
+        "run_fake_exec_implement_v2",
+        "run_fake_read_only_implement_v2",
+        "run_fake_write_implement_v2",
+        "run_unavailable_implement_v2",
+        "JsonModelProviderAdapter",
+        "FakeProviderAdapter",
+        "FakeProviderToolCall",
+    )
+
+
+def _package_surface_banned_symbols(package_scan: Mapping[str, object]) -> dict[str, object]:
+    return {symbol: package_scan.get(symbol) for symbol in _legacy_public_surface_symbols()}
 
 
 def _validation_fixture_transcript() -> NativeTranscript:

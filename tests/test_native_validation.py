@@ -29,6 +29,15 @@ def test_native_loop_gate_passes_static_route_and_fixture() -> None:
     assert result.checks["registry_native_runtime_id"] is True
     assert result.checks["registry_provider_native_loop"] is True
     assert result.checks["command_route_no_live_json_call"] is True
+    assert result.checks["package_surface_exists"] is True
+    assert result.checks["package_surface_no_run_live_json_implement_v2"] is True
+    assert result.checks["package_surface_no_run_fake_exec_implement_v2"] is True
+    assert result.checks["package_surface_no_run_fake_read_only_implement_v2"] is True
+    assert result.checks["package_surface_no_run_fake_write_implement_v2"] is True
+    assert result.checks["package_surface_no_run_unavailable_implement_v2"] is True
+    assert result.checks["package_surface_no_JsonModelProviderAdapter"] is True
+    assert result.checks["package_surface_no_FakeProviderAdapter"] is True
+    assert result.checks["package_surface_no_FakeProviderToolCall"] is True
     assert result.checks["fixture_pairing_valid"] is True
 
 
