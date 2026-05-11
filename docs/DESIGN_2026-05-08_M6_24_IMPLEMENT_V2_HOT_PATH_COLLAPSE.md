@@ -580,22 +580,35 @@ Target files:
 Fastcheck order:
 
 1. Run the focused unit-test subset for the touched surface.
-2. Replay the latest saved artifact for the relevant failure family.
-3. Run prompt leak checks:
+2. Run `scripts/check_implement_v2_hot_path.py` on the latest current-head
+   artifact for the changed surface.
+   - For legacy WorkFrame/history artifacts, this includes WorkFrame replay,
+     prompt leak, sidecar/projection, latest-actionable-failure, and
+     hash-bound micro next-action checks.
+   - For provider-native artifacts, this includes native transcript read,
+     manifest/transcript hash, call/output pairing, `response_items.jsonl`
+     equality, normalized trace parse cleanliness, and native loop-control
+     replay. It must not require or regenerate legacy `history.json`.
+3. Replay the latest saved artifact for the relevant failure family.
+4. Run prompt leak checks:
    - no normal prompt `frontier_state_update`;
    - no full proof/oracle/typed-evidence object in the normal prompt;
    - active todo is projected as a compact card only.
-4. Run sidecar/projection checks:
+5. Run sidecar/projection checks:
    - `hot_path_projection` and `resident_sidecar_state` metrics are present;
    - sidecar total and per-turn growth are within the current phase cap;
    - latest actionable failure is projected once per family.
-5. Run a required micro next-action check:
+6. Run a required micro next-action check when the artifact mode provides a
+   history/WorkFrame micro fixture:
    - use a saved intermediate history from `make-mips-interpreter`,
      `build-cython-ext`, or another measured coding task;
    - ask the model for the next tool call category only;
    - classify the answer as `patch/edit`, `run_verifier`,
-     `inspect_latest_failure`, `cheap_probe`, or `invalid`;
+    `inspect_latest_failure`, `cheap_probe`, or `invalid`;
    - do not run Harbor for this check.
+   Native transcript artifacts may skip the legacy micro fixture only when the
+   native fastcheck has direct transcript/trace/loop-control checks for the same
+   repair class. Do not add `history.json` back solely to satisfy this step.
 
 Micro LLM checks are required because they are cheaper than a live Harbor
 diagnostic and catch prompt/projection mistakes that pure unit tests cannot
@@ -643,8 +656,10 @@ Gate order:
 6. Selected hard-runtime/source-frontier emulator, such as
    `m6_24-implement-v2-hard-runtime-progress-continuation-emulator` when the
    change affects runtime frontier projection.
-7. One same-shape 10 minute `make-mips-interpreter` step-shape diagnostic.
-8. Reference-step comparison against Codex and Claude Code traces.
+7. For native v2, verify the native artifact fastcheck result is green and
+   records `history_path=""`, `transcript_path`, and native loop-control replay.
+8. One same-shape 10 minute `make-mips-interpreter` step-shape diagnostic.
+9. Reference-step comparison against Codex and Claude Code traces.
 
 Done when:
 
@@ -699,10 +714,12 @@ Close prerequisites:
    gates for covered false-completion families.
 8. Replay, dogfood, emulator, and micro next-action checks all pass for the
    current target failure families.
-9. The 10 minute step-shape diagnostic is green or yellow and does not regress
+9. Native transcript artifacts pass the native HOT_PATH fastcheck without
+   legacy `history.json` fallback.
+10. The 10 minute step-shape diagnostic is green or yellow and does not regress
    first edit turn, first verifier turn, prompt bytes, or repeated same-family
    loops against the Phase 0 baseline.
-10. Any remaining failure is recorded as either:
+11. Any remaining failure is recorded as either:
     - implementation polish inside this design;
     - a measured provider/tool-transport gap for a later milestone;
     - or an explicit stop condition requiring redesign.

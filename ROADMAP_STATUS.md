@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, live provider-native Responses runtime, and the tiny live native-loop gate are green; next proof step is a 10min native step-shape diagnostic before any speed/proof evidence counts. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, live provider-native Responses runtime, tiny live native-loop gate, and native-artifact HOT_PATH fastcheck support are green; next proof step is the pre-speed gate, then one 10min native step-shape diagnostic before any speed/proof evidence counts. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -117,7 +117,7 @@ Scope:
   remain repair evidence but cannot close the current M6.24 gate.
 - The prior scoped rebaseline controller
   (`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`) is suspended until the
-  WorkFrame-native fastcheck/dogfood/emulator gate and exactly one same-shape
+  native HOT_PATH fastcheck/dogfood/emulator gate and exactly one same-shape
   `make-mips-interpreter` `step-check-10min` are recorded.
 - The first true-v2 `build-cython-ext` speed attempt
   `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215` is excluded from
@@ -298,7 +298,7 @@ Controller docs:
 Current native-transcript-gated next action:
 
 ```text
-M6.24 -> native transcript rebuild Phase 0-7 reviewed/committed -> keep old model-json v2 as explicit quarantine only -> implement live provider-native execution and authoritative native transcript artifacts -> native-loop validation gate -> one bounded step-shape diagnostic before speed_1/proof_5/broad measurement
+M6.24 -> native transcript rebuild Phase 0-7 reviewed/committed -> keep old model-json v2 as explicit quarantine only -> implement live provider-native execution and authoritative native transcript artifacts -> native-loop validation gate -> native HOT_PATH fastcheck on current artifact -> one bounded step-shape diagnostic before speed_1/proof_5/broad measurement
 ```
 
 Older scoped-rebaseline and WorkFrame rows remain historical evidence only until
@@ -340,11 +340,13 @@ Done when:
   legacy model-JSON v2 is limited to explicit quarantine tests/replay/emulators,
   and proof metrics reject `model_json_main_path_detected=true`;
 - the `implement_v2` HOT_PATH_COLLAPSE design has explicit Phase 0-6 evidence:
-  before any same-shape 10 minute diagnostic, the HOT_PATH fastcheck passes
-  focused UT, saved-artifact replay, prompt leak checks, sidecar/projection
-  checks, latest-actionable-failure shape checks, and a required hash-bound
-  micro next-action check that reuses current fixture evidence or refreshes it
-  with one bounded live `auth.json` LLM call;
+  before any same-shape 10 minute diagnostic, the HOT_PATH fastcheck passes.
+  Legacy WorkFrame artifacts must pass focused UT, saved-artifact replay,
+  prompt leak checks, sidecar/projection checks, latest-actionable-failure
+  shape checks, and a required hash-bound micro next-action check. Native
+  transcript artifacts must pass transcript/response-items/manifest consistency,
+  native trace summary, and native loop-control replay without requiring
+  legacy `history.json`;
 - all 25 scoped `software-engineering,coding` tasks have mew results with
   `implement_v2` results, complete artifacts, and no unexplained Harbor runner
   errors;

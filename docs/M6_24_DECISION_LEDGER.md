@@ -104,12 +104,15 @@ Improvement phase requirements:
     integration gate, not the default phase-correctness detector. Before another
     live step-check for a phase repair, run the fast inner loop from
     `docs/DESIGN_2026-05-08_M6_24_IMPLEMENT_V2_HOT_PATH_COLLAPSE.md`: focused
-    UT, saved-artifact replay, prompt leak checks, sidecar/projection checks,
-    latest-actionable-failure shape checks, and a required hash-bound micro
-    next-action check that reuses current fixture evidence or refreshes it with
-    one bounded live `auth.json` LLM call. If a bug is first found only by live
-    step-check, reduce it to fastcheck/replay/dogfood/emulator coverage before
-    continuing.
+    UT, `scripts/check_implement_v2_hot_path.py`, saved-artifact replay, prompt
+    leak checks, sidecar/projection checks, latest-actionable-failure shape
+    checks, and a required hash-bound micro next-action check when the artifact
+    mode provides history/WorkFrame micro fixtures. Native transcript artifacts
+    must instead pass native transcript read, manifest/transcript hash,
+    call/output pairing, `response_items.jsonl` equality, normalized trace
+    summary, and native loop-control replay without recreating legacy
+    `history.json`. If a bug is first found only by live step-check, reduce it
+    to fastcheck/replay/dogfood/emulator coverage before continuing.
 
 Allowed next actions during improvement phase:
 
@@ -1486,3 +1489,18 @@ comparison before any `speed_1` or `proof_5`.
 
 Detailed comparison:
 `docs/M6_24_WORKFRAME_VARIANT_COMPARISON_2026-05-11.md`.
+
+Native fastcheck decision 2026-05-11 JST:
+
+The native transcript rebuild must not spend another live step-shape diagnostic
+until `scripts/check_implement_v2_hot_path.py` passes on the latest
+provider-native artifact. This check is part of pre-speed, not an optional
+report. In native mode, `history_path` should be empty; the fastcheck reads
+`response_transcript.json`, `response_items.jsonl`, `proof-manifest.json`, and
+normalized trace artifacts, then validates manifest hash/pairing, response item
+equality, parse-clean trace summary, and native loop-control replay. Do not add
+legacy `history.json` back to native artifacts just to satisfy WorkFrame-era
+micro checks. The next live sequence is: focused UT/local checks -> native
+HOT_PATH fastcheck -> replay/dogfood/emulator where applicable -> one 10min
+step-shape diagnostic -> reference-step comparison -> only then `speed_1` or
+`proof_5`.

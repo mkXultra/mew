@@ -19,7 +19,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Mapping
 
 from ..model_backends import (
     call_model_json,
@@ -27,6 +27,9 @@ from ..model_backends import (
     model_backend_default_base_url,
     model_backend_default_model,
 )
+from .native_tool_harness import _native_call_is_verifier, _native_loop_control_state
+from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID, NativeTranscript, NativeTranscriptItem
+from .native_transcript import native_transcript_hash, validate_native_transcript_pairing
 from .tool_lab import resolve_implement_v2_manifest_path
 from .v2_runtime import _render_prompt_history_json
 from .workframe import (
@@ -105,6 +108,15 @@ def run_hot_path_fastcheck(
 
     manifest_path = resolve_implement_v2_manifest_path(artifact)
     artifact_path = Path(str(artifact or "")).expanduser()
+    manifest = _load_manifest_json(manifest_path)
+    if _is_native_transcript_artifact(artifact_path=artifact_path, manifest_path=manifest_path, manifest=manifest):
+        return _run_native_hot_path_fastcheck(
+            artifact_path=artifact_path,
+            manifest_path=manifest_path,
+            manifest=manifest,
+            baseline=baseline,
+        )
+
     history_path = resolve_implement_v2_history_path(artifact_path, manifest_path)
     micro_read_path, micro_write_path = _resolve_micro_fixture_paths(
         manifest_path=manifest_path,
@@ -113,7 +125,6 @@ def run_hot_path_fastcheck(
     )
 
     checks: list[HotPathCheck] = []
-    manifest = _load_manifest_json(manifest_path)
     history = _load_history_json(history_path)
     baseline_data = _load_baseline_json(baseline)
     expected = _expected_micro_categories(expected_categories)
@@ -198,6 +209,7 @@ def format_hot_path_fastcheck_text(result: dict[str, object]) -> str:
         f"status: {result.get('status')}",
         f"manifest: {result.get('manifest_path')}",
         f"history: {result.get('history_path')}",
+        f"transcript: {result.get('transcript_path')}",
         f"micro_next_action: {result.get('micro_next_action_path')}",
         f"micro_refresh: {_format_micro_refresh_line(result.get('micro_next_action_refresh'))}",
         "",
@@ -208,6 +220,317 @@ def format_hot_path_fastcheck_text(result: dict[str, object]) -> str:
             continue
         lines.append(f"- {check.get('status')} {check.get('name')}: {check.get('message')}")
     return "\n".join(lines)
+
+
+def _is_native_transcript_artifact(
+    *,
+    artifact_path: Path,
+    manifest_path: Path,
+    manifest: Mapping[str, object],
+) -> bool:
+    if str(manifest.get("runtime_id") or "") == IMPLEMENT_V2_NATIVE_RUNTIME_ID:
+        return True
+    if _native_manifest_transport_is_provider_native(manifest):
+        return True
+    metrics = _safe_mapping(manifest.get("metrics"))
+    if metrics.get("provider_native_tool_loop") is True:
+        return True
+    return _resolve_native_transcript_path(artifact_path=artifact_path, manifest_path=manifest_path).is_file()
+
+
+def _run_native_hot_path_fastcheck(
+    *,
+    artifact_path: Path,
+    manifest_path: Path,
+    manifest: dict[str, object],
+    baseline: object | None,
+) -> dict[str, object]:
+    transcript_path = _resolve_native_transcript_path(artifact_path=artifact_path, manifest_path=manifest_path)
+    response_items_path = transcript_path.parent / "response_items.jsonl"
+    baseline_data = _load_baseline_json(baseline)
+    transcript_payload: dict[str, object] = {}
+    transcript: NativeTranscript | None = None
+    transcript_error = ""
+    try:
+        transcript_payload = _load_native_transcript_payload(transcript_path)
+        transcript = _native_transcript_from_payload(transcript_payload)
+    except Exception as exc:
+        transcript_error = str(exc)
+
+    checks: list[HotPathCheck] = [
+        _check_native_transcript_read(transcript_path, transcript=transcript, error=transcript_error),
+    ]
+    if transcript is not None:
+        checks.append(_check_native_manifest_contract(manifest, transcript=transcript, transcript_payload=transcript_payload))
+        checks.append(_check_native_pairing(transcript))
+        checks.append(_check_native_response_items(response_items_path, transcript=transcript))
+        checks.append(_check_native_trace_summary(artifact_path=artifact_path, manifest_path=manifest_path, transcript=transcript))
+        checks.append(_check_native_loop_control_replay(transcript))
+    else:
+        checks.extend(
+            [
+                _check("native_manifest_contract", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_pairing", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_response_items_match", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_trace_summary", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_loop_control_replay", False, "native transcript is unreadable", {"skipped": True}),
+            ]
+        )
+    status = "pass" if all(check.status == "pass" for check in checks) else "fail"
+    return {
+        "schema_version": HOT_PATH_FASTCHECK_SCHEMA_VERSION,
+        "status": status,
+        "artifact": str(artifact_path),
+        "manifest_path": str(manifest_path),
+        "history_path": "",
+        "transcript_path": str(transcript_path),
+        "response_items_path": str(response_items_path),
+        "micro_next_action_path": "",
+        "micro_next_action_refresh": {"mode": "skipped", "reason": "native_transcript_mode"},
+        "checks": [check.as_dict() for check in checks],
+        "metrics": {
+            "native_transcript": _native_transcript_metrics(transcript) if transcript is not None else {},
+            "native_trace": _native_trace_summary(artifact_path=artifact_path, manifest_path=manifest_path, transcript=transcript),
+            "baseline": baseline_data,
+            "micro_next_action": {"category": "", "expected_categories": []},
+        },
+    }
+
+
+def _resolve_native_transcript_path(*, artifact_path: Path, manifest_path: Path) -> Path:
+    candidates = (
+        manifest_path.parent / "response_transcript.json",
+        artifact_path / "response_transcript.json",
+        artifact_path / "implement_v2" / "response_transcript.json",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve(strict=False)
+    search_root = artifact_path if artifact_path.exists() else manifest_path.parent
+    recursive = sorted(search_root.rglob("response_transcript.json")) if search_root.is_dir() else []
+    if recursive:
+        return recursive[0].resolve(strict=False)
+    return (manifest_path.parent / "response_transcript.json").resolve(strict=False)
+
+
+def _load_native_transcript_payload(path: Path) -> dict[str, object]:
+    payload = _load_json(path)
+    if not isinstance(payload, dict):
+        raise ValueError(f"expected native transcript JSON object: {path}")
+    return dict(payload)
+
+
+def _native_transcript_from_payload(payload: Mapping[str, object]) -> NativeTranscript:
+    return NativeTranscript(
+        lane_attempt_id=str(payload.get("lane_attempt_id") or ""),
+        provider=str(payload.get("provider") or ""),
+        model=str(payload.get("model") or ""),
+        items=tuple(_native_transcript_item_from_mapping(item) for item in payload.get("items") or [] if isinstance(item, Mapping)),
+    )
+
+
+def _native_transcript_item_from_mapping(item: Mapping[str, object]) -> NativeTranscriptItem:
+    return NativeTranscriptItem(
+        sequence=_nonnegative_int(item.get("sequence")),
+        turn_id=str(item.get("turn_id") or ""),
+        kind=str(item.get("kind") or ""),  # type: ignore[arg-type]
+        lane_attempt_id=str(item.get("lane_attempt_id") or ""),
+        provider=str(item.get("provider") or ""),
+        model=str(item.get("model") or ""),
+        response_id=str(item.get("response_id") or ""),
+        provider_item_id=str(item.get("provider_item_id") or ""),
+        output_index=_nonnegative_int(item.get("output_index")),
+        call_id=str(item.get("call_id") or ""),
+        tool_name=str(item.get("tool_name") or ""),
+        arguments_json_text=str(item.get("arguments_json_text") or ""),
+        custom_input_text=str(item.get("custom_input_text") or ""),
+        output_text_or_ref=str(item.get("output_text_or_ref") or ""),
+        status=str(item.get("status") or ""),
+        is_error=bool(item.get("is_error")),
+        raw_ref=str(item.get("raw_ref") or ""),
+        encrypted_reasoning_ref=str(item.get("encrypted_reasoning_ref") or ""),
+        metrics_ref=str(item.get("metrics_ref") or ""),
+        content_refs=tuple(str(ref) for ref in item.get("content_refs") or ()),
+        evidence_refs=tuple(str(ref) for ref in item.get("evidence_refs") or ()),
+        sidecar_refs=tuple(str(ref) for ref in item.get("sidecar_refs") or ()),
+    )
+
+
+def _check_native_transcript_read(path: Path, *, transcript: NativeTranscript | None, error: str) -> HotPathCheck:
+    ok = transcript is not None and bool(transcript.items)
+    return _check(
+        "native_transcript_read",
+        ok,
+        "native transcript is readable" if ok else "native transcript is missing, empty, or invalid",
+        {"path": str(path), "item_count": len(transcript.items) if transcript else 0, "error": error},
+    )
+
+
+def _check_native_manifest_contract(
+    manifest: Mapping[str, object],
+    *,
+    transcript: NativeTranscript,
+    transcript_payload: Mapping[str, object],
+) -> HotPathCheck:
+    metrics = _safe_mapping(manifest.get("metrics"))
+    pairing = _safe_mapping(manifest.get("pairing"))
+    computed_hash = native_transcript_hash(transcript)
+    payload_hash = str(transcript_payload.get("hash") or "")
+    checks = {
+        "native_runtime_id": str(manifest.get("runtime_id") or "") == IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "native_transport": _native_manifest_transport_is_provider_native(manifest),
+        "provider_native_tool_loop": metrics.get("provider_native_tool_loop") is True,
+        "model_json_main_path_not_detected": metrics.get("model_json_main_path_detected") is not True,
+        "manifest_transcript_hash_matches": str(manifest.get("transcript_hash") or "") == computed_hash,
+        "payload_transcript_hash_matches": payload_hash == computed_hash,
+        "manifest_pairing_valid": pairing.get("valid") is True or metrics.get("pairing_valid") is True,
+    }
+    ok = all(checks.values())
+    return _check(
+        "native_manifest_contract",
+        ok,
+        "native manifest matches authoritative transcript" if ok else "native manifest does not match authoritative transcript",
+        {
+            **checks,
+            "runtime_id": manifest.get("runtime_id"),
+            "transport_kind": manifest.get("transport_kind"),
+            "native_transport_kind": manifest.get("native_transport_kind") or metrics.get("native_transport_kind"),
+            "transcript_hash": computed_hash,
+            "manifest_transcript_hash": manifest.get("transcript_hash"),
+            "payload_transcript_hash": payload_hash,
+        },
+    )
+
+
+def _check_native_pairing(transcript: NativeTranscript) -> HotPathCheck:
+    result = validate_native_transcript_pairing(transcript)
+    return _check(
+        "native_pairing",
+        result.valid,
+        "native function calls and outputs are paired" if result.valid else "native function call/output pairing is invalid",
+        result.as_dict(),
+    )
+
+
+def _check_native_response_items(path: Path, *, transcript: NativeTranscript) -> HotPathCheck:
+    error = ""
+    response_items: list[object] = []
+    try:
+        response_items = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except Exception as exc:
+        error = str(exc)
+    transcript_items = [item.as_dict() for item in transcript.items]
+    ok = bool(response_items) and response_items == transcript_items
+    return _check(
+        "native_response_items_match",
+        ok,
+        "response_items.jsonl matches response_transcript.json"
+        if ok
+        else "response_items.jsonl does not match response_transcript.json",
+        {
+            "path": str(path),
+            "response_item_count": len(response_items),
+            "transcript_item_count": len(transcript_items),
+            "error": error,
+        },
+    )
+
+
+def _check_native_trace_summary(
+    *,
+    artifact_path: Path,
+    manifest_path: Path,
+    transcript: NativeTranscript,
+) -> HotPathCheck:
+    summary = _native_trace_summary(artifact_path=artifact_path, manifest_path=manifest_path, transcript=transcript)
+    parse_error_count = _nonnegative_int(summary.get("parse_error_count"))
+    edit_count = _nonnegative_int(summary.get("edit_count"))
+    verifier_count = _nonnegative_int(summary.get("verifier_count"))
+    has_hot_path_shape = edit_count > 0 and verifier_count > 0
+    ok = parse_error_count == 0 and has_hot_path_shape
+    return _check(
+        "native_trace_summary",
+        ok,
+        "native trace summary is available and parse-clean" if ok else "native trace summary is missing or has parse errors",
+        summary,
+    )
+
+
+def _native_trace_summary(
+    *,
+    artifact_path: Path,
+    manifest_path: Path,
+    transcript: NativeTranscript | None,
+) -> dict[str, object]:
+    for candidate in (
+        manifest_path.parent / "normalized-trace" / "summary.json",
+        artifact_path / "normalized-trace" / "summary.json",
+    ):
+        if candidate.is_file():
+            data = _load_json(candidate)
+            if isinstance(data, dict):
+                return dict(data)
+    if transcript is None:
+        return {}
+    calls = [item for item in transcript.items if item.kind in {"function_call", "custom_tool_call", "finish_call"}]
+    return {
+        "source": "computed_from_native_transcript",
+        "turn_count": len({item.turn_id for item in transcript.items if item.turn_id}),
+        "command_count": sum(1 for item in calls if item.tool_name in {"run_command", "run_tests"}),
+        "edit_count": sum(1 for item in calls if item.tool_name in {"write_file", "edit_file", "apply_patch"}),
+        "verifier_count": sum(1 for item in calls if _native_call_is_verifier(item)),
+        "parse_error_count": sum(
+            1
+            for item in transcript.items
+            if item.status == "invalid" or (item.is_error and item.status == "synthetic_error")
+        ),
+    }
+
+
+def _check_native_loop_control_replay(transcript: NativeTranscript) -> HotPathCheck:
+    state = _native_loop_control_state(list(transcript.items), current_turn_index=_native_next_turn_index(transcript.items))
+    failed_verifier = bool(_safe_mapping(state.get("latest_failed_verifier")))
+    pending_failed_verifier_repair = bool(
+        failed_verifier
+        and _nonnegative_int(state.get("post_failure_write_count")) == 0
+        and _nonnegative_int(state.get("post_failure_probe_count")) >= 2
+    )
+    ok = not pending_failed_verifier_repair or state.get("verifier_repair_due") is True
+    return _check(
+        "native_loop_control_replay",
+        ok,
+        "native loop control replay reaches the expected repair policy"
+        if ok
+        else "native loop control replay failed to mark pending verifier repair",
+        dict(state),
+    )
+
+
+def _native_next_turn_index(items: Iterable[NativeTranscriptItem]) -> int:
+    max_turn = 0
+    for item in items:
+        match = re.search(r"(\d+)$", item.turn_id or "")
+        if match:
+            max_turn = max(max_turn, int(match.group(1)))
+    return max_turn + 1 if max_turn else len({item.turn_id for item in items if item.turn_id}) + 1
+
+
+def _native_transcript_metrics(transcript: NativeTranscript) -> dict[str, object]:
+    pairing = validate_native_transcript_pairing(transcript)
+    return {
+        "transcript_hash": native_transcript_hash(transcript),
+        "item_count": len(transcript.items),
+        "pairing": pairing.as_dict(),
+    }
+
+
+def _native_manifest_transport_is_provider_native(manifest: Mapping[str, object]) -> bool:
+    metrics = _safe_mapping(manifest.get("metrics"))
+    transport_kind = str(manifest.get("transport_kind") or metrics.get("transport_kind") or "")
+    native_transport_kind = str(manifest.get("native_transport_kind") or metrics.get("native_transport_kind") or "")
+    if transport_kind in {"legacy_model_json", "model_json", "provider_native_unavailable"}:
+        return False
+    return transport_kind == "provider_native" or native_transport_kind == "provider_native"
 
 
 def resolve_implement_v2_history_path(artifact: Path, manifest_path: Path) -> Path:

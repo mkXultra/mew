@@ -29,8 +29,17 @@ Implementation checkpoint 2026-05-11:
   -> finish`, valid pairing (`4/4`, no errors), first write at turn 2, first
   verifier at turn 3, and
   `scripts/check_implement_v2_native_gate.py --artifact ... --json` returned
-  `ok=true`. The next proof step is the required 10min native step-shape
-  diagnostic, not broad `speed_1` / `proof_5` measurement.
+  `ok=true`.
+- Native HOT_PATH fastcheck now accepts native transcript artifacts directly:
+  it reads authoritative `response_transcript.json`, verifies
+  `response_items.jsonl`, manifest hash/pairing, normalized trace parse
+  cleanliness, and native loop-control replay without requiring legacy
+  `history.json`. The next proof step is not a bare 10min diagnostic. It is
+  the pre-speed gate in this order: focused UT/local checks -> native
+  `scripts/check_implement_v2_hot_path.py --artifact <native-artifact>
+  --no-baseline` -> replay/dogfood/emulator where applicable -> exactly one
+  10min native step-shape diagnostic -> reference-step comparison. Broad
+  `speed_1` / `proof_5` measurement remains blocked until that gate is green.
 
 Scope: no-backward-compatibility redesign of `implement_v2` as a provider-native
 tool/function calling loop. This document does not authorize code changes by
@@ -1106,7 +1115,13 @@ Implementation:
   native speed/proof evidence.
 - Run saved replay gates.
 - Run dogfood and emulator gates against native artifacts.
-- Run micro next-action gates.
+- Run the native HOT_PATH fastcheck against the latest current-head native
+  artifact. The fastcheck must accept native transcript artifacts without
+  `history.json`, validate transcript/response-items/manifest consistency, and
+  replay native loop-control state.
+- Run micro next-action gates only for legacy WorkFrame/history artifacts or
+  explicitly designed native micro fixtures. Native transcript mode must not
+  recreate `history.json` only to satisfy old micro checks.
 - Run one 10 minute step-shape diagnostic before any speed proof.
 - Compare reference trace normalized shape against Codex and Claude.
 
@@ -1120,6 +1135,11 @@ Close gates:
   finish completes with proof.
 - Micro next-action: latest native tool result maps to the intended next inspect,
   patch, verifier, or blocked action without requiring old frontier/todo state.
+- Native fastcheck: `scripts/check_implement_v2_hot_path.py` passes on the
+  latest native artifact and reports `history_path=""`, `transcript_path`,
+  `native_manifest_contract`, `native_pairing`,
+  `native_response_items_match`, `native_trace_summary`, and
+  `native_loop_control_replay`.
 - 10 minute step shape: parse error count is zero, no model-JSON failures exist,
   first write latency is recorded, verifier count and same-family repeats are
   bounded by the phase's declared thresholds, and no unpaired tool calls appear.
