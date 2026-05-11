@@ -259,6 +259,89 @@ def _write_read_only_native_artifact(tmp_path: Path) -> Path:
     return artifact
 
 
+def _write_native_artifact_with_search_output(tmp_path: Path, *, output_text: str) -> Path:
+    artifact = tmp_path / "native-search-artifact"
+    lane_attempt_id = "native-fastcheck:search"
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider="codex",
+        model="gpt-5.5",
+        items=(
+            NativeTranscriptItem(
+                sequence=1,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="call-search-1",
+                tool_name="search_text",
+                arguments_json_text='{"path":".","query":"syscall"}',
+            ),
+            NativeTranscriptItem(
+                sequence=2,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="call-search-1",
+                tool_name="search_text",
+                status="completed",
+                output_text_or_ref=output_text,
+            ),
+            NativeTranscriptItem(
+                sequence=3,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="call-write-1",
+                tool_name="write_file",
+                arguments_json_text='{"path":"vm.js","content":"console.log(1)"}',
+            ),
+            NativeTranscriptItem(
+                sequence=4,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="call-write-1",
+                tool_name="write_file",
+                status="completed",
+                output_text_or_ref="write_file result: completed",
+            ),
+            NativeTranscriptItem(
+                sequence=5,
+                turn_id="turn-3",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="call-test-1",
+                tool_name="run_tests",
+                arguments_json_text='{"command":"node vm.js","command_intent":"verify"}',
+            ),
+            NativeTranscriptItem(
+                sequence=6,
+                turn_id="turn-3",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="call-test-1",
+                tool_name="run_tests",
+                status="completed",
+                output_text_or_ref="run_tests result: completed",
+            ),
+        ),
+    )
+    write_native_transcript_artifacts(artifact, transcript)
+    return artifact
+
+
 def test_hot_path_fastcheck_accepts_native_transcript_artifact_without_history(tmp_path):
     artifact = _write_native_artifact(tmp_path)
 
@@ -339,6 +422,24 @@ def test_hot_path_fastcheck_replays_native_failed_verifier_repair_control(tmp_pa
     assert check["status"] == "pass"
     assert check["details"]["verifier_repair_due"] is True
     assert check["details"]["next_action_policy"] == "patch_or_blocked_finish_after_failed_verifier"
+
+
+def test_hot_path_fastcheck_rejects_positive_native_search_without_line_anchor(tmp_path):
+    artifact = _write_native_artifact_with_search_output(
+        tmp_path,
+        output_text=(
+            "search_text result: completed; "
+            "summary=Searched /app/doomgeneric for 'syscall' matches=50 (truncated); "
+            "output_refs=implement-v2-read://run/call-search-1/content"
+        ),
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "fail"
+    check = [item for item in result["checks"] if item["name"] == "native_search_text_anchor_projection"][0]
+    assert check["status"] == "fail"
+    assert check["details"]["missing"][0]["call_id"] == "call-search-1"
 
 
 def _workframe_inputs(

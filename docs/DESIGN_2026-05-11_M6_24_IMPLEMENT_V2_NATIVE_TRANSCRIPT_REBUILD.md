@@ -33,7 +33,8 @@ Implementation checkpoint 2026-05-11:
 - Native HOT_PATH fastcheck now accepts native transcript artifacts directly:
   it reads authoritative `response_transcript.json`, verifies
   `response_items.jsonl`, manifest hash/pairing, normalized trace parse
-  cleanliness, and native loop-control replay without requiring legacy
+  cleanliness, native loop-control replay, and positive `search_text` outputs
+  carrying compact model-visible `path:line` anchors without requiring legacy
   `history.json`. The next proof step is not a bare 10min diagnostic. It is
   the pre-speed gate in this order: focused UT/local checks -> native
   `scripts/check_implement_v2_hot_path.py --artifact <native-artifact>
@@ -1139,7 +1140,9 @@ Close gates:
   latest native artifact and reports `history_path=""`, `transcript_path`,
   `native_manifest_contract`, `native_pairing`,
   `native_response_items_match`, `native_trace_summary`, and
-  `native_loop_control_replay`.
+  `native_loop_control_replay`. If a completed `search_text` reports positive
+  matches, `native_search_text_anchor_projection` must confirm that the model
+  saw compact `path:line` anchors rather than only match counts plus refs.
 - 10 minute step shape: parse error count is zero, no model-JSON failures exist,
   first write latency is recorded, verifier count and same-family repeats are
   bounded by the phase's declared thresholds, and no unpaired tool calls appear.

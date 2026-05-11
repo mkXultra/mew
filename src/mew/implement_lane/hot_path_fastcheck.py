@@ -31,6 +31,7 @@ from .native_tool_harness import _native_call_is_verifier, _native_loop_control_
 from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID, NativeTranscript, NativeTranscriptItem
 from .native_transcript import native_transcript_hash, validate_native_transcript_pairing
 from .tool_lab import resolve_implement_v2_manifest_path
+from .types import search_text_output_has_line_anchor
 from .v2_runtime import _render_prompt_history_json
 from .workframe import (
     WORKFRAME_RED_MAX_BYTES,
@@ -266,6 +267,7 @@ def _run_native_hot_path_fastcheck(
         checks.append(_check_native_response_items(response_items_path, transcript=transcript))
         checks.append(_check_native_trace_summary(artifact_path=artifact_path, manifest_path=manifest_path, transcript=transcript))
         checks.append(_check_native_loop_control_replay(transcript))
+        checks.append(_check_native_search_text_anchor_projection(transcript))
     else:
         checks.extend(
             [
@@ -274,6 +276,7 @@ def _run_native_hot_path_fastcheck(
                 _check("native_response_items_match", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_trace_summary", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_loop_control_replay", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_search_text_anchor_projection", False, "native transcript is unreadable", {"skipped": True}),
             ]
         )
     status = "pass" if all(check.status == "pass" for check in checks) else "fail"
@@ -504,6 +507,46 @@ def _check_native_loop_control_replay(transcript: NativeTranscript) -> HotPathCh
         else "native loop control replay failed to mark pending verifier repair",
         dict(state),
     )
+
+
+def _check_native_search_text_anchor_projection(transcript: NativeTranscript) -> HotPathCheck:
+    missing: list[dict[str, object]] = []
+    checked = 0
+    for item in transcript.items:
+        if item.tool_name != "search_text" or not item.kind.endswith("_output") or item.status != "completed":
+            continue
+        match_count = _native_search_text_match_count(item.output_text_or_ref)
+        if match_count <= 0:
+            continue
+        checked += 1
+        if not search_text_output_has_line_anchor(item.output_text_or_ref):
+            missing.append(
+                {
+                    "call_id": item.call_id,
+                    "turn_id": item.turn_id,
+                    "match_count": match_count,
+                    "summary": item.output_text_or_ref[:300],
+                }
+            )
+    ok = not missing
+    return _check(
+        "native_search_text_anchor_projection",
+        ok,
+        "positive native search_text outputs expose path:line anchors"
+        if ok
+        else "positive native search_text output is missing model-visible path:line anchors",
+        {"checked_positive_searches": checked, "missing": missing[:5]},
+    )
+
+
+def _native_search_text_match_count(text: object) -> int:
+    match = re.search(r"\bmatches=(\d+)\b", str(text or ""))
+    if not match:
+        return 0
+    try:
+        return max(0, int(match.group(1)))
+    except ValueError:
+        return 0
 
 
 def _native_next_turn_index(items: Iterable[NativeTranscriptItem]) -> int:

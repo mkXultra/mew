@@ -588,7 +588,9 @@ Fastcheck order:
    - For provider-native artifacts, this includes native transcript read,
      manifest/transcript hash, call/output pairing, `response_items.jsonl`
      equality, normalized trace parse cleanliness, and native loop-control
-     replay. It must not require or regenerate legacy `history.json`.
+     replay. Positive `search_text` outputs must also expose compact
+     model-visible `path:line` anchors instead of only match counts and
+     content refs. It must not require or regenerate legacy `history.json`.
 3. Replay the latest saved artifact for the relevant failure family.
 4. Run prompt leak checks:
    - no normal prompt `frontier_state_update`;

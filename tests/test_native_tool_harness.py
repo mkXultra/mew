@@ -100,6 +100,28 @@ def test_native_harness_read_finish_and_artifacts(tmp_path: Path) -> None:
     assert manifest["metrics"]["native_transport_kind"] == "provider_native"
 
 
+def test_native_harness_search_text_output_includes_model_visible_anchors(tmp_path: Path) -> None:
+    source = tmp_path / "src" / "my_stdlib.c"
+    source.parent.mkdir()
+    source.write_text("int syscall_60(void) { return 0; }\n", encoding="utf-8")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("search-1", "search_text", {"path": ".", "query": "syscall_60"}, output_index=0),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "search done"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider)
+
+    output = next(item for item in result.transcript.items if item.call_id == "search-1" and item.kind.endswith("_output"))
+    assert output.status == "completed"
+    assert "matches=1" in output.output_text_or_ref
+    assert "search_anchors:" in output.output_text_or_ref
+    assert "my_stdlib.c:1:int syscall_60" in output.output_text_or_ref
+
+
 def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifacts"
     live_turn = NativeResponsesStreamParseResult(

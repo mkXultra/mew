@@ -8,6 +8,7 @@ still producing comparable artifacts for M6.24.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Literal
 
 TOOL_CALL_SCHEMA_VERSION = 1
@@ -178,6 +179,10 @@ class ToolResultEnvelope:
                     compact = " ".join(value.strip().split())
                     parts.append(f"{key}: {compact}")
                     break
+            if self.tool_name == "search_text":
+                anchor_preview = _search_text_anchor_preview(payload)
+                if anchor_preview:
+                    parts.append(anchor_preview)
         if self.content_refs:
             parts.append("output_refs=" + ",".join(self.content_refs[:4]))
         if self.evidence_refs:
@@ -186,6 +191,64 @@ class ToolResultEnvelope:
         if len(text) <= limit:
             return text
         return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _search_text_anchor_preview(payload: dict[str, object], *, limit: int = 850) -> str:
+    """Expose compact path:line anchors for model-visible search results.
+
+    Full search payloads remain sidecar-backed, but a native function-call
+    output that only says "matches=50" forces the next model turn to guess or
+    repeat the same search. Keep a small, generic rg-like preview so the model
+    can choose a narrow read_file on the discovered file.
+    """
+
+    lines: list[str] = []
+    for snippet in payload.get("snippets") or ():
+        if not isinstance(snippet, dict):
+            continue
+        path = str(snippet.get("path") or "").strip()
+        if not path:
+            continue
+        for item in snippet.get("lines") or ():
+            if not isinstance(item, dict) or not item.get("match"):
+                continue
+            line = str(item.get("line") or "").strip()
+            text = " ".join(str(item.get("text") or "").strip().split())
+            if line:
+                lines.append(f"{path}:{line}:{text[:220]}")
+            if len(lines) >= 8:
+                break
+        if len(lines) >= 8:
+            break
+    if not lines:
+        for match in payload.get("matches") or ():
+            text = " ".join(str(match or "").strip().split())
+            if not text:
+                continue
+            lines.append(text[:320])
+            if len(lines) >= 8:
+                break
+    if not lines:
+        return ""
+    preview = "search_anchors:\n" + "\n".join(lines)
+    if len(preview) <= limit:
+        return preview
+    clipped_lines: list[str] = []
+    used = len("search_anchors:\n")
+    for line in lines:
+        remaining = limit - used
+        if remaining <= 20:
+            break
+        clipped = line[: max(0, remaining - 1)]
+        clipped_lines.append(clipped)
+        used += len(clipped) + 1
+    return "search_anchors:\n" + "\n".join(clipped_lines)
+
+
+def search_text_output_has_line_anchor(text: object) -> bool:
+    """Return whether a model-visible search result includes a path:line anchor."""
+
+    return bool(re.search(r"(?m)(?:^|[\s;])\S[^:\n;]*:\d+:", str(text or "")))
 
 
 @dataclass(frozen=True)
