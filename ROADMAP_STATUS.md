@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, live provider-native Responses runtime, tiny live native-loop gate, and native-artifact HOT_PATH fastcheck support are green; latest 10min native diagnostic exposed a generic `search_text` anchor-projection gap, so current work is fastcheck-backed repair before another step-shape diagnostic. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, live provider-native Responses runtime, tiny live native-loop gate, native-artifact HOT_PATH fastcheck support, and search-anchor projection are green; latest 10min native diagnostic exposed a generic native final-verifier closeout gap after a late source mutation, so current work is closeout-backed repair before another step-shape diagnostic. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -385,11 +385,17 @@ Native-loop gate evidence:
   `uv run python scripts/check_implement_v2_native_gate.py --artifact proof-artifacts/m6_24_native_loop_gate_20260511_live_portable --json`
   returned `ok=true`
 
-Remaining active gap: run one bounded 10min native step-shape diagnostic from
-the live provider-native path before counting any `speed_1` or `proof_5`
-evidence. Do not count legacy `implement_v2_model_json_tool_loop` artifacts as
-native-loop evidence. The next implementation slice should compare the live
-native step shape against the reference traces before broad measurement
+Remaining active gap: the latest bounded 10min native step-shape diagnostic
+from the live provider-native path reached a late source mutation after a
+failed verifier, but stopped at `max_turns` without running the configured
+final verifier. The active implementation slice is the generic native
+final-verifier closeout repair: if a latest source mutation has no later
+terminal verifier, native v2 must run one deterministic configured verifier at
+closeout, downgrade completed finish on verifier failure, and treat yielded
+verifier success through later `poll_command` as a valid later verifier. Do not
+count legacy `implement_v2_model_json_tool_loop` artifacts as native-loop
+evidence. After this repair is reviewed and committed, rerun fastcheck/replay/
+dogfood and exactly one same-shape 10min diagnostic before broad measurement
 resumes.
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status

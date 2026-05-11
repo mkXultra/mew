@@ -55,6 +55,7 @@ _FIRST_WRITE_DUE_PROBE_THRESHOLD = 10
 _FIRST_WRITE_DUE_TURN_THRESHOLD = 6
 _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
 _CONTROL_FAILURE_SUMMARY_LIMIT = 700
+_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
 _COMMAND_RUN_ID_RE = re.compile(r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)")
 
 
@@ -213,10 +214,14 @@ def run_native_implement_v2(
     )
 
     items: list[NativeTranscriptItem] = []
+    tool_calls: list[NativeTranscriptItem] = []
     tool_results: list[ToolResultEnvelope] = []
     tool_latencies: list[dict[str, object]] = []
     first_write_metric: dict[str, object] | None = None
     first_verifier_metric: dict[str, object] | None = None
+    final_verifier_closeout_count = 0
+    final_verifier_closeout_reason = ""
+    final_verifier_closeout_provider_call_id = ""
     start_monotonic = time.monotonic()
     status = "blocked"
     finish_summary = ""
@@ -277,6 +282,7 @@ def run_native_implement_v2(
             latency_finished = time.monotonic()
             output = _native_output_from_result(call, result, sequence=0)
             output_records.append(output)
+            tool_calls.append(call)
             tool_results.append(result)
             tool_latencies.append(
                 {
@@ -313,6 +319,46 @@ def run_native_implement_v2(
         if accepted_finish is not None:
             break
 
+    closeout = _native_final_verifier_closeout(
+        lane_input,
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        exec_runtime=exec_runtime,
+        workspace=workspace,
+        allowed_read_roots=allowed_read_roots,
+        allowed_write_roots=allowed_write_roots,
+        lane_config=lane_config,
+        tool_calls=tuple(tool_calls),
+        tool_results=tuple(tool_results),
+        start_monotonic=start_monotonic,
+        current_status=status,
+    )
+    if closeout is not None:
+        closeout_call, closeout_result, closeout_latency = closeout
+        final_verifier_closeout_count = 1
+        final_verifier_closeout_reason = (
+            "native final verifier closeout ran after latest source mutation before max-turn closeout"
+        )
+        final_verifier_closeout_provider_call_id = closeout_call.call_id
+        items.append(replace(closeout_call, sequence=len(items) + 1))
+        items.append(replace(_native_output_from_result(closeout_call, closeout_result, sequence=0), sequence=len(items) + 1))
+        tool_calls.append(closeout_call)
+        tool_results.append(closeout_result)
+        tool_latencies.append(closeout_latency)
+        if first_verifier_metric is None:
+            first_verifier_metric = {
+                "turn_index": _turn_number(closeout_call.turn_id),
+                "call_id": closeout_call.call_id,
+                "tool_name": closeout_call.tool_name,
+                "wall_seconds": closeout_latency["started_ms"] / 1000,
+            }
+        if _native_final_verifier_passed(closeout_result):
+            status = "completed"
+            finish_summary = "native final verifier closeout passed; completing without another model turn"
+        else:
+            status = "blocked"
+            finish_summary = ""
+
     transcript = NativeTranscript(
         lane_attempt_id=lane_attempt_id,
         provider=provider.provider,
@@ -333,6 +379,9 @@ def run_native_implement_v2(
         "first_write_latency_turn": (first_write_metric or {}).get("turn_index"),
         "first_verifier_latency": first_verifier_metric
         or {"turn_index": None, "call_id": "", "tool_name": "", "wall_seconds": None},
+        "final_verifier_closeout_count": final_verifier_closeout_count,
+        "final_verifier_closeout_reason": final_verifier_closeout_reason,
+        "final_verifier_closeout_provider_call_id": final_verifier_closeout_provider_call_id,
         "pairing": validation.as_dict(),
     }
     proof_artifacts: tuple[str, ...] = ()
@@ -449,6 +498,333 @@ def _execute_native_call(
             )
         return write_runtime.execute(envelope)
     return _invalid_result(call, reason=f"unknown native tool: {call.tool_name}")
+
+
+def _native_final_verifier_closeout(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    provider: object,
+    exec_runtime: ImplementV2ManagedExecRuntime,
+    workspace: Path,
+    allowed_read_roots: tuple[str, ...],
+    allowed_write_roots: tuple[str, ...],
+    lane_config: Mapping[str, object],
+    tool_calls: tuple[NativeTranscriptItem, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    start_monotonic: float,
+    current_status: str,
+) -> tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]] | None:
+    pending_mutation = _latest_native_source_mutation_without_later_verifier(
+        tool_calls,
+        tool_results,
+        source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
+    )
+    if not pending_mutation:
+        return None
+    if not _native_final_verifier_closeout_allowed(lane_input, lane_config=lane_config):
+        return None
+    command = _configured_native_final_verifier_command(lane_input)
+    if not command:
+        return None
+    budget = _native_final_verifier_closeout_budget_seconds(lane_input, run_started=start_monotonic)
+    if budget < _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS:
+        return None
+    turn_index = len(getattr(provider, "requests", []) or ()) + 1
+    call = _native_final_verifier_closeout_call(
+        lane_input,
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        turn_index=turn_index,
+        command=command,
+        timeout_seconds=budget,
+        pending_mutation=pending_mutation,
+    )
+    latency_start = time.monotonic()
+    result = _execute_native_call(
+        call,
+        lane_input=lane_input,
+        workspace=workspace,
+        allowed_read_roots=allowed_read_roots,
+        allowed_write_roots=allowed_write_roots,
+        lane_config=lane_config,
+        exec_runtime=exec_runtime,
+        write_runtime=ImplementV2WriteRuntime(
+            workspace=workspace,
+            allowed_write_roots=allowed_write_roots,
+            approved_write_calls=(),
+            allow_governance_writes=bool(lane_config.get("allow_governance_writes")),
+        ),
+    )
+    if result.status == "yielded":
+        finalized = exec_runtime.finalize_active_commands(timeout_seconds=budget)
+        for payload in finalized:
+            if str(payload.get("command_run_id") or "") == _command_run_id_from_result(result):
+                result = exec_runtime.project_result_payload(result, payload)
+                break
+    latency_finished = time.monotonic()
+    latency = {
+        "call_id": call.call_id,
+        "tool_name": call.tool_name,
+        "turn_index": turn_index,
+        "queued_ms": 0,
+        "started_ms": round((latency_start - start_monotonic) * 1000, 3),
+        "first_output_ms": round((latency_finished - latency_start) * 1000, 3),
+        "finished_ms": round((latency_finished - latency_start) * 1000, 3),
+    }
+    return call, result, latency
+
+
+def _native_final_verifier_closeout_allowed(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_config: Mapping[str, object],
+) -> bool:
+    if not bool(lane_config.get("allow_verify")):
+        return False
+    if not bool(lane_config.get("allow_shell") or lane_config.get("run_command_available")):
+        return False
+    mode = str(lane_config.get("mode") or "full").strip().casefold()
+    tool_names = {tool.name for tool in list_v2_tool_specs_for_mode(mode)}
+    if "run_command" not in tool_names:
+        return False
+    return bool(lane_input.workspace)
+
+
+def _configured_native_final_verifier_command(lane_input: ImplementLaneInput) -> str:
+    for source in (lane_input.lane_config, lane_input.task_contract):
+        command = str(source.get("verify_command") or "").strip()
+        if command:
+            return command
+    return ""
+
+
+def _native_final_verifier_closeout_budget_seconds(
+    lane_input: ImplementLaneInput,
+    *,
+    run_started: float,
+) -> float:
+    remaining = _native_remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    if remaining is None:
+        remaining = float(lane_input.lane_config.get("final_verifier_closeout_seconds") or 60.0)
+    configured = lane_input.lane_config.get("final_verifier_closeout_seconds")
+    if configured not in (None, ""):
+        try:
+            remaining = min(remaining, max(0.0, float(configured)))
+        except (TypeError, ValueError):
+            return 0.0
+    return max(0.0, min(3600.0, remaining))
+
+
+def _native_remaining_wall_budget_seconds(lane_input: ImplementLaneInput, *, run_started: float) -> float | None:
+    max_wall = lane_input.task_contract.get("max_wall_seconds")
+    if max_wall in (None, ""):
+        return None
+    try:
+        remaining = float(max_wall) - max(0.0, time.monotonic() - run_started)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(600.0, remaining))
+
+
+def _native_final_verifier_closeout_call(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    provider: object,
+    turn_index: int,
+    command: str,
+    timeout_seconds: float,
+    pending_mutation: Mapping[str, object],
+) -> NativeTranscriptItem:
+    call_id = f"call-final-verifier-closeout-{turn_index:03d}"
+    arguments = {
+        "command": command,
+        "cwd": ".",
+        "use_shell": True,
+        "timeout": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
+        "foreground_budget_seconds": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
+        "command_intent": "verifier",
+        "execution_contract": {
+            "role": "runtime",
+            "stage": "final-verifier",
+            "purpose": "verify the latest source mutation before native closeout",
+            "proof_role": "verifier",
+            "acceptance_kind": "external_verifier",
+            "verifier_required": True,
+            "expected_exit": 0,
+            "latest_source_mutation_provider_call_id": pending_mutation.get("provider_call_id") or "",
+            "latest_source_mutation_path": pending_mutation.get("path") or "",
+        },
+    }
+    return NativeTranscriptItem(
+        sequence=0,
+        turn_id=f"turn-{turn_index}-final-verifier-closeout",
+        lane_attempt_id=lane_attempt_id,
+        provider=str(getattr(provider, "provider", "") or "native-controller"),
+        model=str(getattr(provider, "model", "") or lane_input.model or ""),
+        response_id=f"native-final-verifier-closeout-{turn_index}",
+        provider_item_id=f"item-{call_id}",
+        output_index=0,
+        kind="function_call",
+        call_id=call_id,
+        tool_name="run_command",
+        arguments_json_text=json.dumps(arguments, sort_keys=True),
+    )
+
+
+def _latest_native_source_mutation_without_later_verifier(
+    tool_calls: tuple[NativeTranscriptItem, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    source_mutation_roots: tuple[str, ...],
+) -> dict[str, object]:
+    latest_mutation: dict[str, object] = {}
+    latest_verifier_index = 0
+    verifier_command_run_ids: set[str] = set()
+    for index, (call, result) in enumerate(zip(tool_calls, tool_results), start=1):
+        if _native_call_is_verifier(call):
+            command_run_id = _command_run_id_from_result(result)
+            if command_run_id:
+                verifier_command_run_ids.add(command_run_id)
+        if _native_result_is_terminal_verifier(call, result, verifier_command_run_ids=verifier_command_run_ids):
+            latest_verifier_index = index
+        if result.status == "completed" and _native_result_has_source_mutation(
+            result,
+            source_mutation_roots=source_mutation_roots,
+        ):
+            latest_mutation = {
+                "result_index": index,
+                "provider_call_id": call.call_id or result.provider_call_id,
+                "tool_name": call.tool_name or result.tool_name,
+                "path": _native_write_result_path(result),
+                "turn_index": _turn_number(call.turn_id),
+                "latest_verifier_index": latest_verifier_index,
+            }
+    if not latest_mutation:
+        return {}
+    if int(latest_mutation.get("result_index") or 0) <= latest_verifier_index:
+        return {}
+    return latest_mutation
+
+
+def _native_result_is_terminal_verifier(
+    call: NativeTranscriptItem,
+    result: ToolResultEnvelope,
+    *,
+    verifier_command_run_ids: set[str],
+) -> bool:
+    if result.status not in {"completed", "failed", "interrupted", "invalid"}:
+        return False
+    command_run_id = _command_run_id_from_result(result)
+    if command_run_id and command_run_id in verifier_command_run_ids:
+        return True
+    if _native_call_is_verifier(call):
+        return True
+    payload = _native_result_payload(result)
+    contract = payload.get("execution_contract_normalized") or payload.get("execution_contract")
+    if not _native_execution_contract_is_verifier_like(contract):
+        return False
+    verifier = payload.get("verifier_evidence")
+    if not isinstance(verifier, dict):
+        return True
+    return str(verifier.get("verdict") or "").casefold() in {"pass", "fail", "partial"}
+
+
+def _native_result_has_source_mutation(
+    result: ToolResultEnvelope,
+    *,
+    source_mutation_roots: tuple[str, ...],
+) -> bool:
+    for effect in result.side_effects:
+        kind = str(effect.get("kind") or "")
+        if kind == "file_write" and _native_path_in_roots(effect.get("path"), source_mutation_roots):
+            return True
+        if kind in {"source_tree_mutation", "source_tree_delta"}:
+            record = effect.get("record")
+            if isinstance(record, dict) and record.get("changed_count"):
+                return True
+    return False
+
+
+def _native_write_result_path(result: ToolResultEnvelope) -> str:
+    for effect in result.side_effects:
+        if str(effect.get("kind") or "") == "file_write":
+            path = str(effect.get("path") or "").strip()
+            if path:
+                return path
+        if str(effect.get("kind") or "") in {"source_tree_mutation", "source_tree_delta"}:
+            record = effect.get("record")
+            if not isinstance(record, dict):
+                continue
+            changes = record.get("changes")
+            if isinstance(changes, list):
+                for change in changes:
+                    if isinstance(change, dict) and change.get("path"):
+                        return str(change.get("path") or "")
+    return ""
+
+
+def _native_path_in_roots(path: object, roots: tuple[str, ...]) -> bool:
+    text = str(path or "").strip()
+    if not text:
+        return False
+    candidate = Path(text).expanduser()
+    for root in roots:
+        root_path = Path(root).expanduser().resolve(strict=False)
+        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (root_path / candidate).resolve(strict=False)
+        try:
+            resolved.relative_to(root_path)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _native_source_mutation_roots(lane_input: ImplementLaneInput, workspace: Path) -> tuple[str, ...]:
+    raw_roots = lane_input.lane_config.get("source_mutation_roots")
+    if isinstance(raw_roots, list):
+        roots = tuple(str(root) for root in raw_roots if str(root or "").strip())
+    else:
+        roots = ()
+    return roots or (str(workspace),)
+
+
+def _native_result_payload(result: ToolResultEnvelope) -> dict[str, object]:
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _native_execution_contract_is_verifier_like(contract: object) -> bool:
+    if not isinstance(contract, dict):
+        return False
+    proof_role = str(contract.get("proof_role") or "").casefold()
+    acceptance_kind = str(contract.get("acceptance_kind") or "").casefold()
+    stage = str(contract.get("stage") or "").casefold()
+    purpose = str(contract.get("purpose") or "").casefold()
+    role = str(contract.get("role") or "").casefold()
+    return (
+        proof_role == "verifier"
+        or acceptance_kind in {"external_verifier", "candidate_final_proof"}
+        or stage == "final-verifier"
+        or "verifier" in purpose
+        or role in {"verify", "test"}
+    )
+
+
+def _native_final_verifier_passed(result: ToolResultEnvelope) -> bool:
+    if result.status != "completed" or result.is_error:
+        return False
+    payload = _native_result_payload(result)
+    verifier = payload.get("verifier_evidence")
+    if isinstance(verifier, dict):
+        return str(verifier.get("verdict") or "").casefold() == "pass"
+    return True
+
+
+def _command_run_id_from_result(result: ToolResultEnvelope) -> str:
+    payload = _native_result_payload(result)
+    return str(payload.get("command_run_id") or "").strip()
 
 
 def _native_output_from_result(
@@ -986,7 +1362,10 @@ def _side_effect_id_valid(call: NativeTranscriptItem) -> bool:
 def _result_is_write_like(result: ToolResultEnvelope) -> bool:
     if result.tool_name in WRITE_TOOL_NAMES and result.status == "completed" and not result.is_error:
         return True
-    return any(str(effect.get("kind") or "") in {"file_write", "source_tree_delta"} for effect in result.side_effects)
+    return any(
+        str(effect.get("kind") or "") in {"file_write", "source_tree_delta", "source_tree_mutation"}
+        for effect in result.side_effects
+    )
 
 
 def _result_is_verifier_like(result: ToolResultEnvelope) -> bool:

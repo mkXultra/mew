@@ -1143,6 +1143,12 @@ Close gates:
   `native_loop_control_replay`. If a completed `search_text` reports positive
   matches, `native_search_text_anchor_projection` must confirm that the model
   saw compact `path:line` anchors rather than only match counts plus refs.
+- Native closeout: if a latest source mutation has no later terminal configured
+  verifier, the native loop runs one deterministic configured final verifier at
+  closeout. A passing closeout may complete without another model turn; a
+  failing closeout downgrades even a previously completed finish; a verifier
+  that yielded and later completed through `poll_command` counts as the later
+  verifier and must not trigger duplicate closeout.
 - 10 minute step shape: parse error count is zero, no model-JSON failures exist,
   first write latency is recorded, verifier count and same-family repeats are
   bounded by the phase's declared thresholds, and no unpaired tool calls appear.
