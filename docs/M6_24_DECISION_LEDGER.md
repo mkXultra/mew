@@ -65,21 +65,29 @@ Improvement phase requirements:
       including `mew implement-v2 tool-lab` for implement_v2 tool-substrate
       changes such as source-mutation, first-write, verifier, acceptance, or
       provider-history projection repairs,
-   2. `mew replay terminal-bench` against the latest relevant saved Harbor
+   2. HOT_PATH fastcheck for the current selected implement_v2 artifact,
+      using `scripts/check_implement_v2_hot_path.py --artifact <artifact>
+      --no-baseline`. The fastcheck is not optional after native/WorkFrame
+      repairs: if it is broken, fix it or record an explicit temporary block
+      before spending live benchmark budget,
+   3. `mew replay terminal-bench` against the latest relevant saved Harbor
       artifact, or a synthetic same-shape replay fixture if no artifact exists,
-   3. `mew dogfood --scenario m6_24-terminal-bench-replay`, with
+   4. `mew dogfood --scenario m6_24-terminal-bench-replay`, with
       `--terminal-bench-job-dir` and explicit `--terminal-bench-assert-*`
       flags when validating an existing Harbor artifact,
-   4. run the selected gap's emulator. If no emulator exists for the selected
+   5. run the selected gap's emulator. If no emulator exists for the selected
       task/gap shape, create the smallest replayable emulator fixture before
       spending live benchmark budget. `compile-compcert` uses
       `mew dogfood --scenario m6_24-compile-compcert-emulator`; scoped
       software/coding gaps should use a generic Terminal-Bench emulator or a
       task-family emulator such as build/FFI/runtime/numeric/data as appropriate,
-   5. only after 1-4 pass, spend exactly one selected same-shape live
+   6. for native/WorkFrame hot-path repairs, run exactly one same-shape
+      10 minute `step-check-10min` diagnostic and compare its step shape before
+      any scoring proof,
+   7. only after 1-6 pass, spend exactly one selected same-shape live
       `speed_1`.
-   Fix any UT/replay/dogfood/emulator failure before spending live benchmark
-   budget.
+   Fix any UT/fastcheck/replay/dogfood/emulator/step-shape failure before
+   spending live benchmark budget.
 10. After one same-shape live diagnostic exposes a deterministic projection,
     reducer, frontier, contract, or tool-result extraction bug, reduce it to a
     focused UT plus `mew replay terminal-bench` / dogfood assertion before
@@ -145,6 +153,7 @@ recorded.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-12 | Repair completed native verifier outputs that contain nested semantic failure before another live step-shape run. | Commit `b46514a` fixed the prior final-verifier closeout class. The next bounded native diagnostic at `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-20260512-003340/2026-05-12__00-33-41/make-mips-interpreter__PTuMHtN` moved past closeout and reached a concrete verifier at turn 8. The verifier process exited `0`, but its output reported nested runtime failure (`vm finished exit=1 frames=0`). Native loop-control treated it as pass, so it spent 26 post-failure probe calls with no source mutation. The repair is generic semantic verifier-output handling: completed verifier outputs may still count as failed only for high-confidence nested nonzero runtime exits or explicit expected artifact/frame/output missing/not-produced phrases. Bare `frames=0` or `no output expected` must not trigger repair. Focused native tests, HOT_PATH fastcheck on the saved artifact, terminal-bench replay dogfood, replay-adjacent tests, ruff, diff check, and codex-ultra re-review session `019e17c5-0f62-7b01-a076-4b4edd88754d` passed/approved. | Commit the semantic verifier-output repair and the pre-speed fastcheck documentation update. Then rerun the pre-speed gate on current head: focused UT/local checks, HOT_PATH fastcheck, replay/dogfood/emulator where applicable, and exactly one same-shape 10min native diagnostic. Do not run `speed_1`, `proof_5`, or broad measurement first. | semantic_verifier_output_repair_reviewed_commit_pending |
 | 2026-05-12 | Repair native final-verifier closeout after a latest source mutation before another live step-shape run. | The bounded native `make-mips-interpreter` diagnostic at `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-20260512-000022/2026-05-12__00-00-23/make-mips-interpreter__XdT8Tmx` confirmed the prior search-anchor repair worked: native pairing was valid, parse errors were zero, positive `search_text` outputs included compact anchors, first edit improved to about 144s, and HOT_PATH fastcheck plus terminal-bench dogfood replay passed. The new generic blocker is closeout timing in the provider-native harness: after turn 29 failed verifier evidence, turn 30 edited source, then `max_turns` ended the run with no later configured verifier. This mirrors the older model-JSON final-verifier closeout gap, but the native loop had not ported the closeout semantics. | Add native harness deterministic final-verifier closeout after latest source mutation without later terminal verifier. It must run the configured verifier at closeout, complete only on verifier pass, downgrade a completed finish when the verifier fails, and recognize a yielded verifier completed by a later `poll_command` as a later verifier. Validate with focused native tests, HOT_PATH/replay-adjacent tests, codex-ultra review, then rerun fastcheck/dogfood and exactly one same-shape 10min diagnostic. | native_final_verifier_closeout_repair_active |
 | 2026-05-11 | Repair native `search_text` model-visible anchor projection before another live step-shape run. | The first bounded native `make-mips-interpreter` diagnostic at `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-20260511-233103/.../make-mips-interpreter__4N23ddu` reached provider-native transcript execution with valid pairing and no parse errors, but failed at unsupported syscall 60 after spending search turns whose outputs said `matches=50` plus refs without showing path/line anchors. The new HOT_PATH fastcheck check `native_search_text_anchor_projection` reproduces the issue on the saved artifact: positive `search_text` outputs are missing compact `path:line` anchors. This is a generic tool-result visibility gap, not a MIPS solver rule. | Make completed positive `search_text` native outputs include bounded rg-like `path:line:snippet` anchors in the function-call output; keep full payloads sidecar-backed. Validate with focused native harness tests and HOT_PATH fastcheck regression, then run exactly one same-shape 10min diagnostic only after current-head fastcheck/replay/dogfood gates are green. | search_text_anchor_projection_repair_active |
 | 2026-05-11 | Start native transcript rebuild Phase 0-1 before any more WorkFrame polish or live Terminal-Bench proof. | `docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md` was reviewed through `$orchestrate-build-review` for three rounds; final codex/glm5.1/claude review returned `findings: []`. `docs/REVIEW_2026-05-11_IMPLEMENT_V2_NATIVE_LOOP_DRIFT_PREVENTION.md` records the anti-drift gates. Current implementation work must freeze `NativeTranscript` authority, call/output pairing, artifact contract, hash rules, Codex/Claude trace normalization, and fake native fixtures without switching live runtime transport. | Implement and review Phase 0-1 only: schema/artifact contract, native transcript dataclasses, pairing validator, stable hash, synthetic paired error outputs, Codex/Claude import normalizers, derived proof manifest, and focused tests. Do not count WorkFrame/projection-only changes as native-loop progress. Do not switch CLI/runtime to native until Phase 5. | native_transcript_phase0_1_active |

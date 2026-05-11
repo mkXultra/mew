@@ -57,6 +57,15 @@ _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
 _CONTROL_FAILURE_SUMMARY_LIMIT = 700
 _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
 _COMMAND_RUN_ID_RE = re.compile(r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)")
+_SEMANTIC_VERIFIER_FAILURE_PATTERNS = (
+    re.compile(r"\bvm\s+(?:finished|stopped)\s+exit=(?!0\b)\d+\b", re.IGNORECASE),
+    re.compile(r"\bmissing\s+expected\s+(?:artifact|frame|output)\b", re.IGNORECASE),
+    re.compile(
+        r"\bexpected\s+(?:artifact|frame|output)\s+(?:missing|not\s+found|not\s+created|not\s+produced)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bno\s+(?:artifact|frame|output)\s+produced\b", re.IGNORECASE),
+)
 
 
 @dataclass(frozen=True)
@@ -815,6 +824,8 @@ def _native_execution_contract_is_verifier_like(contract: object) -> bool:
 def _native_final_verifier_passed(result: ToolResultEnvelope) -> bool:
     if result.status != "completed" or result.is_error:
         return False
+    if _tool_result_has_semantic_verifier_failure(result):
+        return False
     payload = _native_result_payload(result)
     verifier = payload.get("verifier_evidence")
     if isinstance(verifier, dict):
@@ -1180,7 +1191,30 @@ def _native_output_is_terminal(item: NativeTranscriptItem) -> bool:
 
 def _native_output_is_failure(item: NativeTranscriptItem) -> bool:
     status = str(item.status or "").strip().casefold()
-    return bool(item.is_error or status in {"failed", "interrupted", "invalid", "blocked", "timed_out", "killed", "orphaned"})
+    return bool(
+        item.is_error
+        or status in {"failed", "interrupted", "invalid", "blocked", "timed_out", "killed", "orphaned"}
+        or _native_output_has_semantic_verifier_failure(item)
+    )
+
+
+def _native_output_has_semantic_verifier_failure(item: NativeTranscriptItem) -> bool:
+    if str(item.status or "").strip().casefold() not in {"completed", "failed"}:
+        return False
+    return _semantic_verifier_failure_text_matches(item.output_text_or_ref)
+
+
+def _tool_result_has_semantic_verifier_failure(result: ToolResultEnvelope) -> bool:
+    if str(result.status or "").strip().casefold() not in {"completed", "failed"}:
+        return False
+    return _semantic_verifier_failure_text_matches(result.natural_result_text(limit=5000))
+
+
+def _semantic_verifier_failure_text_matches(value: str) -> bool:
+    text = str(value or "")
+    if not text:
+        return False
+    return any(pattern.search(text) for pattern in _SEMANTIC_VERIFIER_FAILURE_PATTERNS)
 
 
 def _failed_verifier_payload(item: NativeTranscriptItem | None) -> dict[str, object] | None:
@@ -1191,6 +1225,7 @@ def _failed_verifier_payload(item: NativeTranscriptItem | None) -> dict[str, obj
         "call_id": item.call_id,
         "tool_name": item.tool_name,
         "status": item.status,
+        "semantic_failure": _native_output_has_semantic_verifier_failure(item),
         "summary": _truncate_control_text(item.output_text_or_ref),
         "evidence_refs": list(item.evidence_refs[:6]),
     }

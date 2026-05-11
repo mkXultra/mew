@@ -35,13 +35,18 @@ order:
 
 1. focused UT for the repaired behavior and nearby finish/replay/projection
    invariants;
-2. `mew replay terminal-bench` against the latest relevant saved artifact with
+2. HOT_PATH fastcheck for the latest relevant selected-lane artifact:
+   `scripts/check_implement_v2_hot_path.py --artifact <artifact>
+   --no-baseline`. For native transcript artifacts this must validate
+   transcript/response-items/manifest consistency, native trace summary, and
+   native loop-control replay without requiring legacy `history.json`;
+3. `mew replay terminal-bench` against the latest relevant saved artifact with
    assertions matching the selected failure;
-3. `mew dogfood --scenario m6_24-terminal-bench-replay` against the same saved
+4. `mew dogfood --scenario m6_24-terminal-bench-replay` against the same saved
    artifact and assertion shape;
-4. any matching same-shape emulator. If no generic emulator exists, add the
+5. any matching same-shape emulator. If no generic emulator exists, add the
    smallest fixture that reproduces the failure class from saved artifacts;
-5. one 10min step-shape proof for the target task with
+6. one 10min step-shape proof for the target task with
    `selected_lane=implement_v2`, `--max-wall-seconds 600`, full artifact
    capture, and integration observation enabled when step comparison is the
    purpose.

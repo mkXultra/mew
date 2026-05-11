@@ -644,6 +644,90 @@ def test_native_harness_adds_repair_control_after_failed_verifier_probe_budget(t
     assert payload["native_loop_control"]["latest_failed_verifier"]["call_id"] == "verify-1"
 
 
+def test_native_harness_treats_semantic_artifact_gap_as_failed_verifier(tmp_path: Path) -> None:
+    command_run_id = _command_run_id("verify-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("write-1", "write_file", {"path": "vm.js", "content": "almost\n"}, output_index=0),
+                fake_call(
+                    "verify-1",
+                    "run_tests",
+                    {
+                        "command": "printf 'vm finished exit=1 frames=0\n'",
+                        "cwd": ".",
+                        "command_intent": "verifier",
+                    },
+                    output_index=1,
+                ),
+            ],
+            [
+                fake_call(
+                    "read-semantic-gap",
+                    "read_command_output",
+                    {"command_run_id": command_run_id, "max_chars": 2000},
+                    output_index=0,
+                ),
+                fake_call(
+                    "probe-after-semantic-gap",
+                    "run_command",
+                    {"command": "printf diagnose", "cwd": ".", "command_intent": "diagnostic"},
+                    output_index=1,
+                ),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    payload = json.loads(provider.requests[2]["input_items"][-1]["content"][0]["text"])
+    assert payload["native_loop_control"]["verifier_repair_due"] is True
+    assert payload["native_loop_control"]["latest_failed_verifier"]["call_id"] == "verify-1"
+    assert payload["native_loop_control"]["latest_failed_verifier"]["status"] == "completed"
+    assert payload["native_loop_control"]["latest_failed_verifier"]["semantic_failure"] is True
+
+
+def test_native_harness_does_not_treat_benign_completed_output_as_failed_verifier(tmp_path: Path) -> None:
+    command_run_id = _command_run_id("verify-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("write-1", "write_file", {"path": "vm.js", "content": "ok\n"}, output_index=0),
+                fake_call(
+                    "verify-1",
+                    "run_tests",
+                    {
+                        "command": "printf 'vm finished exit=0 frames=0\nno output expected\n'",
+                        "cwd": ".",
+                        "command_intent": "verifier",
+                    },
+                    output_index=1,
+                ),
+            ],
+            [
+                fake_call(
+                    "read-benign-output",
+                    "read_command_output",
+                    {"command_run_id": command_run_id, "max_chars": 2000},
+                    output_index=0,
+                ),
+                fake_call(
+                    "probe-after-benign-output",
+                    "run_command",
+                    {"command": "printf diagnose", "cwd": ".", "command_intent": "diagnostic"},
+                    output_index=1,
+                ),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    assert "native_loop_control" not in json.dumps(provider.requests[2]["input_items"], sort_keys=True)
+
+
 def test_native_harness_adds_repair_control_after_yielded_verifier_poll_failure(tmp_path: Path) -> None:
     command_run_id = _command_run_id("verify-1")
     provider = NativeFakeProvider.from_item_batches(
@@ -913,6 +997,44 @@ def test_native_harness_failed_final_verifier_closeout_remains_blocked(tmp_path:
         if item.call_id == "call-final-verifier-closeout-002" and item.kind.endswith("_output")
     )
     assert closeout_output.status == "failed"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_semantic_final_verifier_closeout_remains_blocked(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('almost')\n", "apply": True, "create": True},
+                    output_index=0,
+                )
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="printf 'vm finished exit=1 frames=0\n' >&2",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.finish_summary == ""
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    closeout_output = next(
+        item
+        for item in result.transcript.items
+        if item.call_id == "call-final-verifier-closeout-002" and item.kind.endswith("_output")
+    )
+    assert closeout_output.status == "completed"
+    assert "vm finished exit=1" in closeout_output.output_text_or_ref
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 

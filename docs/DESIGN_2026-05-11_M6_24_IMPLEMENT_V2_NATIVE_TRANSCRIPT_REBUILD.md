@@ -1149,6 +1149,13 @@ Close gates:
   failing closeout downgrades even a previously completed finish; a verifier
   that yielded and later completed through `poll_command` counts as the later
   verifier and must not trigger duplicate closeout.
+- Semantic verifier output: a verifier process can complete successfully at
+  the shell/process layer while its own output reports nested runtime failure.
+  Native loop-control and final-verifier closeout must treat high-confidence
+  nested nonzero runtime exits and explicit expected artifact/frame/output
+  missing/not-produced phrases as failed verifier evidence. Bare count/status
+  phrases such as `frames=0`, `exit=0`, or `no output expected` must not trigger
+  repair on their own.
 - 10 minute step shape: parse error count is zero, no model-JSON failures exist,
   first write latency is recorded, verifier count and same-family repeats are
   bounded by the phase's declared thresholds, and no unpaired tool calls appear.
