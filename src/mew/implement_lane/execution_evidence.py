@@ -8,6 +8,7 @@ the filesystem or the live tool runtime.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
 EXECUTION_CONTRACT_SCHEMA_VERSION = 3
@@ -2465,9 +2466,39 @@ def _terminal_semantic_failure_should_stay_primary(
     semantic_exit = semantic_exit_from_run(run, contract)
     if bool(semantic_exit.get("ok")):
         return False
+    if _terminal_output_points_to_failed_runtime_artifact(run, failed_artifact, contract):
+        return False
     if str(semantic_exit.get("category") or "") == "unknown":
         return False
     return bool(run.stdout_preview.strip() or run.stderr_preview.strip())
+
+
+def _terminal_output_points_to_failed_runtime_artifact(
+    run: ToolRunRecord,
+    failed_artifact: ArtifactEvidence | None,
+    contract: ExecutionContract,
+) -> bool:
+    if failed_artifact is None:
+        return False
+    if _failure_class_for_artifact(failed_artifact, contract) != "runtime_artifact_missing":
+        return False
+    output = f"{run.stdout_preview}\n{run.stderr_preview}".casefold()
+    if not output.strip():
+        return False
+    artifact_name = Path(str(failed_artifact.path or failed_artifact.artifact_id or "")).name.casefold()
+    artifact_terms = {
+        term
+        for term in (
+            artifact_name,
+            "no frame",
+            "no_frame",
+            "missing artifact",
+            "artifact missing",
+            "not created",
+        )
+        if term
+    }
+    return any(term in output for term in artifact_terms)
 
 
 def _role_for_record(run: ToolRunRecord, contract: ExecutionContract) -> Role:

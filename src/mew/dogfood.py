@@ -18007,7 +18007,7 @@ def run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(worksp
                         "id": f"diagnostic-{index}",
                         "name": "run_command",
                         "arguments": {
-                            "command": f"printf diagnostic-{index} > diagnostic-{index}.txt",
+                            "command": f"printf 'diagnostic-{index}\\n'",
                             "cwd": ".",
                             "use_shell": True,
                         },
@@ -18397,10 +18397,10 @@ def run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(w
             "summary": "final base turn diagnoses the unresolved failure",
             "tool_calls": [
                 {
-                    "id": "diagnose-runtime-failure",
-                    "name": "run_command",
-                    "arguments": {
-                        "command": "printf diagnostic > diagnostic.txt && test -s diagnostic.txt",
+                        "id": "diagnose-runtime-failure",
+                        "name": "run_command",
+                        "arguments": {
+                        "command": "printf 'diagnostic\\n'",
                         "cwd": ".",
                         "use_shell": True,
                     },
@@ -18537,24 +18537,6 @@ def run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(workspace):
     outputs = [
         {
             "summary": "spend final base turn on shell-shaped run_tests",
-            "frontier_state_update": {
-                "status": "active",
-                "source_roles": [
-                    {
-                        "path": "fabricated-source.c",
-                        "role": "primary_source",
-                        "state": "grounded",
-                        "evidence_refs": [{"kind": "provider_call", "id": "fabricated-call"}],
-                    }
-                ],
-                "next_verifier_shaped_command": {
-                    "tool": "run_command",
-                    "cwd": ".",
-                    "command": verifier_command,
-                    "use_shell": True,
-                    "evidence_refs": [{"kind": "provider_call", "id": "bad-shell-verifier"}],
-                },
-            },
             "tool_calls": [
                 {
                     "id": "bad-shell-verifier",
@@ -18701,28 +18683,22 @@ def run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(workspace):
     )
     _scenario_check(
         checks,
-        "m6_24_implement_v2_tool_contract_recovery_emulator_updates_frontier",
-        isinstance(next_verifier, dict)
-        and next_verifier.get("tool") == "run_command"
-        and next_verifier.get("command") == verifier_command
-        and isinstance(frontier.get("final_artifact"), dict)
-        and frontier["final_artifact"].get("path") == "tool-contract-recovery.txt"
-        and (
-            (frontier.get("source_roles") or [{}])[0].get("path") == "fabricated-source.c"
-            and (frontier.get("source_roles") or [{}])[0].get("state") == "hypothesis"
-            and not (frontier.get("source_roles") or [{}])[0].get("evidence_refs")
-        ),
+        "m6_24_implement_v2_tool_contract_recovery_emulator_avoids_legacy_projection",
+        int(metrics.get("ignored_model_frontier_state_updates") or 0) == 0
+        and int(metrics.get("legacy_projection_field_rejected_count") or 0) == 0,
         {
             "next_verifier": next_verifier,
             "final_artifact": frontier.get("final_artifact"),
-            "source_roles": frontier.get("source_roles"),
+            "ignored_model_frontier_state_updates": metrics.get("ignored_model_frontier_state_updates"),
+            "legacy_projection_field_rejected_count": metrics.get("legacy_projection_field_rejected_count"),
         },
-        "frontier preserves verifier command, derives final artifact, and drops fabricated refs",
+        "tool-contract recovery avoids model-authored frontier projection",
     )
     _scenario_check(
         checks,
         "m6_24_implement_v2_tool_contract_recovery_emulator_writes_artifact",
-        (Path(workspace) / "tool-contract-recovery.txt").read_text(encoding="utf-8", errors="replace") == "recovered",
+        (Path(workspace) / "tool-contract-recovery.txt").exists()
+        and (Path(workspace) / "tool-contract-recovery.txt").read_text(encoding="utf-8", errors="replace") == "recovered",
         {"path": str(Path(workspace) / "tool-contract-recovery.txt")},
         "corrected verifier command produced the expected artifact",
     )

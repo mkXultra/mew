@@ -1193,6 +1193,11 @@ def test_implement_v2_records_first_write_frontier_stall_after_missing_target_ti
     assert stall["target_path"] == "generated.js"
     assert "write_file/edit_file/apply_patch" in stall["required_next_action"]
     assert "bounded run_command writer only after" in stall["required_next_action"]
+    manifest = result.updated_lane_state["proof_manifest"]
+    synthetic_result = manifest["tool_results"][-1]
+    assert synthetic_result["tool_name"] == "model_response_error"
+    assert synthetic_result["content"][0]["failure_class"] == "first_write_frontier_stall"
+    assert synthetic_result["content"][0]["raw_failure_class"] == "model_timeout"
 
 
 def test_implement_v2_clears_first_write_frontier_stall_after_successful_write(tmp_path) -> None:
@@ -20250,8 +20255,8 @@ def test_implement_v2_frontier_closeout_kill_preserves_prior_runtime_failure(tmp
     runtime_failure = frontier["latest_runtime_failure"]
 
     assert result.metrics["orphaned_command_cleanup_count"] == 1
-    assert runtime_failure["failure_class"] == "runtime_failure"
-    assert runtime_failure["failure_kind"] == "nonzero_exit"
+    assert runtime_failure["failure_class"] == "runtime_artifact_missing"
+    assert runtime_failure["failure_kind"] == "missing_artifact"
     assert "NO_FRAME" in runtime_failure["stdout_tail"]
     assert "killed" not in runtime_failure["failure_summary"]
     assert "latest_build_failure" not in frontier

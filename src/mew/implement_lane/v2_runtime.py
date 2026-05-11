@@ -804,9 +804,13 @@ def run_live_json_implement_v2(
                     )
                     exec_runtime.frontier_state = dict(hard_runtime_frontier_state)
                 finish_arguments = {
-                    "outcome": "failed",
+                    "outcome": "blocked" if first_write_stall else "failed",
                     "summary": str(model_error.get("message") or "model_json call failed"),
-                    "failure_class": model_error.get("failure_class") or "model_backend_error",
+                    "failure_class": (
+                        model_error.get("semantic_failure_class")
+                        or model_error.get("failure_class")
+                        or "model_backend_error"
+                    ),
                 }
                 synthetic_call, synthetic_result = _synthetic_model_error_call_result(
                     lane_attempt_id=lane_attempt_id,
@@ -4643,6 +4647,11 @@ def _synthetic_model_error_call_result(
 
     provider_call_id = f"model-response-error-{turn_index}"
     mew_tool_call_id = f"{lane_attempt_id}:tool:{turn_index}:0"
+    failure_class = str(
+        model_error.get("semantic_failure_class")
+        or model_error.get("failure_class")
+        or "model_backend_error"
+    )
     call = ToolCallEnvelope(
         lane_attempt_id=lane_attempt_id,
         provider=provider,
@@ -4653,7 +4662,7 @@ def _synthetic_model_error_call_result(
         sequence_index=0,
         tool_name="model_response_error",
         arguments={
-            "failure_class": str(model_error.get("failure_class") or "model_backend_error"),
+            "failure_class": failure_class,
             "message": str(model_error.get("message") or ""),
         },
         status="rejected",
@@ -4661,9 +4670,12 @@ def _synthetic_model_error_call_result(
     content = {
         "summary": str(model_error.get("message") or "model_json call failed"),
         "reason": "provider returned no valid model turn",
-        "failure_class": str(model_error.get("failure_class") or "model_backend_error"),
+        "failure_class": failure_class,
         "retry_count": model_error.get("retry_count", 0),
     }
+    raw_failure_class = str(model_error.get("failure_class") or "").strip()
+    if raw_failure_class and raw_failure_class != failure_class:
+        content["raw_failure_class"] = raw_failure_class
     raw_excerpt = str(model_error.get("raw_excerpt") or "").strip()
     if raw_excerpt:
         content["raw_excerpt"] = raw_excerpt

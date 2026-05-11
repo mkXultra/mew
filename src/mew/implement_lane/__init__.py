@@ -8,6 +8,24 @@ from .registry import (
     select_implement_lane_runtime,
 )
 from .exec_runtime import ImplementV2ManagedExecRuntime
+from .native_transcript import (
+    IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+    LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID,
+    NativeTranscript,
+    NativeTranscriptItem,
+    NativeTranscriptValidationResult,
+    build_synthetic_error_output,
+    native_artifact_contract,
+    native_proof_manifest_from_transcript,
+    native_transcript_hash,
+    native_transcript_indexes,
+    native_transcript_metrics,
+    native_transcript_sidecar_events,
+    normalize_claude_tool_events,
+    normalize_codex_response_items,
+    validate_native_transcript_pairing,
+    write_native_transcript_artifacts,
+)
 from .provider import FakeProviderAdapter, FakeProviderToolCall, JsonModelProviderAdapter
 from .prompt import build_implement_v2_prompt_sections, implement_v2_prompt_section_metrics
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
@@ -72,6 +90,8 @@ from .write_runtime import ImplementV2WriteRuntime
 
 __all__ = [
     "IMPLEMENT_LANE_REGISTRY_VERSION",
+    "IMPLEMENT_V2_NATIVE_RUNTIME_ID",
+    "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID",
     "COMMON_WORKFRAME_INPUTS_SCHEMA_VERSION",
     "FakeProviderAdapter",
     "FakeProviderToolCall",
@@ -90,6 +110,9 @@ __all__ = [
     "ImplementV2WriteRuntime",
     "JsonModelProviderAdapter",
     "M624ReentryABGateResult",
+    "NativeTranscript",
+    "NativeTranscriptItem",
+    "NativeTranscriptValidationResult",
     "PairingValidationResult",
     "ToolCallEnvelope",
     "ToolResultEnvelope",
@@ -101,6 +124,7 @@ __all__ = [
     "WorkFrameTrace",
     "UnknownWorkFrameVariantError",
     "build_implement_v2_prompt_sections",
+    "build_synthetic_error_output",
     "build_transcript_event",
     "build_invalid_tool_result",
     "canonicalize_common_workframe_inputs",
@@ -121,6 +145,14 @@ __all__ = [
     "list_v2_base_tool_specs",
     "list_v2_tool_specs_for_mode",
     "implement_v2_prompt_section_metrics",
+    "native_artifact_contract",
+    "native_proof_manifest_from_transcript",
+    "native_transcript_hash",
+    "native_transcript_indexes",
+    "native_transcript_metrics",
+    "native_transcript_sidecar_events",
+    "normalize_claude_tool_events",
+    "normalize_codex_response_items",
     "record_phase0_baseline_metrics",
     "reduce_workframe",
     "reduce_workframe_with_variant",
@@ -130,8 +162,10 @@ __all__ = [
     "run_live_json_implement_v2",
     "run_unavailable_implement_v2",
     "select_implement_lane_runtime",
+    "validate_native_transcript_pairing",
     "validate_proof_manifest_pairing",
     "validate_tool_result_pairing",
+    "write_native_transcript_artifacts",
     "normalize_workframe_variant",
     "project_workframe_with_variant",
     "validate_workframe_variant_name",
