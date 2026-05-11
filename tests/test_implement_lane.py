@@ -18,8 +18,10 @@ from mew.implement_lane import (
     ImplementLaneTranscriptEvent,
     ToolCallEnvelope,
     ToolResultEnvelope,
+    WorkFrameInputs,
     build_invalid_tool_result,
     build_implement_v2_prompt_sections,
+    common_workframe_inputs_from_workframe_inputs,
     describe_implement_v1_adapter,
     describe_implement_v2_runtime,
     evaluate_m6_24_reentry_ab_gate,
@@ -30,6 +32,7 @@ from mew.implement_lane import (
     list_workframe_variants,
     list_v2_base_tool_specs,
     list_v2_tool_specs_for_mode,
+    project_workframe_with_variant,
     run_fake_exec_implement_v2,
     run_fake_read_only_implement_v2,
     run_fake_write_implement_v2,
@@ -285,6 +288,92 @@ def test_workframe_debug_bundle_records_variant() -> None:
     assert bundle["workframe_variant"] == "current"
     assert bundle["reducer_inputs"]["workframe_variant"] == "current"
     assert bundle["workframe_cursor"]["workframe_variant"] == "current"
+
+
+def test_workframe_projection_keeps_shared_substrate_hash_stable_across_variants() -> None:
+    inputs = WorkFrameInputs(
+        attempt_id="attempt-variant",
+        turn_id="turn-variant",
+        task_id="task-variant",
+        objective="Repair the workspace.",
+        sidecar_events=(
+            {
+                "kind": "verifier",
+                "event_id": "tool-result:verify",
+                "event_sequence": 1,
+                "status": "failed",
+                "family": "runtime_failure",
+                "summary": "TypeError: undefined",
+                "evidence_refs": ["ev:verify"],
+            },
+        ),
+    )
+    common = common_workframe_inputs_from_workframe_inputs(inputs)
+
+    current = project_workframe_with_variant(common, variant="current")
+    minimal = project_workframe_with_variant(common, variant="minimal")
+
+    assert current.shared_substrate_hash == minimal.shared_substrate_hash
+    assert current.projection_hash != minimal.projection_hash
+    assert current.common_inputs.as_dict()["indexes"]["model_turn_index_usage"] == "debug_plateau_recovery_only"
+
+
+def test_workframe_debug_bundle_records_common_substrate_and_static_shape() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-variant",
+        task_id="task-variant",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"workframe_variant": "minimal"},
+        task_contract={"objective": "Repair the workspace."},
+    )
+
+    bundle = build_implement_v2_workframe_debug_bundle(lane_input, turn_id="turn-variant")
+    reducer_inputs = bundle["reducer_inputs"]
+    cursor = bundle["workframe_cursor"]
+    render_inventory = bundle["prompt_render_inventory"]
+
+    assert reducer_inputs["schema_version"] == 2
+    assert reducer_inputs["common_workframe_inputs_schema_version"] == 1
+    assert reducer_inputs["shared_substrate_hash"] == cursor["shared_substrate_hash"]
+    assert reducer_inputs["canonical"]["payload"]["indexes"]["model_turn_index_usage"] == "debug_plateau_recovery_only"
+    assert render_inventory["static_shape"] == [
+        "static_instructions",
+        "task_contract_digest",
+        "natural_transcript_tail",
+        "one_workframe_projection",
+    ]
+    assert render_inventory["projection_hash"] == cursor["projection_hash"]
+
+
+def test_workframe_debug_bundle_keeps_prompt_inventory_out_of_shared_substrate_hash() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-variant",
+        task_id="task-variant",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"workframe_variant": "minimal"},
+        task_contract={"objective": "Repair the workspace."},
+    )
+    without_inventory = build_implement_v2_workframe_debug_bundle(lane_input, turn_id="turn-variant")
+    with_inventory = build_implement_v2_workframe_debug_bundle(
+        lane_input,
+        turn_id="turn-variant",
+        prompt_inventory=(
+            {
+                "id": "implement_v2_workframe",
+                "chars": 999,
+                "variant_rendered_section": True,
+            },
+        ),
+    )
+
+    assert (
+        without_inventory["reducer_inputs"]["shared_substrate_hash"]
+        == with_inventory["reducer_inputs"]["shared_substrate_hash"]
+    )
+    assert with_inventory["reducer_inputs"]["common_workframe_inputs"]["current_workframe_inputs"]["prompt_inventory"] == []
+    assert with_inventory["prompt_render_inventory"]["source_prompt_inventory"][0]["id"] == "implement_v2_workframe"
 
 
 def test_workframe_variant_is_not_rendered_in_lane_state_prompt() -> None:

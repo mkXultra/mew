@@ -34,12 +34,12 @@ def test_substrate_inventory_reports_phase0_migration_gap(tmp_path: Path) -> Non
         "model turn index",
         "tool registry artifact",
         "natural transcript log",
-        "CommonWorkFrameInputs source type",
         "transcript_tool_nav variant",
     }
     assert inventory["schemas"]["common_workframe_inputs"] == 1
     assert inventory["schemas"]["target_workframe_projection"] == 3
     assert inventory["workframe_inputs"]["compatibility_wrapper_target"] == "CommonWorkFrameInputs"
+    assert inventory["workframe_inputs"]["compatibility_wrapper_type"] == "CommonWorkFrameInputs"
     assert any(field["name"] == "sidecar_events" for field in inventory["workframe_inputs"]["fields"])
 
 

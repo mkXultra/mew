@@ -29,7 +29,7 @@ from .workframe import (
     WORKFRAME_TARGET_MAX_BYTES,
     WorkFrameInputs,
 )
-from .workframe_variants import DEFAULT_WORKFRAME_VARIANT, list_workframe_variants
+from .workframe_variants import DEFAULT_WORKFRAME_VARIANT, CommonWorkFrameInputs, list_workframe_variants
 
 INVENTORY_SCHEMA_VERSION = 1
 
@@ -111,8 +111,8 @@ SHARED_SUBSTRATE_SURFACES = (
         "name": "workframe_variant_projection",
         "current_source": "src/mew/implement_lane/workframe_variants.py",
         "phase": 3,
-        "status": "partial",
-        "notes": "Variant registry exists; CommonWorkFrameInputs wrapper and projection contract are pending.",
+        "status": "implemented",
+        "notes": "Variant registry, CommonWorkFrameInputs wrapper, shared substrate hash, and projection hash exist.",
     },
     {
         "name": "transcript_tool_nav",
@@ -178,10 +178,11 @@ def build_substrate_inventory(repo_root: Path | str = ".") -> dict[str, Any]:
         "workframe_inputs": {
             "current_type": "WorkFrameInputs",
             "compatibility_wrapper_target": "CommonWorkFrameInputs",
+            "compatibility_wrapper_type": CommonWorkFrameInputs.__name__,
             "fields": _dataclass_field_inventory(WorkFrameInputs),
             "migration_notes": [
                 "Current WorkFrameInputs remains the source compatibility surface for existing reducers.",
-                "CommonWorkFrameInputs v1 should wrap current WorkFrameInputs plus tool registry, sidecars, indexes, and migration metadata.",
+                "CommonWorkFrameInputs v1 wraps current WorkFrameInputs plus tool registry, sidecars, indexes, and migration metadata.",
                 "WorkFrame projection schema v3 is the target projection schema; it is distinct from CommonWorkFrameInputs schema v1.",
                 "Variant projections must canonicalize CommonWorkFrameInputs before hashing or rendering.",
                 "v1/v2 fixtures must be compared within their original schema or explicitly converted before v3 hash comparison.",
@@ -419,12 +420,6 @@ def _missing_for_offline_diagnosis(artifact_coverage: dict[str, dict[str, object
             )
     missing.extend(
         [
-            {
-                "surface": "CommonWorkFrameInputs source type",
-                "filename": "src/mew/implement_lane/common_workframe_inputs.py",
-                "phase": 3,
-                "reason": "current code still uses WorkFrameInputs directly; CommonWorkFrameInputs v1 wrapper is design-only",
-            },
             {
                 "surface": "transcript_tool_nav variant",
                 "filename": "src/mew/implement_lane/workframe_variant_transcript_tool_nav.py",

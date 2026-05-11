@@ -11377,6 +11377,12 @@ def _write_live_json_artifacts(
             "workframe_variant.json": {
                 "schema_version": 1,
                 "variant": workframe_debug_bundle.get("workframe_variant") or DEFAULT_WORKFRAME_VARIANT,
+                "shared_substrate_hash": _dict_or_empty(workframe_debug_bundle.get("workframe_cursor")).get(
+                    "shared_substrate_hash"
+                ),
+                "projection_hash": _dict_or_empty(workframe_debug_bundle.get("workframe_cursor")).get(
+                    "projection_hash"
+                ),
             },
         }
         for filename, payload in bundle_files.items():

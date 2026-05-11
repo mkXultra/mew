@@ -17,8 +17,14 @@ from ..prompt_sections import (
 )
 from .tool_policy import ImplementLaneToolSpec, list_v2_tool_specs_for_mode
 from .types import ImplementLaneInput
-from .workframe import WorkFrameInputs, canonicalize_workframe_inputs
-from .workframe_variants import DEFAULT_WORKFRAME_VARIANT, reduce_workframe_with_variant, validate_workframe_variant_name
+from .workframe import WorkFrameInputs
+from .workframe_variants import (
+    DEFAULT_WORKFRAME_VARIANT,
+    canonicalize_common_workframe_inputs,
+    common_workframe_inputs_from_workframe_inputs,
+    project_workframe_with_variant,
+    validate_workframe_variant_name,
+)
 
 HOT_PATH_PROJECTION_SURFACE = "hot_path_projection"
 ORDINARY_RESIDENT_SUMMARY_SURFACE = "ordinary_resident_summary"
@@ -304,36 +310,54 @@ def build_implement_v2_workframe_debug_bundle(
         success_contract_ref=_success_contract_ref(lane_input),
         constraints=("model_visible_workframe_only",),
         sidecar_events=_merge_workframe_sidecar_events(runtime_events=runtime_events, prompt_events=prompt_events),
-        prompt_inventory=prompt_inventory,
+        prompt_inventory=(),
         workspace_root=lane_input.workspace,
         artifact_root=str(lane_input.lane_config.get("artifact_dir") or ""),
     )
     workframe_variant = _workframe_variant(lane_input)
-    workframe, report = reduce_workframe_with_variant(inputs, variant=workframe_variant)
+    common_inputs = common_workframe_inputs_from_workframe_inputs(inputs)
+    projection = project_workframe_with_variant(common_inputs, variant=workframe_variant)
+    workframe = projection.workframe
+    report = projection.invariant_report
     visible = _workframe_visible_payload(workframe.as_dict())
     return {
         "schema_version": 1,
         "turn_id": turn_id,
         "workframe_variant": workframe_variant,
         "reducer_inputs": {
-            "schema_version": 1,
+            "schema_version": 2,
             "workframe_variant": workframe_variant,
+            "common_workframe_inputs_schema_version": common_inputs.schema_version,
             "workframe_inputs": inputs.as_dict(),
-            "canonical": canonicalize_workframe_inputs(inputs),
+            "common_workframe_inputs": common_inputs.as_dict(),
+            "canonical": canonicalize_common_workframe_inputs(common_inputs),
+            "shared_substrate_hash": projection.shared_substrate_hash,
         },
         "reducer_output": workframe.as_dict(),
         "invariant_report": report.as_dict(),
         "prompt_visible_workframe": visible,
         "prompt_render_inventory": {
-            "schema_version": 1,
+            "schema_version": 2,
+            "static_shape": [
+                "static_instructions",
+                "task_contract_digest",
+                "natural_transcript_tail",
+                "one_workframe_projection",
+            ],
+            "workframe_variant": workframe_variant,
+            "shared_substrate_hash": projection.shared_substrate_hash,
+            "projection_hash": projection.projection_hash,
+            "source_prompt_inventory": [dict(item) for item in prompt_inventory],
             "sections": [dict(item) for item in prompt_inventory],
         },
         "workframe_cursor": {
-            "schema_version": 1,
+            "schema_version": 2,
             "attempt_id": inputs.attempt_id,
             "turn_id": turn_id,
             "workframe_id": workframe.trace.workframe_id,
             "workframe_variant": workframe_variant,
+            "shared_substrate_hash": projection.shared_substrate_hash,
+            "projection_hash": projection.projection_hash,
             "input_hash": workframe.trace.input_hash,
             "output_hash": workframe.trace.output_hash,
             "reducer_schema_version": workframe.trace.reducer_schema_version,
