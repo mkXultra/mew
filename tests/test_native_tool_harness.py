@@ -9,7 +9,11 @@ from mew.implement_lane.native_fake_provider import (
     fake_reasoning,
     model_json_text_non_control_item,
 )
-from mew.implement_lane.native_tool_harness import PHASE3_NATIVE_SURFACE, run_native_implement_v2
+from mew.implement_lane.native_tool_harness import (
+    PHASE3_NATIVE_SURFACE,
+    run_native_implement_v2,
+    run_unavailable_native_implement_v2,
+)
 from mew.implement_lane.native_transcript import (
     NativeTranscript,
     NativeTranscriptItem,
@@ -44,6 +48,17 @@ def _command_run_id(call_id: str) -> str:
     lane_attempt_id = "ws-native:task-native:implement_v2:native"
     digest = hashlib.sha256(f"{lane_attempt_id}:{call_id}".encode()).hexdigest()
     return f"{lane_attempt_id}:command:{call_id}-{digest[:8]}"
+
+
+def test_unavailable_native_runtime_keeps_native_identity(tmp_path: Path) -> None:
+    result = run_unavailable_native_implement_v2(_lane_input(tmp_path))
+
+    assert result.status == "unavailable"
+    assert result.metrics["runtime_id"] == "implement_v2_native_transcript_loop"
+    assert result.metrics["transport_kind"] == "provider_native_unavailable"
+    assert result.metrics["provider_native_tool_loop"] is True
+    assert result.metrics["model_json_main_path_detected"] is False
+    assert result.updated_lane_state["runtime_id"] == "implement_v2_native_transcript_loop"
 
 
 def test_native_harness_read_finish_and_artifacts(tmp_path: Path) -> None:

@@ -11017,11 +11017,16 @@ class WorkSessionTests(unittest.TestCase):
                     status="completed",
                     lane="implement_v2",
                     user_visible_summary="v2 completed",
-                    metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
                 )
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
                     with patch("mew.commands.plan_work_model_turn") as v1_plan:
-                        with patch("mew.commands.run_live_json_implement_v2", return_value=v2_result) as v2_run:
+                        with patch("mew.commands.run_unavailable_native_implement_v2", return_value=v2_result) as v2_run:
                             with redirect_stdout(StringIO()) as stdout:
                                 self.assertEqual(
                                     main(
@@ -11088,18 +11093,19 @@ class WorkSessionTests(unittest.TestCase):
                     status="failed",
                     lane="implement_v2",
                     user_visible_summary="model turn failed: request timed out",
-                    metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
                 )
 
-                def fake_v2_run(*args, progress=None, **kwargs):
-                    if progress:
-                        progress("implement_v2 turn #1: prompt_render start")
-                        progress("implement_v2 turn #1: prompt_render done prompt_chars=123")
-                        progress("implement_v2 turn #1: model_json start timeout_seconds=123.000")
+                def fake_v2_run(*args, **kwargs):
                     return v2_result
 
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.commands.run_live_json_implement_v2", side_effect=fake_v2_run):
+                    with patch("mew.commands.run_unavailable_native_implement_v2", side_effect=fake_v2_run):
                         with redirect_stdout(StringIO()) as stdout:
                             self.assertEqual(
                                 main(
@@ -11137,17 +11143,16 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(payload["work_exit_code"], 1)
                 state = load_state()
                 metrics = state["work_sessions"][0]["model_turns"][0]["model_metrics"]
-                self.assertEqual(metrics["provider"], "model_json")
-                self.assertEqual(metrics["runtime_id"], "implement_v2_model_json_tool_loop")
+                self.assertEqual(metrics["provider"], "provider-native")
+                self.assertEqual(metrics["runtime_id"], "implement_v2_native_transcript_loop")
+                self.assertIs(metrics["provider_native_tool_loop"], True)
+                self.assertIs(metrics["model_json_main_path_detected"], False)
                 self.assertEqual(metrics["selected_lane"], "implement_v2")
                 self.assertEqual(metrics["model_backend"], "codex")
                 self.assertEqual(metrics["model"], "gpt-5.5")
                 self.assertEqual(metrics["model_timeout_seconds"], 123.0)
                 self.assertEqual(metrics["timeout_guard"], "work_loop_process_guard")
                 self.assertEqual(metrics["status"], "failed")
-                self.assertEqual(metrics["runtime_phase"], "model_json_call")
-                self.assertIn("model_json start", metrics["last_runtime_progress"])
-                self.assertEqual(metrics["active_model_timeout_seconds"], 123.0)
             finally:
                 os.chdir(old_cwd)
 
@@ -11167,11 +11172,16 @@ class WorkSessionTests(unittest.TestCase):
                     status="completed",
                     lane="implement_v2",
                     user_visible_summary="v2 completed",
-                    metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
                 )
                 guidance = "selected_lane=implement_v2 write_integration_observation_detail=true"
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.commands.run_live_json_implement_v2", return_value=v2_result) as v2_run:
+                    with patch("mew.commands.run_unavailable_native_implement_v2", return_value=v2_result) as v2_run:
                         with redirect_stdout(StringIO()):
                             self.assertEqual(
                                 main(
@@ -11224,7 +11234,12 @@ class WorkSessionTests(unittest.TestCase):
                     status="completed",
                     lane="implement_v2",
                     user_visible_summary="v2 completed",
-                    metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
                 )
                 guidance = json.dumps(
                     {
@@ -11233,7 +11248,7 @@ class WorkSessionTests(unittest.TestCase):
                     }
                 )
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.commands.run_live_json_implement_v2", return_value=v2_result) as v2_run:
+                    with patch("mew.commands.run_unavailable_native_implement_v2", return_value=v2_result) as v2_run:
                         with redirect_stdout(StringIO()):
                             self.assertEqual(
                                 main(
@@ -11283,7 +11298,12 @@ class WorkSessionTests(unittest.TestCase):
                     status="completed",
                     lane="implement_v2",
                     user_visible_summary="v2 completed",
-                    metrics={"provider": "model_json", "runtime_id": "implement_v2_model_json_tool_loop"},
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
                 )
                 repair_history = {
                     "task": "make-mips-interpreter",
@@ -11297,7 +11317,7 @@ class WorkSessionTests(unittest.TestCase):
                     }
                 )
                 with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
-                    with patch("mew.commands.run_live_json_implement_v2", return_value=v2_result) as v2_run:
+                    with patch("mew.commands.run_unavailable_native_implement_v2", return_value=v2_result) as v2_run:
                         with redirect_stdout(StringIO()):
                             self.assertEqual(
                                 main(

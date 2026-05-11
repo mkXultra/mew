@@ -88,7 +88,7 @@ from .implementation_lane_baseline import (
     format_implementation_lane_baseline_report,
     summarize_implementation_lane_baseline,
 )
-from .implement_lane import ImplementLaneInput, run_live_json_implement_v2
+from .implement_lane import IMPLEMENT_V2_NATIVE_RUNTIME_ID, ImplementLaneInput, run_unavailable_native_implement_v2
 from .implement_lane.tool_lab import (
     analyze_implement_v2_tool_lab_artifact,
     format_implement_v2_tool_lab_text,
@@ -7356,15 +7356,18 @@ def _run_work_ai_implement_v2(
     selected_lane = _work_guidance_selected_lane(getattr(effective_args, "work_guidance", None))
     model_timeout_seconds = float(getattr(effective_args, "model_timeout", 60.0) or 60.0)
     implement_v2_runtime_metrics = {
-        "runtime_id": "implement_v2_model_json_tool_loop",
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "selected_lane": selected_lane,
         "model_backend": model_backend,
         "model": model,
         "model_timeout_seconds": model_timeout_seconds,
         "timeout_guard": "work_loop_process_guard",
+        "transport_kind": "provider_native",
+        "provider_native_tool_loop": True,
+        "model_json_main_path_detected": False,
     }
     report["selected_lane"] = selected_lane
-    report["runtime_id"] = "implement_v2_model_json_tool_loop"
+    report["runtime_id"] = IMPLEMENT_V2_NATIVE_RUNTIME_ID
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
@@ -7389,23 +7392,23 @@ def _run_work_ai_implement_v2(
             "last_runtime_progress": text,
             "last_runtime_progress_at": now_iso(),
         }
-        if "prompt_render start" in text:
-            metrics_update["runtime_phase"] = "prompt_render"
+        if "native_request start" in text:
+            metrics_update["runtime_phase"] = "native_request"
             metrics_update["prompt_render_started_at"] = metrics_update["last_runtime_progress_at"]
-        elif "prompt_render done" in text:
-            metrics_update["runtime_phase"] = "model_turn_ready"
+        elif "native_request done" in text:
+            metrics_update["runtime_phase"] = "native_response_ready"
             metrics_update["prompt_render_finished_at"] = metrics_update["last_runtime_progress_at"]
-        elif "model_json start" in text:
-            metrics_update["runtime_phase"] = "model_json_call"
-            metrics_update["model_json_started_at"] = metrics_update["last_runtime_progress_at"]
+        elif "native_response start" in text:
+            metrics_update["runtime_phase"] = "native_response_call"
+            metrics_update["native_response_started_at"] = metrics_update["last_runtime_progress_at"]
             timeout_match = re.search(r"timeout_seconds=([0-9.]+)", text)
             if timeout_match:
                 try:
                     metrics_update["active_model_timeout_seconds"] = float(timeout_match.group(1))
                 except ValueError:
                     pass
-        elif "model_json failed" in text:
-            metrics_update["runtime_phase"] = "model_json_failed"
+        elif "native_response failed" in text:
+            metrics_update["runtime_phase"] = "native_response_failed"
         with state_lock():
             state = load_state()
             session = find_work_session(state, session_id)
@@ -7470,16 +7473,13 @@ def _run_work_ai_implement_v2(
         },
     )
     if progress:
-        progress("selected implement_v2 runtime; bypassing v1 THINK/ACT")
+        progress("selected implement_v2 native transcript runtime; bypassing v1 THINK/ACT")
     try:
-        result = run_live_json_implement_v2(
-            lane_input,
-            model_auth=model_auth,
-            base_url=base_url,
-            timeout=model_timeout_seconds,
-            max_turns=max_steps,
-            progress=record_implement_v2_progress,
-        )
+        # Phase 5 must not route selected v2 through the legacy model-JSON
+        # main path. Live provider-native transport is wired in a later phase;
+        # until then selected v2 returns a native unavailable result instead of
+        # silently using the old JSON transport.
+        result = run_unavailable_native_implement_v2(lane_input)
     except Exception as exc:
         result = None
         error = str(exc)
@@ -7487,7 +7487,7 @@ def _run_work_ai_implement_v2(
     else:
         error = "" if result.status == "completed" else result.user_visible_summary
         status = result.status
-    action = {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE, "runtime_id": "implement_v2_model_json_tool_loop"}
+    action = {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE, "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID}
     if result:
         persisted_model_metrics = {**implement_v2_runtime_metrics, **dict(result.metrics or {})}
     else:
@@ -7511,7 +7511,7 @@ def _run_work_ai_implement_v2(
             {
                 "summary": (result.user_visible_summary if result else error) or "",
                 "action": action,
-                "act_mode": "implement_v2_model_json_tool_loop",
+                "act_mode": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
             },
             action,
             model_metrics=persisted_model_metrics,

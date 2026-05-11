@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE, WorkLaneView, get_work_lane_view
+from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID
 
 IMPLEMENT_LANE_REGISTRY_VERSION = 1
 
@@ -44,11 +45,11 @@ _IMPLEMENT_RUNTIMES: tuple[ImplementLaneRuntimeView, ...] = (
     ),
     ImplementLaneRuntimeView(
         lane=IMPLEMENT_V2_LANE,
-        runtime_id="implement_v2_model_json_tool_loop",
-        version=1,
+        runtime_id=IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        version=2,
         default=False,
         runtime_available=True,
-        provider_native_tool_loop=False,
+        provider_native_tool_loop=True,
         writes_allowed=True,
         fallback_lane=IMPLEMENT_V1_LANE,
         work_lane=get_work_lane_view(IMPLEMENT_V2_LANE),

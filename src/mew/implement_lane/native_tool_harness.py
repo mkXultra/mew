@@ -16,6 +16,7 @@ from .native_transcript import (
     NativeTranscript,
     NativeTranscriptItem,
     build_synthetic_error_output,
+    native_transcript_hash,
     normalize_codex_response_items,
     validate_native_transcript_pairing,
     write_native_transcript_artifacts,
@@ -220,6 +221,59 @@ def run_native_implement_v2(
         proof_artifacts=proof_artifacts,
         metrics=metrics,
         finish_summary=finish_summary,
+    )
+
+
+def run_unavailable_native_implement_v2(lane_input: ImplementLaneInput) -> ImplementLaneResult:
+    """Return the production native-v2 unavailable result.
+
+    Phase 5 switches selected v2 away from the legacy model-JSON transport even
+    before the live provider-native adapter is wired. This result keeps the
+    runtime identity and proof metrics native so command integration cannot
+    silently fall back to the old main path.
+    """
+
+    provider = NativeFakeProvider.from_item_batches(
+        (),
+        provider="provider-native-unavailable",
+        model=str(lane_input.model or ""),
+    )
+    lane_attempt_id = _lane_attempt_id(lane_input)
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider=provider.provider,
+        model=provider.model,
+    )
+    return ImplementLaneResult(
+        status="unavailable",
+        lane="implement_v2",
+        user_visible_summary="implement_v2 native transcript loop is selected but live provider transport is not wired yet.",
+        proof_artifacts=(),
+        updated_lane_state={
+            "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+            "transport_kind": "provider_native_unavailable",
+            "provider_native_tool_loop": True,
+            "model_json_main_path_detected": False,
+            "requested_task_id": lane_input.task_id,
+        },
+        next_reentry_hint={
+            "reason": "implement_v2_native_provider_not_wired",
+            "fallback_lane": "implement_v1",
+            "requires_separate_lane_attempt": True,
+        },
+        metrics={
+            **PHASE3_NATIVE_SURFACE,
+            "status": "unavailable",
+            "transport_kind": "provider_native_unavailable",
+            "native_transport_kind": "provider_native",
+            "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+            "provider": provider.provider,
+            "model": provider.model,
+            "provider_native_tool_loop": True,
+            "model_json_main_path_detected": False,
+            "transcript_hash": native_transcript_hash(transcript),
+            "unavailable_reason": "live_provider_native_transport_not_wired",
+        },
     )
 
 

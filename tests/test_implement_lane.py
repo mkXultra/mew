@@ -10,6 +10,7 @@ import pytest
 from mew.errors import ModelBackendError
 from mew.implement_lane import (
     DEFAULT_WORKFRAME_VARIANT,
+    IMPLEMENT_V2_NATIVE_RUNTIME_ID,
     FakeProviderAdapter,
     FakeProviderToolCall,
     ImplementLaneInput,
@@ -97,8 +98,8 @@ def test_implementation_runtime_registry_keeps_v1_default_and_v2_explicit() -> N
     assert runtimes[0].provider_native_tool_loop is False
     assert runtimes[1].default is False
     assert runtimes[1].runtime_available is True
-    assert runtimes[1].runtime_id == "implement_v2_model_json_tool_loop"
-    assert runtimes[1].provider_native_tool_loop is False
+    assert runtimes[1].runtime_id == IMPLEMENT_V2_NATIVE_RUNTIME_ID
+    assert runtimes[1].provider_native_tool_loop is True
     assert runtimes[1].writes_allowed is True
 
 
@@ -202,7 +203,7 @@ def test_implement_v2_descriptor_exposes_live_runtime_and_tools() -> None:
 
     assert description["lane"] == IMPLEMENT_V2_LANE
     assert description["runtime_available"] is True
-    assert description["provider_native_tool_loop"] is False
+    assert description["provider_native_tool_loop"] is True
     assert description["artifact_namespace"] == "implement-lane/implement_v2/ws-1/task-1"
     assert {tool["name"] for tool in description["tool_specs"]} == {
         "inspect_dir",

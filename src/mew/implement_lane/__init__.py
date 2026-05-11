@@ -55,6 +55,7 @@ from .v2_runtime import (
     run_fake_write_implement_v2,
     run_unavailable_implement_v2,
 )
+from .native_tool_harness import run_native_implement_v2, run_unavailable_native_implement_v2
 from .workframe import (
     WorkFrame,
     WorkFrameInputs,
@@ -160,7 +161,9 @@ __all__ = [
     "run_fake_read_only_implement_v2",
     "run_fake_write_implement_v2",
     "run_live_json_implement_v2",
+    "run_native_implement_v2",
     "run_unavailable_implement_v2",
+    "run_unavailable_native_implement_v2",
     "select_implement_lane_runtime",
     "validate_native_transcript_pairing",
     "validate_proof_manifest_pairing",
