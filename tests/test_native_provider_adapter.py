@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from mew.implement_lane.native_provider_adapter import (
     ENCRYPTED_REASONING_INCLUDE,
@@ -8,10 +9,12 @@ from mew.implement_lane.native_provider_adapter import (
     build_reasoning_sidecar,
     build_reasoning_sidecar_entry,
     build_responses_request_descriptor,
+    call_codex_native_responses,
     parse_responses_stream_events,
     read_reasoning_sidecar,
     reasoning_carry_forward_refs,
     reasoning_sidecar_digest,
+    responses_events_from_raw,
     validate_reasoning_sidecar_refs,
     write_reasoning_sidecar,
 )
@@ -258,6 +261,96 @@ def test_stream_parser_accumulates_function_call_arguments_and_usage() -> None:
     assert item.call_id == "call-1"
     assert item.tool_name == "read_file"
     assert item.arguments_json_text == '{"path":"src/mew/a.py"}'
+
+
+def test_responses_events_from_raw_decodes_sse_events() -> None:
+    raw = "\n".join(
+        [
+            'data: {"type":"response.created","response":{"id":"resp-sse"}}',
+            'data: {"type":"response.completed","response":{"id":"resp-sse","usage":{"output_tokens":1}}}',
+            "data: [DONE]",
+        ]
+    )
+
+    events = responses_events_from_raw(raw, content_type="text/event-stream")
+
+    assert [event["type"] for event in events] == ["response.created", "response.completed"]
+    assert events[1]["response"] == {"id": "resp-sse", "usage": {"output_tokens": 1}}
+
+
+def test_responses_events_from_raw_wraps_non_stream_response_payload() -> None:
+    raw = json.dumps(
+        {
+            "id": "resp-json",
+            "status": "completed",
+            "output": [
+                {
+                    "id": "fc-1",
+                    "type": "function_call",
+                    "call_id": "call-1",
+                    "name": "read_file",
+                    "arguments": {"path": "README.md"},
+                }
+            ],
+            "usage": {"input_tokens": 3},
+        }
+    )
+
+    events = responses_events_from_raw(raw, content_type="application/json")
+    result = parse_responses_stream_events(
+        events,
+        lane_attempt_id="attempt-json",
+        model="gpt-5.5",
+    )
+
+    assert result.status == "completed"
+    assert result.usage == {"input_tokens": 3}
+    assert result.transcript.items[0].kind == "function_call"
+    assert result.transcript.items[0].arguments_json_text == '{"path": "README.md"}'
+
+
+def test_call_codex_native_responses_sends_descriptor_body_and_parses_items() -> None:
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[_input_item()],
+        provider_request_id="req-native-call",
+    )
+    raw = json.dumps(
+        {
+            "id": "resp-native",
+            "status": "completed",
+            "output": [
+                {
+                    "id": "finish-1",
+                    "type": "function_call",
+                    "call_id": "call-finish",
+                    "name": "finish",
+                    "arguments": {"outcome": "completed", "summary": "done"},
+                }
+            ],
+        }
+    )
+
+    with patch(
+        "mew.implement_lane.native_provider_adapter._codex_api.call_codex_responses_raw",
+        return_value=(raw, "application/json"),
+    ) as call:
+        result = call_codex_native_responses(
+            auth={"access_token": "x"},
+            descriptor=descriptor,
+            base_url="https://example.invalid/api",
+            timeout=10,
+            lane_attempt_id="attempt-live",
+            turn_id="turn-live-1",
+        )
+
+    call.assert_called_once()
+    assert call.call_args.args[1] == descriptor["request_body"]
+    assert result.status == "completed"
+    item = result.transcript.items[0]
+    assert item.kind == "finish_call"
+    assert item.call_id == "call-finish"
 
 
 def test_stream_parser_accumulates_custom_tool_input_deltas() -> None:

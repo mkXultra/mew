@@ -13,6 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from .. import codex_api as _codex_api
 from .native_tool_schema import (
     NativeToolSchemaCapabilities,
     lowered_tool_descriptor_metadata,
@@ -273,6 +274,92 @@ def build_custom_tool_call_output_input_item(
         "name": name,
         "output": output,
     }
+
+
+def call_codex_native_responses(
+    *,
+    auth: Mapping[str, object],
+    descriptor: Mapping[str, object],
+    base_url: str,
+    timeout: float,
+    lane_attempt_id: str,
+    turn_id: str,
+    on_text_delta=None,
+) -> NativeResponsesStreamParseResult:
+    """Send a provider-native Codex Responses request and parse native items.
+
+    The descriptor is built by ``build_responses_request_descriptor``. This
+    function intentionally returns the parsed native transcript turn, not
+    assistant text or model-authored JSON.
+    """
+
+    request_body = descriptor.get("request_body")
+    if not isinstance(request_body, Mapping):
+        raise ValueError("native Responses descriptor missing request_body")
+    raw, content_type = _codex_api.call_codex_responses_raw(
+        auth,
+        dict(request_body),
+        base_url,
+        timeout,
+        on_text_delta=on_text_delta,
+    )
+    events = responses_events_from_raw(raw, content_type=content_type)
+    return parse_responses_stream_events(
+        events,
+        lane_attempt_id=lane_attempt_id,
+        provider=_text(descriptor.get("provider") or "openai"),
+        model=_text(descriptor.get("model") or request_body.get("model")),
+        turn_id=turn_id,
+    )
+
+
+def responses_events_from_raw(
+    raw_text: str,
+    *,
+    content_type: str = "",
+) -> tuple[dict[str, object], ...]:
+    """Decode raw Responses API output into provider-native event mappings."""
+
+    raw = str(raw_text or "")
+    if "text/event-stream" in str(content_type) or raw.lstrip().startswith(("event:", "data:")):
+        return tuple(
+            event
+            for line in raw.splitlines()
+            if (event := _codex_api.decode_sse_data_line(line))
+        )
+
+    payload = json.loads(raw)
+    if not isinstance(payload, Mapping):
+        raise ValueError("Responses payload must be a JSON object")
+    response = payload.get("response") if isinstance(payload.get("response"), Mapping) else payload
+    response_payload = dict(response)
+    response_id = _text(response_payload.get("id"))
+    status = _text(response_payload.get("status"))
+    events: list[dict[str, object]] = [
+        {"type": "response.created", "response": response_payload}
+    ]
+    for index, raw_item in enumerate(_list(response_payload.get("output"))):
+        if not isinstance(raw_item, Mapping):
+            continue
+        item = dict(raw_item)
+        item.setdefault("output_index", index)
+        if response_id:
+            item.setdefault("response_id", response_id)
+        output_index = item.get("output_index", index)
+        events.append(
+            {
+                "type": "response.output_item.done",
+                "output_index": output_index,
+                "item": item,
+            }
+        )
+    if status == "failed":
+        events.append({"type": "response.failed", "response": response_payload})
+    elif status == "incomplete":
+        events.append({"type": "response.incomplete", "response": response_payload})
+    else:
+        events.append({"type": "response.completed", "response": response_payload})
+    return tuple(events)
 
 
 def build_reasoning_sidecar_entry(
@@ -892,10 +979,12 @@ __all__ = [
     "build_reasoning_sidecar",
     "build_reasoning_sidecar_entry",
     "build_responses_request_descriptor",
+    "call_codex_native_responses",
     "parse_responses_stream_events",
     "read_reasoning_sidecar",
     "reasoning_carry_forward_refs",
     "reasoning_sidecar_digest",
+    "responses_events_from_raw",
     "sanitize_responses_headers",
     "validate_reasoning_sidecar_refs",
     "write_reasoning_sidecar",

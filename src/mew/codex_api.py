@@ -639,6 +639,47 @@ def call_codex_web_api(
         raise CodexApiError("response did not contain assistant text")
     return text
 
+
+def call_codex_responses_raw(auth, body, base_url, timeout, on_text_delta=None):
+    """Send an already-built Responses API body and return raw response bytes as text.
+
+    This is the provider-native escape hatch used by implement_v2. It reuses the
+    same OAuth refresh, timeout, SSE, and 401 retry behavior as
+    ``call_codex_web_api`` without imposing the legacy text/JSON prompt wrapper.
+    """
+
+    url = base_url.rstrip("/") + "/responses"
+    deadline = _request_deadline(timeout)
+    try:
+        if _auth_expires_soon(auth):
+            refresh_codex_oauth(auth, timeout=_refresh_timeout(deadline))
+        raw, content_type = _send_codex_responses_request(
+            auth,
+            url,
+            body,
+            timeout,
+            deadline,
+            on_text_delta=on_text_delta,
+        )
+    except _CodexUnauthorizedError as exc:
+        try:
+            refresh_codex_oauth(auth, timeout=_refresh_timeout(deadline))
+        except CodexApiError as refresh_error:
+            raise CodexApiError(f"HTTP {exc.code}: {exc.detail}") from refresh_error
+        try:
+            raw, content_type = _send_codex_responses_request(
+                auth,
+                url,
+                body,
+                timeout,
+                deadline,
+                on_text_delta=on_text_delta,
+            )
+        except _CodexUnauthorizedError as retry_exc:
+            raise CodexApiError(f"HTTP {retry_exc.code}: {retry_exc.detail}") from retry_exc
+    return raw, content_type
+
+
 def extract_json_object(text):
     stripped = text.strip()
     if stripped.startswith("```"):

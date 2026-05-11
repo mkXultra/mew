@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from mew.codex_api import (
     call_codex_json,
+    call_codex_responses_raw,
     call_codex_web_api,
     decode_sse_data_line,
     extract_json_object,
@@ -186,6 +187,37 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(text, "ok")
         self.assertEqual(captured["body"]["reasoning"], {"effort": "high"})
         self.assertTrue(captured["body"]["stream"])
+
+    def test_call_codex_responses_raw_sends_existing_body_without_prompt_wrapper(self):
+        captured = {}
+        request_body = {
+            "model": "gpt-5.5",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+            "tools": [{"type": "function", "name": "finish", "parameters": {"type": "object"}}],
+            "stream": True,
+            "store": False,
+        }
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["url"] = request.full_url
+            return FakeUrlopenResponse(
+                [b"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\"}}\n"],
+                headers={"content-type": "text/event-stream"},
+            )
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            raw, content_type = call_codex_responses_raw(
+                {"access_token": "token"},
+                request_body,
+                "https://example.invalid/api",
+                1,
+            )
+
+        self.assertEqual(captured["body"], request_body)
+        self.assertEqual(captured["url"], "https://example.invalid/api/responses")
+        self.assertEqual(content_type, "text/event-stream")
+        self.assertIn("response.completed", raw)
 
     def test_call_codex_web_api_sends_image_inputs(self):
         captured = {}
