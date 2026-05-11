@@ -2,7 +2,12 @@ import json
 from pathlib import Path
 
 from mew.implement_lane.workframe import WORKFRAME_RED_MAX_BYTES, WorkFrameInputs, reduce_workframe, workframe_output_hash
-from mew.implement_lane.workframe_variants import DEFAULT_WORKFRAME_VARIANT, reduce_workframe_with_variant
+from mew.implement_lane.workframe_variants import (
+    DEFAULT_WORKFRAME_VARIANT,
+    common_workframe_inputs_from_workframe_inputs,
+    project_workframe_with_variant,
+    reduce_workframe_with_variant,
+)
 from mew.implement_lane.workframe_variant_transition_contract import (
     VARIANT_NAME,
     reduce_transition_contract_workframe,
@@ -144,6 +149,30 @@ def test_default_variant_dispatches_transition_contract_and_current_alias_dispat
     assert current_report.status == "pass"
     assert default.as_dict() == transition.as_dict()
     assert explicit_current.as_dict() == current.as_dict()
+
+
+def test_transition_contract_and_transcript_tool_nav_share_substrate_but_change_projection_only() -> None:
+    inputs = _verifier_failure_after_mutation_inputs()
+    common = common_workframe_inputs_from_workframe_inputs(inputs)
+
+    transition = project_workframe_with_variant(common, variant="transition_contract")
+    transcript_nav = project_workframe_with_variant(common, variant="transcript_tool_nav")
+
+    assert transition.shared_substrate_hash == transcript_nav.shared_substrate_hash
+    assert transition.projection_hash != transcript_nav.projection_hash
+    assert transition.common_inputs.as_dict() == transcript_nav.common_inputs.as_dict()
+    assert transition.workframe.required_next
+    assert transition.workframe.required_next.kind == "patch_or_edit"
+    assert "transition_rule=transition_contract.verifier_failure_after_mutation" in (
+        transition.workframe.required_next.after
+    )
+    assert transition.workframe.latest_actionable
+    assert transition.workframe.latest_actionable.recovery_hint["transition_contract"]["state_transition"][
+        "rule_id"
+    ] == "transition_contract.verifier_failure_after_mutation"
+    assert transcript_nav.workframe.required_next is None
+    assert transcript_nav.workframe.tool_context["recommended_tool_refs"]
+    assert transcript_nav.workframe.tool_context["model_turn_search"]["usage"] == "debug_plateau_recovery_only"
 
 
 def _runtime_artifact_repeat_fixture() -> tuple[WorkFrameInputs, dict[str, object]]:
