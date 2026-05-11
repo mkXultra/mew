@@ -22,6 +22,15 @@ Implementation checkpoint 2026-05-11:
   stays green and the next bounded diagnostic run emits authoritative
   `response_transcript.json`, `response_items.jsonl`, and `proof-manifest.json`
   from the live provider-native path.
+- Tiny live native-loop gate is green:
+  `proof-artifacts/m6_24_native_loop_gate_20260511_live_portable/` completed
+  with `work_exit_code=0`, runtime `implement_v2_native_transcript_loop`,
+  transport `provider_native`, paired `inspect_dir -> write_file -> run_tests
+  -> finish`, valid pairing (`4/4`, no errors), first write at turn 2, first
+  verifier at turn 3, and
+  `scripts/check_implement_v2_native_gate.py --artifact ... --json` returned
+  `ok=true`. The next proof step is the required 10min native step-shape
+  diagnostic, not broad `speed_1` / `proof_5` measurement.
 
 Scope: no-backward-compatibility redesign of `implement_v2` as a provider-native
 tool/function calling loop. This document does not authorize code changes by

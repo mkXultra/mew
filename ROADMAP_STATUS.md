@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, and the live provider-native Responses runtime slice are implemented; next proof step is a bounded native-loop diagnostic that emits authoritative native transcript artifacts before any speed/proof evidence counts. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, live provider-native Responses runtime, and the tiny live native-loop gate are green; next proof step is a 10min native step-shape diagnostic before any speed/proof evidence counts. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -71,7 +71,7 @@ Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode: `m6_24_native_transcript_rebuild`.
 
-Current diagnostic mode: `m6_24_native_loop_gate`.
+Current diagnostic mode: `m6_24_native_step_shape_gate`.
 
 Before another live `speed_1`, `proof_5`, or broad measurement, complete the
 native transcript rebuild in
@@ -104,9 +104,12 @@ Scope:
   old live `model_json` runtime is now explicit quarantine for legacy tests,
   replay compatibility, and dogfood emulators only; it is not the selected
   production v2 main path.
-- Provider-specific live native tool-call execution is the next implementation
-  gap. Current native-loop credit comes only from native transcript fixtures,
-  native adapter/tool scaffolds, CLI selection, and static validation gates.
+- Provider-specific live native tool-call execution is wired. Tiny live
+  native-loop diagnostic
+  `proof-artifacts/m6_24_native_loop_gate_20260511_live_portable/` completed
+  through provider-native `inspect_dir -> write_file -> run_tests -> finish`,
+  emitted authoritative native artifacts, and passed
+  `scripts/check_implement_v2_native_gate.py`.
 - M6.24 live proof work resumes only after the native-loop gate is green. The
   active proof lane is still `implement_v2`, but the active controller is the
   native transcript rebuild, not scoped `speed_1` rebaseline. Historical
@@ -360,18 +363,32 @@ Done when:
 
 Status as of 2026-05-11: **in progress**. The active design is
 `docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`.
-Phase 0-7 substrate, legacy public-surface quarantine, and live provider-native
-Responses runtime wiring are implemented. Native validation now rejects
-selected-route, package-surface, and native-production-path drift back to the
-old model-JSON v2 symbols.
+Phase 0-7 substrate, legacy public-surface quarantine, live provider-native
+Responses runtime wiring, and the tiny live native-loop diagnostic are green.
+Native validation now rejects selected-route, package-surface, and
+native-production-path drift back to the old model-JSON v2 symbols.
 
-Remaining active gap: run the native-loop gate and one bounded diagnostic from
+Native-loop gate evidence:
+
+- artifact root:
+  `proof-artifacts/m6_24_native_loop_gate_20260511_live_portable/`
+- work exit: `0`, stop reason: `finish`
+- runtime: `implement_v2_native_transcript_loop`
+- transport: `provider_native`, provider: `openai`, model: `gpt-5.5`
+- step shape: `inspect_dir -> write_file -> run_tests -> finish`
+- pairing: valid, `call_count=4`, `output_count=4`, `errors=[]`
+- first write: turn 2, about 26.3s
+- first verifier: turn 3, about 36.1s
+- native gate:
+  `uv run python scripts/check_implement_v2_native_gate.py --artifact proof-artifacts/m6_24_native_loop_gate_20260511_live_portable --json`
+  returned `ok=true`
+
+Remaining active gap: run one bounded 10min native step-shape diagnostic from
 the live provider-native path before counting any `speed_1` or `proof_5`
 evidence. Do not count legacy `implement_v2_model_json_tool_loop` artifacts as
-native-loop evidence. The next implementation slice should preserve
-authoritative `response_transcript.json`, `response_items.jsonl`, and native
-proof manifests from the live provider-native tool-call turn, then compare the
-step shape before broad measurement resumes.
+native-loop evidence. The next implementation slice should compare the live
+native step shape against the reference traces before broad measurement
+resumes.
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 
