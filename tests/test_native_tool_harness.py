@@ -771,6 +771,43 @@ def test_native_harness_write_apply_patch_exec_poll_cancel_and_read_output(tmp_p
     assert len(result.metrics["tool_latency"]) == 7
 
 
+def test_native_harness_custom_apply_patch_mutates_when_writes_are_auto_approved(tmp_path: Path) -> None:
+    target = tmp_path / "created.txt"
+    patch = "\n".join(
+        [
+            "*** Begin Patch",
+            "*** Add File: created.txt",
+            "+created from custom patch",
+            "*** End Patch",
+        ]
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                {
+                    "type": "custom_tool_call",
+                    "id": "item-custom-patch",
+                    "call_id": "custom-patch-1",
+                    "name": "apply_patch",
+                    "input": patch,
+                    "output_index": 0,
+                },
+                fake_finish("finish-1", {"outcome": "completed", "summary": "patched"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider)
+
+    assert target.read_text(encoding="utf-8") == "created from custom patch\n"
+    output = next(
+        item
+        for item in result.transcript.items
+        if item.call_id == "custom-patch-1" and item.kind == "custom_tool_call_output"
+    )
+    assert output.status == "completed"
+
+
 def test_native_harness_invalid_arguments_get_paired_output(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [[fake_call("bad-args", "read_file", "{not-json", output_index=0), fake_finish("finish-1", output_index=1)]]

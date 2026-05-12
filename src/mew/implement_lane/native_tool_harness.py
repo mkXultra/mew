@@ -1789,7 +1789,10 @@ def _arguments(call: NativeTranscriptItem) -> tuple[dict[str, object], str]:
             return {}, "native tool arguments must decode to an object"
         return dict(decoded), ""
     if call.custom_input_text:
-        return {"input": call.custom_input_text}, ""
+        arguments: dict[str, object] = {"input": call.custom_input_text}
+        if call.kind == "custom_tool_call" and call.tool_name == "apply_patch":
+            arguments["apply"] = True
+        return arguments, ""
     return {}, ""
 
 

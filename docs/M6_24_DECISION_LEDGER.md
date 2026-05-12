@@ -59,6 +59,18 @@ terminal provider `response.completed` event before executing any parsed native
 tool call. Then rerun focused Codex API/native parsing tests, codex-ultra
 review, commit, and one same-shape diagnostic before any scoring proof.
 
+Follow-up diagnostic `mew-make-mips-interpreter-step-check-10min-20260513-044402`
+showed the stream repair worked: the lane reached `apply_patch` and `run_tests`
+with valid native pairing. The next generic blocker was custom/freeform
+`apply_patch` semantics, not task VM logic. Native custom `apply_patch` returned
+`completed; path=/app/vm.js`, but verifier failed with `Cannot find module
+'/app/vm.js'`; the freeform custom call carried no JSON `apply=true`, so the
+write runtime treated it as dry-run while reporting successful patch metadata.
+Repair custom provider-native `apply_patch` argument normalization so freeform
+patches are execution-intent writes under the existing write approval gate.
+Keep JSON/function `apply_patch` dry-run behavior unchanged unless its arguments
+explicitly request apply.
+
 ## Controller Rule
 
 M6.24 scope decision on 2026-05-03: the controller applies only to the 25
