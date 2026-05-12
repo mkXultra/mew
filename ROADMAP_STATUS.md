@@ -69,9 +69,22 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_native_step_shape_diagnostic_repair`.
+Current controller mode: `m6_24_native_responsibility_boundary_phase_3`.
 
-Current diagnostic mode: `m6_24_native_step_shape_gate`.
+Current diagnostic mode: `phase_implementation_before_more_live_proof`.
+
+Latest phase status: Phase 2 of
+`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is
+implemented and reviewed. `CompletionResolver` is now a harness-independent
+semantic finish resolver with strict pre-extracted input validation,
+`completed` / `blocked_continue` / `blocked_return` outputs, sidecar-only
+`resolver_decisions.jsonl` artifacts, proof-manifest resolver fields, and
+fresh-process import-boundary coverage proving resolver import does not
+initialize native harness or tool runtimes. codex-ultra review session
+`019e1bcb-3aef-7860-a14e-b1db9035decd` returned `STATUS: APPROVE`.
+Next action: implement Phase 3 finish call integration. Do not spend another
+10min step-shape diagnostic, `speed_1`, `proof_5`, or broad measurement before
+Phase 3 is implemented/reviewed/committed.
 
 Phase 1 of
 `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is
@@ -288,7 +301,7 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 is still the active M6.24 lane; native responsibility-boundary Phase 1 is green, so run exactly one bounded native step-shape diagnostic next. Keep NativeTranscript/provider-native paired outputs as source of truth, keep full persisted_lane_state and ordinary repair required_next out of the default provider-visible path, and do not jump directly to speed_1/proof_5/broad measurement before analyzing that diagnostic.
+selected_lane=implement_v2 is still the active M6.24 lane; native responsibility-boundary Phase 2 is green, so implement Phase 3 finish call integration next. Keep NativeTranscript/provider-native paired outputs as source of truth, keep CompletionResolver as the semantic completion authority, and do not jump back to step-shape polish, speed_1, proof_5, or broad measurement before Phase 3 is reviewed and committed.
 ```
 
 Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
@@ -335,7 +348,7 @@ Controller docs:
 Current native-boundary-gated next action:
 
 ```text
-M6.24 -> native responsibility-boundary Phase 1 green -> run one bounded native step-shape diagnostic -> compare step shape and provider-visible request inventory -> then decide repair vs speed_1/proof_5/broad measurement
+M6.24 -> native responsibility-boundary Phase 2 green -> implement Phase 3 finish call integration -> review/commit -> then decide Phase 4 verifier closeout boundary before any new live proof spending
 ```
 
 Older scoped-rebaseline, WorkFrame, diagnostic-runner, and native-loop rows
@@ -413,6 +426,13 @@ Phase 0 boundary inventory/static audit is complete and committed as
 `native_tool_harness.py`, `native_sidecar_projection.py`,
 `native_workframe_projection.py`, `exec_runtime.py`, and
 `execution_evidence.py`.
+
+Phase 1 compact sidecar digest boundary is complete and reviewed. Phase 2
+`CompletionResolver` skeleton is complete and reviewed: resolver import is
+boundary-clean, resolver input rejects raw transcript/tool payloads, decisions
+are sidecar/proof artifacts rather than native ResponseItems, and focused tests
+cover allow, `blocked_continue`, `blocked_return`, import boundary, artifact
+schema, and raw-input rejection.
 
 Native-loop gate evidence:
 

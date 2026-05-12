@@ -437,6 +437,15 @@ Tests:
 
 ### Phase 2: CompletionResolver Skeleton
 
+Implementation status 2026-05-12: green. Added
+`src/mew/implement_lane/completion_resolver.py` as a harness-independent
+resolver, strict pre-extracted input schema validation, sidecar-only
+`resolver_decisions.jsonl` / proof-manifest fields, focused unit tests, and a
+fresh-process import-boundary test. Focused resolver/native regression tests,
+boundary audit, scoped ruff, `git diff --check`, and codex-ultra review session
+`019e1bcb-3aef-7860-a14e-b1db9035decd` passed. Next action is Phase 3 finish
+call integration.
+
 作業:
 
 - `CompletionResolver` を harness 外に定義する。
