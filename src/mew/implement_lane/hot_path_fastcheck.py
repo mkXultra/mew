@@ -28,6 +28,8 @@ from ..model_backends import (
     model_backend_default_model,
 )
 from .native_tool_harness import _native_call_is_verifier, _native_loop_control_state
+from .completion_resolver import COMPLETION_RESOLVER_DECISIONS_FILE
+from .native_sidecar_projection import build_compact_native_sidecar_digest
 from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID, NativeTranscript, NativeTranscriptItem
 from .native_transcript import native_transcript_hash, validate_native_transcript_pairing
 from .tool_lab import resolve_implement_v2_manifest_path
@@ -268,6 +270,16 @@ def _run_native_hot_path_fastcheck(
         checks.append(_check_native_trace_summary(artifact_path=artifact_path, manifest_path=manifest_path, transcript=transcript))
         checks.append(_check_native_loop_control_replay(transcript))
         checks.append(_check_native_search_text_anchor_projection(transcript))
+        provider_requests = _native_provider_requests(artifact_path=artifact_path, manifest_path=manifest_path)
+        checks.append(_check_native_compact_digest_replay(provider_requests, fallback_transcript=transcript))
+        checks.append(_check_native_provider_visible_state(provider_requests))
+        checks.append(
+            _check_native_resolver_decisions(
+                manifest_path=manifest_path,
+                manifest=manifest,
+                transcript=transcript,
+            )
+        )
     else:
         checks.extend(
             [
@@ -277,6 +289,9 @@ def _run_native_hot_path_fastcheck(
                 _check("native_trace_summary", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_loop_control_replay", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_search_text_anchor_projection", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_compact_digest_replay", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_provider_visible_state", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_resolver_decisions", False, "native transcript is unreadable", {"skipped": True}),
             ]
         )
     status = "pass" if all(check.status == "pass" for check in checks) else "fail"
@@ -537,6 +552,417 @@ def _check_native_search_text_anchor_projection(transcript: NativeTranscript) ->
         else "positive native search_text output is missing model-visible path:line anchors",
         {"checked_positive_searches": checked, "missing": missing[:5]},
     )
+
+
+def _check_native_compact_digest_replay(
+    provider_requests: tuple[dict[str, object], ...],
+    *,
+    fallback_transcript: NativeTranscript,
+) -> HotPathCheck:
+    if not provider_requests:
+        return _check(
+            "native_compact_digest_replay",
+            True,
+            "no provider request artifact present; compact digest replay skipped",
+            {"skipped": True},
+        )
+    mismatches: list[dict[str, object]] = []
+    checked = 0
+    for index, request in enumerate(provider_requests, start=1):
+        digest = _native_request_compact_digest(request)
+        if not digest:
+            mismatches.append({"request": index, "reason": "missing_compact_sidecar_digest"})
+            continue
+        transcript = _native_request_transcript(request, fallback_transcript=fallback_transcript)
+        loop_state = _native_loop_control_state(
+            list(transcript.items),
+            current_turn_index=_nonnegative_int(request.get("turn_index")) or _native_next_turn_index(transcript.items),
+        )
+        recomputed = build_compact_native_sidecar_digest(transcript, loop_signals=loop_state)
+        checked += 1
+        if digest != recomputed:
+            mismatches.append(
+                {
+                    "request": index,
+                    "reason": "digest_mismatch",
+                    "stored": digest.get("digest_hash"),
+                    "recomputed": recomputed.get("digest_hash"),
+                    "stored_transcript_hash": digest.get("transcript_hash"),
+                    "recomputed_transcript_hash": recomputed.get("transcript_hash"),
+                }
+            )
+    return _check(
+        "native_compact_digest_replay",
+        not mismatches and checked > 0,
+        "provider request compact_sidecar_digest deterministically replays from transcript window"
+        if not mismatches and checked > 0
+        else "provider request compact_sidecar_digest does not replay from transcript window",
+        {"checked_requests": checked, "mismatches": mismatches[:5]},
+    )
+
+
+def _check_native_provider_visible_state(provider_requests: tuple[dict[str, object], ...]) -> HotPathCheck:
+    if not provider_requests:
+        return _check(
+            "native_provider_visible_state",
+            True,
+            "no provider request artifact present; provider-visible static gate skipped",
+            {"skipped": True},
+        )
+    violations: list[dict[str, object]] = []
+    checked = 0
+    for index, request in enumerate(provider_requests, start=1):
+        checked += 1
+        digest = _native_request_compact_digest(request)
+        task_payload = _native_request_task_payload(request)
+        inventory = _safe_mapping(request.get("provider_request_inventory"))
+        projection = _safe_mapping(digest.get("workframe_projection"))
+        serialized_digest = json.dumps(digest, ensure_ascii=False, sort_keys=True)
+        provider_visible = json.dumps(
+            {
+                "input_items": _native_request_input_items(request),
+                "instructions": _native_request_instructions(request),
+                "provider_request_inventory": inventory,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        transition_contract = _native_request_allows_transition_contract(task_payload, digest)
+        if inventory.get("model_visible_sections") != ["native_transcript_window", "compact_sidecar_digest"]:
+            violations.append(
+                {
+                    "request": index,
+                    "reason": "unexpected_model_visible_sections",
+                    "model_visible_sections": inventory.get("model_visible_sections"),
+                }
+            )
+        if digest.get("provider_input_authority") != "transcript_window_plus_compact_sidecar_digest":
+            violations.append(
+                {
+                    "request": index,
+                    "reason": "wrong_provider_input_authority",
+                    "provider_input_authority": digest.get("provider_input_authority"),
+                }
+            )
+        if len(digest) > 16:
+            violations.append({"request": index, "reason": "digest_top_level_key_cap", "key_count": len(digest)})
+        digest_bytes = len(serialized_digest.encode("utf-8"))
+        if digest_bytes > 6144:
+            violations.append({"request": index, "reason": "digest_byte_cap", "bytes": digest_bytes})
+        if len(projection) > 8:
+            violations.append(
+                {"request": index, "reason": "workframe_projection_key_cap", "key_count": len(projection)}
+            )
+        forbidden_tokens = [
+            token
+            for token in (
+                "persisted_lane_state",
+                "frontier_state_update",
+                "hard_runtime_frontier",
+                "proof_manifest",
+                "model_authored_todo",
+                "model_authored_proof",
+                "next_action_policy",
+            )
+            if token in provider_visible or token in serialized_digest
+        ]
+        if forbidden_tokens:
+            violations.append({"request": index, "reason": "legacy_state_leak", "tokens": forbidden_tokens})
+        if not transition_contract:
+            required_next_tokens = [
+                token
+                for token in ("required_next_kind", "required_next_evidence_refs", "needs_")
+                if token in serialized_digest
+            ]
+            if required_next_tokens:
+                violations.append(
+                    {"request": index, "reason": "default_required_next_leak", "tokens": required_next_tokens}
+                )
+        imperative_hints = _native_imperative_hint_leaks(projection)
+        if imperative_hints:
+            violations.append({"request": index, "reason": "imperative_instruction_hint", "hints": imperative_hints})
+    return _check(
+        "native_provider_visible_state",
+        not violations and checked > 0,
+        "provider-visible native request state is bounded and default required_next-free"
+        if not violations and checked > 0
+        else "provider-visible native request state drifted beyond native transcript window + compact digest",
+        {"checked_requests": checked, "violations": violations[:10]},
+    )
+
+
+def _check_native_resolver_decisions(
+    *,
+    manifest_path: Path,
+    manifest: Mapping[str, object],
+    transcript: NativeTranscript,
+) -> HotPathCheck:
+    valid_finish_call_ids = _native_valid_finish_call_ids(transcript)
+    finish_output_ids = {
+        item.call_id
+        for item in transcript.items
+        if item.kind == "finish_output" and item.call_id and item.call_id in valid_finish_call_ids
+    }
+    decision_ref = str(manifest.get("resolver_decisions_ref") or "").strip()
+    decision_sha = str(manifest.get("resolver_decisions_sha256") or "").strip()
+    if not decision_ref:
+        ok = not valid_finish_call_ids
+        return _check(
+            "native_resolver_decisions",
+            ok,
+            "no finish claim requires resolver decision artifact"
+            if ok
+            else "finish claim exists without resolver decision artifact",
+            {
+                "finish_call_ids": sorted(valid_finish_call_ids),
+                "resolver_decisions_ref": "",
+            },
+        )
+    decision_path = (manifest_path.parent / decision_ref).resolve(strict=False)
+    rows, error = _load_jsonl_objects(decision_path)
+    actual_sha = _file_sha256(decision_path) if decision_path.is_file() else ""
+    row_finish_ids = {
+        str(row.get("finish_call_id") or "").strip()
+        for row in rows
+        if str(row.get("finish_call_id") or "").strip()
+    }
+    row_output_ids = {
+        str(row.get("finish_output_call_id") or "").strip()
+        for row in rows
+        if str(row.get("finish_output_call_id") or "").strip()
+    }
+    transcript_text = json.dumps([item.as_dict() for item in transcript.items], ensure_ascii=False, sort_keys=True)
+    checks = {
+        "path_exists": decision_path.is_file(),
+        "sha_matches": bool(decision_sha) and decision_sha == actual_sha,
+        "rows_present": bool(rows),
+        "finish_calls_exact": row_finish_ids == valid_finish_call_ids,
+        "finish_outputs_exact": row_output_ids == finish_output_ids,
+        "decision_count_matches_finish_count": len(rows) == len(valid_finish_call_ids),
+        "not_native_response_item": "completion_resolver" not in transcript_text,
+        "expected_filename": decision_path.name == COMPLETION_RESOLVER_DECISIONS_FILE,
+    }
+    ok = all(checks.values())
+    return _check(
+        "native_resolver_decisions",
+        ok,
+        "resolver decisions replay from sidecar artifact and manifest hash"
+        if ok
+        else "resolver decision sidecar artifact is missing, stale, or not aligned with finish transcript",
+        {
+            **checks,
+            "resolver_decisions_ref": decision_ref,
+            "resolver_decisions_sha256": decision_sha,
+            "actual_sha256": actual_sha,
+            "row_count": len(rows),
+            "finish_call_ids": sorted(valid_finish_call_ids),
+            "row_finish_call_ids": sorted(row_finish_ids),
+            "finish_output_ids": sorted(finish_output_ids),
+            "row_finish_output_ids": sorted(row_output_ids),
+            "load_error": error,
+        },
+    )
+
+
+def _native_valid_finish_call_ids(transcript: NativeTranscript) -> set[str]:
+    finish_outputs = {
+        item.call_id: item
+        for item in transcript.items
+        if item.kind == "finish_output" and item.call_id
+    }
+    valid: set[str] = set()
+    for item in transcript.items:
+        if item.kind != "finish_call" or not item.call_id:
+            continue
+        output = finish_outputs.get(item.call_id)
+        if output is not None and _native_finish_output_is_protocol_invalid(output):
+            continue
+        valid.add(item.call_id)
+    return valid
+
+
+def _native_finish_output_is_protocol_invalid(output: NativeTranscriptItem) -> bool:
+    if output.kind != "finish_output" or output.status != "invalid" or not output.is_error:
+        return False
+    text = str(output.output_text_or_ref or "").casefold()
+    return any(
+        marker in text
+        for marker in (
+            "invalid json arguments",
+            "finish argument",
+            "finish arguments contain unsupported keys",
+            "must be a string",
+            "must be a boolean",
+            "must be a string or list of strings",
+            "protocol_error",
+        )
+    )
+
+
+def _native_provider_requests(*, artifact_path: Path, manifest_path: Path) -> tuple[dict[str, object], ...]:
+    for candidate in (
+        manifest_path.parent / "native-provider-requests.json",
+        artifact_path / "native-provider-requests.json",
+        artifact_path / "implement_v2" / "native-provider-requests.json",
+    ):
+        if not candidate.is_file():
+            continue
+        data = _load_json(candidate)
+        if not isinstance(data, dict):
+            continue
+        requests = data.get("requests")
+        if isinstance(requests, list):
+            return tuple(dict(item) for item in requests if isinstance(item, dict))
+    return ()
+
+
+def _native_request_compact_digest(request: Mapping[str, object]) -> dict[str, object]:
+    payload = _native_request_task_payload(request)
+    digest = payload.get("compact_sidecar_digest")
+    return dict(digest) if isinstance(digest, Mapping) else {}
+
+
+def _native_request_task_payload(request: Mapping[str, object]) -> dict[str, object]:
+    input_items = _native_request_input_items(request)
+    if not isinstance(input_items, list):
+        return {}
+    for item in input_items:
+        if not isinstance(item, Mapping):
+            continue
+        content = item.get("content")
+        if not isinstance(content, list):
+            continue
+        for chunk in content:
+            if not isinstance(chunk, Mapping):
+                continue
+            if str(chunk.get("type") or "") != "input_text":
+                continue
+            text = str(chunk.get("text") or "").strip()
+            if not text:
+                continue
+            try:
+                decoded = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(decoded, dict):
+                return dict(decoded)
+    return {}
+
+
+def _native_request_transcript(
+    request: Mapping[str, object],
+    *,
+    fallback_transcript: NativeTranscript,
+) -> NativeTranscript:
+    window = request.get("transcript_window")
+    if isinstance(window, list):
+        raw_items = window
+    else:
+        raw_items = list(fallback_transcript.items[: _nonnegative_int(request.get("input_item_count"))])
+    items = tuple(
+        item if isinstance(item, NativeTranscriptItem) else _native_transcript_item_from_mapping(item)
+        for item in raw_items
+        if isinstance(item, (NativeTranscriptItem, Mapping))
+    )
+    lane_attempt_id = str(request.get("lane_attempt_id") or fallback_transcript.lane_attempt_id)
+    provider = _request_transcript_provider(request, fallback_transcript=fallback_transcript)
+    model = str(request.get("model") or fallback_transcript.model)
+    return NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        model=model,
+        items=items,
+    )
+
+
+def _native_request_input_items(request: Mapping[str, object]) -> list[dict[str, object]]:
+    input_items = request.get("input_items")
+    if isinstance(input_items, list):
+        return [dict(item) for item in input_items if isinstance(item, Mapping)]
+    request_body = request.get("request_body")
+    if isinstance(request_body, Mapping):
+        body_input = request_body.get("input")
+        if isinstance(body_input, list):
+            return [dict(item) for item in body_input if isinstance(item, Mapping)]
+    return []
+
+
+def _native_request_instructions(request: Mapping[str, object]) -> str:
+    value = request.get("instructions")
+    if isinstance(value, str):
+        return value
+    request_body = request.get("request_body")
+    if isinstance(request_body, Mapping):
+        return str(request_body.get("instructions") or "")
+    return ""
+
+
+def _request_transcript_provider(
+    request: Mapping[str, object],
+    *,
+    fallback_transcript: NativeTranscript,
+) -> str:
+    transport = str(request.get("transport_kind") or "").strip()
+    if transport == "fake_native":
+        return "fake_native"
+    if transport == "provider_native":
+        # `_compact_sidecar_digest_for_request` intentionally normalizes live
+        # provider-native requests to the codex model backend identity even
+        # when the transport adapter records provider="openai".
+        return "codex"
+    explicit = str(request.get("provider") or "").strip()
+    if explicit:
+        return explicit
+    return fallback_transcript.provider
+
+
+def _native_request_allows_transition_contract(
+    task_payload: Mapping[str, object],
+    digest: Mapping[str, object],
+) -> bool:
+    values = [
+        task_payload.get("workframe_variant"),
+        task_payload.get("native_projection_variant"),
+        digest.get("workframe_variant"),
+        _safe_mapping(digest.get("workframe_projection")).get("variant"),
+    ]
+    lane_config = task_payload.get("lane_config")
+    if isinstance(lane_config, Mapping):
+        values.append(lane_config.get("workframe_variant"))
+    return any(str(value or "").strip() == "transition_contract" for value in values)
+
+
+def _native_imperative_hint_leaks(projection: Mapping[str, object]) -> list[str]:
+    hints = projection.get("attention_hints")
+    if not isinstance(hints, list):
+        return []
+    forbidden = re.compile(r"\b(apply_patch|write_file|edit_file|run_command|read_file|search_text)\b")
+    leaks: list[str] = []
+    for hint in hints:
+        text = str(hint or "").strip()
+        if not text:
+            continue
+        if forbidden.search(text) or re.search(r"[\w./-]+\.(py|js|ts|c|h|rs|go|java|rb|php|sh)\b", text):
+            leaks.append(text[:300])
+    return leaks
+
+
+def _load_jsonl_objects(path: Path) -> tuple[list[dict[str, object]], str]:
+    try:
+        rows = [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except Exception as exc:
+        return [], str(exc)
+    return [dict(row) for row in rows if isinstance(row, dict)], ""
+
+
+def _file_sha256(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _native_search_text_match_count(text: object) -> int:

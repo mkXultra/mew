@@ -1,9 +1,14 @@
 import json
+import hashlib
 from pathlib import Path
 
 import pytest
 
+from mew.implement_lane.completion_resolver import CompletionResolverDecision, write_completion_resolver_artifacts
 from mew.implement_lane.hot_path_fastcheck import _workframe_resolvable_refs, run_hot_path_fastcheck
+from mew.implement_lane.native_sidecar_projection import build_compact_native_sidecar_digest
+from mew.implement_lane.native_tool_harness import _native_loop_control_state
+from mew.implement_lane.native_workframe_projection import build_native_prompt_input_inventory
 from mew.implement_lane.native_transcript import NativeTranscript, NativeTranscriptItem, write_native_transcript_artifacts
 from mew.implement_lane.workframe import WorkFrameInputs, canonicalize_workframe_inputs, reduce_workframe
 from mew.implement_lane.workframe_variants import (
@@ -222,6 +227,218 @@ def _write_native_artifact(tmp_path: Path, *, with_failed_verifier_repair: bool 
     return artifact
 
 
+def _write_native_provider_request(
+    artifact: Path,
+    transcript: NativeTranscript,
+    *,
+    prefix_item_count: int = 0,
+    workframe_variant: str = "",
+    live_shape: bool = False,
+) -> None:
+    prefix = NativeTranscript(
+        lane_attempt_id=transcript.lane_attempt_id,
+        provider=transcript.provider,
+        model=transcript.model,
+        items=tuple(transcript.items[:prefix_item_count]),
+    )
+    digest = build_compact_native_sidecar_digest(
+        prefix,
+        loop_signals=_native_loop_control_state(list(prefix.items), current_turn_index=1),
+    )
+    task_payload = {
+        "task_contract": {"goal": "exercise native request fastcheck"},
+        "compact_sidecar_digest": digest,
+        "workspace": str(artifact),
+        "lane": "implement_v2",
+    }
+    if workframe_variant:
+        task_payload["workframe_variant"] = workframe_variant
+    input_items = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": json.dumps(task_payload, ensure_ascii=False, sort_keys=True),
+                }
+            ],
+        }
+    ]
+    request = {
+        "runtime_id": "implement_v2_native_transcript_loop",
+        "transport_kind": "provider_native",
+        "native_transport_kind": "provider_native",
+        "lane_attempt_id": transcript.lane_attempt_id,
+        "turn_index": 1,
+        "input_item_count": prefix_item_count,
+        "provider_request_inventory": build_native_prompt_input_inventory(compact_sidecar_digest=digest),
+    }
+    if live_shape:
+        request["provider"] = transcript.provider
+        request["model"] = transcript.model
+        request["request_body"] = {
+            "model": transcript.model,
+            "instructions": "native loop instructions",
+            "input": input_items,
+            "tools": [],
+            "tool_choice": "auto",
+            "parallel_tool_calls": True,
+            "stream": True,
+            "store": False,
+        }
+    else:
+        request["transcript_window"] = [item.as_dict() for item in prefix.items]
+        request["input_items"] = input_items
+    payload = {
+        "schema_version": 1,
+        "runtime_id": "implement_v2_native_transcript_loop",
+        "transport_kind": "provider_native",
+        "native_transport_kind": "provider_native",
+        "status": "completed",
+        "request_count": 1,
+        "requests": [request],
+    }
+    (artifact / "native-provider-requests.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _read_native_transcript(artifact: Path) -> NativeTranscript:
+    payload = json.loads((artifact / "response_transcript.json").read_text(encoding="utf-8"))
+    return NativeTranscript(
+        lane_attempt_id=str(payload["lane_attempt_id"]),
+        provider=str(payload["provider"]),
+        model=str(payload["model"]),
+        items=tuple(NativeTranscriptItem(**{k: v for k, v in item.items() if k != "schema_version"}) for item in payload["items"]),
+    )
+
+
+def _native_request_payload(artifact: Path) -> dict[str, object]:
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    request = payload["requests"][0]
+    input_items = request.get("input_items") or request["request_body"]["input"]
+    text = input_items[0]["content"][0]["text"]
+    return json.loads(text)
+
+
+def _replace_native_request_payload(artifact: Path, task_payload: dict[str, object]) -> None:
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    request = payload["requests"][0]
+    input_items = request.get("input_items") or request["request_body"]["input"]
+    input_items[0]["content"][0]["text"] = json.dumps(
+        task_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_native_finish_artifact(tmp_path: Path) -> Path:
+    artifact = tmp_path / "native-finish-artifact"
+    lane_attempt_id = "native-fastcheck:finish"
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider="codex",
+        model="gpt-5.5",
+        items=(
+            NativeTranscriptItem(
+                sequence=1,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="call-write-1",
+                tool_name="write_file",
+                arguments_json_text='{"path":"vm.js","content":"console.log(1)"}',
+            ),
+            NativeTranscriptItem(
+                sequence=2,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="call-write-1",
+                tool_name="write_file",
+                status="completed",
+                output_text_or_ref="write_file result: completed",
+            ),
+            NativeTranscriptItem(
+                sequence=3,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="call-test-1",
+                tool_name="run_tests",
+                arguments_json_text='{"command":"node vm.js"}',
+            ),
+            NativeTranscriptItem(
+                sequence=4,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="call-test-1",
+                tool_name="run_tests",
+                status="completed",
+                output_text_or_ref="run_tests result: completed",
+                evidence_refs=("ev:verify-pass",),
+            ),
+            NativeTranscriptItem(
+                sequence=5,
+                turn_id="turn-3",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="finish_call",
+                call_id="finish-1",
+                tool_name="finish",
+                arguments_json_text='{"outcome":"completed","summary":"done","evidence_refs":["ev:verify-pass"]}',
+            ),
+            NativeTranscriptItem(
+                sequence=6,
+                turn_id="turn-3",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="finish_output",
+                call_id="finish-1",
+                tool_name="finish",
+                status="completed",
+                output_text_or_ref="finish result: completed; summary=done",
+                evidence_refs=("ev:verify-pass",),
+            ),
+        ),
+    )
+    paths = write_native_transcript_artifacts(artifact, transcript)
+    decision = CompletionResolverDecision(
+        decision_id="resolver:turn-3:finish-1",
+        lane_attempt_id=lane_attempt_id,
+        turn_id="turn-3",
+        finish_call_id="finish-1",
+        finish_output_call_id="finish-1",
+        lane_status="completed",
+        result="allow",
+        evidence_refs=("ev:verify-pass",),
+        reason="done",
+        transcript_hash_before_decision="sha256:before",
+        compact_sidecar_digest_hash="sha256:digest",
+    )
+    write_completion_resolver_artifacts(
+        artifact,
+        [decision],
+        proof_manifest_path=paths["proof_manifest"],
+    )
+    return artifact
+
+
 def _write_read_only_native_artifact(tmp_path: Path) -> Path:
     artifact = tmp_path / "read-only-native-artifact"
     lane_attempt_id = "native-fastcheck:read-only"
@@ -354,6 +571,358 @@ def test_hot_path_fastcheck_accepts_native_transcript_artifact_without_history(t
     assert checks["native_manifest_contract"]["status"] == "pass"
     assert checks["native_response_items_match"]["status"] == "pass"
     assert result["micro_next_action_refresh"]["reason"] == "native_transcript_mode"
+
+
+def test_hot_path_fastcheck_replays_native_provider_request_compact_digest(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    _write_native_provider_request(artifact, _read_native_transcript(artifact))
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "pass"
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_compact_digest_replay"]["status"] == "pass"
+    assert checks["native_provider_visible_state"]["status"] == "pass"
+
+
+def test_hot_path_fastcheck_replays_live_provider_request_body_shape(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2, live_shape=True)
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "pass"
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_compact_digest_replay"]["details"]["checked_requests"] == 1
+    assert checks["native_provider_visible_state"]["status"] == "pass"
+
+
+def test_hot_path_fastcheck_replays_live_openai_request_against_codex_digest_identity(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2, live_shape=True)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    payload["requests"][0]["provider"] = "openai"
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_compact_digest_replay"]["status"] == "pass"
+
+
+def test_hot_path_fastcheck_rejects_native_compact_digest_drift(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    _write_native_provider_request(artifact, _read_native_transcript(artifact))
+    task_payload = _native_request_payload(artifact)
+    task_payload["compact_sidecar_digest"]["transcript_hash"] = "sha256:stale"  # type: ignore[index]
+    _replace_native_request_payload(artifact, task_payload)
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "fail"
+    check = [item for item in result["checks"] if item["name"] == "native_compact_digest_replay"][0]
+    assert check["status"] == "fail"
+    assert check["details"]["mismatches"][0]["reason"] == "digest_mismatch"
+
+
+def test_hot_path_fastcheck_rejects_default_native_required_next_leak(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    _write_native_provider_request(artifact, _read_native_transcript(artifact))
+    task_payload = _native_request_payload(artifact)
+    task_payload["compact_sidecar_digest"]["workframe_projection"]["required_next_kind"] = "patch"  # type: ignore[index]
+    _replace_native_request_payload(artifact, task_payload)
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "fail"
+    check = [item for item in result["checks"] if item["name"] == "native_provider_visible_state"][0]
+    assert check["status"] == "fail"
+    assert check["details"]["violations"][0]["reason"] == "default_required_next_leak"
+
+
+def test_hot_path_fastcheck_rejects_live_request_body_instruction_state_leak(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    _write_native_provider_request(artifact, _read_native_transcript(artifact), live_shape=True)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    payload["requests"][0]["request_body"]["instructions"] = "Use persisted_lane_state and next_action_policy."
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "fail"
+    check = [item for item in result["checks"] if item["name"] == "native_provider_visible_state"][0]
+    assert check["status"] == "fail"
+    assert check["details"]["violations"][0]["reason"] == "legacy_state_leak"
+
+
+def test_hot_path_fastcheck_rejects_resolver_decision_hash_drift(tmp_path):
+    artifact = _write_native_finish_artifact(tmp_path)
+    decision_path = artifact / "resolver_decisions.jsonl"
+    rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["reason"] = "tampered"
+    decision_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "fail"
+    check = [item for item in result["checks"] if item["name"] == "native_resolver_decisions"][0]
+    assert check["status"] == "fail"
+    assert check["details"]["sha_matches"] is False
+
+
+def test_hot_path_fastcheck_rejects_extra_resolver_decision_row_even_with_matching_hash(tmp_path):
+    artifact = _write_native_finish_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    decision_path = artifact / "resolver_decisions.jsonl"
+    rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
+    extra = dict(rows[0])
+    extra["decision_id"] = "resolver:turn-extra:finish-extra"
+    extra["turn_id"] = "turn-extra"
+    extra["finish_call_id"] = "finish-extra"
+    extra["finish_output_call_id"] = "finish-extra"
+    decision_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in (*rows, extra)), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["resolver_decisions_sha256"] = "sha256:" + hashlib.sha256(decision_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "fail"
+    check = [item for item in result["checks"] if item["name"] == "native_resolver_decisions"][0]
+    assert check["status"] == "fail"
+    assert check["details"]["sha_matches"] is True
+    assert check["details"]["finish_calls_exact"] is False
+    assert check["details"]["decision_count_matches_finish_count"] is False
+
+
+def test_hot_path_fastcheck_allows_invalid_finish_retry_with_one_valid_resolver_decision(tmp_path):
+    artifact = tmp_path / "native-finish-retry-artifact"
+    lane_attempt_id = "native-fastcheck:finish-retry"
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider="codex",
+        model="gpt-5.5",
+        items=(
+            NativeTranscriptItem(
+                sequence=1,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="write-1",
+                tool_name="write_file",
+                arguments_json_text='{"path":"vm.js","content":"console.log(1)"}',
+            ),
+            NativeTranscriptItem(
+                sequence=2,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="write-1",
+                tool_name="write_file",
+                status="completed",
+                output_text_or_ref="write_file result: completed",
+            ),
+            NativeTranscriptItem(
+                sequence=3,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="test-1",
+                tool_name="run_tests",
+                arguments_json_text='{"command":"node vm.js"}',
+            ),
+            NativeTranscriptItem(
+                sequence=4,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="test-1",
+                tool_name="run_tests",
+                status="completed",
+                output_text_or_ref="run_tests result: completed",
+                evidence_refs=("ev:verify-pass",),
+            ),
+            NativeTranscriptItem(
+                sequence=5,
+                turn_id="turn-3",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="finish_call",
+                call_id="finish-json",
+                tool_name="finish",
+                arguments_json_text="{not-json",
+            ),
+            NativeTranscriptItem(
+                sequence=6,
+                turn_id="turn-3",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="finish_output",
+                call_id="finish-json",
+                tool_name="finish",
+                status="invalid",
+                is_error=True,
+                output_text_or_ref="finish result: invalid; summary=invalid JSON arguments",
+            ),
+            NativeTranscriptItem(
+                sequence=7,
+                turn_id="turn-4",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="finish_call",
+                call_id="finish-ok",
+                tool_name="finish",
+                arguments_json_text='{"outcome":"completed","summary":"retried","evidence_refs":["ev:verify-pass"]}',
+            ),
+            NativeTranscriptItem(
+                sequence=8,
+                turn_id="turn-4",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="finish_output",
+                call_id="finish-ok",
+                tool_name="finish",
+                status="completed",
+                output_text_or_ref="finish result: completed; summary=retried",
+                evidence_refs=("ev:verify-pass",),
+            ),
+        ),
+    )
+    paths = write_native_transcript_artifacts(artifact, transcript)
+    decision = CompletionResolverDecision(
+        decision_id="resolver:turn-4:finish-ok",
+        lane_attempt_id=lane_attempt_id,
+        turn_id="turn-4",
+        finish_call_id="finish-ok",
+        finish_output_call_id="finish-ok",
+        lane_status="completed",
+        result="allow",
+        evidence_refs=("ev:verify-pass",),
+        reason="retried",
+    )
+    write_completion_resolver_artifacts(artifact, [decision], proof_manifest_path=paths["proof_manifest"])
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_resolver_decisions"]["status"] == "pass"
+
+
+def test_hot_path_fastcheck_allows_resolver_blocked_invalid_finish_output(tmp_path):
+    artifact = tmp_path / "native-finish-blocked-artifact"
+    lane_attempt_id = "native-fastcheck:finish-blocked"
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider="codex",
+        model="gpt-5.5",
+        items=(
+            NativeTranscriptItem(
+                sequence=1,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="write-1",
+                tool_name="write_file",
+                arguments_json_text='{"path":"vm.js","content":"console.log(1)"}',
+            ),
+            NativeTranscriptItem(
+                sequence=2,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="write-1",
+                tool_name="write_file",
+                status="completed",
+                output_text_or_ref="write_file result: completed",
+            ),
+            NativeTranscriptItem(
+                sequence=3,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="test-1",
+                tool_name="run_tests",
+                arguments_json_text='{"command":"node vm.js"}',
+            ),
+            NativeTranscriptItem(
+                sequence=4,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="test-1",
+                tool_name="run_tests",
+                status="completed",
+                output_text_or_ref="run_tests result: completed",
+            ),
+            NativeTranscriptItem(
+                sequence=5,
+                turn_id="turn-3",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="finish_call",
+                call_id="finish-blocked",
+                tool_name="finish",
+                arguments_json_text='{"outcome":"completed","summary":"needs verifier"}',
+            ),
+            NativeTranscriptItem(
+                sequence=6,
+                turn_id="turn-3",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="finish_output",
+                call_id="finish-blocked",
+                tool_name="finish",
+                status="invalid",
+                is_error=True,
+                output_text_or_ref="finish result: invalid; summary=finish blocked; more evidence or repair is required",
+            ),
+        ),
+    )
+    paths = write_native_transcript_artifacts(artifact, transcript)
+    decision = CompletionResolverDecision(
+        decision_id="resolver:turn-3:finish-blocked",
+        lane_attempt_id=lane_attempt_id,
+        turn_id="turn-3",
+        finish_call_id="finish-blocked",
+        finish_output_call_id="finish-blocked",
+        lane_status="blocked_continue",
+        result="block",
+        blockers=("verifier_evidence_missing",),
+        missing_obligations=("strict_verifier_evidence",),
+        reason="finish blocked; more evidence or repair is required",
+    )
+    write_completion_resolver_artifacts(artifact, [decision], proof_manifest_path=paths["proof_manifest"])
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_resolver_decisions"]["status"] == "pass"
 
 
 def test_hot_path_fastcheck_accepts_fake_native_transport_kind(tmp_path):
