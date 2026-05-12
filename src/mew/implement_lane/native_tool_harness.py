@@ -2105,7 +2105,9 @@ def _native_call_is_prewrite_probe(item: NativeTranscriptItem) -> bool:
         return False
     if _native_call_is_source_mutating_exec(item):
         return False
-    if item.tool_name in {"poll_command", "cancel_command", "read_command_output", "run_tests"}:
+    if item.tool_name in {"poll_command", "cancel_command", "read_command_output"}:
+        return False
+    if item.tool_name == "run_tests":
         return True
     arguments, _ = _arguments(item)
     command_intent = str(arguments.get("command_intent") or arguments.get("intent") or "").strip().casefold()

@@ -432,6 +432,43 @@ def test_native_hard_runtime_prewrite_plateau_guidance_excludes_write_file(tmp_p
     assert "write_file" not in reason
 
 
+def test_native_first_write_overrun_allows_command_lifecycle_tools(tmp_path: Path) -> None:
+    lane_input = _lane_input(tmp_path)
+    lifecycle_calls = [
+        NativeTranscriptItem(
+            sequence=index,
+            turn_id="turn-3",
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="fake-native",
+            model="fake-native-model",
+            response_id="resp-3",
+            provider_item_id=f"item-{tool_name}",
+            output_index=index,
+            kind="function_call",
+            call_id=f"{tool_name}-{index}",
+            tool_name=tool_name,
+            arguments_json_text=json.dumps(arguments),
+        )
+        for index, (tool_name, arguments) in enumerate(
+            [
+                ("poll_command", {"command_run_id": "cmd-1", "wait_seconds": 0}),
+                ("read_command_output", {"command_run_id": "cmd-1"}),
+                ("cancel_command", {"command_run_id": "cmd-1"}),
+            ],
+            start=1,
+        )
+    ]
+
+    for call in lifecycle_calls:
+        result = _prewrite_probe_plateau_result(
+            call,
+            {"first_write_due_overrun": True},
+            lane_input=lane_input,
+            lane_config=lane_input.lane_config,
+        )
+        assert result is None
+
+
 def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifacts"
     lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
