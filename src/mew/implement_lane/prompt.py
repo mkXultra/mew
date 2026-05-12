@@ -97,7 +97,7 @@ def build_implement_v2_prompt_sections(
         ),
         PromptSection(
             id="implement_v2_active_coding_rhythm",
-            version="v0",
+            version="v1",
             title="Implement V2 Active Coding Rhythm",
             content=(
                 "Keep the normal coding hot path small and transcript-driven: cheap probe -> coherent "
@@ -109,13 +109,14 @@ def build_implement_v2_prompt_sections(
                 "with the exact missing information. Do not keep re-reading generated source or full "
                 "proof objects when the latest command exit, bounded stdout/stderr tail, artifact miss, "
                 "and blocker class are enough to act. Keep source mutation on write_file/edit_file/"
-                "apply_patch paths by default, including large generated files. For new or replacement "
-                "source files above a few KB, use write_file content_lines or an apply_patch with real "
-                "line breaks; never minify generated source into one long line just to fit JSON. Use a bounded "
-                "run_command writer only as a fallback after a concrete write-tool payload, parser, "
-                "or transport failure makes the write path unavailable; if you use that fallback, "
-                "immediately run a syntax check or verifier. Use run_command otherwise for probes, "
-                "builds, runtime execution, and verification. "
+                "apply_patch paths by default for scoped edits. For large generated or replacement source, "
+                "avoid one huge provider-native write_file/content_lines JSON payload: prefer a custom "
+                "apply_patch/freeform patch for concrete edits, or a bounded run_command writer when the "
+                "content can be generated compactly. Split very large mutations into smaller source-producing "
+                "steps rather than spending a model turn on one huge tool call. Never minify generated source "
+                "into one long line just to fit JSON. If you use a bounded writer, immediately run a syntax "
+                "check or verifier. Use run_command otherwise for probes, builds, runtime execution, and "
+                "verification. "
                 "When a cheap probe depends on an optional CLI such as rg, fd, ag, readelf, objdump, "
                 "file, or nm, either preflight it with command -v or include an available fallback in "
                 "the same cheap turn. If output says command not found or executable not found, treat "

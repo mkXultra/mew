@@ -16,6 +16,21 @@ Companion controller and data files:
 - `docs/M6_24_WORKFRAME_PHASE0_PREP_2026-05-10.md`
 - `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`
 
+## Current Native-Loop Repair
+
+2026-05-13 checkpoint: keep M6.24 measurement paused after the
+`mew-make-mips-interpreter-step-check-10min-20260513-005024` diagnostic. The
+native evidence resolver is observable and not the current blocker. The current
+generic blocker is native generation latency: the first source mutation used a
+`write_file` function call with about 29k argument characters and 716
+`content_lines`, delaying the first edit until about 531 seconds. Repair this as
+tool-contract / prompt guidance, not task-specific VM logic: large generated or
+replacement source must avoid one huge provider-native `write_file` JSON
+payload, prefer custom/freeform patch or a compact bounded writer when suitable,
+and immediately verify after any writer. After repair, run focused tests,
+HOT_PATH fastcheck against the saved artifact, codex-ultra review, commit, then
+one same-shape 10 minute step-check before any scoring proof.
+
 ## Controller Rule
 
 M6.24 scope decision on 2026-05-03: the controller applies only to the 25

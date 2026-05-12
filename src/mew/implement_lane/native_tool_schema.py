@@ -318,7 +318,8 @@ def structured_tool_json_schema(tool_name: str) -> dict[str, object] | None:
                 "path": _string("Workspace-relative path to write."),
                 "content": _nullable_string("Full file content as a single string."),
                 "content_lines": _nullable_string_array(
-                    "Full file content as one line per array item."
+                    "Full file content as one line per array item. Use for small and medium writes; "
+                    "avoid large generated source payloads in one provider-native call."
                 ),
                 "create": _nullable_boolean(
                     "Whether creating a missing file is allowed."

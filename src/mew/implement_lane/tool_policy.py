@@ -110,8 +110,11 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         access="write",
         description=(
             "Write a file through the existing write substrate. Accepts content string or content_lines "
-            "array joined with newlines. For source files above a few KB, prefer content_lines so the "
-            "result stays readable and diagnosable; do not minify generated source into one long line."
+            "array joined with newlines for small and medium writes. Do not emit a single huge "
+            "provider-native write_file JSON payload for large generated or replacement source; prefer "
+            "a custom apply_patch/freeform patch for concrete edits, or a bounded run_command writer "
+            "only when the content can be generated compactly and is followed by a verifier. Never "
+            "minify generated source into one long line just to fit JSON."
         ),
         approval_required=True,
         dry_run_supported=True,

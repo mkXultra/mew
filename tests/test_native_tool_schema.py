@@ -51,6 +51,20 @@ def test_base_tool_specs_lower_to_responses_tools_with_strict_read_file_schema()
     assert strict_false_reasons(lowered) == {}
 
 
+def test_write_file_tool_contract_discourages_huge_native_payloads() -> None:
+    lowered = lower_implement_lane_tool_specs(list_v2_base_tool_specs())
+    write_file = {tool.name: tool for tool in lowered}["write_file"].provider_tool
+
+    description = str(write_file["description"])
+    content_lines_description = str(
+        write_file["parameters"]["properties"]["content_lines"]["description"]  # type: ignore[index]
+    )
+
+    assert "Do not emit a single huge provider-native write_file JSON payload" in description
+    assert "small and medium writes" in description
+    assert "avoid large generated source payloads in one provider-native call" in content_lines_description
+
+
 def test_apply_patch_lowers_to_custom_grammar_tool_when_supported() -> None:
     lowered = lower_implement_lane_tool_specs(list_v2_base_tool_specs())
     apply_patch = {tool.name: tool for tool in lowered}["apply_patch"]
