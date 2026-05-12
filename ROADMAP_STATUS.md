@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-10
+Last updated: 2026-05-12
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native transcript rebuild. Phase 0-7 scaffolds, legacy model-JSON quarantine, live provider-native Responses runtime, tiny live native-loop gate, native-artifact HOT_PATH fastcheck support, search-anchor projection, final-verifier closeout, and semantic verifier-output repair are green. Latest 10min native diagnostic improved to internal VM execution but stopped at `model_turns=30` after about `210s` of a `660s` window, so current work is diagnostic runner step-budget repair before another same-shape diagnostic. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native responsibility-boundary repair. Provider-native runtime exists, but Phase 0 inventory/static audit showed semantic-ish controls still leak through sidecar/workframe/finish paths. Current work is Phase 1 compact sidecar digest boundary before another live diagnostic. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,18 +69,19 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_native_transcript_rebuild`.
+Current controller mode: `m6_24_native_responsibility_boundary`.
 
 Current diagnostic mode: `m6_24_native_step_shape_gate`.
 
-Before another live `speed_1`, `proof_5`, or broad measurement, complete the
-native transcript rebuild in
-`docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`.
-Native v2 proof evidence must use `runtime_id=implement_v2_native_transcript_loop`,
-`transport_kind=provider_native`, paired native transcript artifacts, and
-`model_json_main_path_detected=false`. Legacy model-JSON runs, WorkFrame-only
-projection work, and prompt/parser repair cannot close the active native-loop
-gate.
+Before another live `step-check-10min`, `speed_1`, `proof_5`, or broad
+measurement, complete Phase 1 of
+`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`.
+Native v2 must keep `NativeTranscript` / provider-native paired tool outputs as
+the source of truth, expose only `native_transcript_window` plus bounded
+`compact_sidecar_digest` as dynamic provider input, and keep `persisted_lane_state`
+and ordinary repair `required_next` out of the default provider-visible path.
+Legacy model-JSON runs, WorkFrame-only projection work, prompt/parser repair,
+and live diagnostic reruns cannot close the active boundary gate.
 
 Scope:
 
@@ -110,15 +111,17 @@ Scope:
   through provider-native `inspect_dir -> write_file -> run_tests -> finish`,
   emitted authoritative native artifacts, and passed
   `scripts/check_implement_v2_native_gate.py`.
-- M6.24 live proof work resumes only after the native-loop gate is green. The
-  active proof lane is still `implement_v2`, but the active controller is the
-  native transcript rebuild, not scoped `speed_1` rebaseline. Historical
-  `implement_v1`, model-JSON `implement_v2`, and pre-native WorkFrame results
+- M6.24 live proof work resumes only after the native responsibility-boundary
+  Phase 1 gate is green or explicitly accepted yellow. The active proof lane is
+  still `implement_v2`, but the active controller is the native boundary repair,
+  not scoped `speed_1` rebaseline. Historical `implement_v1`, model-JSON
+  `implement_v2`, pre-native WorkFrame results, and the tiny native-loop gate
   remain repair evidence but cannot close the current M6.24 gate.
 - The prior scoped rebaseline controller
-  (`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`) is suspended until the
-  native HOT_PATH fastcheck/dogfood/emulator gate and exactly one same-shape
-  `make-mips-interpreter` `step-check-10min` are recorded.
+  (`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`) is suspended until Phase
+  1 compact sidecar digest boundary is implemented, focused projection/harness
+  tests plus `scripts/check_native_tool_loop_boundary.py` pass, and one bounded
+  same-shape diagnostic is explicitly authorized.
 - The first true-v2 `build-cython-ext` speed attempt
   `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215` is excluded from
   product evidence: Docker failed before `mew` launched because the harness
@@ -252,7 +255,7 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 is still the active M6.24 lane, but measurement is paused while the native transcript rebuild is active; continue docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md from the latest committed phase, keep legacy model-json only in explicit quarantine, make selected production v2 use provider-native transcript artifacts, then rerun native-loop validation before any speed_1/proof_5/broad measurement
+selected_lane=implement_v2 is still the active M6.24 lane, but measurement is paused while the native responsibility-boundary repair is active; continue docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md Phase 1 from commit 3059cca, keep NativeTranscript/provider-native paired outputs as source of truth, remove full persisted_lane_state and ordinary repair required_next from the default provider-visible path, then run focused projection/harness tests plus the boundary audit before any live step-check/speed_1/proof_5/broad measurement
 ```
 
 Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
@@ -262,7 +265,7 @@ Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
 passed with exact replay and terminal-bench replay dogfood. This is historical
 pre-WorkFrame measurement evidence. The current decision is no longer
 "build-cython proof_5 now" or "continue the implement_v2 scoped rebaseline";
-the current decision is the native transcript rebuild above.
+the current decision is the native responsibility-boundary Phase 1 above.
 
 ## Active M6.24 Context
 
@@ -290,19 +293,21 @@ Controller docs:
 - `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`
 - `docs/M6_24_REFERENCE_TRACE_BUILD_CYTHON_EXT_2026-05-05.md`
 - `docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`
+- `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`
 - `docs/M6_24_DECISION_LEDGER.md`
 - `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
 
-Current native-transcript-gated next action:
+Current native-boundary-gated next action:
 
 ```text
-M6.24 -> native transcript rebuild Phase 0-7 reviewed/committed -> keep old model-json v2 as explicit quarantine only -> implement live provider-native execution and authoritative native transcript artifacts -> native-loop validation gate -> native HOT_PATH fastcheck on current artifact -> one bounded step-shape diagnostic before speed_1/proof_5/broad measurement
+M6.24 -> native responsibility-boundary Phase 0 audit committed -> implement Phase 1 compact sidecar digest boundary -> focused projection/harness tests plus boundary audit -> then one bounded step-shape diagnostic before speed_1/proof_5/broad measurement
 ```
 
-Older scoped-rebaseline and WorkFrame rows remain historical evidence only until
-the native-loop gate is green or explicitly accepted yellow.
+Older scoped-rebaseline, WorkFrame, diagnostic-runner, and native-loop rows
+remain historical evidence only until the Phase 1 boundary gate is green or
+explicitly accepted yellow.
 
 The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
 prior-failure repair is replayable and classified, but codex-ultra marked it
@@ -361,14 +366,20 @@ Done when:
 - no accepted structural blocker remains unaddressed while scoped measurement
   continues.
 
-### M6.24 Native Transcript Rebuild Status
+### M6.24 Native Boundary Status
 
-Status as of 2026-05-11: **in progress**. The active design is
-`docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`.
-Phase 0-7 substrate, legacy public-surface quarantine, live provider-native
-Responses runtime wiring, and the tiny live native-loop diagnostic are green.
-Native validation now rejects selected-route, package-surface, and
-native-production-path drift back to the old model-JSON v2 symbols.
+Status as of 2026-05-12: **in progress**. The native transcript rebuild design
+`docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md` gave
+mew a provider-native runtime. The active design is now
+`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`,
+which prevents WorkFrame/todo/evidence sidecars from becoming a second
+model-visible control plane.
+
+Phase 0 boundary inventory/static audit is complete and committed as
+`3059cca`. It audits the current semantic-ish controls across
+`native_tool_harness.py`, `native_sidecar_projection.py`,
+`native_workframe_projection.py`, `exec_runtime.py`, and
+`execution_evidence.py`.
 
 Native-loop gate evidence:
 
@@ -385,22 +396,14 @@ Native-loop gate evidence:
   `uv run python scripts/check_implement_v2_native_gate.py --artifact proof-artifacts/m6_24_native_loop_gate_20260511_live_portable --json`
   returned `ok=true`
 
-Remaining active gap: the latest bounded 10min native step-shape diagnostic
-from the live provider-native path moved past final-verifier closeout, wrote
-and patched `vm.js`, then ran a verifier command whose process completed with
-exit code `0` while its own output reported nested runtime failure
-(`vm finished exit=1`). Native loop-control treated that output as a passing
-verifier and drifted into broad probes. That semantic verifier-output repair is
-now committed. The next current-head diagnostic at
-`mew-make-mips-interpreter-step-check-10min-20260512-050507` moved further: it
-reached internal `node vm.js` success and generated frame files, but still
-missed the external `/tmp/frame.bmp` contract. Do not classify that miss yet:
-the runner stopped at `model_turns=30` after about `210s` of a `660s` 10min
-diagnostic window. Current work is the generic diagnostic-runner repair:
-mode-specific `max_steps` defaults plus `step_budget_preempted` reporting.
-After this repair is reviewed and committed, rerun focused UT, HOT_PATH
-fastcheck, replay/dogfood/emulator if applicable, and exactly one same-shape
-10min diagnostic before broad measurement resumes.
+Remaining active gap: do not classify the latest bounded 10min native
+step-shape diagnostic as a solver failure yet. Before another live diagnostic,
+close Phase 1 of the boundary design: provider-visible dynamic input must be
+`native_transcript_window` plus bounded `compact_sidecar_digest`; full
+`persisted_lane_state`, ordinary repair `required_next`, and prescriptive
+`native_loop_control` instruction text must leave the default provider-visible
+path. Validate with focused projection/harness tests and
+`scripts/check_native_tool_loop_boundary.py`.
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 
@@ -431,33 +434,23 @@ findings. Phases 0-6 were then implemented in small reviewed commits:
 | Phase 3 sidecar-inferred execution contracts | implemented/reviewed | `c3ccfa9` keeps execution contracts, typed evidence, and oracle details sidecar-only while WorkFrame carries compact refs and obligations. |
 | Phase 4 patch/edit as mutation boundary | implemented/reviewed | `3d28412` makes source mutation and verifier freshness reducer-owned WorkFrame facts. |
 | Phase 5 finish cited evidence | implemented/reviewed | `1fff2ab` routes finish readiness and final verifier closeout deterministically through WorkFrame/sidecars instead of finish-continuation proof dumps. |
-| Phase 6 replay/dogfood/emulator/step-shape gate | implemented/reviewed; proof gate pending | `3787e83` extends HOT_PATH fastcheck with WorkFrame replay, invariant, ref-policy, reentry, prompt-leak, hard-reject, and hash-bound micro checks. Focused validation passed (`454 passed`), scoped ruff passed, `git diff --check` passed, and codex-ultra reviewer session `019e0f86-d16a-7da3-ac92-2a39cb825ca6` returned `STATUS: APPROVE`. Current remaining gap is superseded by the 2026-05-11 Phase 7 variant comparison: repair `transition_contract` hot-path patch-anchor/runtime-artifact-obligation handling, then rerun focused checks and exactly one same-shape diagnostic. |
+| Phase 6 replay/dogfood/emulator/step-shape gate | implemented/reviewed; proof gate superseded | `3787e83` extends HOT_PATH fastcheck with WorkFrame replay, invariant, ref-policy, reentry, prompt-leak, hard-reject, and hash-bound micro checks. Focused validation passed (`454 passed`), scoped ruff passed, `git diff --check` passed, and codex-ultra reviewer session `019e0f86-d16a-7da3-ac92-2a39cb825ca6` returned `STATUS: APPROVE`. The WorkFrame proof-gate next action is superseded by the 2026-05-12 native responsibility-boundary Phase 1 gate. |
 
-Immediate next action for this phase: close the WorkFrame proof gate, not more
-frontier/todo/evidence polish. Required order:
-
-1. Run focused validation if files changed.
-2. Repair the generic `transition_contract` hot path from the 2026-05-11
-   variant comparison: patch-anchor mismatch should become direct re-anchor or
-   bounded rewrite, and runtime artifact obligations must keep internal
-   WorkFrame artifacts distinct from external Terminal-Bench targets.
-3. Run focused UT/fastcheck/micro checks for that repair.
-4. Spend exactly one same-shape `transition_contract` `make-mips-interpreter`
-   `step-check-10min`.
-5. Compare the step shape against the reference traces and Phase 0 bands.
-
-Do not run `speed_1`, `proof_5`, or broad measurement until this gate is green
-or explicitly accepted yellow.
+Historical WorkFrame action: close the WorkFrame proof gate by repairing
+`transition_contract` hot-path patch-anchor/runtime-artifact-obligation handling
+and rerunning focused checks plus one same-shape diagnostic. This is not the
+current next action while `native_boundary_phase1_active` is open. Do not resume
+this WorkFrame action until the native boundary row in
+`docs/M6_24_DECISION_LEDGER.md` is closed or explicitly superseded.
 
 WorkFrame variant benchmark note (2026-05-10): after Codex, Claude Code, and
 2025-2026 literature reviews of `tool result -> evidence/state -> next action`,
-the active M6.24 proof-gate strategy is to measure WorkFrame reducer variants
-before another long polish sequence. First add a switchable WorkFrame variant
-substrate inside `implement_v2` and record `workframe_variant` in artifacts.
-Then compare future variants such as `transcript_first`,
-`transition_contract`, and `minimal` with the same fastcheck, same
-`step-check-10min`, and same analyzer. Do not create a new implement lane unless
-reducer variants cannot explain the step-shape gap.
+the historical WorkFrame proof-gate strategy was to measure WorkFrame reducer
+variants before another long polish sequence. That strategy is superseded while
+`native_boundary_phase1_active` is open. The retained lesson is architectural:
+if WorkFrame variants are revisited later, keep variant implementations isolated
+from tool runtime/provider loop/verifier changes and compare them with the same
+fastcheck, same diagnostic, and same analyzer.
 
 WorkFrame variant comparison result (2026-05-11): the same-shape
 `make-mips-interpreter` comparison is recorded in
@@ -493,19 +486,19 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. WorkFrame Phase 0-6 implementation is complete through `3787e83`; the active
-   M6.24 focus is now proof-gate closure from
-   `docs/DESIGN_2026-05-10_M6_24_IMPLEMENT_V2_WORKFRAME_REDESIGN.md`.
-2. Use `docs/M6_24_DECISION_LEDGER.md` and the WorkFrame section above as the
-   reentry guard. They supersede older HOT_PATH polish or scoped-rebaseline rows
-   that point directly to `speed_1`, `proof_5`, or broad measurement.
-3. Required next order: repair the generic `transition_contract` hot path
-   captured by the 2026-05-11 variant comparison, run focused
-   UT/fastcheck/micro checks, then exactly one same-shape
-   `transition_contract` `make-mips-interpreter` `step-check-10min` and
-   reference-step comparison.
-4. If the gate is red, repair the generic WorkFrame/fastcheck/dogfood/emulator
-   failure first. Do not add another normal-prompt frontier/todo/evidence
-   projection as a shortcut.
+1. The active M6.24 focus is native responsibility-boundary Phase 1 from
+   `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`.
+2. Use `docs/M6_24_DECISION_LEDGER.md` and the native boundary section above as
+   the reentry guard. They supersede older HOT_PATH polish, WorkFrame,
+   diagnostic-runner, or scoped-rebaseline rows that point directly to
+   `step-check-10min`, `speed_1`, `proof_5`, or broad measurement.
+3. Required next order: implement compact sidecar digest boundary, remove full
+   `persisted_lane_state` and ordinary repair `required_next` from default
+   provider-visible input, preserve loop signals as bounded observational
+   booleans/hints, run focused projection/harness tests plus
+   `scripts/check_native_tool_loop_boundary.py`, then run exactly one bounded
+   same-shape diagnostic.
+4. If the gate is red, repair the native boundary/projection failure first. Do
+   not add another model-visible frontier/todo/evidence projection as a shortcut.
 5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.
