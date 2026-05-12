@@ -196,6 +196,7 @@ class ImplementV2ManagedExecRuntime:
     ):
         self.workspace = Path(str(workspace or ".")).expanduser().resolve(strict=False)
         self.allowed_roots = tuple(str(root) for root in (allowed_roots or (str(self.workspace),)))
+        self.artifact_check_roots = _artifact_check_roots(self.allowed_roots)
         self.source_mutation_roots = tuple(str(root) for root in (source_mutation_roots or (str(self.workspace),)))
         self.allow_shell = bool(allow_shell)
         self.run_command_available = bool(run_command_available)
@@ -358,7 +359,7 @@ class ImplementV2ManagedExecRuntime:
         normalized_contract, unchecked_expected_artifacts = _drop_uncheckable_expected_artifacts(
             normalized_contract,
             workspace=self.workspace,
-            allowed_roots=self.allowed_roots,
+            allowed_roots=self.artifact_check_roots,
         )
         raw_contract_preserved = raw_contract if not _intent_downgrades_artifact_contract(command_intent) else {}
         pre_run_artifact_stats = {}
@@ -366,7 +367,7 @@ class ImplementV2ManagedExecRuntime:
             pre_run_artifact_stats = capture_pre_run_artifact_stats(
                 normalized_contract.expected_artifacts,
                 workspace=self.workspace,
-                allowed_roots=self.allowed_roots,
+                allowed_roots=self.artifact_check_roots,
             )
         pre_run_source_tree_snapshot = {}
         if effective_tool_name == "run_command":
@@ -628,7 +629,7 @@ class ImplementV2ManagedExecRuntime:
             advertised_artifacts = _runtime_advertised_expected_artifacts(
                 contract,
                 payload,
-                allowed_roots=self.allowed_roots,
+                allowed_roots=self.artifact_check_roots,
             )
             if advertised_artifacts:
                 contract = replace(
@@ -645,7 +646,7 @@ class ImplementV2ManagedExecRuntime:
                 tool_run_record_id=record.record_id,
                 run_started_at=payload.get("started_epoch") or metadata.get("started_epoch") or payload.get("started_at") or command_run.started_at,
                 workspace=self.workspace,
-                allowed_roots=self.allowed_roots,
+                allowed_roots=self.artifact_check_roots,
                 pre_run_stats=metadata.get("pre_run_artifact_stats") if isinstance(metadata.get("pre_run_artifact_stats"), dict) else {},
                 previous_evidence=(),
                 stream_outputs=_stream_outputs_from_payload(payload, tool_run_record_id=record.record_id),
@@ -815,6 +816,31 @@ def _path_allowed_by_roots(path: str, allowed_roots: tuple[str, ...] | list[str]
         if candidate == root_path or _is_relative_to(candidate, root_path):
             return True
     return False
+
+
+def _artifact_check_roots(allowed_roots: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """Roots that internal artifact checks may stat/read.
+
+    This is intentionally broader than command read/write roots: many benchmark
+    verifiers produce scratch artifacts under /tmp, while source access must
+    remain confined to the workspace roots.
+    """
+
+    roots: list[str] = []
+    seen: set[str] = set()
+    for root in [*list(allowed_roots or ()), "/tmp", "/var/tmp"]:
+        text = str(root or "").strip()
+        if not text:
+            continue
+        try:
+            normalized = str(Path(text).expanduser().resolve(strict=False))
+        except OSError:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        roots.append(normalized)
+    return tuple(roots)
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:

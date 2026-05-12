@@ -10280,6 +10280,9 @@ def _acceptance_tool_call_from_result(index: int, result: ToolResultEnvelope) ->
     elif result.tool_name in EXEC_TOOL_NAMES:
         result_payload["timed_out"] = False
     for key in (
+        "tool_name",
+        "effective_tool_name",
+        "command_run_id",
         "execution_contract",
         "execution_contract_normalized",
         "artifact_evidence",
@@ -10295,6 +10298,13 @@ def _acceptance_tool_call_from_result(index: int, result: ToolResultEnvelope) ->
         parameters["command"] = command
     if primary.get("cwd"):
         parameters["cwd"] = primary.get("cwd")
+    contract = result_payload.get("execution_contract") or result_payload.get("execution_contract_normalized")
+    if isinstance(contract, dict):
+        parameters["execution_contract"] = dict(contract)
+    if result_payload.get("effective_tool_name"):
+        parameters["effective_tool_name"] = result_payload.get("effective_tool_name")
+    if result_payload.get("command_run_id"):
+        parameters["command_run_id"] = result_payload.get("command_run_id")
     return {
         "id": index,
         "tool": result.tool_name,

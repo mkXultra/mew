@@ -949,7 +949,7 @@ def test_acceptance_finish_blocker_rejects_stateful_output_relabel_only():
                 "result": {
                     "stdout": "PASS: asserted live desk label appears in the speech bubble.",
                 },
-            }
+            },
         ]
     }
 
@@ -1062,6 +1062,51 @@ def test_runtime_component_finish_gate_accepts_targeted_component_test_ref():
     decision = runtime_component_finish_gate_decision(text, action, session=session)
 
     assert decision["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_rejects_failed_poll_command_behavior_ref():
+    text = "The generated executable should run in its runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runtime behavior",
+                "status": "verified",
+                "evidence": "Tool #9 executed the runtime behavior smoke.",
+                "evidence_refs": [{"kind": "tool_call", "id": 9}],
+            }
+        ],
+    }
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "poll_command",
+                "status": "completed",
+                "parameters": {
+                    "command_run_id": "cmd-1",
+                    "command": "./dist/tool --smoke",
+                    "execution_contract": {
+                        "stage": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+                "result": {
+                    "status": "failed",
+                    "exit_code": 1,
+                    "timed_out": False,
+                    "stderr": "execution smoke failed\n",
+                },
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
 
 
 def test_runtime_component_finish_gate_rejects_attribute_access_only():
@@ -1964,6 +2009,63 @@ def test_acceptance_finish_blocker_accepts_runtime_artifact_command_evidence_ref
     assert blocker == ""
 
 
+def test_acceptance_finish_blocker_accepts_runtime_artifact_poll_command_ref():
+    text = "A fresh VM run will write /tmp/frame.bmp during execution."
+    checks = [
+        {
+            "constraint": "fresh VM run created /tmp/frame.bmp",
+            "status": "verified",
+            "evidence": "Tool #9 completed the final verifier and created /tmp/frame.bmp.",
+            "evidence_refs": [{"kind": "tool_call", "id": 9}],
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "poll_command",
+                "status": "completed",
+                "parameters": {
+                    "command_run_id": "cmd-1",
+                    "command": "rm -f /tmp/frame.bmp && node vm.js && test -s /tmp/frame.bmp",
+                    "execution_contract": {
+                        "role": "runtime",
+                        "stage": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+                "result": {
+                    "command": "rm -f /tmp/frame.bmp && node vm.js && test -s /tmp/frame.bmp",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "stderr": "vm stopped; /tmp/frame.bmp 1024054 bytes (first frame)\n",
+                    "verifier_evidence": {"verdict": "pass"},
+                    "artifact_evidence": [
+                        {
+                            "artifact_id": "/tmp/frame.bmp",
+                            "path": "/tmp/frame.bmp",
+                            "status": "passed",
+                            "blocking": False,
+                        }
+                    ],
+                },
+            },
+            {
+                "id": 10,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp"},
+                "result": {"command": "rm -f /tmp/frame.bmp", "exit_code": 0, "stdout": "removed /tmp/frame.bmp\n"},
+            },
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert blocker == ""
+
+
 def test_acceptance_finish_blocker_rejects_wrong_runtime_artifact_path():
     text = (
         "Implement a MIPS interpreter called vm.js so I can run `node vm.js`. "
@@ -2472,6 +2574,47 @@ def test_acceptance_finish_blocker_accepts_post_write_edit_scope_validator():
         )
         == ""
     )
+
+
+def test_acceptance_finish_blocker_rejects_poll_as_post_write_edit_scope_validator():
+    text = (
+        "Ensure the output file exists. The only edits you may make are specified replacements. "
+        "Do not edit config.json."
+    )
+    checks = [
+        {"constraint": "Ensure the output file exists.", "status": "verified", "evidence": "tool #3 passed"},
+        {
+            "constraint": "The only edits you may make are specified replacements.",
+            "status": "verified",
+            "evidence": "Tool #4 poll_command reported the earlier validator completed.",
+        },
+        {
+            "constraint": "Do not edit config.json.",
+            "status": "verified",
+            "evidence": "Tool #4 poll_command reported the earlier validator completed.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {"id": 1, "tool": "run_command", "status": "completed"},
+            {"id": 2, "tool": "edit_file", "status": "completed"},
+            {"id": 3, "tool": "run_command", "status": "completed"},
+            {
+                "id": 4,
+                "tool": "poll_command",
+                "status": "completed",
+                "result": {"status": "completed", "exit_code": 0},
+            },
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "edit-scope acceptance evidence ungrounded" in blocker
 
 
 def test_acceptance_finish_blocker_rejects_numeric_single_fit_residual_only():

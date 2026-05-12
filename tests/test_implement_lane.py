@@ -1,5 +1,6 @@
 import hashlib
 import json
+from pathlib import Path
 import shlex
 import subprocess
 import sys
@@ -13358,6 +13359,87 @@ def test_implement_v2_exec_probe_intent_downgrade_survives_poll(tmp_path) -> Non
     assert poll_payload["artifact_evidence"] == []
     assert "execution_contract" not in first_payload
     assert "execution_contract" not in poll_payload
+
+
+def test_implement_v2_exec_poll_checks_runtime_tmp_advertised_artifact(tmp_path) -> None:
+    artifact = Path("/tmp") / f"mew-test-{tmp_path.name}-frame.bmp"
+    artifact.unlink(missing_ok=True)
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import pathlib, time; "
+                "p=pathlib.Path(%r); "
+                "time.sleep(0.05); "
+                "p.write_bytes(b'BMpayload'); "
+                "print(f'saved to {p}', flush=True)"
+            )
+            % str(artifact),
+        ]
+    )
+    lane_attempt_id = "implement_v2:ws-1:task-1:exec"
+    command_run_id = _expected_command_run_id(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id="tmp-artifact-yield",
+    )
+
+    try:
+        result = run_fake_exec_implement_v2(
+            ImplementLaneInput(
+                work_session_id="ws-1",
+                task_id="task-1",
+                workspace=str(tmp_path),
+                lane=IMPLEMENT_V2_LANE,
+                lane_config={
+                    "mode": "exec",
+                    "allow_shell": True,
+                    "allowed_read_roots": [str(tmp_path)],
+                },
+            ),
+            provider_calls=(
+                {
+                    "provider_call_id": "tmp-artifact-yield",
+                    "tool_name": "run_tests",
+                    "arguments": {
+                        "command": command,
+                        "cwd": ".",
+                        "timeout": 5,
+                        "foreground_budget_seconds": 0.001,
+                        "execution_contract": {
+                            "id": "contract:tmp-runtime-artifact",
+                            "role": "runtime",
+                            "stage": "verification",
+                            "purpose": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "external_verifier",
+                            "expected_exit": {"mode": "zero"},
+                        },
+                    },
+                },
+                {
+                    "provider_call_id": "tmp-artifact-poll",
+                    "tool_name": "poll_command",
+                    "arguments": {"command_run_id": command_run_id, "wait_seconds": 1},
+                },
+            ),
+            finish_arguments={"outcome": "analysis_ready", "summary": "tmp artifact verified"},
+        )
+    finally:
+        artifact.unlink(missing_ok=True)
+
+    manifest = result.updated_lane_state["proof_manifest"]
+    first_payload = manifest["tool_results"][0]["content"][0]
+    poll_result = manifest["tool_results"][1]
+    poll_payload = poll_result["content"][0]
+
+    assert manifest["tool_results"][0]["status"] == "yielded"
+    assert poll_result["status"] == "completed"
+    assert first_payload["artifact_evidence"] == []
+    assert poll_payload["runtime_advertised_expected_artifacts"][0]["path"] == str(artifact)
+    assert poll_payload["artifact_evidence"][0]["path"] == str(artifact.resolve(strict=False))
+    assert poll_payload["artifact_evidence"][0]["status"] == "passed"
+    assert poll_payload["structured_finish_gate"]["blocked"] is False
 
 
 def test_implement_v2_exec_plain_intent_does_not_downgrade_verifier_contract(tmp_path) -> None:

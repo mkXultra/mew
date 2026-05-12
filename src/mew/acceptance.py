@@ -62,6 +62,7 @@ _GROUNDING_TOOLS = {
     "run_tests",
     "search_text",
 }
+_TERMINAL_COMMAND_TOOLS = {"run_command", "run_tests", "poll_command"}
 
 _RUNTIME_FRESH_RUN_MARKERS = (
     "emulator",
@@ -1091,6 +1092,22 @@ def _tool_call_text(call: object) -> str:
     return "\n".join(chunks)
 
 
+def _acceptance_tool_call_terminal_success(call: object) -> bool:
+    if not isinstance(call, dict):
+        return False
+    if call.get("tool") != "poll_command":
+        return tool_call_terminal_success(call)
+    if str(call.get("status") or "").casefold() != "completed":
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("timed_out"):
+        return False
+    payload_status = str(result.get("status") or "").casefold()
+    if payload_status and payload_status not in {"completed", "done", "success", "succeeded"}:
+        return False
+    return result.get("exit_code") == 0
+
+
 def _tool_call_result_text(call: object) -> str:
     if not isinstance(call, dict):
         return ""
@@ -1231,7 +1248,9 @@ def _runtime_fresh_run_artifacts_for_finish(
 
 
 def _runtime_artifact_created_by_call(call: object, artifact: str) -> bool:
-    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+    if not isinstance(call, dict) or call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
+        return False
+    if call.get("tool") == "poll_command" and not _acceptance_tool_call_terminal_success(call):
         return False
     if _runtime_artifact_created_by_structured_evidence(call, artifact):
         return True
@@ -1275,7 +1294,9 @@ def _runtime_artifact_created_by_structured_evidence(call: object, artifact: str
 
 
 def _runtime_artifact_cleanup_by_call(call: object, artifact: str) -> bool:
-    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+    if not isinstance(call, dict) or call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
+        return False
+    if call.get("tool") == "poll_command" and not _acceptance_tool_call_terminal_success(call):
         return False
     text = _tool_call_text(call)
     lowered = text.casefold()
@@ -1391,7 +1412,7 @@ def _runtime_artifact_final_state_blocker(
             continue
         return (
             "runtime final verifier artifact evidence ungrounded: "
-            f"{artifact} checks must cite a completed run_command or run_tests tool "
+            f"{artifact} checks must cite a completed run_command, run_tests, or poll_command tool "
             "whose output proves the artifact was created during the verifier-shaped run"
         )
     return ""
@@ -1609,7 +1630,7 @@ def _runtime_component_command_kind_allows_behavior(call: object) -> bool:
     tool = call.get("tool")
     if tool == "run_tests":
         return True
-    if tool != "run_command":
+    if tool not in {"run_command", "poll_command"}:
         return False
     if _runtime_component_call_contract_terms(call) & _RUNTIME_COMPONENT_BEHAVIOR_CONTRACT_TERMS:
         return True
@@ -1686,7 +1707,7 @@ def _runtime_component_external_verifier_behavior_seen(call: object, text: str) 
 
 
 def _runtime_component_execution_smoke_seen(call: object, text: str) -> bool:
-    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+    if not isinstance(call, dict) or call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
         return False
     if _runtime_component_call_contract_terms(call) & {
         "candidate_runtime_smoke",
@@ -1724,7 +1745,7 @@ def _runtime_component_entrypoint_behavior_signal_seen(text: str) -> bool:
 
 
 def _runtime_component_entrypoint_execution_seen(call: object) -> bool:
-    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+    if not isinstance(call, dict) or call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
         return False
     parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
     command = str(parameters.get("command") or "")
@@ -1793,9 +1814,9 @@ def _runtime_component_has_behavior_evidence(check: object, session: object) -> 
         call = _tool_call_by_id(session, ref_id)
         if not call:
             continue
-        if call.get("tool") not in {"run_command", "run_tests"}:
+        if call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
             continue
-        if not tool_call_terminal_success(call):
+        if not _acceptance_tool_call_terminal_success(call):
             continue
         if _runtime_component_command_kind_allows_behavior(call) and _runtime_component_call_text_proves_behavior(
             call,
@@ -2325,7 +2346,7 @@ def _evidence_ref_findings_for_checks(checks: list[dict], session: object) -> di
                 check_invalid.append(f"tool_call#{ref_id} missing")
                 check_invalid_refs.append({"kind": "tool_call", "id": ref_id, "reason": "missing"})
                 continue
-            if not tool_call_terminal_success(call):
+            if not _acceptance_tool_call_terminal_success(call):
                 evidence = tool_call_evidence_ref(call)
                 check_invalid.append(
                     "tool_call#"
