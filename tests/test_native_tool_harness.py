@@ -189,6 +189,8 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
     assert result.metrics["transport_kind"] == "provider_native"
     assert result.metrics["runtime_id"] == "implement_v2_native_transcript_loop"
     assert result.metrics["provider_native_tool_loop"] is True
+    assert result.metrics["provider_request_inventory_available"] is True
+    assert result.metrics["provider_request_count"] == 1
     descriptor = call.call_args.kwargs["descriptor"]
     assert descriptor["request_body"]["store"] is False
     assert descriptor["request_body"]["stream"] is True
@@ -200,6 +202,14 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
     manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
     assert manifest["transport_kind"] == "provider_native"
     assert manifest["metrics"]["transport_kind"] == "provider_native"
+    request_payload = json.loads((artifact_root / "native-provider-requests.json").read_text(encoding="utf-8"))
+    inventory_payload = json.loads((artifact_root / "provider-request-inventory.json").read_text(encoding="utf-8"))
+    assert request_payload["status"] == "completed"
+    assert request_payload["request_count"] == 1
+    assert inventory_payload["provider_request_inventory"][0]["model_visible_sections"] == [
+        "native_transcript_window",
+        "compact_sidecar_digest",
+    ]
 
 
 def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_path: Path) -> None:

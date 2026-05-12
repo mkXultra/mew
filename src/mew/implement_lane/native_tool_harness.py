@@ -476,6 +476,8 @@ def run_native_implement_v2(
         **_native_surface_for_provider(provider),
         "status": status,
         "turn_count": len(provider.requests),
+        "provider_request_inventory_available": bool(_provider_request_records(provider)),
+        "provider_request_count": len(_provider_request_records(provider)),
         "tool_latency": tuple(tool_latencies),
         "first_write_latency": first_write_metric
         or {"turn_index": None, "call_id": "", "tool_name": "", "wall_seconds": None},
@@ -496,7 +498,7 @@ def run_native_implement_v2(
         metrics["native_model_turn_budget_block"] = native_model_budget_block
     proof_artifacts: tuple[str, ...] = ()
     if artifact_root is not None:
-        paths = _write_native_artifacts(Path(artifact_root), transcript, provider=provider)
+        paths = _write_native_artifacts(Path(artifact_root), transcript, provider=provider, status=status)
         proof_artifacts = tuple(str(path) for path in paths.values())
     return NativeImplementV2HarnessResult(
         status=status,
@@ -1801,7 +1803,7 @@ def _partial_failure_harness_result(
                 artifact_root=Path(artifact_root),
             )
         else:
-            paths = _write_native_artifacts(Path(artifact_root), transcript, provider=provider)
+            paths = _write_native_artifacts(Path(artifact_root), transcript, provider=provider, status="failed", error=error)
             proof_artifacts = tuple(str(path) for path in paths.values())
     return NativeImplementV2HarnessResult(
         status="failed",
@@ -1892,8 +1894,16 @@ def _call_order_key(call: NativeTranscriptItem) -> tuple[int, int]:
     return (call.output_index, call.sequence)
 
 
-def _write_native_artifacts(root: Path, transcript: NativeTranscript, *, provider: object) -> dict[str, Path]:
+def _write_native_artifacts(
+    root: Path,
+    transcript: NativeTranscript,
+    *,
+    provider: object,
+    status: str = "",
+    error: str = "",
+) -> dict[str, Path]:
     paths = write_native_transcript_artifacts(root, transcript)
+    paths.update(_write_provider_request_artifacts(root, provider=provider, status=status, error=error))
     if not isinstance(provider, NativeFakeProvider):
         return paths
     for key in ("transcript_metrics", "proof_manifest"):
@@ -1906,6 +1916,59 @@ def _write_native_artifacts(root: Path, transcript: NativeTranscript, *, provide
             payload["metrics"]["native_transport_kind"] = "provider_native"
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return paths
+
+
+def _provider_request_records(provider: object) -> tuple[dict[str, object], ...]:
+    requests = getattr(provider, "requests", None)
+    if not isinstance(requests, list):
+        return ()
+    return tuple(dict(request) for request in requests if isinstance(request, Mapping))
+
+
+def _write_provider_request_artifacts(
+    root: Path,
+    *,
+    provider: object,
+    status: str = "",
+    error: str = "",
+) -> dict[str, Path]:
+    requests = _provider_request_records(provider)
+    if not requests:
+        return {}
+    request_path = root / "native-provider-requests.json"
+    inventory_path = root / "provider-request-inventory.json"
+    request_payload: dict[str, object] = {
+        "schema_version": 1,
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "transport_kind": "provider_native",
+        "native_transport_kind": "provider_native",
+        "status": status or "unknown",
+        "request_count": len(requests),
+        "requests": list(requests),
+    }
+    if error:
+        request_payload["error"] = str(error)
+    inventory_payload: dict[str, object] = {
+        "schema_version": 1,
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "transport_kind": "provider_native",
+        "native_transport_kind": "provider_native",
+        "status": status or "unknown",
+        "request_count": len(requests),
+        "provider_request_inventory": [
+            request.get("provider_request_inventory")
+            for request in requests
+            if isinstance(request.get("provider_request_inventory"), dict)
+        ],
+    }
+    if error:
+        inventory_payload["error"] = str(error)
+    request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    inventory_path.write_text(json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return {
+        "native_provider_requests": request_path,
+        "provider_request_inventory": inventory_path,
+    }
 
 
 def _finish_summary(call: NativeTranscriptItem) -> str:

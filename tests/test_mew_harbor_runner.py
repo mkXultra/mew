@@ -240,6 +240,17 @@ def test_collect_mew_trial_summary_accepts_native_artifacts_at_task_root(tmp_pat
         "\n".join(json.dumps(item) for item in response_items) + "\n",
         encoding="utf-8",
     )
+    (unknown_task / "provider-request-inventory.json").write_text(
+        json.dumps(
+            {
+                "request_count": 1,
+                "provider_request_inventory": [
+                    {"model_visible_sections": ["native_transcript_window", "compact_sidecar_digest"]}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     (unknown_task / "mew-report.json").write_text(
         json.dumps({"work_exit_code": 1, "work_report": {"stop_reason": "implement_v2_blocked"}}),
         encoding="utf-8",
@@ -252,6 +263,7 @@ def test_collect_mew_trial_summary_accepts_native_artifacts_at_task_root(tmp_pat
     assert summary["transcript_path"] == str(unknown_task / "response_transcript.json")
     assert summary["native_observation_present"] is True
     assert summary["native_pairing_valid"] is True
+    assert summary["provider_request_inventory_present"] is True
     assert observer_detail_missing([summary]) is False
 
 
@@ -320,6 +332,45 @@ def test_collect_mew_trial_summary_accepts_request_inventory_for_pre_response_fa
     assert summary["native_observation_reason"] == "empty_transcript"
     assert summary["provider_request_inventory_present"] is True
     assert observer_detail_missing([summary]) is False
+
+
+def test_collect_mew_trial_summary_rejects_empty_request_inventory(tmp_path):
+    task_dir = tmp_path / "run" / "trial"
+    unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    unknown_task.mkdir(parents=True)
+    (unknown_task / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_id": "implement_v2_native_transcript_loop",
+                "transport_kind": "provider_native",
+                "pairing": {"valid": True, "call_count": 1, "output_count": 1, "errors": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    items = [
+        {"kind": "function_call", "call_id": "call-1", "tool_name": "inspect_dir"},
+        {"kind": "function_call_output", "call_id": "call-1", "status": "completed"},
+    ]
+    (unknown_task / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    (unknown_task / "response_items.jsonl").write_text(
+        "\n".join(json.dumps(item) for item in items) + "\n",
+        encoding="utf-8",
+    )
+    (unknown_task / "provider-request-inventory.json").write_text(
+        json.dumps({"request_count": 1, "provider_request_inventory": []}),
+        encoding="utf-8",
+    )
+    (unknown_task / "mew-report.json").write_text(json.dumps({"work_exit_code": 1}), encoding="utf-8")
+    (task_dir / "result.json").write_text(json.dumps({"reward": 0.0}), encoding="utf-8")
+
+    summary = collect_mew_trial_summary(task_dir)
+
+    assert summary["native_observation_present"] is True
+    assert summary["provider_request_inventory_exists"] is True
+    assert summary["provider_request_inventory_present"] is False
+    assert summary["provider_request_inventory_reason"] == "empty_inventory"
+    assert observer_detail_missing([summary]) is True
 
 
 def test_collect_mew_trial_summary_rejects_mismatched_native_jsonl(tmp_path):

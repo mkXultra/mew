@@ -248,6 +248,7 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
     transcript_path = _implement_v2_transcript_path(manifest_dir)
     provider_request_inventory_path = manifest_dir / "provider-request-inventory.json"
     provider_requests_path = manifest_dir / "native-provider-requests.json"
+    provider_request_inventory_status = _provider_request_inventory_status(provider_request_inventory_path)
     result_path = task_dir / "result.json"
     command_transcript_path = unknown_task_dir / "command-transcript.json"
     verifier_stdout_path = task_dir / "verifier" / "test-stdout.txt"
@@ -288,8 +289,12 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
         "native_pairing_valid": native_status["pairing_valid"],
         "native_call_count": native_status["call_count"],
         "native_output_count": native_status["output_count"],
-        "provider_request_inventory_present": provider_request_inventory_path.exists(),
-        "provider_request_inventory_path": str(provider_request_inventory_path) if provider_request_inventory_path.exists() else "",
+        "provider_request_inventory_present": provider_request_inventory_status["valid"],
+        "provider_request_inventory_exists": provider_request_inventory_status["exists"],
+        "provider_request_inventory_reason": provider_request_inventory_status["reason"],
+        "provider_request_inventory_count": provider_request_inventory_status["request_count"],
+        "provider_request_inventory_entry_count": provider_request_inventory_status["entry_count"],
+        "provider_request_inventory_path": str(provider_request_inventory_path) if provider_request_inventory_status["exists"] else "",
         "native_provider_requests_path": str(provider_requests_path) if provider_requests_path.exists() else "",
         "proof_manifest_path": str(proof_manifest_path),
         "history_path": str(history_path),
@@ -321,6 +326,59 @@ def _implement_v2_artifact_dir(unknown_task_dir: Path) -> Path:
     if (native_dir / "proof-manifest.json").exists():
         return native_dir
     return legacy_dir
+
+
+def _provider_request_inventory_status(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {
+            "valid": False,
+            "exists": False,
+            "reason": "missing",
+            "request_count": 0,
+            "entry_count": 0,
+        }
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {
+            "valid": False,
+            "exists": True,
+            "reason": "invalid_json",
+            "request_count": 0,
+            "entry_count": 0,
+        }
+    if not isinstance(data, dict):
+        return {
+            "valid": False,
+            "exists": True,
+            "reason": "not_object",
+            "request_count": 0,
+            "entry_count": 0,
+        }
+    request_count = _nonnegative_int_metric(data.get("request_count"))
+    inventory = data.get("provider_request_inventory")
+    entry_count = sum(1 for item in inventory if isinstance(item, dict)) if isinstance(inventory, list) else 0
+    if request_count <= 0:
+        reason = "empty_request_count"
+    elif entry_count <= 0:
+        reason = "empty_inventory"
+    else:
+        reason = "ok"
+    return {
+        "valid": reason == "ok",
+        "exists": True,
+        "reason": reason,
+        "request_count": request_count,
+        "entry_count": entry_count,
+    }
+
+
+def _nonnegative_int_metric(value: object) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
 
 
 def _implement_v2_transcript_path(manifest_dir: Path) -> Path:
@@ -536,8 +594,7 @@ def observer_detail_missing(summaries: Sequence[dict[str, object]]) -> bool:
         return True
     return any(
         not (
-            summary.get("native_observation_present")
-            or summary.get("provider_request_inventory_present")
+            summary.get("provider_request_inventory_present")
             or (
                 summary.get("observer_detail_enabled")
                 and summary.get("observer_detail_written")
