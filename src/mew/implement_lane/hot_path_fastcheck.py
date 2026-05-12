@@ -597,6 +597,7 @@ def _check_native_compact_digest_replay(
         loop_state = _native_loop_control_state(
             list(transcript.items),
             current_turn_index=_nonnegative_int(request.get("turn_index")) or _native_next_turn_index(transcript.items),
+            task_contract=_native_request_task_contract(request),
         )
         recomputed = build_compact_native_sidecar_digest(transcript, loop_signals=loop_state)
         checked += 1
@@ -905,6 +906,12 @@ def _native_request_compact_digest(request: Mapping[str, object]) -> dict[str, o
     payload = _native_request_task_payload(request)
     digest = payload.get("compact_sidecar_digest")
     return dict(digest) if isinstance(digest, Mapping) else {}
+
+
+def _native_request_task_contract(request: Mapping[str, object]) -> dict[str, object]:
+    payload = _native_request_task_payload(request)
+    task_contract = payload.get("task_contract")
+    return dict(task_contract) if isinstance(task_contract, Mapping) else {}
 
 
 def _native_request_task_payload(request: Mapping[str, object]) -> dict[str, object]:

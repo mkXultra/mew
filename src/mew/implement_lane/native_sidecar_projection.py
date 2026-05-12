@@ -837,6 +837,8 @@ def _bounded_loop_signals(loop_signals: Mapping[str, object] | None) -> dict[str
         "prewrite_probe_plateau": bool(loop_signals.get("prewrite_probe_plateau")),
         "verifier_repair_due": bool(loop_signals.get("verifier_repair_due")),
         "probe_count_without_write": _safe_int(loop_signals.get("probe_count_without_write"), default=0),
+        "first_write_probe_threshold": _safe_int(loop_signals.get("first_write_probe_threshold"), default=0),
+        "first_write_turn_threshold": _safe_int(loop_signals.get("first_write_turn_threshold"), default=0),
         "post_failure_probe_count": _safe_int(loop_signals.get("post_failure_probe_count"), default=0),
         "post_failure_write_count": _safe_int(loop_signals.get("post_failure_write_count"), default=0),
         "verifier_count": _safe_int(loop_signals.get("verifier_count"), default=0),

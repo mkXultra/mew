@@ -237,9 +237,11 @@ def _write_native_provider_request(
     transcript: NativeTranscript,
     *,
     prefix_item_count: int = 0,
+    task_contract: dict[str, object] | None = None,
     workframe_variant: str = "",
     live_shape: bool = False,
 ) -> None:
+    task_contract = task_contract or {"goal": "exercise native request fastcheck"}
     prefix = NativeTranscript(
         lane_attempt_id=transcript.lane_attempt_id,
         provider=transcript.provider,
@@ -248,10 +250,14 @@ def _write_native_provider_request(
     )
     digest = build_compact_native_sidecar_digest(
         prefix,
-        loop_signals=_native_loop_control_state(list(prefix.items), current_turn_index=1),
+        loop_signals=_native_loop_control_state(
+            list(prefix.items),
+            current_turn_index=1,
+            task_contract=task_contract,
+        ),
     )
     task_payload = {
-        "task_contract": {"goal": "exercise native request fastcheck"},
+        "task_contract": task_contract,
         "compact_sidecar_digest": digest,
         "workspace": str(artifact),
         "lane": "implement_v2",
@@ -691,6 +697,66 @@ def test_hot_path_fastcheck_replays_live_openai_request_against_codex_digest_ide
 
     checks = {check["name"]: check for check in result["checks"]}
     assert checks["native_compact_digest_replay"]["status"] == "pass"
+
+
+def test_hot_path_fastcheck_replays_hard_runtime_native_request_thresholds(tmp_path):
+    artifact = tmp_path / "native-hard-runtime-artifact"
+    lane_attempt_id = "native-fastcheck:hard-runtime"
+    items: list[NativeTranscriptItem] = []
+    for index in range(10):
+        call_id = f"call-read-{index}"
+        items.extend(
+            [
+                NativeTranscriptItem(
+                    sequence=len(items) + 1,
+                    turn_id=f"turn-{index + 1}",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="codex",
+                    model="gpt-5.5",
+                    kind="function_call",
+                    call_id=call_id,
+                    tool_name="read_file",
+                    arguments_json_text=json.dumps({"path": f"missing-{index}.txt"}, sort_keys=True),
+                ),
+                NativeTranscriptItem(
+                    sequence=len(items) + 2,
+                    turn_id=f"turn-{index + 1}",
+                    lane_attempt_id=lane_attempt_id,
+                    provider="codex",
+                    model="gpt-5.5",
+                    kind="function_call_output",
+                    call_id=call_id,
+                    tool_name="read_file",
+                    status="completed",
+                    output_text_or_ref="read_file result: completed",
+                ),
+            ]
+        )
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider="codex",
+        model="gpt-5.5",
+        items=tuple(items),
+    )
+    write_native_transcript_artifacts(artifact, transcript)
+    hard_runtime_contract = {
+        "goal": (
+            "Implement a MIPS ELF interpreter from provided source code "
+            "and write the rendered frame to /tmp/frame.bmp."
+        )
+    }
+    _write_native_provider_request(
+        artifact,
+        transcript,
+        prefix_item_count=len(transcript.items),
+        task_contract=hard_runtime_contract,
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_compact_digest_replay"]["status"] == "pass"
+    assert checks["native_compact_digest_replay"]["details"]["checked_requests"] == 1
 
 
 def test_hot_path_fastcheck_rejects_native_compact_digest_drift(tmp_path):

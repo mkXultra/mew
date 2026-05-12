@@ -45,6 +45,7 @@ from .prompt import build_implement_v2_prompt_sections
 from .read_runtime import READ_ONLY_TOOL_NAMES, execute_read_only_tool_call
 from .tool_policy import (
     hide_unavailable_write_file_guidance,
+    is_hard_runtime_artifact_task,
     list_v2_tool_specs_for_mode,
     list_v2_tool_specs_for_task,
 )
@@ -73,6 +74,8 @@ PHASE3_NATIVE_SURFACE = {
 _FIRST_WRITE_DUE_PROBE_THRESHOLD = 10
 _FIRST_WRITE_DUE_TURN_THRESHOLD = 6
 _FIRST_WRITE_DUE_GRACE_PROBE_CALLS = 1
+_FIRST_WRITE_DUE_HARD_RUNTIME_PROBE_THRESHOLD = 18
+_FIRST_WRITE_DUE_HARD_RUNTIME_TURN_THRESHOLD = 8
 _PREWRITE_PROBE_PLATEAU_THRESHOLD = 30
 _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
 _CONTROL_FAILURE_SUMMARY_LIMIT = 700
@@ -397,7 +400,11 @@ def run_native_implement_v2(
                 break
             if hasattr(provider, "timeout"):
                 provider.timeout = turn_timeout
-        turn_entry_loop_signals = _native_loop_control_state(items, current_turn_index=turn_index)
+        turn_entry_loop_signals = _native_loop_control_state(
+            items,
+            current_turn_index=turn_index,
+            lane_input=lane_input,
+        )
         request_descriptor = _request_descriptor(
             lane_input=lane_input,
             lane_attempt_id=lane_attempt_id,
@@ -1837,7 +1844,11 @@ def _request_descriptor(
     transcript_items: list[NativeTranscriptItem],
     loop_signals: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    loop_signals = loop_signals or _native_loop_control_state(transcript_items, current_turn_index=turn_index)
+    loop_signals = loop_signals or _native_loop_control_state(
+        transcript_items,
+        current_turn_index=turn_index,
+        lane_input=lane_input,
+    )
     provider_visible_transcript_items = [
         _provider_visible_native_item(item, lane_input=lane_input)
         for item in transcript_items
@@ -1969,6 +1980,8 @@ def _native_loop_control_state(
     transcript_items: list[NativeTranscriptItem],
     *,
     current_turn_index: int,
+    lane_input: ImplementLaneInput | None = None,
+    task_contract: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     calls = [item for item in transcript_items if item.kind in CALL_ITEM_KINDS]
     write_count = sum(1 for item in calls if item.tool_name in WRITE_TOOL_NAMES or _native_call_is_source_mutating_exec(item))
@@ -1982,17 +1995,23 @@ def _native_loop_control_state(
     post_failure_write_count = sum(1 for item in post_failure_calls if item.tool_name in WRITE_TOOL_NAMES)
     post_failure_probe_count = sum(1 for item in post_failure_calls if _native_call_is_probe_or_exec(item))
     post_failure_verifier_count = sum(1 for item in post_failure_calls if _native_call_is_verifier(item))
+    first_write_probe_threshold, first_write_turn_threshold = _first_write_due_thresholds(
+        lane_input,
+        task_contract=task_contract,
+    )
     first_write_due = bool(
         write_count == 0
         and verifier_count == 0
         and (
-            probe_count >= _FIRST_WRITE_DUE_PROBE_THRESHOLD
-            or current_turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD
+            probe_count >= first_write_probe_threshold
+            or current_turn_index >= first_write_turn_threshold
         )
     )
     first_write_due_entry_turn = _first_write_due_entry_turn(
         transcript_items,
         current_turn_index=current_turn_index,
+        probe_threshold=first_write_probe_threshold,
+        turn_threshold=first_write_turn_threshold,
     )
     first_write_due_overrun = bool(
         first_write_due
@@ -2017,6 +2036,8 @@ def _native_loop_control_state(
         "observed_turn_count": turn_count,
         "tool_call_count": len(calls),
         "probe_count_without_write": probe_count if write_count == 0 else 0,
+        "first_write_probe_threshold": first_write_probe_threshold,
+        "first_write_turn_threshold": first_write_turn_threshold,
         "command_count_without_write": command_count if write_count == 0 else 0,
         "read_output_count_without_write": read_output_count if write_count == 0 else 0,
         "write_count": write_count,
@@ -2079,6 +2100,8 @@ def _first_write_due_entry_turn(
     transcript_items: list[NativeTranscriptItem],
     *,
     current_turn_index: int,
+    probe_threshold: int = _FIRST_WRITE_DUE_PROBE_THRESHOLD,
+    turn_threshold: int = _FIRST_WRITE_DUE_TURN_THRESHOLD,
 ) -> int | None:
     for turn_index in range(1, max(1, current_turn_index) + 1):
         prior_calls = [
@@ -2093,9 +2116,20 @@ def _first_write_due_entry_turn(
         if write_count or verifier_count:
             return None
         probe_count = sum(1 for item in prior_calls if _native_call_is_probe_or_exec(item))
-        if probe_count >= _FIRST_WRITE_DUE_PROBE_THRESHOLD or turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD:
+        if probe_count >= probe_threshold or turn_index >= turn_threshold:
             return turn_index
-    return current_turn_index if current_turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD else None
+    return current_turn_index if current_turn_index >= turn_threshold else None
+
+
+def _first_write_due_thresholds(
+    lane_input: ImplementLaneInput | None,
+    *,
+    task_contract: Mapping[str, object] | None = None,
+) -> tuple[int, int]:
+    candidate = lane_input.task_contract if lane_input is not None else task_contract
+    if is_hard_runtime_artifact_task(candidate):
+        return _FIRST_WRITE_DUE_HARD_RUNTIME_PROBE_THRESHOLD, _FIRST_WRITE_DUE_HARD_RUNTIME_TURN_THRESHOLD
+    return _FIRST_WRITE_DUE_PROBE_THRESHOLD, _FIRST_WRITE_DUE_TURN_THRESHOLD
 
 
 def _native_call_is_prewrite_probe(item: NativeTranscriptItem) -> bool:
