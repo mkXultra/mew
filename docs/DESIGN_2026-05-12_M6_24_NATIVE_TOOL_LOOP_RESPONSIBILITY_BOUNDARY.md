@@ -469,6 +469,17 @@ Tests:
 
 ### Phase 3: Finish Call Integration
 
+Implementation status 2026-05-12: green. Harness finish handling now pairs
+valid finish calls with allow/block `finish_output`, invokes
+`CompletionResolver` for semantic lane status, writes resolver decisions into
+native proof artifacts, treats invalid finish arguments as protocol-error
+`finish_output` without invoking the resolver, preserves blocked finish pairs
+for retry/supervisor return, and prevents post-loop closeout evidence from
+setting or overriding lane completion. Focused native/resolver/transcript tests,
+boundary audit, scoped ruff, `git diff --check`, and codex-ultra review session
+`019e1be7-808a-7cc1-ab4a-a3f5b41739c0` passed. Next action is Phase 4 verifier
+closeout boundary.
+
 作業:
 
 - harness の finish handling を state machine に合わせる。

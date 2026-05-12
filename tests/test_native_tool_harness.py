@@ -120,6 +120,13 @@ def test_native_harness_read_finish_and_artifacts(tmp_path: Path) -> None:
     assert manifest["native_transport_kind"] == "provider_native"
     assert manifest["metrics"]["transport_kind"] == "fake_native"
     assert manifest["metrics"]["native_transport_kind"] == "provider_native"
+    assert manifest["resolver_decisions_ref"] == "resolver_decisions.jsonl"
+    resolver_rows = [
+        json.loads(line)
+        for line in (artifact_root / "resolver_decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert resolver_rows[0]["lane_status"] == "completed"
+    assert resolver_rows[0]["finish_call_id"] == "finish-1"
 
 
 def test_native_harness_search_text_output_includes_model_visible_anchors(tmp_path: Path) -> None:
@@ -502,6 +509,32 @@ def test_native_harness_invalid_arguments_get_paired_output(tmp_path: Path) -> N
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_invalid_finish_args_pairs_protocol_error_without_resolver(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [fake_call("finish-json", "finish", "{not-json", output_index=0)],
+            [fake_finish("finish-bad", {"summary": ["not", "a", "string"]}, output_index=0)],
+            [fake_finish("finish-ok", {"outcome": "completed", "summary": "retried"}, output_index=0)],
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    assert result.status == "completed"
+    json_output = next(item for item in result.transcript.items if item.call_id == "finish-json" and item.kind == "finish_output")
+    assert json_output.status == "invalid"
+    assert json_output.is_error is True
+    assert "invalid JSON arguments" in json_output.output_text_or_ref
+    bad_output = next(item for item in result.transcript.items if item.call_id == "finish-bad" and item.kind == "finish_output")
+    assert bad_output.status == "invalid"
+    assert bad_output.is_error is True
+    assert "finish_protocol_error" not in bad_output.output_text_or_ref
+    assert "must be a string" in bad_output.output_text_or_ref
+    assert result.metrics["completion_resolver_decision_count"] == 1
+    assert result.metrics["completion_resolver_latest_decision"]["finish_call_id"] == "finish-ok"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_native_harness_finish_with_siblings_cancels_later_calls(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
@@ -548,6 +581,32 @@ def test_native_harness_blocked_finish_continues_and_non_tool_siblings_need_no_p
     assert blocked.status == "blocked"
     assert blocked.is_error is True
     assert "finish result: invalid" in blocked.output_text_or_ref
+    assert result.metrics["completion_resolver_decision_count"] == 2
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_blocked_return_preserves_pair_and_stops_provider_requests(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_finish(
+                    "finish-return",
+                    {"outcome": "blocked_return", "summary": "supervisor needed"},
+                    output_index=0,
+                )
+            ],
+            [fake_finish("finish-late", {"outcome": "completed", "summary": "should not run"}, output_index=0)],
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    assert result.status == "blocked"
+    assert len(provider.requests) == 1
+    output = next(item for item in result.transcript.items if item.call_id == "finish-return" and item.kind == "finish_output")
+    assert output.status == "blocked"
+    assert output.is_error is True
+    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_return"
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
@@ -583,6 +642,7 @@ def test_native_harness_completed_finish_runs_acceptance_gate(tmp_path: Path) ->
     finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
     assert finish_output.status == "blocked"
     assert finish_output.is_error is True
+    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_continue"
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
@@ -789,7 +849,12 @@ def test_native_harness_proof_manifest_replays_from_response_transcript(tmp_path
     expected["metrics"]["native_transport_kind"] = "provider_native"
 
     manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
-    assert manifest == expected
+    assert manifest["resolver_decisions_ref"] == "resolver_decisions.jsonl"
+    assert str(manifest["resolver_decisions_sha256"]).startswith("sha256:")
+    manifest_without_resolver = dict(manifest)
+    manifest_without_resolver.pop("resolver_decisions_ref")
+    manifest_without_resolver.pop("resolver_decisions_sha256")
+    assert manifest_without_resolver == expected
 
 
 def test_native_harness_adds_first_write_control_after_probe_budget(tmp_path: Path) -> None:
@@ -1385,8 +1450,8 @@ def test_native_harness_runs_final_verifier_closeout_after_latest_source_mutatio
         max_turns=1,
     )
 
-    assert result.status == "completed"
-    assert result.finish_summary == "native final verifier closeout passed; completing without another model turn"
+    assert result.status == "blocked"
+    assert result.finish_summary == ""
     assert result.metrics["final_verifier_closeout_count"] == 1
     assert result.metrics["final_verifier_closeout_provider_call_id"] == "call-final-verifier-closeout-002"
     closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
@@ -1507,7 +1572,7 @@ def test_native_harness_semantic_final_verifier_closeout_remains_blocked(tmp_pat
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
-def test_native_harness_completed_finish_without_later_verifier_is_downgraded_by_closeout(tmp_path: Path) -> None:
+def test_native_harness_completed_finish_status_is_not_overridden_by_post_loop_closeout(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -1533,7 +1598,7 @@ def test_native_harness_completed_finish_without_later_verifier_is_downgraded_by
         max_turns=1,
     )
 
-    assert result.status == "blocked"
+    assert result.status == "completed"
     assert result.metrics["final_verifier_closeout_count"] == 1
     assert any(item.call_id == "finish-1" and item.kind == "finish_output" for item in result.transcript.items)
     closeout_output = next(
@@ -1620,8 +1685,8 @@ def test_native_harness_finalizes_active_verifier_before_deterministic_closeout(
         max_turns=1,
     )
 
-    assert result.status == "completed"
-    assert result.finish_summary == "native active verifier closeout passed; completing without another model turn"
+    assert result.status == "blocked"
+    assert result.finish_summary == ""
     assert result.metrics["active_command_closeout_count"] == 1
     assert result.metrics["active_command_closeout_provider_call_id"] == "call-active-command-closeout-002"
     assert result.metrics["final_verifier_closeout_count"] == 0
@@ -1717,7 +1782,7 @@ def test_native_harness_final_verifier_closeout_detects_run_command_source_mutat
         max_turns=1,
     )
 
-    assert result.status == "completed"
+    assert result.status == "blocked"
     assert result.metrics["first_write_latency"]["call_id"] == "generate-source"
     assert result.metrics["final_verifier_closeout_count"] == 1
     assert any(item.call_id == "call-final-verifier-closeout-002" for item in result.transcript.items)

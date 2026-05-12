@@ -10,6 +10,13 @@ import re
 import time
 from typing import Mapping
 
+from .completion_resolver import (
+    CompletionResolver,
+    CompletionResolverDecision,
+    CompletionResolverInput,
+    FinishClaim,
+    write_completion_resolver_artifacts,
+)
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .native_fake_provider import PHASE3_TRANSPORT_CHANGE, NativeFakeProvider
 from .native_provider_adapter import (
@@ -261,10 +268,13 @@ def run_native_implement_v2(
     active_command_closeout_provider_call_id = ""
     finish_gate_block_count = 0
     finish_gate_decision: dict[str, object] = {}
+    resolver_decisions: list[CompletionResolverDecision] = []
     native_model_budget_block: dict[str, object] | None = None
     start_monotonic = time.monotonic()
     status = "blocked"
     finish_summary = ""
+    resolver = CompletionResolver()
+    resolver_blocked_return = False
 
     for turn_index in range(1, max_turns + 1):
         turn_timeout = _native_next_model_timeout_seconds(
@@ -328,6 +338,7 @@ def run_native_implement_v2(
             key=lambda item: (item.output_index, item.sequence),
         )
         accepted_finish: NativeTranscriptItem | None = None
+        terminal_blocked_finish: NativeTranscriptItem | None = None
         output_records: list[NativeTranscriptItem] = []
         prewrite_probe_calls_this_turn = 0
         for call in calls:
@@ -337,6 +348,18 @@ def run_native_implement_v2(
                         call,
                         sequence=0,
                         reason=f"cancelled because finish call {accepted_finish.call_id} completed earlier in the same response",
+                    )
+                )
+                continue
+            if terminal_blocked_finish is not None and _call_order_key(call) > _call_order_key(terminal_blocked_finish):
+                output_records.append(
+                    build_synthetic_error_output(
+                        call,
+                        sequence=0,
+                        reason=(
+                            "cancelled because finish call "
+                            f"{terminal_blocked_finish.call_id} returned control to supervisor"
+                        ),
                     )
                 )
                 continue
@@ -360,6 +383,18 @@ def run_native_implement_v2(
                 write_runtime=write_runtime,
                 prior_tool_results=tuple(tool_results),
             )
+            if call.kind == "finish_call" and not _native_finish_protocol_error(result):
+                decision = resolver.resolve(
+                    _completion_resolver_input_from_finish(
+                        call,
+                        result,
+                        lane_input=lane_input,
+                        transcript_items=tuple(items),
+                        request_descriptor=request_descriptor,
+                    )
+                )
+                resolver_decisions.append(decision)
+                result = _finish_result_with_resolver_decision(result, decision)
             latency_finished = time.monotonic()
             output = _native_output_from_result(call, result, sequence=0)
             output_records.append(output)
@@ -393,23 +428,30 @@ def run_native_implement_v2(
             if call.kind == "finish_call" and _native_finish_gate_blocked(result):
                 finish_gate_block_count += 1
                 finish_gate_decision = _native_finish_gate_decision_payload(result)
-            if call.kind == "finish_call" and result.status == "completed" and not result.is_error:
+            if call.kind == "finish_call" and _native_finish_resolver_lane_status(result) == "completed":
                 accepted_finish = call
                 status = "completed"
                 finish_summary = _finish_summary(call)
+            elif call.kind == "finish_call" and _native_finish_resolver_lane_status(result) == "blocked_return":
+                terminal_blocked_finish = call
+                resolver_blocked_return = True
+                status = "blocked"
+                finish_summary = _native_finish_resolver_reason(result)
 
         for output in output_records:
             items.append(replace(output, sequence=len(items) + 1))
-        if accepted_finish is not None:
+        if accepted_finish is not None or terminal_blocked_finish is not None:
             break
 
-    active_closeout = _native_active_command_closeout(
-        lane_input,
-        lane_attempt_id=lane_attempt_id,
-        provider=provider,
-        exec_runtime=exec_runtime,
-        start_monotonic=start_monotonic,
-    )
+    active_closeout = None
+    if not resolver_blocked_return:
+        active_closeout = _native_active_command_closeout(
+            lane_input,
+            lane_attempt_id=lane_attempt_id,
+            provider=provider,
+            exec_runtime=exec_runtime,
+            start_monotonic=start_monotonic,
+        )
     if active_closeout is not None:
         active_call, active_result, active_latency = active_closeout
         active_command_closeout_count = 1
@@ -427,27 +469,23 @@ def run_native_implement_v2(
                 "tool_name": active_call.tool_name,
                 "wall_seconds": active_latency["started_ms"] / 1000,
             }
-        if _native_final_verifier_passed(active_result):
-            status = "completed"
-            finish_summary = "native active verifier closeout passed; completing without another model turn"
-        else:
-            status = "blocked"
-            finish_summary = ""
 
-    closeout = _native_final_verifier_closeout(
-        lane_input,
-        lane_attempt_id=lane_attempt_id,
-        provider=provider,
-        exec_runtime=exec_runtime,
-        workspace=workspace,
-        allowed_read_roots=allowed_read_roots,
-        allowed_write_roots=allowed_write_roots,
-        lane_config=lane_config,
-        tool_calls=tuple(tool_calls),
-        tool_results=tuple(tool_results),
-        start_monotonic=start_monotonic,
-        current_status=status,
-    )
+    closeout = None
+    if not resolver_blocked_return:
+        closeout = _native_final_verifier_closeout(
+            lane_input,
+            lane_attempt_id=lane_attempt_id,
+            provider=provider,
+            exec_runtime=exec_runtime,
+            workspace=workspace,
+            allowed_read_roots=allowed_read_roots,
+            allowed_write_roots=allowed_write_roots,
+            lane_config=lane_config,
+            tool_calls=tuple(tool_calls),
+            tool_results=tuple(tool_results),
+            start_monotonic=start_monotonic,
+            current_status=status,
+        )
     if closeout is not None:
         closeout_call, closeout_result, closeout_latency = closeout
         final_verifier_closeout_count = 1
@@ -467,12 +505,6 @@ def run_native_implement_v2(
                 "tool_name": closeout_call.tool_name,
                 "wall_seconds": closeout_latency["started_ms"] / 1000,
             }
-        if _native_final_verifier_passed(closeout_result):
-            status = "completed"
-            finish_summary = "native final verifier closeout passed; completing without another model turn"
-        else:
-            status = "blocked"
-            finish_summary = ""
 
     transcript = NativeTranscript(
         lane_attempt_id=lane_attempt_id,
@@ -504,13 +536,21 @@ def run_native_implement_v2(
         "active_command_closeout_provider_call_id": active_command_closeout_provider_call_id,
         "finish_gate_block_count": finish_gate_block_count,
         "finish_gate_decision": finish_gate_decision,
+        "completion_resolver_decision_count": len(resolver_decisions),
+        "completion_resolver_latest_decision": resolver_decisions[-1].as_dict() if resolver_decisions else {},
         "pairing": validation.as_dict(),
     }
     if native_model_budget_block is not None:
         metrics["native_model_turn_budget_block"] = native_model_budget_block
     proof_artifacts: tuple[str, ...] = ()
     if artifact_root is not None:
-        paths = _write_native_artifacts(Path(artifact_root), transcript, provider=provider, status=status)
+        paths = _write_native_artifacts(
+            Path(artifact_root),
+            transcript,
+            provider=provider,
+            status=status,
+            resolver_decisions=tuple(resolver_decisions),
+        )
         proof_artifacts = tuple(str(path) for path in paths.values())
     return NativeImplementV2HarnessResult(
         status=status,
@@ -587,22 +627,35 @@ def _execute_native_call(
     prior_tool_results: tuple[ToolResultEnvelope, ...] = (),
 ) -> ToolResultEnvelope:
     if not call.call_id:
+        if call.kind == "finish_call":
+            return _finish_protocol_error_result(
+                _finish_tool_call_envelope(call, {}),
+                reason="native finish call is missing call_id",
+            )
         return _invalid_result(call, reason="native tool call is missing call_id")
     arguments, error = _arguments(call)
     if error:
+        if call.kind == "finish_call":
+            return _finish_protocol_error_result(
+                _finish_tool_call_envelope(call, {}),
+                reason=error,
+            )
         return _invalid_result(call, reason=error)
-    envelope = ToolCallEnvelope(
-        lane_attempt_id=call.lane_attempt_id,
-        provider=call.provider,
-        provider_call_id=call.call_id,
-        mew_tool_call_id=f"native:{call.call_id}",
-        tool_name=call.tool_name,
-        arguments=arguments,
-        provider_message_id=call.provider_item_id,
-        turn_index=_turn_number(call.turn_id),
-        sequence_index=call.output_index,
-        status="validated",
-    )
+    if call.kind == "finish_call":
+        envelope = _finish_tool_call_envelope(call, arguments)
+    else:
+        envelope = ToolCallEnvelope(
+            lane_attempt_id=call.lane_attempt_id,
+            provider=call.provider,
+            provider_call_id=call.call_id,
+            mew_tool_call_id=f"native:{call.call_id}",
+            tool_name=call.tool_name,
+            arguments=arguments,
+            provider_message_id=call.provider_item_id,
+            turn_index=_turn_number(call.turn_id),
+            sequence_index=call.output_index,
+            status="validated",
+        )
     if call.kind == "finish_call":
         return _finish_result(envelope, lane_input=lane_input, prior_tool_results=prior_tool_results)
     if call.tool_name in READ_ONLY_TOOL_NAMES:
@@ -1123,9 +1176,12 @@ def _finish_result(
     lane_input: ImplementLaneInput,
     prior_tool_results: tuple[ToolResultEnvelope, ...],
 ) -> ToolResultEnvelope:
+    protocol_error = _finish_protocol_error(call.arguments)
+    if protocol_error:
+        return _finish_protocol_error_result(call, reason=protocol_error)
     outcome = _native_finish_outcome(call.arguments)
     task_done = call.arguments.get("task_done")
-    blocked = outcome in {"blocked", "continue"} or task_done is False
+    blocked = outcome in {"blocked", "blocked_return", "continue"} or task_done is False
     if not blocked:
         finish_arguments = dict(call.arguments)
         finish_arguments["outcome"] = outcome
@@ -1149,6 +1205,89 @@ def _finish_result(
     )
 
 
+def _finish_tool_call_envelope(call: NativeTranscriptItem, arguments: Mapping[str, object]) -> ToolCallEnvelope:
+    return ToolCallEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider=call.provider,
+        provider_call_id=call.call_id,
+        mew_tool_call_id=f"native:{call.call_id}",
+        tool_name="finish",
+        arguments=dict(arguments),
+        provider_message_id=call.provider_item_id,
+        turn_index=_turn_number(call.turn_id),
+        sequence_index=call.output_index,
+        status="validated",
+    )
+
+
+_ALLOWED_FINISH_ARGUMENT_KEYS = frozenset(
+    {
+        "blockers",
+        "budget_blockers",
+        "closeout_refs",
+        "evidence_refs",
+        "final_status",
+        "missing_obligations",
+        "outcome",
+        "reason",
+        "return_to_supervisor",
+        "status",
+        "summary",
+        "task_done",
+        "unsafe_blockers",
+        "unsafe_to_continue",
+    }
+)
+
+
+def _finish_protocol_error(arguments: Mapping[str, object]) -> str:
+    unknown = sorted(str(key) for key in arguments if str(key) not in _ALLOWED_FINISH_ARGUMENT_KEYS)
+    if unknown:
+        return "finish arguments contain unsupported keys: " + ", ".join(unknown)
+    for key in ("summary", "reason", "outcome", "status", "final_status"):
+        value = arguments.get(key)
+        if value is not None and not isinstance(value, str):
+            return f"finish argument {key!r} must be a string"
+    task_done = arguments.get("task_done")
+    if task_done is not None and not isinstance(task_done, bool):
+        return "finish argument 'task_done' must be a boolean"
+    for key in ("evidence_refs", "closeout_refs", "blockers", "missing_obligations", "unsafe_blockers", "budget_blockers"):
+        value = arguments.get(key)
+        if value is not None and not _finish_string_list_like(value):
+            return f"finish argument {key!r} must be a string or list of strings"
+    for key in ("return_to_supervisor", "unsafe_to_continue"):
+        value = arguments.get(key)
+        if value is not None and not isinstance(value, bool):
+            return f"finish argument {key!r} must be a boolean"
+    return ""
+
+
+def _finish_string_list_like(value: object) -> bool:
+    if isinstance(value, str):
+        return True
+    if not isinstance(value, (list, tuple)):
+        return False
+    return all(isinstance(item, str) for item in value)
+
+
+def _finish_protocol_error_result(call: ToolCallEnvelope, *, reason: str) -> ToolResultEnvelope:
+    return ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name="finish",
+        status="invalid",
+        is_error=True,
+        content=(
+            {
+                "summary": reason,
+                "outcome": "protocol_error",
+                "finish_protocol_error": {"reason": reason},
+            },
+        ),
+    )
+
+
 def _native_finish_outcome(arguments: Mapping[str, object]) -> str:
     raw = str(
         arguments.get("outcome")
@@ -1160,6 +1299,8 @@ def _native_finish_outcome(arguments: Mapping[str, object]) -> str:
         return "completed"
     if raw in {"complete", "completed", "done", "success", "succeeded", "ok"}:
         return "completed"
+    if raw in {"blocked_return", "return", "supervisor_return", "needs_supervisor"}:
+        return "blocked_return"
     if raw in {"block", "blocked", "continue", "needs_work", "incomplete", "fail", "failed", "failure", "error"}:
         return "blocked" if raw != "continue" else "continue"
     return "completed"
@@ -1213,6 +1354,163 @@ def _finish_gate_block_result(call: ToolCallEnvelope, gate: Mapping[str, object]
             },
         ),
     )
+
+
+def _completion_resolver_input_from_finish(
+    call: NativeTranscriptItem,
+    result: ToolResultEnvelope,
+    *,
+    lane_input: ImplementLaneInput,
+    transcript_items: tuple[NativeTranscriptItem, ...],
+    request_descriptor: Mapping[str, object],
+) -> CompletionResolverInput:
+    arguments, _ = _arguments(call)
+    outcome = _native_finish_outcome(arguments)
+    gate = _native_finish_gate_decision_payload(result)
+    blockers: list[str] = []
+    missing: list[str] = []
+    unsafe_blockers: list[str] = []
+    budget_blockers: list[str] = []
+    if outcome in {"blocked", "continue"} or arguments.get("task_done") is False:
+        blockers.append("finish_claim_not_completed")
+    if outcome == "blocked_return" or arguments.get("return_to_supervisor") is True:
+        budget_blockers.append("finish_requested_supervisor_return")
+    if arguments.get("unsafe_to_continue") is True:
+        unsafe_blockers.append("finish_marked_unsafe_to_continue")
+    blockers.extend(_finish_arg_strings(arguments.get("blockers")))
+    missing.extend(_finish_arg_strings(arguments.get("missing_obligations")))
+    unsafe_blockers.extend(_finish_arg_strings(arguments.get("unsafe_blockers")))
+    budget_blockers.extend(_finish_arg_strings(arguments.get("budget_blockers")))
+    if gate:
+        blockers.append("finish_gate_blocked")
+        blockers.extend(_finish_gate_blocker_codes(gate))
+        missing.extend(_finish_gate_missing_obligations(gate))
+    return CompletionResolverInput(
+        finish_claim=FinishClaim(
+            lane_attempt_id=call.lane_attempt_id,
+            turn_id=call.turn_id,
+            finish_call_id=call.call_id,
+            finish_output_call_id=call.call_id,
+            outcome=outcome,
+            summary=str(arguments.get("summary") or ""),
+            arguments=dict(arguments),
+        ),
+        transcript_hash_before_decision=native_transcript_hash(
+            NativeTranscript(
+                lane_attempt_id=call.lane_attempt_id,
+                provider=call.provider,
+                model=call.model,
+                items=transcript_items,
+            )
+        ),
+        compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
+        typed_evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *_finish_arg_strings(arguments.get("evidence_refs"))))),
+        missing_obligations=tuple(dict.fromkeys(missing)),
+        closeout_refs=tuple(_finish_arg_strings(arguments.get("closeout_refs"))),
+        blockers=tuple(dict.fromkeys(blockers)),
+        unsafe_blockers=tuple(dict.fromkeys(unsafe_blockers)),
+        budget_blockers=tuple(dict.fromkeys(budget_blockers)),
+        verifier_required=bool(gate),
+    )
+
+
+def _finish_result_with_resolver_decision(
+    result: ToolResultEnvelope,
+    decision: CompletionResolverDecision,
+) -> ToolResultEnvelope:
+    payload = dict(result.content[0]) if result.content and isinstance(result.content[0], dict) else {}
+    payload["completion_resolver"] = decision.as_dict()
+    payload["resolver_decision_id"] = decision.decision_id
+    payload["lane_status"] = decision.lane_status
+    if decision.result == "allow":
+        payload["summary"] = payload.get("summary") or decision.reason
+        payload["outcome"] = "completed"
+        return replace(
+            result,
+            status="completed",
+            is_error=False,
+            content=(payload,),
+            evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *decision.evidence_refs))),
+        )
+    payload["summary"] = decision.reason
+    payload["outcome"] = decision.lane_status
+    payload["blockers"] = list(decision.blockers)
+    payload["missing_obligations"] = list(decision.missing_obligations)
+    return replace(
+        result,
+        status="invalid",
+        is_error=True,
+        content=(payload,),
+        evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *decision.evidence_refs))),
+    )
+
+
+def _native_finish_protocol_error(result: ToolResultEnvelope) -> bool:
+    if result.tool_name != "finish":
+        return False
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    return isinstance(payload.get("finish_protocol_error"), dict)
+
+
+def _native_finish_resolver_decision_payload(result: ToolResultEnvelope) -> dict[str, object]:
+    if result.tool_name != "finish":
+        return {}
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    decision = payload.get("completion_resolver")
+    return dict(decision) if isinstance(decision, dict) else {}
+
+
+def _native_finish_resolver_lane_status(result: ToolResultEnvelope) -> str:
+    return str(_native_finish_resolver_decision_payload(result).get("lane_status") or "").strip()
+
+
+def _native_finish_resolver_reason(result: ToolResultEnvelope) -> str:
+    return str(_native_finish_resolver_decision_payload(result).get("reason") or "").strip()
+
+
+def _request_compact_sidecar_digest_hash(request_descriptor: Mapping[str, object]) -> str:
+    inventory = request_descriptor.get("provider_request_inventory")
+    if isinstance(inventory, Mapping):
+        return str(inventory.get("compact_sidecar_digest_hash") or "").strip()
+    return ""
+
+
+def _finish_arg_strings(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,) if value else ()
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(text for item in value if (text := str(item or "").strip()))
+
+
+def _finish_gate_blocker_codes(gate: Mapping[str, object]) -> tuple[str, ...]:
+    codes: list[str] = []
+    blockers = gate.get("blockers")
+    if isinstance(blockers, list):
+        for blocker in blockers:
+            if isinstance(blocker, Mapping):
+                code = str(blocker.get("code") or blocker.get("family") or blocker.get("message") or "").strip()
+                if code:
+                    codes.append(code)
+            else:
+                text = str(blocker or "").strip()
+                if text:
+                    codes.append(text)
+    return tuple(dict.fromkeys(codes))
+
+
+def _finish_gate_missing_obligations(gate: Mapping[str, object]) -> tuple[str, ...]:
+    missing: list[str] = []
+    blockers = gate.get("blockers")
+    if isinstance(blockers, list):
+        for blocker in blockers:
+            if not isinstance(blocker, Mapping):
+                continue
+            for key in ("required_evidence_ref", "missing_obligation", "obligation"):
+                value = str(blocker.get(key) or "").strip()
+                if value:
+                    missing.append(value)
+    return tuple(dict.fromkeys(missing))
 
 
 def _native_finish_gate_blocked(result: ToolResultEnvelope) -> bool:
@@ -1966,7 +2264,12 @@ def _result_is_verifier_like(result: ToolResultEnvelope) -> bool:
 def _native_output_status(call: NativeTranscriptItem, result: ToolResultEnvelope) -> str:
     if call.kind == "finish_call":
         payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
-        if result.is_error and str(payload.get("outcome") or "").strip().lower() in {"blocked", "continue"}:
+        if result.is_error and str(payload.get("outcome") or "").strip().lower() in {
+            "blocked",
+            "blocked_continue",
+            "blocked_return",
+            "continue",
+        }:
             return "blocked"
     return result.status
 
@@ -1982,8 +2285,17 @@ def _write_native_artifacts(
     provider: object,
     status: str = "",
     error: str = "",
+    resolver_decisions: tuple[CompletionResolverDecision, ...] = (),
 ) -> dict[str, Path]:
     paths = write_native_transcript_artifacts(root, transcript)
+    if resolver_decisions:
+        paths.update(
+            write_completion_resolver_artifacts(
+                root,
+                resolver_decisions,
+                proof_manifest_path=paths.get("proof_manifest"),
+            )
+        )
     paths.update(_write_provider_request_artifacts(root, provider=provider, status=status, error=error))
     if not isinstance(provider, NativeFakeProvider):
         return paths

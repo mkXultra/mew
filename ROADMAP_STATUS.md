@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is native step-shape diagnosis. Exact artifact-obligation projection is committed; the latest step-check proved the model targets `/tmp/frame.bmp` and exposed active verifier closeout lifecycle as the next generic repair. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is native responsibility-boundary Phase 4. Phase 3 finish integration is reviewed; verifier closeout must move behind resolver authority before live proof resumes. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,22 +69,23 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_native_responsibility_boundary_phase_3`.
+Current controller mode: `m6_24_native_responsibility_boundary_phase_4`.
 
 Current diagnostic mode: `phase_implementation_before_more_live_proof`.
 
-Latest phase status: Phase 2 of
+Latest phase status: Phase 3 of
 `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is
-implemented and reviewed. `CompletionResolver` is now a harness-independent
-semantic finish resolver with strict pre-extracted input validation,
-`completed` / `blocked_continue` / `blocked_return` outputs, sidecar-only
-`resolver_decisions.jsonl` artifacts, proof-manifest resolver fields, and
-fresh-process import-boundary coverage proving resolver import does not
-initialize native harness or tool runtimes. codex-ultra review session
-`019e1bcb-3aef-7860-a14e-b1db9035decd` returned `STATUS: APPROVE`.
-Next action: implement Phase 3 finish call integration. Do not spend another
+implemented and reviewed. Provider-native `finish_call` handling now preserves
+paired `finish_output` for allow/block/protocol-error paths, calls
+`CompletionResolver` for semantic lane status, writes `resolver_decisions.jsonl`
+plus proof-manifest refs, skips resolver for invalid finish args so the model
+can retry, distinguishes `blocked_continue` from `blocked_return`, and prevents
+post-loop closeout evidence from completing or overriding a resolver decision.
+codex-ultra review session `019e1be7-808a-7cc1-ab4a-a3f5b41739c0` returned
+`STATUS: APPROVE`.
+Next action: implement Phase 4 verifier closeout boundary. Do not spend another
 10min step-shape diagnostic, `speed_1`, `proof_5`, or broad measurement before
-Phase 3 is implemented/reviewed/committed.
+Phase 4 is implemented/reviewed/committed.
 
 Phase 1 of
 `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is
@@ -301,7 +302,7 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 is still the active M6.24 lane; native responsibility-boundary Phase 2 is green, so implement Phase 3 finish call integration next. Keep NativeTranscript/provider-native paired outputs as source of truth, keep CompletionResolver as the semantic completion authority, and do not jump back to step-shape polish, speed_1, proof_5, or broad measurement before Phase 3 is reviewed and committed.
+selected_lane=implement_v2 is still the active M6.24 lane; native responsibility-boundary Phase 3 is green, so implement Phase 4 verifier closeout boundary next. Keep NativeTranscript/provider-native paired outputs as source of truth, keep CompletionResolver as the semantic completion authority, and do not jump back to step-shape polish, speed_1, proof_5, or broad measurement before Phase 4 is reviewed and committed.
 ```
 
 Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
@@ -311,7 +312,7 @@ Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
 passed with exact replay and terminal-bench replay dogfood. This is historical
 pre-WorkFrame measurement evidence. The current decision is no longer
 "build-cython proof_5 now" or "continue the implement_v2 scoped rebaseline";
-the current decision is the native responsibility-boundary Phase 1 above.
+the current decision is the native responsibility-boundary Phase 4 above.
 
 ## Active M6.24 Context
 
@@ -348,7 +349,7 @@ Controller docs:
 Current native-boundary-gated next action:
 
 ```text
-M6.24 -> native responsibility-boundary Phase 2 green -> implement Phase 3 finish call integration -> review/commit -> then decide Phase 4 verifier closeout boundary before any new live proof spending
+M6.24 -> native responsibility-boundary Phase 3 green -> implement Phase 4 verifier closeout boundary -> review/commit -> then decide Phase 5 replay/fastcheck before any new live proof spending
 ```
 
 Older scoped-rebaseline, WorkFrame, diagnostic-runner, and native-loop rows
@@ -489,7 +490,7 @@ findings. Phases 0-6 were then implemented in small reviewed commits:
 Historical WorkFrame action: close the WorkFrame proof gate by repairing
 `transition_contract` hot-path patch-anchor/runtime-artifact-obligation handling
 and rerunning focused checks plus one same-shape diagnostic. This is not the
-current next action while `native_boundary_phase1_active` is open. Do not resume
+current next action while `native_boundary_phase3_green_phase4_next` is open. Do not resume
 this WorkFrame action until the native boundary row in
 `docs/M6_24_DECISION_LEDGER.md` is closed or explicitly superseded.
 
@@ -497,7 +498,7 @@ WorkFrame variant benchmark note (2026-05-10): after Codex, Claude Code, and
 2025-2026 literature reviews of `tool result -> evidence/state -> next action`,
 the historical WorkFrame proof-gate strategy was to measure WorkFrame reducer
 variants before another long polish sequence. That strategy is superseded while
-`native_boundary_phase1_active` is open. The retained lesson is architectural:
+`native_boundary_phase3_green_phase4_next` is open. The retained lesson is architectural:
 if WorkFrame variants are revisited later, keep variant implementations isolated
 from tool runtime/provider loop/verifier changes and compare them with the same
 fastcheck, same diagnostic, and same analyzer.
@@ -536,16 +537,16 @@ Useful historical files:
 
 ## Current Roadmap Focus
 
-1. The active M6.24 focus is native responsibility-boundary Phase 1 from
+1. The active M6.24 focus is native responsibility-boundary Phase 4 from
    `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`.
 2. Use `docs/M6_24_DECISION_LEDGER.md` and the native boundary section above as
    the reentry guard. They supersede older HOT_PATH polish, WorkFrame,
    diagnostic-runner, or scoped-rebaseline rows that point directly to
    `step-check-10min`, `speed_1`, `proof_5`, or broad measurement.
-3. Required next order: keep the native boundary intact, repair the exact
-   finish-gate obligation projection, run focused acceptance/native tests plus
-   the native boundary audit when touched, then run exactly one bounded
-   same-shape diagnostic.
+3. Required next order: keep the native boundary intact, implement the verifier
+   closeout boundary behind `CompletionResolver`, run focused native/resolver
+   tests plus the native boundary audit when touched, then decide Phase 5
+   replay/fastcheck before any live diagnostic.
 4. If the gate is red, repair the native boundary/projection failure first. Do
    not add another model-visible frontier/todo/evidence projection as a shortcut.
 5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the

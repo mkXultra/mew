@@ -147,22 +147,25 @@ that present another same-shape `step-check-10min`, `speed_1`, or `proof_5` as
 the immediate next action.
 
 Latest active-row update, 2026-05-12 JST: native tool-loop responsibility
-boundary Phase 1 compact sidecar digest boundary is green, exact
-artifact-obligation projection is committed as `90e5dd1`, and the latest
-bounded native diagnostic proved the model now targets `/tmp/frame.bmp`
-directly. The active task is the generic managed-command lifecycle repair: if a
-verifier command is still active at native closeout, finalize or cancel that
-active command before starting any deterministic final verifier. Do not spend
-`speed_1`, `proof_5`, or broad measurement before this repair is committed and
-followed by one bounded native step-shape diagnostic.
+boundary Phase 3 finish call integration is green. `finish_call` pairing and
+semantic lane completion are separated: valid finish calls always receive
+paired `finish_output`, invalid finish args produce protocol-error output
+without invoking the resolver, and `CompletionResolver` is the lane-status
+authority. Post-loop active/final closeout evidence can no longer complete or
+override lane status. The active task is Phase 4 verifier closeout boundary:
+move closeout dispatch/evidence into the finish-time resolver path and keep
+non-finish/max-turn closeout from completing the lane. Do not spend
+`step-check-10min`, `speed_1`, `proof_5`, or broad measurement before Phase 4
+is implemented, reviewed, and committed.
 
 Note: older rows may retain their original status labels for historical search,
-but they are not task-selection authority while `native_boundary_phase1_green`
-is the newest row. Treat them as repair evidence only unless this row is
-explicitly closed or superseded.
+but they are not task-selection authority while
+`native_boundary_phase3_green_phase4_next` is the newest row. Treat them as
+repair evidence only unless this row is explicitly closed or superseded.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-12 | Native responsibility-boundary Phase 3 is green; move to Phase 4 verifier closeout boundary. | `src/mew/implement_lane/native_tool_harness.py` now routes valid provider-native `finish_call` results through `CompletionResolver`, keeps paired `finish_output` for allow/block outcomes, treats invalid finish arguments and bad finish JSON as protocol-error `finish_output` without invoking the resolver, records resolver decisions in metrics and native proof artifacts, distinguishes `blocked_continue` from `blocked_return`, and makes post-loop active/final closeout evidence-only for lane status. `src/mew/implement_lane/native_boundary_audit.py` now checks resolver-authority completion rather than raw `ToolResultEnvelope.status`. Focused validation passed: `uv run pytest --no-testmon tests/test_native_tool_harness.py tests/test_completion_resolver.py tests/test_native_transcript.py tests/test_native_boundary_audit.py tests/test_native_sidecar_projection.py tests/test_native_workframe_projection.py -q`; `uv run pytest --no-testmon tests/test_implement_lane.py -q`; `uv run python scripts/check_native_tool_loop_boundary.py --json`; scoped ruff; `git diff --check`. codex-ultra review session `019e1be7-808a-7cc1-ab4a-a3f5b41739c0` first requested protocol-error and closeout-authority fixes, then returned `STATUS: APPROVE`. | Implement Phase 4 verifier closeout boundary: run finish-time closeout only after valid finish args and before resolver, pass closeout evidence/blockers into `CompletionResolverInput`, and ensure no valid `finish_call` means no lane completion. Do not run live diagnostics, `speed_1`, `proof_5`, or broad measurement before Phase 4 is reviewed and committed. | native_boundary_phase3_green_phase4_next |
 | 2026-05-12 | Native responsibility-boundary Phase 2 is green; move to Phase 3 finish call integration. | Added `src/mew/implement_lane/completion_resolver.py` as a harness-independent semantic finish resolver. The resolver consumes only pre-extracted finish/evidence facts, rejects unsupported top-level dynamic payloads and nested raw transcript/tool keys, returns `completed` / `blocked_continue` / `blocked_return`, and writes sidecar-only `resolver_decisions.jsonl` plus proof-manifest fields. `src/mew/implement_lane/__init__.py` now uses lazy exports so importing `mew.implement_lane.completion_resolver` does not initialize `exec_runtime`, `native_tool_harness`, `read_runtime`, or `write_runtime`. Validation passed: `uv run pytest --no-testmon tests/test_completion_resolver.py tests/test_native_transcript.py -q`; `uv run pytest --no-testmon tests/test_implement_lane.py -q`; `uv run pytest --no-testmon tests/test_completion_resolver.py tests/test_native_tool_harness.py tests/test_native_boundary_audit.py -q`; `uv run python scripts/check_native_tool_loop_boundary.py --json`; scoped ruff; `git diff --check`. codex-ultra review session `019e1bcb-3aef-7860-a14e-b1db9035decd` first requested import-boundary and strict-input fixes, then returned `STATUS: APPROVE`. | Implement Phase 3 finish call integration: valid finish calls must always produce paired finish output; semantic lane status must come from `CompletionResolver`; blocked finishes stay in transcript/provider window as designed; invalid finish args produce protocol-error output without invoking resolver. Do not return to diagnostic polish, `speed_1`, `proof_5`, or broad measurement before Phase 3 is reviewed and committed. | native_boundary_phase2_green_phase3_next |
 | 2026-05-12 | Repair native active verifier closeout before another live proof. | Commit `90e5dd1` fixed exact artifact-obligation projection. The follow-up bounded native diagnostic, `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-20260512-141746/2026-05-12__14-17-46/make-mips-interpreter__k5LYrfo`, showed the model's verifier now targeted `/tmp/frame.bmp` directly. The remaining gap is generic lifecycle, not task solver logic: that verifier yielded while `node vm.js` was still running, and the native deterministic final-verifier closeout then attempted a second `run_command`, failing with `a managed command is already running`. The repair adds an active-command closeout before deterministic final verifier closeout: project a synthetic `poll_command` output, finalize or cancel the active managed command, treat exit-0 `run_tests` closeout as a passing verifier when verifier evidence is unknown but no semantic failure is present, and avoid starting a second command while one is active. Focused native/acceptance tests, boundary audit, scoped ruff, and `git diff --check` are green; codex-ultra re-review session `019e1ab4-4305-7f92-8e64-b8128b4c6035` returned `STATUS: APPROVE`. | Commit, then rerun exactly one same-shape bounded native diagnostic. Do not run `speed_1`, `proof_5`, or broad measurement first. | native_active_command_closeout_repair_reviewed_commit_pending |
 | 2026-05-12 | Repair generic prewrite probe plateau before another live proof. | Commit `85e5a88` fixed late provider-turn budget blocking and interrupted-verifier repair projection. The next bounded native diagnostic, `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-20260512-114504/2026-05-12__11-45-05/make-mips-interpreter__aU6XVoY`, preserved paired native transcript artifacts (`58` calls / `58` outputs, valid pairing, native observation present) and avoided the previous low-budget final provider-turn failure. The remaining gap is generic prewrite plateau control: from early requests the compact digest projected `first_write_due=true`, but the model continued `58` read/probe calls with `0` writes and `0` verifiers until provider timeout. This is not solver evidence and should not trigger task-specific MIPS rules. The repair adds a bounded native loop guard: once prewrite probe count reaches the plateau threshold with no write and no verifier, reject further read/exec probes while still allowing `write_file`, `edit_file`, `apply_patch`, or finish. It preserves the signal in compact sidecar digest. Validation passed: focused native harness/sidecar tests, boundary audit, scoped ruff, `git diff --check`; codex-ultra review session `019e1a30-9aab-7411-a3d9-5d65d52f62e6` returned `STATUS: APPROVE` and its test-gap note was addressed. | Commit, then rerun exactly one same-shape bounded native diagnostic. Do not run `speed_1`, `proof_5`, or broad measurement first. | prewrite_probe_plateau_repair_reviewed_commit_pending |
@@ -1472,7 +1475,8 @@ After comparing the latest `make-mips-interpreter` mew speed proof with Codex
 and Claude Code reference traces, do not classify the gap as one undifferentiated
 "redesign" or "polish" problem. Use
 `docs/M6_24_STEP_CAUSE_BREAKDOWN_2026-05-11.md` as the diagnostic split for
-that WorkFrame-era repair window. While `native_boundary_phase1_active` is open,
+that WorkFrame-era repair window. While
+`native_boundary_phase3_green_phase4_next` is the newest native-boundary row,
 this split is historical evidence, not the active task selector. The split was:
 
 - polish-only: nested tool payload extraction, apply-patch surface bugs,

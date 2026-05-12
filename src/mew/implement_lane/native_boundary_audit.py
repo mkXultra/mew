@@ -28,10 +28,11 @@ class SourceControlSpec:
 
 SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
     SourceControlSpec(
-        name="finish_call_status_completion",
+        name="finish_call_resolver_completion",
         relative_path="src/mew/implement_lane/native_tool_harness.py",
-        anchor='if call.kind == "finish_call" and result.status == "completed"',
+        anchor='if call.kind == "finish_call" and _native_finish_resolver_lane_status(result) == "completed"',
         markers=("accepted_finish = call", 'status = "completed"'),
+        forbidden_markers=('result.status == "completed" and not result.is_error',),
         window_after=8,
     ),
     SourceControlSpec(
