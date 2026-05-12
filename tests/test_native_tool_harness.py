@@ -200,6 +200,39 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
     assert manifest["metrics"]["transport_kind"] == "provider_native"
 
 
+def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        side_effect=RuntimeError("request timed out"),
+    ):
+        result = run_live_native_implement_v2(
+            lane_input,
+            model_auth={"access_token": "x"},
+            base_url="https://example.invalid",
+            timeout=3,
+            max_turns=1,
+        )
+
+    assert result.status == "failed"
+    assert result.metrics["provider_request_inventory_available"] is True
+    assert result.metrics["turn_count"] == 1
+    request_path = artifact_root / "native-provider-requests.json"
+    inventory_path = artifact_root / "provider-request-inventory.json"
+    assert request_path.exists()
+    assert inventory_path.exists()
+    request_payload = json.loads(request_path.read_text(encoding="utf-8"))
+    inventory_payload = json.loads(inventory_path.read_text(encoding="utf-8"))
+    assert request_payload["request_count"] == 1
+    assert inventory_payload["request_count"] == 1
+    assert inventory_payload["provider_request_inventory"][0]["model_visible_sections"] == [
+        "native_transcript_window",
+        "compact_sidecar_digest",
+    ]
+
+
 def test_live_native_input_carry_forward_omits_reasoning_refs_without_sidecar_bytes(tmp_path: Path) -> None:
     lane_input = _lane_input(tmp_path)
     descriptor = {

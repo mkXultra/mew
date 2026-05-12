@@ -11156,6 +11156,74 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_selected_implement_v2_reduces_native_model_timeout_to_fit_wall_budget(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="failed",
+                    lane="implement_v2",
+                    user_visible_summary="model turn failed: request timed out",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        "selected_lane=implement_v2",
+                                        "--model",
+                                        "gpt-5.5",
+                                        "--model-timeout",
+                                        "600",
+                                        "--max-wall-seconds",
+                                        "600",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                self.assertEqual(v2_run.call_args.kwargs["timeout"], 570.0)
+                state = load_state()
+                metrics = state["work_sessions"][0]["model_turns"][0]["model_metrics"]
+                self.assertEqual(metrics["requested_model_timeout_seconds"], 600.0)
+                self.assertEqual(metrics["model_timeout_seconds"], 570.0)
+                self.assertEqual(metrics["native_timeout_reserve_seconds"], 30.0)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_oneshot_selected_implement_v2_can_enable_integration_observation_detail(self):
         from mew.implement_lane import ImplementLaneResult
 

@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native responsibility-boundary repair. Phase 1 compact sidecar digest boundary is green; next action is one bounded native step-shape diagnostic before any speed_1/proof_5/broad measurement. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native diagnostic timeout/reporting repair. Phase 1 compact sidecar digest boundary is green, but the first post-Phase-1 step-check was invalid because the provider turn consumed the inner wall budget before report/native artifacts were written. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,7 +69,7 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_native_responsibility_boundary`.
+Current controller mode: `m6_24_native_diagnostic_timeout_repair`.
 
 Current diagnostic mode: `m6_24_native_step_shape_gate`.
 
@@ -80,8 +80,14 @@ as the source of truth, exposes only `native_transcript_window` plus bounded
 `compact_sidecar_digest` as dynamic provider input, and keeps full
 `persisted_lane_state`, ordinary repair `required_next`, and prescriptive
 `native_loop_control` policy text out of the default provider-visible path.
-The next step is exactly one bounded native step-shape diagnostic before
-`speed_1`, `proof_5`, or broad measurement.
+The first post-Phase-1 bounded diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-094248` is invalid as
+solver evidence because `mew work --oneshot` was killed by Harbor's outer
+timeout before writing `mew-report.json`, native transcript, observer detail, or
+provider request inventory. The next step is to finish the generic timeout /
+request-inventory reporting repair, review it, commit it, and only then rerun
+exactly one bounded native step-shape diagnostic before `speed_1`, `proof_5`, or
+broad measurement.
 
 Scope:
 
@@ -398,12 +404,10 @@ Native-loop gate evidence:
   returned `ok=true`
 
 Remaining active gap: do not classify the latest bounded 10min native
-step-shape diagnostic as a solver failure yet. Phase 1 of the boundary design is
-green: provider-visible dynamic input is `native_transcript_window` plus bounded
-`compact_sidecar_digest`; full `persisted_lane_state`, ordinary repair
-`required_next`, and prescriptive `native_loop_control` instruction text are out
-of the default provider-visible path. Next, run and analyze one bounded native
-step-shape diagnostic.
+step-shape diagnostic as a solver failure. It timed out before mew report /
+native artifacts were written. Fix native timeout budgeting and pre-response
+provider request inventory artifacts first, then rerun and analyze one bounded
+native step-shape diagnostic.
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 

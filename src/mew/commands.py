@@ -363,6 +363,7 @@ RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS = 0.5
 RUNNING_OUTPUT_MIRROR_BUFFER_CHARS = 4_000
 WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
 WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS = 5.0
+IMPLEMENT_V2_NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS = 30.0
 WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS = 2.0
 WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS = 60.0
 WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS = 600.0
@@ -7354,13 +7355,23 @@ def _run_work_ai_implement_v2(
 ):
     workspace = options.get("cwd") or os.getcwd()
     selected_lane = _work_guidance_selected_lane(getattr(effective_args, "work_guidance", None))
-    model_timeout_seconds = float(getattr(effective_args, "model_timeout", 60.0) or 60.0)
+    requested_model_timeout_seconds = float(getattr(effective_args, "model_timeout", 60.0) or 60.0)
+    model_timeout_seconds = _implement_v2_native_model_timeout_seconds(
+        requested_model_timeout_seconds,
+        max_wall_seconds=max_wall_seconds,
+    )
     implement_v2_runtime_metrics = {
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "selected_lane": selected_lane,
         "model_backend": model_backend,
         "model": model,
         "model_timeout_seconds": model_timeout_seconds,
+        "requested_model_timeout_seconds": requested_model_timeout_seconds,
+        "native_timeout_reserve_seconds": (
+            round(max(0.0, requested_model_timeout_seconds - model_timeout_seconds), 3)
+            if model_timeout_seconds < requested_model_timeout_seconds
+            else 0.0
+        ),
         "timeout_guard": "work_loop_process_guard",
         "transport_kind": "provider_native",
         "provider_native_tool_loop": True,
@@ -7548,6 +7559,27 @@ def _run_work_ai_implement_v2(
     else:
         print(format_work_ai_report(report, compact=getattr(effective_args, "compact_live", False)))
     return 0 if status == "completed" else 1
+
+
+def _implement_v2_native_model_timeout_seconds(requested_timeout, *, max_wall_seconds):
+    try:
+        requested = float(requested_timeout)
+    except (TypeError, ValueError):
+        requested = 60.0
+    if requested <= 0:
+        return requested
+    try:
+        wall = float(max_wall_seconds)
+    except (TypeError, ValueError):
+        return requested
+    if wall <= 0:
+        return requested
+    reserve = min(
+        max(IMPLEMENT_V2_NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS, WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS),
+        max(0.0, wall - WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS),
+    )
+    available = max(WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS, wall - reserve)
+    return min(requested, available)
 
 
 def cmd_work_ai(args):

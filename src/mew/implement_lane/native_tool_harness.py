@@ -58,6 +58,8 @@ _FIRST_WRITE_DUE_TURN_THRESHOLD = 6
 _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
 _CONTROL_FAILURE_SUMMARY_LIMIT = 700
 _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
+_NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
+_NATIVE_MODEL_TIMEOUT_MIN_SECONDS = 5.0
 _COMMAND_RUN_ID_RE = re.compile(r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)")
 _SEMANTIC_VERIFIER_FAILURE_PATTERNS = (
     re.compile(r"\bvm\s+(?:finished|stopped)\s+exit=(?!0\b)\d+\b", re.IGNORECASE),
@@ -118,6 +120,11 @@ class NativeCodexResponsesProvider:
             model=self.model,
             request_descriptor=request_descriptor,
         )
+        descriptor["provider_request_inventory"] = dict(
+            request_descriptor.get("provider_request_inventory") or {}
+        )
+        descriptor["input_item_count"] = request_descriptor.get("input_item_count")
+        descriptor["turn_index"] = request_descriptor.get("turn_index")
         self.requests.append(dict(descriptor))
         _emit_progress(
             self.progress,
@@ -238,6 +245,18 @@ def run_native_implement_v2(
     finish_summary = ""
 
     for turn_index in range(1, max_turns + 1):
+        turn_timeout = _native_next_model_timeout_seconds(
+            lane_input,
+            run_started=start_monotonic,
+            requested_timeout=getattr(provider, "timeout", None),
+        )
+        if turn_timeout is not None:
+            if turn_timeout < _NATIVE_MODEL_TIMEOUT_MIN_SECONDS:
+                status = "blocked"
+                finish_summary = "native wall-clock budget exhausted before next provider turn"
+                break
+            if hasattr(provider, "timeout"):
+                provider.timeout = turn_timeout
         request_descriptor = _request_descriptor(
             lane_input=lane_input,
             lane_attempt_id=lane_attempt_id,
@@ -636,6 +655,29 @@ def _native_remaining_wall_budget_seconds(lane_input: ImplementLaneInput, *, run
     except (TypeError, ValueError):
         return None
     return max(0.0, min(600.0, remaining))
+
+
+def _native_next_model_timeout_seconds(
+    lane_input: ImplementLaneInput,
+    *,
+    run_started: float,
+    requested_timeout: object,
+) -> float | None:
+    remaining = _native_remaining_wall_budget_seconds(lane_input, run_started=run_started)
+    if remaining is None:
+        return None
+    try:
+        requested = float(requested_timeout) if requested_timeout not in (None, "") else remaining
+    except (TypeError, ValueError):
+        requested = remaining
+    if requested <= 0:
+        return requested
+    reserve = min(
+        _NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS,
+        max(0.0, remaining - _NATIVE_MODEL_TIMEOUT_MIN_SECONDS),
+    )
+    available = remaining - reserve
+    return max(0.0, min(requested, available))
 
 
 def _native_final_verifier_closeout_call(
@@ -1369,11 +1411,17 @@ def _live_failure_lane_result(
         provider=provider.provider,
         model=provider.model,
     )
+    proof_artifacts = _write_live_failure_artifacts(
+        lane_input,
+        transcript=transcript,
+        provider=provider,
+        error=error,
+    )
     return ImplementLaneResult(
         status="failed",
         lane="implement_v2",
         user_visible_summary=f"implement_v2 native provider failed: {error}",
-        proof_artifacts=(),
+        proof_artifacts=proof_artifacts,
         updated_lane_state={
             "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
             "transport_kind": "provider_native",
@@ -1389,8 +1437,52 @@ def _live_failure_lane_result(
             "model": provider.model,
             "transcript_hash": native_transcript_hash(transcript),
             "error": error,
+            "turn_count": len(provider.requests),
+            "provider_request_inventory_available": bool(provider.requests),
         },
     )
+
+
+def _write_live_failure_artifacts(
+    lane_input: ImplementLaneInput,
+    *,
+    transcript: NativeTranscript,
+    provider: NativeCodexResponsesProvider,
+    error: str,
+) -> tuple[str, ...]:
+    artifact_root = _artifact_root(lane_input)
+    if artifact_root is None:
+        return ()
+    root = Path(artifact_root)
+    root.mkdir(parents=True, exist_ok=True)
+    paths = write_native_transcript_artifacts(root, transcript)
+    request_path = root / "native-provider-requests.json"
+    inventory_path = root / "provider-request-inventory.json"
+    request_payload = {
+        "schema_version": 1,
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "transport_kind": "provider_native",
+        "status": "failed_before_native_response",
+        "error": str(error),
+        "request_count": len(provider.requests),
+        "requests": list(provider.requests),
+    }
+    inventory_payload = {
+        "schema_version": 1,
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "transport_kind": "provider_native",
+        "status": "failed_before_native_response",
+        "error": str(error),
+        "request_count": len(provider.requests),
+        "provider_request_inventory": [
+            request.get("provider_request_inventory")
+            for request in provider.requests
+            if isinstance(request.get("provider_request_inventory"), dict)
+        ],
+    }
+    request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    inventory_path.write_text(json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return tuple(str(path) for path in (*paths.values(), request_path, inventory_path))
 
 
 def _approved_write_calls(lane_config: Mapping[str, object]) -> tuple[dict[str, object], ...]:

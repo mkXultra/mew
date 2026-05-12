@@ -282,6 +282,45 @@ def test_collect_mew_trial_summary_rejects_empty_native_artifacts(tmp_path):
     assert observer_detail_missing([summary]) is True
 
 
+def test_collect_mew_trial_summary_accepts_request_inventory_for_pre_response_failure(tmp_path):
+    task_dir = tmp_path / "run" / "trial"
+    unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    unknown_task.mkdir(parents=True)
+    (unknown_task / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_id": "implement_v2_native_transcript_loop",
+                "transport_kind": "provider_native",
+                "pairing": {"valid": True, "call_count": 0, "output_count": 0, "errors": []},
+                "metrics": {"turn_count": 1, "provider_request_inventory_available": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (unknown_task / "response_transcript.json").write_text(json.dumps({"items": []}), encoding="utf-8")
+    (unknown_task / "response_items.jsonl").write_text("", encoding="utf-8")
+    (unknown_task / "provider-request-inventory.json").write_text(
+        json.dumps(
+            {
+                "request_count": 1,
+                "provider_request_inventory": [
+                    {"model_visible_sections": ["native_transcript_window", "compact_sidecar_digest"]}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (unknown_task / "mew-report.json").write_text(json.dumps({"work_exit_code": 1}), encoding="utf-8")
+    (task_dir / "result.json").write_text(json.dumps({"reward": 0.0}), encoding="utf-8")
+
+    summary = collect_mew_trial_summary(task_dir)
+
+    assert summary["native_observation_present"] is False
+    assert summary["native_observation_reason"] == "empty_transcript"
+    assert summary["provider_request_inventory_present"] is True
+    assert observer_detail_missing([summary]) is False
+
+
 def test_collect_mew_trial_summary_rejects_mismatched_native_jsonl(tmp_path):
     task_dir = tmp_path / "run" / "trial"
     unknown_task = task_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"

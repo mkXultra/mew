@@ -244,6 +244,8 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
     proof_manifest_path = manifest_dir / "proof-manifest.json"
     history_path = manifest_dir / "history.json"
     transcript_path = _implement_v2_transcript_path(manifest_dir)
+    provider_request_inventory_path = manifest_dir / "provider-request-inventory.json"
+    provider_requests_path = manifest_dir / "native-provider-requests.json"
     result_path = task_dir / "result.json"
     command_transcript_path = unknown_task_dir / "command-transcript.json"
     verifier_stdout_path = task_dir / "verifier" / "test-stdout.txt"
@@ -284,6 +286,9 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
         "native_pairing_valid": native_status["pairing_valid"],
         "native_call_count": native_status["call_count"],
         "native_output_count": native_status["output_count"],
+        "provider_request_inventory_present": provider_request_inventory_path.exists(),
+        "provider_request_inventory_path": str(provider_request_inventory_path) if provider_request_inventory_path.exists() else "",
+        "native_provider_requests_path": str(provider_requests_path) if provider_requests_path.exists() else "",
         "proof_manifest_path": str(proof_manifest_path),
         "history_path": str(history_path),
         "transcript_path": str(transcript_path),
@@ -530,6 +535,7 @@ def observer_detail_missing(summaries: Sequence[dict[str, object]]) -> bool:
     return any(
         not (
             summary.get("native_observation_present")
+            or summary.get("provider_request_inventory_present")
             or (
                 summary.get("observer_detail_enabled")
                 and summary.get("observer_detail_written")
