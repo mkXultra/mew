@@ -1,4 +1,5 @@
 import json
+import http.client
 import io
 import os
 import signal
@@ -217,6 +218,38 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(captured["body"], request_body)
         self.assertEqual(captured["url"], "https://example.invalid/api/responses")
         self.assertEqual(content_type, "text/event-stream")
+        self.assertIn("response.completed", raw)
+
+    def test_call_codex_responses_raw_salvages_partial_sse_on_incomplete_read(self):
+        request_body = {
+            "model": "gpt-5.5",
+            "input": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "name": "finish", "parameters": {"type": "object"}}],
+            "stream": True,
+            "store": False,
+        }
+        partial = b'data: {"type":"response.completed","response":{"id":"resp-partial"}}\n'
+
+        def fake_urlopen(_request, timeout):
+            return FakeUrlopenResponse(
+                [],
+                headers={"content-type": "text/event-stream"},
+                readline_side_effects=[
+                    b'data: {"type":"response.created","response":{"id":"resp-partial"}}\n',
+                    http.client.IncompleteRead(partial=partial),
+                ],
+            )
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            raw, content_type = call_codex_responses_raw(
+                {"access_token": "token"},
+                request_body,
+                "https://example.invalid/api",
+                1,
+            )
+
+        self.assertEqual(content_type, "text/event-stream")
+        self.assertIn("response.created", raw)
         self.assertIn("response.completed", raw)
 
     def test_call_codex_web_api_sends_image_inputs(self):

@@ -159,12 +159,15 @@ class NativeCodexResponsesProvider:
     progress: object | None = None
     requests: list[dict[str, object]] = None  # type: ignore[assignment]
     responses: list[dict[str, object]] = None  # type: ignore[assignment]
+    rejected_responses: list[dict[str, object]] = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if self.requests is None:
             self.requests = []
         if self.responses is None:
             self.responses = []
+        if self.rejected_responses is None:
+            self.rejected_responses = []
         if not self.model:
             self.model = str(self.lane_input.model or "gpt-5.5")
 
@@ -202,7 +205,14 @@ class NativeCodexResponsesProvider:
             raise
         _emit_progress(self.progress, "native_response done")
         self.responses.append(result.as_dict())
-        if result.status in {"failed", "incomplete"} or (result.errors and not result.transcript.items):
+        if result.status != "completed":
+            self.rejected_responses.append(result.as_dict())
+            detail = "; ".join(result.errors) or f"status={result.status or 'unknown'}"
+            raise RuntimeError(
+                "native provider response did not complete before stream ended: "
+                f"{detail}; parsed_items={len(result.transcript.items)}"
+            )
+        if result.errors and not result.transcript.items:
             raise RuntimeError("native provider response failed: " + "; ".join(result.errors or (result.status,)))
         return result
 
@@ -2473,26 +2483,49 @@ def _write_live_failure_artifacts(
     paths = write_native_transcript_artifacts(root, transcript)
     request_path = root / "native-provider-requests.json"
     inventory_path = root / "provider-request-inventory.json"
+    response_count = len(provider.responses)
+    rejected_response_count = len(provider.rejected_responses)
+    failure_status = (
+        "failed_before_completed_native_response"
+        if rejected_response_count
+        else "failed_before_native_response"
+    )
     request_payload = {
         "schema_version": 1,
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "transport_kind": "provider_native",
-        "status": "failed_before_native_response",
+        "status": failure_status,
         "error": str(error),
         "request_count": len(provider.requests),
+        "response_count": response_count,
+        "rejected_response_count": rejected_response_count,
         "requests": list(provider.requests),
+        "responses": list(provider.responses),
+        "rejected_responses": list(provider.rejected_responses),
     }
     inventory_payload = {
         "schema_version": 1,
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "transport_kind": "provider_native",
-        "status": "failed_before_native_response",
+        "status": failure_status,
         "error": str(error),
         "request_count": len(provider.requests),
+        "response_count": response_count,
+        "rejected_response_count": rejected_response_count,
         "provider_request_inventory": [
             request.get("provider_request_inventory")
             for request in provider.requests
             if isinstance(request.get("provider_request_inventory"), dict)
+        ],
+        "provider_response_statuses": [
+            response.get("status")
+            for response in provider.responses
+            if isinstance(response, dict)
+        ],
+        "rejected_provider_response_statuses": [
+            response.get("status")
+            for response in provider.rejected_responses
+            if isinstance(response, dict)
         ],
     }
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

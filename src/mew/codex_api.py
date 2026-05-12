@@ -1,4 +1,5 @@
 import json
+import http.client
 import os
 from pathlib import Path
 import socket
@@ -471,6 +472,12 @@ def _read_stream_body(response, deadline, on_text_delta=None):
             _set_response_read_timeout(response, socket_timeout)
         try:
             raw_line = response.readline()
+        except http.client.IncompleteRead as exc:
+            partial = exc.partial or b""
+            if partial:
+                chunks.append(partial.decode("utf-8", errors="replace"))
+                break
+            raise
         except (socket.timeout, TimeoutError) as exc:
             raise CodexApiError("request timed out") from exc
         except OSError as exc:

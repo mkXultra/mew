@@ -544,6 +544,66 @@ def test_live_native_provider_failure_preserves_partial_transcript_artifacts(tmp
     request_payload = json.loads((artifact_root / "native-provider-requests.json").read_text(encoding="utf-8"))
     assert request_payload["status"] == "failed_before_native_response"
     assert request_payload["request_count"] == 2
+    assert request_payload["response_count"] == 1
+    assert request_payload["rejected_response_count"] == 0
+
+
+def test_live_native_provider_requires_completed_terminal_event_before_tool_execution(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
+    incomplete_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+            items=(
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id="ws-native:task-native:implement_v2:native",
+                    provider="openai",
+                    model="gpt-5.5",
+                    response_id="resp-live-1",
+                    provider_item_id="item-write",
+                    output_index=0,
+                    kind="function_call",
+                    call_id="write-live",
+                    tool_name="write_file",
+                    arguments_json_text='{"path":"created.txt","content":"bad\\n","create":true}',
+                ),
+            ),
+        ),
+        response_id="resp-live-1",
+        status="created",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        return_value=incomplete_turn,
+    ):
+        result = run_live_native_implement_v2(
+            lane_input,
+            model_auth={"access_token": "x"},
+            base_url="https://example.invalid",
+            timeout=3,
+            max_turns=1,
+        )
+
+    assert result.status == "failed"
+    assert "did not complete before stream ended" in result.user_visible_summary
+    assert not (tmp_path / "created.txt").exists()
+    transcript_payload = json.loads((artifact_root / "response_transcript.json").read_text(encoding="utf-8"))
+    assert transcript_payload["items"] == []
+    request_payload = json.loads((artifact_root / "native-provider-requests.json").read_text(encoding="utf-8"))
+    assert request_payload["status"] == "failed_before_completed_native_response"
+    assert request_payload["response_count"] == 1
+    assert request_payload["rejected_response_count"] == 1
+    rejected_response = request_payload["rejected_responses"][0]
+    assert rejected_response["status"] == "created"
+    assert rejected_response["transcript"]["items"][0]["tool_name"] == "write_file"
+    inventory_payload = json.loads((artifact_root / "provider-request-inventory.json").read_text(encoding="utf-8"))
+    assert inventory_payload["provider_response_statuses"] == ["created"]
+    assert inventory_payload["rejected_provider_response_statuses"] == ["created"]
 
 
 def test_live_native_provider_failure_rejects_invalid_partial_transcript(tmp_path: Path) -> None:

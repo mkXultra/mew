@@ -44,6 +44,21 @@ native execution availability, live JSON prompt text, native instructions, and
 native tool-result output are all sanitized when `write_file` is hidden. Normal
 non-hard-runtime tasks still keep `write_file`.
 
+Post-commit diagnostic `mew-make-mips-interpreter-step-check-10min-20260513-040750`
+confirmed the structural `write_file` hiding worked: provider-visible tool
+specs contained `edit_file` / `apply_patch` and no `write_file`, native
+generation metrics reported `write_call_count=0`,
+`first_write_argument_chars=0`, and `large_write_generation_suspected=false`.
+The miss moved to a generic provider-native stream failure after the
+first-write pressure turn: `native provider failed: IncompleteRead(1610973
+bytes read)`, with a valid partial transcript through turn 4 and no edit or
+verifier yet. Repair this as stream/transcript resilience, not task-specific VM
+logic: if an SSE stream ends with `IncompleteRead`, preserve and parse complete
+partial SSE events instead of dropping all response bytes, but require a
+terminal provider `response.completed` event before executing any parsed native
+tool call. Then rerun focused Codex API/native parsing tests, codex-ultra
+review, commit, and one same-shape diagnostic before any scoring proof.
+
 ## Controller Rule
 
 M6.24 scope decision on 2026-05-03: the controller applies only to the 25
