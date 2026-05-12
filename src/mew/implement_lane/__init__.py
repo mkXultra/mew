@@ -76,6 +76,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "list_v2_tool_specs_for_mode": ("mew.implement_lane.tool_policy", "list_v2_tool_specs_for_mode"),
     "list_workframe_variants": ("mew.implement_lane.workframe_variants", "list_workframe_variants"),
     "native_artifact_contract": ("mew.implement_lane.native_transcript", "native_artifact_contract"),
+    "native_function_call_argument_metrics": ("mew.implement_lane.native_transcript", "native_function_call_argument_metrics"),
     "native_proof_manifest_from_transcript": ("mew.implement_lane.native_transcript", "native_proof_manifest_from_transcript"),
     "native_transcript_hash": ("mew.implement_lane.native_transcript", "native_transcript_hash"),
     "native_transcript_indexes": ("mew.implement_lane.native_transcript", "native_transcript_indexes"),

@@ -7,6 +7,7 @@ from mew.implement_lane import (
     build_native_evidence_observation,
     build_synthetic_error_output,
     native_artifact_contract,
+    native_function_call_argument_metrics,
     native_proof_manifest_from_transcript,
     native_transcript_hash,
     native_transcript_sidecar_events,
@@ -364,6 +365,46 @@ def test_native_transcript_artifacts_and_derived_manifest_are_regenerable(tmp_pa
     assert initial_manifest["pairing"]["valid"] is True
     assert paths["response_transcript"].exists()
     assert paths["response_items"].read_text(encoding="utf-8").count("\n") == len(transcript.items)
+
+
+def test_native_function_call_argument_metrics_surface_large_write_payload() -> None:
+    transcript = NativeTranscript(
+        lane_attempt_id="attempt-1",
+        provider="codex",
+        model="gpt-5.5",
+        items=(
+            NativeTranscriptItem(
+                sequence=1,
+                turn_id="turn-1",
+                kind="function_call",
+                call_id="write-1",
+                tool_name="write_file",
+                arguments_json_text=json.dumps(
+                    {
+                        "path": "vm.js",
+                        "content": None,
+                        "content_lines": ["console.log(1);"] * 1200,
+                    }
+                ),
+            ),
+            NativeTranscriptItem(
+                sequence=2,
+                turn_id="turn-1",
+                kind="function_call_output",
+                call_id="write-1",
+                tool_name="write_file",
+                status="completed",
+            ),
+        ),
+    )
+
+    metrics = native_function_call_argument_metrics(transcript)
+
+    assert metrics["large_write_generation_suspected"] is True
+    assert metrics["large_write_argument_count"] == 1
+    assert metrics["first_write_call"]["path"] == "vm.js"  # type: ignore[index]
+    assert metrics["first_write_call"]["content_lines_count"] == 1200  # type: ignore[index]
+    assert metrics["max_argument_call"]["tool_name"] == "write_file"  # type: ignore[index]
 
 
 def test_native_evidence_observation_resolves_finish_refs_without_finish_echo(tmp_path) -> None:

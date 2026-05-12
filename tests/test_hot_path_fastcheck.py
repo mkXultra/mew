@@ -579,6 +579,80 @@ def test_hot_path_fastcheck_accepts_native_transcript_artifact_without_history(t
     assert result["micro_next_action_refresh"]["reason"] == "native_transcript_mode"
 
 
+def test_hot_path_fastcheck_surfaces_large_native_write_generation(tmp_path):
+    artifact = tmp_path / "large-native-write"
+    lane_attempt_id = "native-fastcheck:large-write"
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider="codex",
+        model="gpt-5.5",
+        items=(
+            NativeTranscriptItem(
+                sequence=1,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="call-write-1",
+                tool_name="write_file",
+                arguments_json_text=json.dumps(
+                    {
+                        "path": "vm.js",
+                        "content": None,
+                        "content_lines": ["console.log(1);"] * 1200,
+                    }
+                ),
+            ),
+            NativeTranscriptItem(
+                sequence=2,
+                turn_id="turn-1",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="call-write-1",
+                tool_name="write_file",
+                status="completed",
+            ),
+            NativeTranscriptItem(
+                sequence=3,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call",
+                call_id="call-test-1",
+                tool_name="run_tests",
+                arguments_json_text='{"command":"node vm.js"}',
+            ),
+            NativeTranscriptItem(
+                sequence=4,
+                turn_id="turn-2",
+                lane_attempt_id=lane_attempt_id,
+                provider="codex",
+                model="gpt-5.5",
+                kind="function_call_output",
+                call_id="call-test-1",
+                tool_name="run_tests",
+                status="completed",
+                output_text_or_ref="run_tests result: completed",
+            ),
+        ),
+    )
+    write_native_transcript_artifacts(artifact, transcript)
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "pass"
+    checks = {check["name"]: check for check in result["checks"]}
+    details = checks["native_generation_observation"]["details"]
+    assert checks["native_generation_observation"]["status"] == "pass"
+    assert details["large_write_generation_suspected"] is True
+    assert details["first_write_content_lines_count"] == 1200
+    assert result["metrics"]["native_generation"]["large_write_argument_count"] == 1
+
+
 def test_hot_path_fastcheck_replays_native_provider_request_compact_digest(tmp_path):
     artifact = _write_native_artifact(tmp_path)
     _write_native_provider_request(artifact, _read_native_transcript(artifact))

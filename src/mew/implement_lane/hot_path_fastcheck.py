@@ -31,7 +31,7 @@ from .native_tool_harness import _native_call_is_verifier, _native_loop_control_
 from .completion_resolver import COMPLETION_RESOLVER_DECISIONS_FILE
 from .native_sidecar_projection import build_compact_native_sidecar_digest
 from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID, NativeTranscript, NativeTranscriptItem
-from .native_transcript import native_transcript_hash, validate_native_transcript_pairing
+from .native_transcript import native_function_call_argument_metrics, native_transcript_hash, validate_native_transcript_pairing
 from .tool_lab import resolve_implement_v2_manifest_path
 from .types import search_text_output_has_line_anchor
 from .v2_runtime import _render_prompt_history_json
@@ -268,6 +268,7 @@ def _run_native_hot_path_fastcheck(
         checks.append(_check_native_pairing(transcript))
         checks.append(_check_native_response_items(response_items_path, transcript=transcript))
         checks.append(_check_native_trace_summary(artifact_path=artifact_path, manifest_path=manifest_path, transcript=transcript))
+        checks.append(_check_native_generation_observation(transcript))
         checks.append(_check_native_loop_control_replay(transcript))
         checks.append(_check_native_search_text_anchor_projection(transcript))
         provider_requests = _native_provider_requests(artifact_path=artifact_path, manifest_path=manifest_path)
@@ -288,6 +289,7 @@ def _run_native_hot_path_fastcheck(
                 _check("native_pairing", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_response_items_match", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_trace_summary", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_generation_observation", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_loop_control_replay", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_search_text_anchor_projection", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_compact_digest_replay", False, "native transcript is unreadable", {"skipped": True}),
@@ -311,6 +313,7 @@ def _run_native_hot_path_fastcheck(
         "metrics": {
             "native_transcript": _native_transcript_metrics(transcript) if transcript is not None else {},
             "native_trace": _native_trace_summary(artifact_path=artifact_path, manifest_path=manifest_path, transcript=transcript),
+            "native_generation": _native_generation_metrics(transcript) if transcript is not None else {},
             "baseline": baseline_data,
             "micro_next_action": {"category": "", "expected_categories": []},
         },
@@ -1072,7 +1075,45 @@ def _native_transcript_metrics(transcript: NativeTranscript) -> dict[str, object
         "transcript_hash": native_transcript_hash(transcript),
         "item_count": len(transcript.items),
         "pairing": pairing.as_dict(),
+        "function_call_arguments": native_function_call_argument_metrics(transcript),
     }
+
+
+def _native_generation_metrics(transcript: NativeTranscript) -> dict[str, object]:
+    return native_function_call_argument_metrics(transcript)
+
+
+def _check_native_generation_observation(transcript: NativeTranscript) -> HotPathCheck:
+    metrics = _native_generation_metrics(transcript)
+    first_write = _safe_mapping(metrics.get("first_write_call"))
+    max_call = _safe_mapping(metrics.get("max_argument_call"))
+    suspected = bool(metrics.get("large_write_generation_suspected"))
+    message = (
+        "large write function-call payload observed; model generation may dominate wall time"
+        if suspected
+        else "native function-call argument sizes are observable"
+    )
+    return _check(
+        "native_generation_observation",
+        True,
+        message,
+        {
+            "large_argument_threshold_chars": metrics.get("large_argument_threshold_chars"),
+            "total_argument_chars": metrics.get("total_argument_chars"),
+            "max_argument_chars": metrics.get("max_argument_chars"),
+            "max_argument_tool_name": max_call.get("tool_name") or "",
+            "max_argument_call_id": max_call.get("call_id") or "",
+            "max_argument_turn_id": max_call.get("turn_id") or "",
+            "large_argument_count": metrics.get("large_argument_count"),
+            "write_call_count": metrics.get("write_call_count"),
+            "first_write_argument_chars": metrics.get("first_write_argument_chars"),
+            "first_write_content_lines_count": first_write.get("content_lines_count") or 0,
+            "first_write_tool_name": first_write.get("tool_name") or "",
+            "first_write_call_id": first_write.get("call_id") or "",
+            "large_write_argument_count": metrics.get("large_write_argument_count"),
+            "large_write_generation_suspected": suspected,
+        },
+    )
 
 
 def _native_manifest_transport_is_provider_native(manifest: Mapping[str, object]) -> bool:

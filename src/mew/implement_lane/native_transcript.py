@@ -45,6 +45,8 @@ NativeTranscriptOutputStatus = Literal[
 CALL_ITEM_KINDS = frozenset({"function_call", "custom_tool_call", "finish_call"})
 OUTPUT_ITEM_KINDS = frozenset({"function_call_output", "custom_tool_call_output", "finish_output"})
 NON_TOOL_ITEM_KINDS = frozenset({"input_message", "assistant_message", "reasoning"})
+WRITE_LIKE_TOOL_NAMES = frozenset({"write_file", "edit_file", "apply_patch"})
+LARGE_NATIVE_FUNCTION_CALL_ARGUMENT_CHARS = 16_000
 
 AUTHORITATIVE_NATIVE_TRANSCRIPT_FILES = (
     "response_transcript.json",
@@ -366,6 +368,94 @@ def native_transcript_metrics(transcript: NativeTranscript) -> dict[str, object]
         "non_tool_count": validation.non_tool_count,
         "pairing_valid": validation.valid,
         "pairing_error_count": len(validation.errors),
+        "function_call_arguments": native_function_call_argument_metrics(transcript),
+    }
+
+
+def native_function_call_argument_metrics(transcript: NativeTranscript) -> dict[str, object]:
+    """Summarize function-call argument size from the authoritative transcript.
+
+    Native tool loops can spend most wall time generating a huge tool-call JSON
+    payload rather than executing the tool.  These metrics make that visible in
+    proof artifacts without treating it as a verifier failure.
+    """
+
+    calls = tuple(item for item in transcript.items if item.kind in CALL_ITEM_KINDS)
+    call_summaries: list[dict[str, object]] = []
+    write_summaries: list[dict[str, object]] = []
+    total_chars = 0
+    large_calls: list[dict[str, object]] = []
+
+    for item in calls:
+        arg_text = item.arguments_json_text or item.custom_input_text or ""
+        arg_chars = len(arg_text)
+        total_chars += arg_chars
+        summary = {
+            "turn_id": item.turn_id,
+            "sequence": item.sequence,
+            "call_id": item.call_id,
+            "tool_name": item.tool_name,
+            "argument_chars": arg_chars,
+            **_native_write_argument_shape(item, arg_text),
+        }
+        call_summaries.append(summary)
+        if item.tool_name in WRITE_LIKE_TOOL_NAMES:
+            write_summaries.append(summary)
+        if arg_chars >= LARGE_NATIVE_FUNCTION_CALL_ARGUMENT_CHARS:
+            large_calls.append(summary)
+
+    max_call = max(call_summaries, key=lambda row: int(row.get("argument_chars") or 0), default={})
+    max_write = max(write_summaries, key=lambda row: int(row.get("argument_chars") or 0), default={})
+    first_write = write_summaries[0] if write_summaries else {}
+    return {
+        "large_argument_threshold_chars": LARGE_NATIVE_FUNCTION_CALL_ARGUMENT_CHARS,
+        "total_argument_chars": total_chars,
+        "max_argument_chars": int(max_call.get("argument_chars") or 0),
+        "max_argument_call": max_call,
+        "large_argument_count": len(large_calls),
+        "large_arguments": large_calls[:10],
+        "write_call_count": len(write_summaries),
+        "max_write_argument_chars": int(max_write.get("argument_chars") or 0),
+        "max_write_call": max_write,
+        "first_write_argument_chars": int(first_write.get("argument_chars") or 0),
+        "first_write_call": first_write,
+        "large_write_argument_count": sum(
+            1 for row in write_summaries if int(row.get("argument_chars") or 0) >= LARGE_NATIVE_FUNCTION_CALL_ARGUMENT_CHARS
+        ),
+        "large_write_generation_suspected": any(
+            int(row.get("argument_chars") or 0) >= LARGE_NATIVE_FUNCTION_CALL_ARGUMENT_CHARS for row in write_summaries
+        ),
+    }
+
+
+def _native_write_argument_shape(item: NativeTranscriptItem, arg_text: str) -> dict[str, object]:
+    if item.tool_name not in WRITE_LIKE_TOOL_NAMES:
+        return {}
+    shape: dict[str, object] = {
+        "path": "",
+        "content_chars": 0,
+        "content_lines_count": 0,
+        "old_string_chars": 0,
+        "new_string_chars": 0,
+    }
+    try:
+        payload = json.loads(arg_text) if arg_text else {}
+    except json.JSONDecodeError:
+        return {**shape, "argument_json_valid": False}
+    if not isinstance(payload, Mapping):
+        return {**shape, "argument_json_valid": False}
+    content = payload.get("content")
+    content_lines = payload.get("content_lines")
+    old_string = payload.get("old_string")
+    new_string = payload.get("new_string")
+    return {
+        **shape,
+        "argument_json_valid": True,
+        "path": str(payload.get("path") or ""),
+        "content_chars": len(content) if isinstance(content, str) else 0,
+        "content_lines_count": len(content_lines) if isinstance(content_lines, list) else 0,
+        "old_string_chars": len(old_string) if isinstance(old_string, str) else 0,
+        "new_string_chars": len(new_string) if isinstance(new_string, str) else 0,
     }
 
 
@@ -928,6 +1018,7 @@ __all__ = [
     "build_synthetic_error_output",
     "build_native_evidence_observation",
     "native_artifact_contract",
+    "native_function_call_argument_metrics",
     "native_proof_manifest_from_transcript",
     "native_transcript_hash",
     "native_transcript_indexes",
