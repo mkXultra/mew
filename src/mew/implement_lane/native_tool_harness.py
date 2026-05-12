@@ -55,6 +55,7 @@ PHASE3_NATIVE_SURFACE = {
 }
 _FIRST_WRITE_DUE_PROBE_THRESHOLD = 10
 _FIRST_WRITE_DUE_TURN_THRESHOLD = 6
+_PREWRITE_PROBE_PLATEAU_THRESHOLD = 30
 _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
 _CONTROL_FAILURE_SUMMARY_LIMIT = 700
 _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
@@ -270,11 +271,13 @@ def run_native_implement_v2(
                 break
             if hasattr(provider, "timeout"):
                 provider.timeout = turn_timeout
+        turn_entry_loop_signals = _native_loop_control_state(items, current_turn_index=turn_index)
         request_descriptor = _request_descriptor(
             lane_input=lane_input,
             lane_attempt_id=lane_attempt_id,
             turn_index=turn_index,
             transcript_items=items,
+            loop_signals=turn_entry_loop_signals,
         )
         try:
             response = provider.next_response(request_descriptor)
@@ -324,7 +327,7 @@ def run_native_implement_v2(
                 continue
 
             latency_start = time.monotonic()
-            result = _execute_native_call(
+            result = _prewrite_probe_plateau_result(call, turn_entry_loop_signals) or _execute_native_call(
                 call,
                 lane_input=lane_input,
                 workspace=workspace,
@@ -1012,11 +1015,9 @@ def _request_descriptor(
     lane_attempt_id: str,
     turn_index: int,
     transcript_items: list[NativeTranscriptItem],
+    loop_signals: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    loop_signals = _native_loop_control_state(
-        transcript_items,
-        current_turn_index=turn_index,
-    )
+    loop_signals = loop_signals or _native_loop_control_state(transcript_items, current_turn_index=turn_index)
     compact_sidecar_digest = _compact_sidecar_digest_for_request(
         lane_input=lane_input,
         lane_attempt_id=lane_attempt_id,
@@ -1153,6 +1154,11 @@ def _native_loop_control_state(
             or current_turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD
         )
     )
+    prewrite_probe_plateau = bool(
+        write_count == 0
+        and verifier_count == 0
+        and probe_count >= _PREWRITE_PROBE_PLATEAU_THRESHOLD
+    )
     failed_verifier_probe_threshold = _failed_verifier_repair_probe_threshold(latest_failed_verifier)
     verifier_repair_due = bool(
         latest_failed_verifier
@@ -1171,14 +1177,36 @@ def _native_loop_control_state(
         "write_count": write_count,
         "verifier_count": verifier_count,
         "first_write_due": first_write_due,
+        "prewrite_probe_plateau": prewrite_probe_plateau,
         "verifier_repair_due": verifier_repair_due,
         "latest_failed_verifier": _failed_verifier_payload(latest_failed_verifier),
         "post_failure_probe_count": post_failure_probe_count,
         "post_failure_verifier_count": post_failure_verifier_count,
         "post_failure_write_count": post_failure_write_count,
         "failed_verifier_repair_probe_threshold": failed_verifier_probe_threshold,
-        "max_additional_probe_turns": 0 if verifier_repair_due else (1 if first_write_due else None),
+        "max_additional_probe_turns": (
+            0 if (verifier_repair_due or prewrite_probe_plateau) else (1 if first_write_due else None)
+        ),
     }
+
+
+def _prewrite_probe_plateau_result(
+    call: NativeTranscriptItem,
+    loop_signals: Mapping[str, object],
+) -> ToolResultEnvelope | None:
+    if not bool(loop_signals.get("prewrite_probe_plateau")):
+        return None
+    if call.kind == "finish_call" or call.tool_name in WRITE_TOOL_NAMES:
+        return None
+    if call.tool_name not in READ_ONLY_TOOL_NAMES and call.tool_name not in EXEC_TOOL_NAMES:
+        return None
+    return _invalid_result(
+        call,
+        reason=(
+            "prewrite probe plateau: enough read/probe evidence has been gathered; "
+            "perform a source mutation with write_file/edit_file/apply_patch or finish blocked before more probes"
+        ),
+    )
 
 
 def _failed_verifier_repair_probe_threshold(item: NativeTranscriptItem | None) -> int:

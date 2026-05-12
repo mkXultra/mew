@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is native step-shape diagnosis after partial transcript preservation. The latest step-check preserved paired native transcript evidence; current repair targets low remaining provider-turn budget and interrupted-verifier repair projection before another live proof. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is native step-shape diagnosis. The low-budget/interrupted-verifier repair is committed; the latest step-check preserved paired transcript evidence and exposed a generic prewrite probe plateau. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -80,20 +80,21 @@ as the source of truth, exposes only `native_transcript_window` plus bounded
 `compact_sidecar_digest` as dynamic provider input, and keeps full
 `persisted_lane_state`, ordinary repair `required_next`, and prescriptive
 `native_loop_control` policy text out of the default provider-visible path.
-The partial transcript preservation repair was committed as `d3605d9`. The next
+The low-budget/interrupted-verifier repair was committed as `85e5a88`. The next
 bounded diagnostic,
-`mew-make-mips-interpreter-step-check-10min-20260512-105949`, preserved paired
-native transcript evidence (`72` native calls / `72` outputs, valid pairing, no
-parse errors). It is still not clean solver evidence: the final provider turn
-entered with only about `6.3s` active timeout and failed as `request timed out`,
-and the compact digest returned to `orient` after an interrupted verifier plus
-one diagnostic probe. Current repair is bounded and generic: block provider
-turns before they start when remaining model budget is below the native minimum,
-and keep interrupted/killed/timed-out verifier failures in repair projection
-after one post-failure probe. Focused validation is green and codex-ultra review
-session `019e1a0b-06bc-7612-941a-b7a6bd25dbe7` returned `STATUS: APPROVE`.
-Do not run `speed_1`, `proof_5`, or broad measurement until this repair is
-committed and followed by one bounded native step-shape diagnostic.
+`mew-make-mips-interpreter-step-check-10min-20260512-114504`, preserved paired
+native transcript evidence (`58` native calls / `58` outputs, valid pairing, no
+model-json parse path). It is still not clean solver evidence: it spent `37`
+native model turns and `58` read/probe calls with `0` writes and `0` verifiers,
+while the compact digest had already projected `first_write_due=true` from turn
+4 onward. Current repair is bounded and generic: after a prewrite probe plateau,
+allow `write_file` / `edit_file` / `apply_patch` or finish, but block more
+read/exec probes until the model mutates source or exits blocked. Focused
+native validation is green; codex-ultra review session
+`019e1a30-9aab-7411-a3d9-5d65d52f62e6` returned `STATUS: APPROVE` and its
+minor test-gap note was addressed. Do not run
+`speed_1`, `proof_5`, or broad measurement until this repair is committed and
+followed by one bounded native step-shape diagnostic.
 
 Scope:
 

@@ -827,10 +827,12 @@ def _bounded_loop_signals(loop_signals: Mapping[str, object] | None) -> dict[str
     if not isinstance(loop_signals, Mapping):
         return {
             "first_write_due": False,
+            "prewrite_probe_plateau": False,
             "verifier_repair_due": False,
         }
     signals: dict[str, object] = {
         "first_write_due": bool(loop_signals.get("first_write_due")),
+        "prewrite_probe_plateau": bool(loop_signals.get("prewrite_probe_plateau")),
         "verifier_repair_due": bool(loop_signals.get("verifier_repair_due")),
         "probe_count_without_write": _safe_int(loop_signals.get("probe_count_without_write"), default=0),
         "post_failure_probe_count": _safe_int(loop_signals.get("post_failure_probe_count"), default=0),
@@ -842,6 +844,11 @@ def _bounded_loop_signals(loop_signals: Mapping[str, object] | None) -> dict[str
             default=0,
         ),
     }
+    if loop_signals.get("max_additional_probe_turns") is not None:
+        signals["max_additional_probe_turns"] = _safe_int(
+            loop_signals.get("max_additional_probe_turns"),
+            default=0,
+        )
     latest = _compact_failed_verifier_signal(loop_signals.get("latest_failed_verifier"))
     if latest:
         signals["latest_failed_verifier"] = latest
@@ -862,13 +869,15 @@ def _compact_failed_verifier_signal(value: object) -> dict[str, object]:
 def _phase_from_loop_signals(signals: Mapping[str, object]) -> str:
     if bool(signals.get("verifier_repair_due")):
         return "repair_after_verifier_failure"
-    if bool(signals.get("first_write_due")):
+    if bool(signals.get("prewrite_probe_plateau")) or bool(signals.get("first_write_due")):
         return "prewrite_blocked"
     return "orient"
 
 
 def _attention_hints(signals: Mapping[str, object]) -> list[str]:
     hints: list[str] = []
+    if bool(signals.get("prewrite_probe_plateau")):
+        hints.append("Probe plateau reached before any source mutation; stop probing and mutate or finish blocked.")
     if bool(signals.get("first_write_due")):
         hints.append("No source mutation has been observed after repeated probes.")
     if bool(signals.get("verifier_repair_due")):

@@ -741,6 +741,45 @@ def test_native_harness_adds_first_write_control_after_probe_budget(tmp_path: Pa
     assert "next_action_policy" not in json.dumps(_compact_sidecar_digest(second_request), sort_keys=True)
 
 
+def test_native_harness_blocks_more_probes_after_prewrite_plateau(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(f"read-{index}", "read_file", {"path": f"missing-{index}.txt"}, output_index=index)
+                for index in range(30)
+            ],
+            [fake_call("read-too-late", "read_file", {"path": "still-probing.txt"}, output_index=0)],
+            [
+                fake_call(
+                    "write-after-plateau",
+                    "write_file",
+                    {"path": "vm.js", "content": "patched\n", "apply": True, "create": True},
+                    output_index=0,
+                )
+            ],
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    second_signals = _loop_signals(provider.requests[1])
+    assert second_signals["first_write_due"] is True
+    assert second_signals["prewrite_probe_plateau"] is True
+    assert second_signals["max_additional_probe_turns"] == 0
+    first_batch_outputs = [
+        item
+        for item in result.transcript.items
+        if item.kind.endswith("_output") and item.call_id.startswith("read-") and item.call_id != "read-too-late"
+    ]
+    assert len(first_batch_outputs) == 30
+    assert all("prewrite probe plateau" not in item.output_text_or_ref for item in first_batch_outputs)
+    blocked = next(item for item in result.transcript.items if item.call_id == "read-too-late" and item.kind.endswith("_output"))
+    assert blocked.status == "invalid"
+    assert blocked.is_error is True
+    assert "prewrite probe plateau" in blocked.output_text_or_ref
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "patched\n"
+
+
 def test_native_harness_instructions_do_not_leak_persisted_lane_state(tmp_path: Path) -> None:
     lane_input = replace(
         _lane_input(tmp_path),

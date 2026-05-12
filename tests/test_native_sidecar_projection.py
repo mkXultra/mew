@@ -194,12 +194,33 @@ def test_compact_sidecar_digest_preserves_loop_signals_without_policy_text() -> 
     signals = projection["loop_signals"]
 
     assert signals["first_write_due"] is True
+    assert signals["prewrite_probe_plateau"] is False
     assert signals["probe_count_without_write"] == 10
     assert signals["latest_failed_verifier"]["call_id"].startswith("verify-")
     assert len(signals["latest_failed_verifier"]["call_id"]) <= 120
     assert projection["current_phase"] == "prewrite_blocked"
     assert "must-not-leak" not in serialized
     assert "next_action_policy" not in serialized
+
+
+def test_compact_sidecar_digest_preserves_prewrite_plateau_signal() -> None:
+    digest = build_compact_native_sidecar_digest(
+        _native_transcript_dict(),
+        loop_signals={
+            "first_write_due": True,
+            "prewrite_probe_plateau": True,
+            "verifier_repair_due": False,
+            "probe_count_without_write": 30,
+            "max_additional_probe_turns": 0,
+        },
+    )
+    projection = digest["workframe_projection"]
+    signals = projection["loop_signals"]
+
+    assert projection["current_phase"] == "prewrite_blocked"
+    assert signals["prewrite_probe_plateau"] is True
+    assert signals["max_additional_probe_turns"] == 0
+    assert "Probe plateau reached" in " ".join(projection["attention_hints"])
 
 
 def test_compact_sidecar_digest_bounds_long_refs() -> None:
