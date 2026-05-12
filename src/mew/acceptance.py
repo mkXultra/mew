@@ -3291,6 +3291,21 @@ def finish_continuation_prompt(blockers: list[object]) -> str:
     )
 
 
+def _combined_finish_continuation_prompt(
+    *,
+    typed_prompt: object,
+    typed_blockers: list[dict[str, object]],
+    blockers: list[str],
+) -> str:
+    typed_text = str(typed_prompt or "").strip()
+    typed_messages = {str(blocker.get("message") or "") for blocker in typed_blockers}
+    additional_blockers = [blocker for blocker in blockers if blocker and blocker not in typed_messages]
+    additional_text = finish_continuation_prompt(additional_blockers)
+    if typed_text and additional_text:
+        return f"{typed_text}\n{additional_text}"
+    return typed_text or additional_text
+
+
 def runtime_component_finish_gate_decision(
     task_description: object,
     action: object,
@@ -3418,7 +3433,11 @@ def acceptance_done_gate_decision(
         "invalid_evidence_refs": [dict(item) for item in evidence_ref_findings.get("invalid_refs") or []],
         "missing_obligations": [dict(item) for item in typed_gate.get("missing_obligations") or []],
         "failed_evidence_refs": [dict(item) for item in typed_gate.get("failed_evidence_refs") or []],
-        "continuation_prompt": str(typed_gate.get("continuation_prompt") or "") or finish_continuation_prompt(blockers),
+        "continuation_prompt": _combined_finish_continuation_prompt(
+            typed_prompt=typed_gate.get("continuation_prompt"),
+            typed_blockers=typed_blockers,
+            blockers=blockers,
+        ),
         "legacy_warnings": legacy_warnings,
     }
 

@@ -1574,3 +1574,29 @@ native task contract so provider input and finish gating share the same
 checklist. After focused tests, review, and commit, run exactly one same-shape
 `make-mips-interpreter --mode step-check-10min` diagnostic before any
 `speed_1`, `proof_5`, or broad measurement.
+
+Native finish-gate obligation projection decision 2026-05-12 JST:
+
+The post-`0c57d1a` same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-134343` showed the native
+finish gate itself is now doing useful work. The premature provider-native
+finish was blocked, native pairing remained valid (`66` calls / `66` outputs),
+and the model continued with a fresh verifier turn instead of falsely
+completing. The remaining gap is not MIPS/Doom-specific: the gate blocker knew
+the exact external artifact obligation (`/tmp/frame.bmp`), but the continuation
+prompt emphasized invalid typed evidence ids and did not preserve the exact
+legacy/runtime artifact obligation strongly enough. The next verifier therefore
+proved nearby model-selected artifacts (`first_frame.bmp`, `frame_000000.bmp`)
+instead of the external artifact path.
+
+Decision: repair the generic finish-gate projection layer. Typed acceptance
+continuations must include missing obligation subject details such as
+`path`, `artifact_id`, `contract_id`, and `verifier_id`; invalid typed-evidence
+refs should still surface the required oracle obligations so the next turn knows
+what to satisfy; and when typed acceptance blocks first, continuation text must
+merge additional legacy/runtime blockers instead of dropping them. This keeps
+the native loop Codex-like while preserving mew's deterministic done gate. Do
+not add task-specific frame/MIPS/Doom rules. After focused acceptance/native
+tests, codex-ultra review, and commit, run exactly one same-shape
+`make-mips-interpreter --mode step-check-10min` diagnostic. Do not run
+`speed_1`, `proof_5`, or broad measurement first.

@@ -1341,9 +1341,16 @@ def resolve_typed_finish(
     event_by_alias = _evidence_events_by_finish_ref_alias(events)
     invalid = tuple({"id": event_id, "reason": "not_found"} for event_id in cited_ids if event_id not in event_by_alias)
     if invalid:
+        valid_cited_ids = tuple(event_id for event_id in cited_ids if event_id in event_by_alias)
+        valid_cited_events = _resolve_cited_evidence_events(valid_cited_ids, event_by_alias)
         return _typed_block(
             code="invalid_typed_evidence_ref",
             message="Finish cited typed evidence ids that do not exist.",
+            missing_obligations=tuple(
+                obligation.as_dict()
+                for obligation in bundle.obligations
+                if obligation.required and _covering_event_for_obligation(obligation, valid_cited_events) is None
+            ),
             invalid_evidence_refs=invalid,
         )
     cited_events = _resolve_cited_evidence_events(cited_ids, event_by_alias)
@@ -2363,17 +2370,26 @@ def _typed_continuation_prompt(
 ) -> str:
     lines = ["Finish was blocked by the typed evidence gate.", message]
     for obligation in missing_obligations[:6]:
-        lines.append(
-            "- missing "
-            f"{obligation.get('kind') or 'obligation'} "
-            f"{obligation.get('id') or ''}".strip()
-        )
+        lines.append(f"- missing {_obligation_prompt_label(obligation)}")
     for ref in failed_evidence_refs[:6]:
         lines.append(f"- failed evidence {ref.get('id')}: status={ref.get('status')}")
     for ref in invalid_evidence_refs[:6]:
         lines.append(f"- invalid evidence ref {ref.get('id')}: {ref.get('reason')}")
     lines.append("Next action: produce or cite passing typed evidence_refs for the missing obligation ids.")
     return "\n".join(line for line in lines if line)
+
+
+def _obligation_prompt_label(obligation: Mapping[str, Any]) -> str:
+    kind = str(obligation.get("kind") or "obligation").strip()
+    obligation_id = str(obligation.get("id") or "").strip()
+    subject = obligation.get("subject") if isinstance(obligation.get("subject"), Mapping) else {}
+    details: list[str] = []
+    for key in ("path", "artifact_id", "contract_id", "verifier_id"):
+        value = str(subject.get(key) or "").strip()
+        if value:
+            details.append(f"{key}={value}")
+    suffix = f" ({', '.join(details[:4])})" if details else ""
+    return f"{kind} {obligation_id}{suffix}".strip()
 
 
 def _stable_token(value: object) -> str:

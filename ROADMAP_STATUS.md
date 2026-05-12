@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is native step-shape diagnosis. The low-budget/interrupted-verifier repair is committed; the latest step-check preserved paired transcript evidence and exposed a generic prewrite probe plateau. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is native step-shape diagnosis. Native finish gating is committed; the latest step-check proved the gate blocks false completion and exposed exact artifact-obligation projection as the next generic repair. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -91,15 +91,21 @@ created. The internal verifier had accepted nearby frame artifacts
 acceptance surface. The first attempted repair (`a958586`) exposed `/tests` as
 a read root and guidance, but the follow-up diagnostic
 `mew-make-mips-interpreter-step-check-10min-20260512-125506` falsified that
-hypothesis: `/tests` does not exist in the agent environment, native pairing
-remained valid (`57` calls / `57` outputs), and the model still finished after
-only proving `/tmp/frame.bmp` shape/nonblank while missing the semantic
-`booted correctly` stdout obligation. Current repair is native core finish
-gating: remove the false `/tests` guidance and make provider-native `finish`
-calls pass through the deterministic acceptance gate using task-extracted
-constraints. Do not run `speed_1`, `proof_5`, or broad measurement until this
-repair is committed and followed by one bounded same-shape native step-shape
-diagnostic.
+hypothesis: `/tests` does not exist in the agent environment. Native finish
+gating was committed as `0c57d1a`, removing the false `/tests` guidance and
+routing provider-native `finish` calls through deterministic acceptance using
+task-extracted constraints. The follow-up diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-134343` proved the gate
+works: pairing stayed valid (`66` calls / `66` outputs), the premature finish
+was blocked, and the model continued with another verifier. The remaining gap
+is generic projection, not task-specific solver logic: the gate knew the exact
+external artifact obligation `/tmp/frame.bmp`, but the continuation turn
+verified nearby model-selected artifacts (`first_frame.bmp`,
+`frame_000000.bmp`) instead. Current repair is to preserve exact typed and
+legacy finish-gate obligations, including artifact paths, in continuation
+prompts and recovery cards. Do not run `speed_1`, `proof_5`, or broad
+measurement until this projection repair is committed and followed by one
+bounded same-shape native step-shape diagnostic.
 
 Scope:
 
@@ -508,11 +514,9 @@ Useful historical files:
    the reentry guard. They supersede older HOT_PATH polish, WorkFrame,
    diagnostic-runner, or scoped-rebaseline rows that point directly to
    `step-check-10min`, `speed_1`, `proof_5`, or broad measurement.
-3. Required next order: implement compact sidecar digest boundary, remove full
-   `persisted_lane_state` and ordinary repair `required_next` from default
-   provider-visible input, preserve loop signals as bounded observational
-   booleans/hints, run focused projection/harness tests plus
-   `scripts/check_native_tool_loop_boundary.py`, then run exactly one bounded
+3. Required next order: keep the native boundary intact, repair the exact
+   finish-gate obligation projection, run focused acceptance/native tests plus
+   the native boundary audit when touched, then run exactly one bounded
    same-shape diagnostic.
 4. If the gate is red, repair the native boundary/projection failure first. Do
    not add another model-visible frontier/todo/evidence projection as a shortcut.

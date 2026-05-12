@@ -59,6 +59,7 @@ def test_resolve_typed_finish_blocks_completed_finish_without_refs():
     assert decision.gate_source == "typed_evidence"
     assert decision.missing_obligations
     assert "typed evidence" in decision.continuation_prompt
+    assert "frame.bmp" in decision.continuation_prompt
 
 
 def test_resolve_typed_finish_allows_cited_passing_artifact_event():
@@ -90,6 +91,52 @@ def test_resolve_typed_finish_allows_cited_passing_artifact_event():
 
     assert decision.decision == "allow_complete"
     assert decision.gate_source == "typed_evidence"
+
+
+def test_resolve_typed_finish_invalid_refs_report_only_uncovered_obligations():
+    bundle = OracleBundle(
+        id="oracle:bundle:multi",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+            OracleObligation(
+                id="oracle:log:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "log", "path": "/tmp/run.log"},
+                expected={"exists": True},
+                source="test",
+            ),
+        ),
+    )
+    frame_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {"kind": "evidence_event", "id": "ev:artifact:frame"},
+                {"kind": "evidence_event", "id": "missing-ref"},
+            ),
+        ),
+        bundle,
+        (frame_event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert any(ref["id"] == "missing-ref" for ref in decision.invalid_evidence_refs)
+    assert "/tmp/run.log" in decision.continuation_prompt
+    assert "/tmp/frame.bmp" not in decision.continuation_prompt
 
 
 def test_resolve_typed_finish_does_not_cross_satisfy_source_grounding():
@@ -799,6 +846,49 @@ def test_acceptance_done_gate_keeps_legacy_block_when_typed_family_not_retired()
     assert decision["decision"] == "block_continue"
     assert decision["gate_source"] == "legacy_string_safety"
     assert decision["blockers"][0]["code"] == "runtime_final_verifier_artifact_evidence"
+
+
+def test_acceptance_done_gate_continuation_keeps_legacy_artifact_path_when_typed_blocks_first():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+        ),
+    )
+
+    decision = acceptance_done_gate_decision(
+        (
+            "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+            "The final verifier checks that /tmp/frame.bmp exists."
+        ),
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [{"kind": "evidence_event", "id": "missing-ref"}],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": bundle.as_dict(),
+                "evidence_events": [],
+            }
+        },
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["gate_source"] == "typed_evidence"
+    assert any(blocker["code"] == "invalid_typed_evidence_ref" for blocker in decision["blockers"])
+    assert any(blocker["code"] == "runtime_final_verifier_artifact_evidence" for blocker in decision["blockers"])
+    assert "invalid evidence ref missing-ref" in decision["continuation_prompt"]
+    assert "/tmp/frame.bmp" in decision["continuation_prompt"]
+    assert "runtime final verifier artifact evidence missing" in decision["continuation_prompt"]
+    assert "deterministic done gate" in decision["continuation_prompt"]
 
 
 def test_extract_acceptance_constraints_keeps_output_and_edit_scope_rules():
