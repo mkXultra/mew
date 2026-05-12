@@ -166,12 +166,74 @@ def test_compact_sidecar_digest_is_provider_request_context_not_state_object() -
     serialized = json.dumps(digest, sort_keys=True)
 
     assert digest["provider_input_authority"] == "transcript_window_plus_compact_sidecar_digest"
-    assert digest["model_authored_state_accepted"] is False
-    assert digest["transport_change"] == "sidecar-only"
     assert "native_sidecar_digest=" in digest["digest_text"]
+    assert len(digest) <= 16
+    assert len(serialized.encode("utf-8")) <= 6144
+    assert "workframe_projection" in digest
+    assert len(digest["workframe_projection"]) <= 8
+    assert digest["workframe_projection"]["current_phase"] == "orient"
+    assert "required_next_kind" not in serialized
     assert "frontier_state_update" not in serialized
     assert '"active_work_todo"' not in serialized
     assert '"proof"' not in serialized
+
+
+def test_compact_sidecar_digest_preserves_loop_signals_without_policy_text() -> None:
+    digest = build_compact_native_sidecar_digest(
+        _native_transcript_dict(),
+        loop_signals={
+            "first_write_due": True,
+            "verifier_repair_due": False,
+            "probe_count_without_write": 10,
+            "latest_failed_verifier": {"call_id": "verify-" + ("v" * 8000), "status": "completed"},
+            "next_action_policy": "must-not-leak",
+        },
+    )
+    serialized = json.dumps(digest, sort_keys=True)
+    projection = digest["workframe_projection"]
+    signals = projection["loop_signals"]
+
+    assert signals["first_write_due"] is True
+    assert signals["probe_count_without_write"] == 10
+    assert signals["latest_failed_verifier"]["call_id"].startswith("verify-")
+    assert len(signals["latest_failed_verifier"]["call_id"]) <= 120
+    assert projection["current_phase"] == "prewrite_blocked"
+    assert "must-not-leak" not in serialized
+    assert "next_action_policy" not in serialized
+
+
+def test_compact_sidecar_digest_bounds_long_refs() -> None:
+    transcript = _native_transcript_dict()
+    transcript["lane_attempt_id"] = "attempt-" + ("a" * 8000)
+    transcript["items"][2]["evidence_refs"] = ["ev:" + ("x" * 2000)] * 12  # type: ignore[index]
+    transcript["items"][2]["content_refs"] = ["sidecar:" + ("y" * 2000)] * 12  # type: ignore[index]
+    for index in range(8, 14):
+        transcript["items"].append(  # type: ignore[union-attr]
+            {
+                "sequence": index,
+                "turn_id": "turn-overflow",
+                "kind": "function_call_output",
+                "call_id": "call-" + ("z" * 2000) + str(index),
+                "tool_name": "run_command",
+                "status": "completed",
+                "output_text_or_ref": "output " + ("o" * 2000),
+                "content_refs": ["sidecar:" + ("c" * 2000)] * 12,
+                "evidence_refs": ["ev:" + ("e" * 2000)] * 12,
+            }
+        )
+
+    digest = build_compact_native_sidecar_digest(transcript)
+    serialized = json.dumps(digest, sort_keys=True)
+
+    assert len(digest) <= 16
+    assert len(serialized.encode("utf-8")) <= 6144
+    assert len(digest["lane_attempt_id"]) <= 160
+    assert all(len(item["ref"]) <= 120 for item in digest["latest_tool_results"])
+    for item in digest["latest_tool_results"]:
+        assert all(len(ref) <= 160 for ref in item["evidence_refs"])
+        assert all(len(ref) <= 160 for ref in item["output_refs"])
+    assert "a" * 1000 not in serialized
+    assert "z" * 1000 not in serialized
 
 
 def test_updated_lane_state_is_derived_and_keeps_active_work_todo_readiness_shape() -> None:

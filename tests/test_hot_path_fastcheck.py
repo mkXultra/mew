@@ -421,7 +421,7 @@ def test_hot_path_fastcheck_replays_native_failed_verifier_repair_control(tmp_pa
     check = [item for item in result["checks"] if item["name"] == "native_loop_control_replay"][0]
     assert check["status"] == "pass"
     assert check["details"]["verifier_repair_due"] is True
-    assert check["details"]["next_action_policy"] == "patch_or_blocked_finish_after_failed_verifier"
+    assert "next_action_policy" not in check["details"]
 
 
 def test_hot_path_fastcheck_rejects_positive_native_search_without_line_anchor(tmp_path):

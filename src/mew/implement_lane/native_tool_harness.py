@@ -19,6 +19,7 @@ from .native_provider_adapter import (
     build_responses_request_descriptor,
     call_codex_native_responses,
 )
+from .native_sidecar_projection import build_compact_native_sidecar_digest
 from .native_transcript import (
     CALL_ITEM_KINDS,
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
@@ -31,6 +32,7 @@ from .native_transcript import (
     validate_native_transcript_pairing,
     write_native_transcript_artifacts,
 )
+from .native_workframe_projection import build_native_prompt_input_inventory
 from .prompt import build_implement_v2_prompt_sections
 from .read_runtime import READ_ONLY_TOOL_NAMES, execute_read_only_tool_call
 from .tool_policy import list_v2_tool_specs_for_mode
@@ -942,6 +944,16 @@ def _request_descriptor(
     turn_index: int,
     transcript_items: list[NativeTranscriptItem],
 ) -> dict[str, object]:
+    loop_signals = _native_loop_control_state(
+        transcript_items,
+        current_turn_index=turn_index,
+    )
+    compact_sidecar_digest = _compact_sidecar_digest_for_request(
+        lane_input=lane_input,
+        lane_attempt_id=lane_attempt_id,
+        transcript_items=transcript_items,
+        loop_signals=loop_signals,
+    )
     return {
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "transport_kind": "provider_native" if _provider_is_live(lane_input) else "fake_native",
@@ -952,12 +964,12 @@ def _request_descriptor(
         "input_items": _responses_input_items(
             lane_input,
             transcript_items,
-            native_loop_control=_native_loop_control_state(
-                transcript_items,
-                current_turn_index=turn_index,
-            ),
+            compact_sidecar_digest=compact_sidecar_digest,
         ),
         "transcript_window": [item.as_dict() for item in transcript_items],
+        "provider_request_inventory": build_native_prompt_input_inventory(
+            compact_sidecar_digest=compact_sidecar_digest,
+        ),
         "instructions": _native_instructions(lane_input),
         "model_json_main_path_detected": False,
     }
@@ -985,18 +997,28 @@ def _live_responses_request_descriptor(
 
 
 def _native_instructions(lane_input: ImplementLaneInput) -> str:
-    return render_prompt_sections(build_implement_v2_prompt_sections(lane_input))
+    sections = [
+        section
+        for section in build_implement_v2_prompt_sections(lane_input)
+        if section.id
+        not in {
+            "implement_v2_workframe",
+            "implement_v2_task_contract",
+            "implement_v2_lane_state",
+        }
+    ]
+    return render_prompt_sections(sections)
 
 
 def _responses_input_items(
     lane_input: ImplementLaneInput,
     transcript_items: list[NativeTranscriptItem],
     *,
-    native_loop_control: Mapping[str, object] | None = None,
+    compact_sidecar_digest: Mapping[str, object],
 ) -> list[dict[str, object]]:
     task_payload = {
         "task_contract": dict(lane_input.task_contract),
-        "persisted_lane_state": dict(lane_input.persisted_lane_state),
+        "compact_sidecar_digest": dict(compact_sidecar_digest),
         "workspace": lane_input.workspace,
         "lane": lane_input.lane,
     }
@@ -1015,11 +1037,26 @@ def _responses_input_items(
         converted = _responses_input_item_from_transcript_item(item)
         if converted:
             items.append(converted)
-    if native_loop_control and (
-        native_loop_control.get("first_write_due") or native_loop_control.get("verifier_repair_due")
-    ):
-        items.append(_native_loop_control_input_item(native_loop_control))
     return items
+
+
+def _compact_sidecar_digest_for_request(
+    *,
+    lane_input: ImplementLaneInput,
+    lane_attempt_id: str,
+    transcript_items: list[NativeTranscriptItem],
+    loop_signals: Mapping[str, object],
+) -> dict[str, object]:
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id or _lane_attempt_id(lane_input),
+        provider="codex" if _provider_is_live(lane_input) else "fake_native",
+        model=str(lane_input.model or "gpt-5.5"),
+        items=tuple(transcript_items),
+    )
+    return build_compact_native_sidecar_digest(
+        transcript,
+        loop_signals=loop_signals,
+    )
 
 
 def _native_loop_control_state(
@@ -1052,14 +1089,9 @@ def _native_loop_control_state(
         and post_failure_write_count == 0
         and post_failure_probe_count >= _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD
     )
-    next_action_policy = "continue_transcript_driven_work"
-    if verifier_repair_due:
-        next_action_policy = "patch_or_blocked_finish_after_failed_verifier"
-    elif first_write_due:
-        next_action_policy = "source_mutation_or_verifier_or_blocked_finish"
     return {
         "schema_version": 1,
-        "surface": "native_loop_control",
+        "surface": "native_loop_signals",
         "current_turn_index": current_turn_index,
         "observed_turn_count": turn_count,
         "tool_call_count": len(calls),
@@ -1074,31 +1106,7 @@ def _native_loop_control_state(
         "post_failure_probe_count": post_failure_probe_count,
         "post_failure_verifier_count": post_failure_verifier_count,
         "post_failure_write_count": post_failure_write_count,
-        "next_action_policy": next_action_policy,
         "max_additional_probe_turns": 0 if verifier_repair_due else (1 if first_write_due else None),
-    }
-
-
-def _native_loop_control_input_item(state: Mapping[str, object]) -> dict[str, object]:
-    payload = {
-        "native_loop_control": dict(state),
-        "instruction": (
-            "The native loop has enough evidence for a bounded transition. "
-            "If first_write_due is true, choose one action: patch/edit/write the best current hypothesis, "
-            "run a verifier that proves or falsifies it, or finish blocked with the exact missing fact. "
-            "If verifier_repair_due is true, the latest verifier already failed and enough post-failure "
-            "diagnosis has been collected; next action must repair with edit/write/apply_patch or finish "
-            "blocked with the exact missing fact. Do not continue broad exploration."
-        ),
-    }
-    return {
-        "role": "user",
-        "content": [
-            {
-                "type": "input_text",
-                "text": json.dumps(payload, ensure_ascii=False, sort_keys=True),
-            }
-        ],
     }
 
 

@@ -28,6 +28,21 @@ NATIVE_EVIDENCE_REF_INDEX_SCHEMA_VERSION = 1
 NATIVE_MODEL_TURN_INDEX_SCHEMA_VERSION = 1
 NATIVE_COMPACT_SIDECAR_DIGEST_SCHEMA_VERSION = 1
 NATIVE_UPDATED_LANE_STATE_SCHEMA_VERSION = 1
+NATIVE_WORKFRAME_PHASE_ALLOWED_VALUES = frozenset(
+    {
+        "orient",
+        "cheap_probe",
+        "prewrite_blocked",
+        "ready_to_patch",
+        "repair_after_write_failure",
+        "verify_after_mutation",
+        "repair_after_verifier_failure",
+        "finish_ready",
+        "finish_blocked",
+        "controller_closeout",
+        "blocked",
+    }
+)
 
 NATIVE_TRANSCRIPT_SOURCE_OF_TRUTH = "response_transcript.json"
 NATIVE_RESPONSE_ITEMS_SOURCE_OF_TRUTH = "response_items.jsonl"
@@ -377,6 +392,7 @@ def build_compact_native_sidecar_digest(
     evidence_ref_index: Mapping[str, object] | None = None,
     model_turn_index: Mapping[str, object] | None = None,
     workframe_bundle: Mapping[str, object] | None = None,
+    loop_signals: Mapping[str, object] | None = None,
     max_tool_results: int = 6,
 ) -> dict[str, object]:
     """Build compact sidecar context suitable for future provider requests."""
@@ -388,6 +404,12 @@ def build_compact_native_sidecar_digest(
     turn_index = dict(model_turn_index or build_native_model_turn_index(transcript))
     workframe = _workframe_digest(workframe_bundle)
     ordered_refs = [str(ref) for ref in tool_index.get("ordered_refs") or []]
+    workframe_projection = _workframe_projection_digest(
+        workframe,
+        loop_signals=loop_signals,
+        latest_evidence_refs=_bounded_refs(list((evidence_index.get("by_evidence_ref") or {}).keys())[-12:], max_items=12),
+        latest_tool_result_refs=_bounded_refs(ordered_refs[-12:], max_items=12),
+    )
     by_call = tool_index.get("by_provider_call_id") if isinstance(tool_index.get("by_provider_call_id"), dict) else {}
     latest_tool_results = [
         _compact_tool_result_for_digest(by_call.get(str(ref).removeprefix("tool-result:")), ref)
@@ -398,13 +420,9 @@ def build_compact_native_sidecar_digest(
         "digest_kind": "native_transcript_compact_sidecar_digest",
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "transport_kind": "provider_native",
-        "transport_change": NATIVE_SIDECAR_TRANSPORT_CHANGE,
         "provider_input_authority": "transcript_window_plus_compact_sidecar_digest",
         "source_of_truth": NATIVE_TRANSCRIPT_SOURCE_OF_TRUTH,
-        "model_authored_state_accepted": False,
-        "lane_attempt_id": context["lane_attempt_id"],
-        "provider": context["provider"],
-        "model": context["model"],
+        "lane_attempt_id": _bounded_text(context["lane_attempt_id"], limit=160),
         "transcript_hash": context["transcript_hash"],
         "sidecar_hashes": {
             "tool_result_index": tool_index.get("index_hash") or "",
@@ -419,15 +437,14 @@ def build_compact_native_sidecar_digest(
             "turns": len(turn_index.get("turns") or []),
         },
         "latest_tool_results": [item for item in latest_tool_results if item],
-        "latest_evidence_refs": [str(ref) for ref in list((evidence_index.get("by_evidence_ref") or {}).keys())[-max_tool_results:]],
-        "workframe": workframe,
+        "latest_evidence_refs": _bounded_refs(
+            list((evidence_index.get("by_evidence_ref") or {}).keys())[-max_tool_results:],
+            max_items=max_tool_results,
+        ),
+        "workframe_projection": workframe_projection,
         "provider_request_note": "Use with a native transcript window; this digest is not a standalone state object.",
     }
-    payload = _strip_model_authored_state(payload)
-    digest_hash = stable_json_hash(payload)
-    payload["digest_hash"] = digest_hash
-    payload["digest_text"] = _digest_text(payload)
-    return payload
+    return _finalize_compact_digest_payload(_strip_model_authored_state(payload))
 
 
 def build_native_updated_lane_state(
@@ -774,24 +791,198 @@ def _workframe_digest(workframe_bundle: Mapping[str, object] | None) -> dict[str
     }
 
 
+def _workframe_projection_digest(
+    workframe: Mapping[str, object],
+    *,
+    loop_signals: Mapping[str, object] | None = None,
+    latest_evidence_refs: Iterable[object] = (),
+    latest_tool_result_refs: Iterable[object] = (),
+) -> dict[str, object]:
+    signals = _bounded_loop_signals(loop_signals)
+    current_phase = _allowed_workframe_phase(_text(workframe.get("current_phase")))
+    if current_phase == "orient":
+        current_phase = _phase_from_loop_signals(signals)
+    evidence_refs = _bounded_refs(
+        _dedupe((*_strings(latest_evidence_refs), *_strings(workframe.get("finish_required_evidence_refs")))),
+        max_items=12,
+    )
+    projection: dict[str, object] = {
+        "current_phase": current_phase,
+        "attention_hints": _attention_hints(signals),
+        "tool_context": {
+            "latest_tool_result_refs": _bounded_refs(_strings(latest_tool_result_refs), max_items=12),
+        },
+        "finish_readiness": {
+            "state": _text(workframe.get("finish_readiness_state")) or "unknown",
+            "missing_evidence_refs": _bounded_refs(_strings(workframe.get("finish_required_evidence_refs")), max_items=12),
+        },
+        "verifier_state": _verifier_state_from_loop_signals(signals),
+        "loop_signals": signals,
+        "evidence_refs": evidence_refs,
+    }
+    return projection
+
+
+def _bounded_loop_signals(loop_signals: Mapping[str, object] | None) -> dict[str, object]:
+    if not isinstance(loop_signals, Mapping):
+        return {
+            "first_write_due": False,
+            "verifier_repair_due": False,
+        }
+    signals: dict[str, object] = {
+        "first_write_due": bool(loop_signals.get("first_write_due")),
+        "verifier_repair_due": bool(loop_signals.get("verifier_repair_due")),
+        "probe_count_without_write": _safe_int(loop_signals.get("probe_count_without_write"), default=0),
+        "post_failure_probe_count": _safe_int(loop_signals.get("post_failure_probe_count"), default=0),
+        "post_failure_write_count": _safe_int(loop_signals.get("post_failure_write_count"), default=0),
+        "verifier_count": _safe_int(loop_signals.get("verifier_count"), default=0),
+        "write_count": _safe_int(loop_signals.get("write_count"), default=0),
+    }
+    latest = _compact_failed_verifier_signal(loop_signals.get("latest_failed_verifier"))
+    if latest:
+        signals["latest_failed_verifier"] = latest
+    return signals
+
+
+def _compact_failed_verifier_signal(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+    payload: dict[str, object] = {
+        "call_id": _bounded_text(value.get("call_id"), limit=120),
+        "status": _bounded_text(value.get("status"), limit=32),
+        "semantic_failure": bool(value.get("semantic_failure")),
+    }
+    return {key: item for key, item in payload.items() if item not in ("", [], {}, None)}
+
+
+def _phase_from_loop_signals(signals: Mapping[str, object]) -> str:
+    if bool(signals.get("verifier_repair_due")):
+        return "repair_after_verifier_failure"
+    if bool(signals.get("first_write_due")):
+        return "prewrite_blocked"
+    return "orient"
+
+
+def _attention_hints(signals: Mapping[str, object]) -> list[str]:
+    hints: list[str] = []
+    if bool(signals.get("first_write_due")):
+        hints.append("No source mutation has been observed after repeated probes.")
+    if bool(signals.get("verifier_repair_due")):
+        hints.append("A failed verifier remains unrepaired after post-failure probes.")
+    return hints[:6]
+
+
+def _verifier_state_from_loop_signals(signals: Mapping[str, object]) -> dict[str, object]:
+    if bool(signals.get("verifier_repair_due")):
+        state = "failing"
+    elif _safe_int(signals.get("verifier_count"), default=0) > 0:
+        state = "fresh"
+    else:
+        state = "missing"
+    return {
+        "state": state,
+        "post_failure_probe_count": _safe_int(signals.get("post_failure_probe_count"), default=0),
+        "post_failure_write_count": _safe_int(signals.get("post_failure_write_count"), default=0),
+    }
+
+
+def _allowed_workframe_phase(value: str) -> str:
+    phase = _text(value) or "orient"
+    return phase if phase in NATIVE_WORKFRAME_PHASE_ALLOWED_VALUES else "orient"
+
+
 def _compact_tool_result_for_digest(entry: object, ref: str) -> dict[str, object]:
     if not isinstance(entry, Mapping):
         return {}
     return {
-        "ref": _text(entry.get("ref") or ref),
-        "tool_name": _text(entry.get("tool_name")),
-        "status": _text(entry.get("status")),
+        "ref": _bounded_text(entry.get("ref") or ref, limit=120),
+        "tool_name": _bounded_text(entry.get("tool_name"), limit=64),
+        "status": _bounded_text(entry.get("status"), limit=32),
         "is_error": bool(entry.get("is_error")),
-        "evidence_refs": _strings(entry.get("evidence_refs"))[:4],
-        "output_refs": _strings(entry.get("output_refs"))[:4],
-        "summary": _bounded_text(entry.get("natural_result_text"), limit=240),
+        "evidence_refs": _bounded_refs(_strings(entry.get("evidence_refs")), max_items=2, max_chars=96),
+        "output_refs": _bounded_refs(_strings(entry.get("output_refs")), max_items=2, max_chars=96),
+        "summary": _bounded_text(entry.get("natural_result_text"), limit=160),
     }
+
+
+def _bounded_refs(values: Iterable[object], *, max_items: int, max_chars: int = 160) -> list[str]:
+    refs: list[str] = []
+    for value in values:
+        text = _bounded_text(value, limit=max_chars)
+        if text:
+            refs.append(text)
+        if len(refs) >= max_items:
+            break
+    return _dedupe(refs)
+
+
+def _fit_compact_digest_payload(payload: object) -> dict[str, object]:
+    if not isinstance(payload, Mapping):
+        return {}
+    fitted = dict(payload)
+    if _json_size_bytes(fitted) <= 6144:
+        return fitted
+    tool_results = list(fitted.get("latest_tool_results") or []) if isinstance(fitted.get("latest_tool_results"), list) else []
+    while tool_results and _json_size_bytes(fitted) > 6144:
+        tool_results = tool_results[:-1]
+        fitted["latest_tool_results"] = tool_results
+    if _json_size_bytes(fitted) <= 6144:
+        return fitted
+    fitted["latest_evidence_refs"] = _bounded_refs(fitted.get("latest_evidence_refs") or (), max_items=4, max_chars=80)
+    workframe = dict(fitted.get("workframe_projection") or {}) if isinstance(fitted.get("workframe_projection"), Mapping) else {}
+    workframe["evidence_refs"] = _bounded_refs(workframe.get("evidence_refs") or (), max_items=4, max_chars=80)
+    tool_context = dict(workframe.get("tool_context") or {}) if isinstance(workframe.get("tool_context"), Mapping) else {}
+    tool_context["latest_tool_result_refs"] = _bounded_refs(
+        tool_context.get("latest_tool_result_refs") or (),
+        max_items=4,
+        max_chars=80,
+    )
+    workframe["tool_context"] = tool_context
+    fitted["workframe_projection"] = workframe
+    if _json_size_bytes(fitted) <= 6144:
+        return fitted
+    fitted["provider_request_note"] = "Use with a native transcript window."
+    if _json_size_bytes(fitted) <= 6144:
+        return fitted
+    fitted["latest_tool_results"] = []
+    fitted["latest_evidence_refs"] = []
+    workframe["evidence_refs"] = []
+    workframe["tool_context"] = {"latest_tool_result_refs": []}
+    fitted["workframe_projection"] = workframe
+    return fitted
+
+
+def _finalize_compact_digest_payload(payload: object) -> dict[str, object]:
+    fitted = _fit_compact_digest_payload(payload)
+    for _ in range(4):
+        base = {key: value for key, value in fitted.items() if key not in {"digest_hash", "digest_text"}}
+        candidate = dict(base)
+        candidate["digest_hash"] = stable_json_hash(base)
+        candidate["digest_text"] = _digest_text(candidate)
+        candidate = _fit_compact_digest_payload(candidate)
+        if _json_size_bytes(candidate) <= 6144:
+            return candidate
+        fitted = {key: value for key, value in candidate.items() if key not in {"digest_hash", "digest_text"}}
+    minimal = {key: value for key, value in fitted.items() if key not in {"digest_hash", "digest_text"}}
+    minimal["latest_tool_results"] = []
+    minimal["latest_evidence_refs"] = []
+    workframe = dict(minimal.get("workframe_projection") or {}) if isinstance(minimal.get("workframe_projection"), Mapping) else {}
+    workframe["evidence_refs"] = []
+    workframe["tool_context"] = {"latest_tool_result_refs": []}
+    minimal["workframe_projection"] = workframe
+    minimal["digest_hash"] = stable_json_hash({key: value for key, value in minimal.items() if key not in {"digest_hash", "digest_text"}})
+    minimal["digest_text"] = _digest_text(minimal)
+    return _fit_compact_digest_payload(minimal)
+
+
+def _json_size_bytes(value: object) -> int:
+    return len(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8"))
 
 
 def _digest_text(payload: Mapping[str, object]) -> str:
     sidecar_hashes = payload.get("sidecar_hashes") if isinstance(payload.get("sidecar_hashes"), Mapping) else {}
     counts = payload.get("counts") if isinstance(payload.get("counts"), Mapping) else {}
-    workframe = payload.get("workframe") if isinstance(payload.get("workframe"), Mapping) else {}
+    workframe = payload.get("workframe_projection") if isinstance(payload.get("workframe_projection"), Mapping) else {}
     parts = [
         f"native_sidecar_digest={payload.get('digest_hash')}",
         f"transcript_hash={payload.get('transcript_hash')}",

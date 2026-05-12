@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from dataclasses import replace
 from unittest.mock import patch
 
 from mew.implement_lane.native_fake_provider import (
@@ -52,6 +53,25 @@ def _command_run_id(call_id: str) -> str:
     lane_attempt_id = "ws-native:task-native:implement_v2:native"
     digest = hashlib.sha256(f"{lane_attempt_id}:{call_id}".encode()).hexdigest()
     return f"{lane_attempt_id}:command:{call_id}-{digest[:8]}"
+
+
+def _task_payload(request: dict[str, object]) -> dict[str, object]:
+    first = request["input_items"][0]  # type: ignore[index]
+    return json.loads(first["content"][0]["text"])  # type: ignore[index]
+
+
+def _compact_sidecar_digest(request: dict[str, object]) -> dict[str, object]:
+    return _task_payload(request)["compact_sidecar_digest"]
+
+
+def _loop_signals(request: dict[str, object]) -> dict[str, object]:
+    digest = _compact_sidecar_digest(request)
+    return digest["workframe_projection"]["loop_signals"]
+
+
+def _verifier_state(request: dict[str, object]) -> dict[str, object]:
+    digest = _compact_sidecar_digest(request)
+    return digest["workframe_projection"]["verifier_state"]
 
 
 def test_unavailable_native_runtime_keeps_native_identity(tmp_path: Path) -> None:
@@ -533,19 +553,38 @@ def test_native_harness_adds_first_write_control_after_probe_budget(tmp_path: Pa
     run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
 
     second_request = provider.requests[1]
-    assert second_request["input_items"][-1]["role"] == "user"
-    control_items = [
-        item
-        for item in second_request["input_items"]
-        if isinstance(item, dict)
-        and item.get("role") == "user"
-        and "native_loop_control" in json.dumps(item, sort_keys=True)
+    assert "native_loop_control" not in json.dumps(second_request["input_items"], sort_keys=True)
+    payload = _task_payload(second_request)
+    assert "persisted_lane_state" not in payload
+    assert second_request["provider_request_inventory"]["model_visible_sections"] == [
+        "native_transcript_window",
+        "compact_sidecar_digest",
     ]
-    assert control_items
-    payload = json.loads(control_items[-1]["content"][0]["text"])
-    assert payload["native_loop_control"]["first_write_due"] is True
-    assert payload["native_loop_control"]["probe_count_without_write"] == 10
-    assert payload["native_loop_control"]["next_action_policy"] == "source_mutation_or_verifier_or_blocked_finish"
+    assert second_request["provider_request_inventory"]["compact_sidecar_digest_hash"] == payload["compact_sidecar_digest"]["digest_hash"]
+    signals = _loop_signals(second_request)
+    assert signals["first_write_due"] is True
+    assert signals["probe_count_without_write"] == 10
+    assert "next_action_policy" not in json.dumps(_compact_sidecar_digest(second_request), sort_keys=True)
+
+
+def test_native_harness_instructions_do_not_leak_persisted_lane_state(tmp_path: Path) -> None:
+    lane_input = replace(
+        _lane_input(tmp_path),
+        persisted_lane_state={
+            "active_work_todo": {"status": "must-not-leak-active-work-todo"},
+            "lane_hard_runtime_frontier": {"status": "must-not-leak-frontier"},
+            "lane_repair_history": {"log": ["must-not-leak-repair-history"]},
+        },
+    )
+    provider = NativeFakeProvider.from_item_batches([[fake_finish("finish-1", {"outcome": "blocked"})]])
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    request = provider.requests[0]
+    assert "must-not-leak" not in request["instructions"]
+    assert "implement_v2_workframe" not in request["instructions"]
+    assert "implement_v2_lane_state" not in request["instructions"]
+    assert "persisted_lane_state" not in json.dumps(request["input_items"], sort_keys=True)
 
 
 def test_native_harness_first_write_control_does_not_treat_improve_probe_as_verifier(tmp_path: Path) -> None:
@@ -566,10 +605,9 @@ def test_native_harness_first_write_control_does_not_treat_improve_probe_as_veri
 
     run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
 
-    control_text = provider.requests[1]["input_items"][-1]["content"][0]["text"]
-    payload = json.loads(control_text)
-    assert payload["native_loop_control"]["first_write_due"] is True
-    assert payload["native_loop_control"]["verifier_count"] == 0
+    signals = _loop_signals(provider.requests[1])
+    assert signals["first_write_due"] is True
+    assert signals["verifier_count"] == 0
 
 
 def test_native_harness_first_write_control_suppressed_by_explicit_verifier_intent(tmp_path: Path) -> None:
@@ -597,6 +635,7 @@ def test_native_harness_first_write_control_suppressed_by_explicit_verifier_inte
     run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
 
     assert "native_loop_control" not in json.dumps(provider.requests[1]["input_items"], sort_keys=True)
+    assert _loop_signals(provider.requests[1])["first_write_due"] is False
 
 
 def test_native_harness_adds_repair_control_after_failed_verifier_probe_budget(tmp_path: Path) -> None:
@@ -633,15 +672,13 @@ def test_native_harness_adds_repair_control_after_failed_verifier_probe_budget(t
     run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
 
     third_request = provider.requests[2]
-    control_text = third_request["input_items"][-1]["content"][0]["text"]
-    payload = json.loads(control_text)
-    assert payload["native_loop_control"]["verifier_repair_due"] is True
-    assert payload["native_loop_control"]["first_write_due"] is False
-    assert payload["native_loop_control"]["post_failure_probe_count"] == 2
-    assert payload["native_loop_control"]["post_failure_write_count"] == 0
-    assert payload["native_loop_control"]["next_action_policy"] == "patch_or_blocked_finish_after_failed_verifier"
-    assert payload["native_loop_control"]["max_additional_probe_turns"] == 0
-    assert payload["native_loop_control"]["latest_failed_verifier"]["call_id"] == "verify-1"
+    signals = _loop_signals(third_request)
+    assert signals["verifier_repair_due"] is True
+    assert signals["first_write_due"] is False
+    assert signals["post_failure_probe_count"] == 2
+    assert signals["post_failure_write_count"] == 0
+    assert signals["latest_failed_verifier"]["call_id"] == "verify-1"
+    assert "next_action_policy" not in json.dumps(_compact_sidecar_digest(third_request), sort_keys=True)
 
 
 def test_native_harness_treats_semantic_artifact_gap_as_failed_verifier(tmp_path: Path) -> None:
@@ -681,11 +718,11 @@ def test_native_harness_treats_semantic_artifact_gap_as_failed_verifier(tmp_path
 
     run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
 
-    payload = json.loads(provider.requests[2]["input_items"][-1]["content"][0]["text"])
-    assert payload["native_loop_control"]["verifier_repair_due"] is True
-    assert payload["native_loop_control"]["latest_failed_verifier"]["call_id"] == "verify-1"
-    assert payload["native_loop_control"]["latest_failed_verifier"]["status"] == "completed"
-    assert payload["native_loop_control"]["latest_failed_verifier"]["semantic_failure"] is True
+    signals = _loop_signals(provider.requests[2])
+    assert signals["verifier_repair_due"] is True
+    assert signals["latest_failed_verifier"]["call_id"] == "verify-1"
+    assert signals["latest_failed_verifier"]["status"] == "completed"
+    assert signals["latest_failed_verifier"]["semantic_failure"] is True
 
 
 def test_native_harness_does_not_treat_benign_completed_output_as_failed_verifier(tmp_path: Path) -> None:
@@ -774,10 +811,10 @@ def test_native_harness_adds_repair_control_after_yielded_verifier_poll_failure(
 
     run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=4)
 
-    payload = json.loads(provider.requests[3]["input_items"][-1]["content"][0]["text"])
-    assert payload["native_loop_control"]["verifier_repair_due"] is True
-    assert payload["native_loop_control"]["latest_failed_verifier"]["call_id"] == "poll-failure"
-    assert payload["native_loop_control"]["latest_failed_verifier"]["status"] == "failed"
+    signals = _loop_signals(provider.requests[3])
+    assert signals["verifier_repair_due"] is True
+    assert signals["latest_failed_verifier"]["call_id"] == "poll-failure"
+    assert signals["latest_failed_verifier"]["status"] == "failed"
 
 
 def test_native_harness_repair_control_suppressed_after_later_passing_verifier(tmp_path: Path) -> None:
@@ -855,9 +892,9 @@ def test_native_harness_run_command_verifier_intent_triggers_repair_control(tmp_
 
     run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
 
-    payload = json.loads(provider.requests[2]["input_items"][-1]["content"][0]["text"])
-    assert payload["native_loop_control"]["verifier_repair_due"] is True
-    assert payload["native_loop_control"]["latest_failed_verifier"]["call_id"] == "verify-1"
+    signals = _loop_signals(provider.requests[2])
+    assert signals["verifier_repair_due"] is True
+    assert signals["latest_failed_verifier"]["call_id"] == "verify-1"
 
 
 def test_native_harness_repair_control_suppressed_after_failed_verifier_write(tmp_path: Path) -> None:

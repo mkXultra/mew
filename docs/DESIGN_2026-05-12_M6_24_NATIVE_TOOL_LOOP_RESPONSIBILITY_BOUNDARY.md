@@ -402,6 +402,11 @@ Tests:
 
 ### Phase 1: Compact Sidecar Digest Boundary
 
+Implementation status 2026-05-12: green. Focused projection/harness tests,
+boundary audit, scoped ruff, `git diff --check`, and codex-ultra review session
+`019e198a-88e3-7962-886d-072a9b05d997` passed. Next action is one bounded
+native step-shape diagnostic before `speed_1` / `proof_5` / broad measurement.
+
 作業:
 
 - `compact_sidecar_digest` に bounded WorkFrame projection fields を追加する。

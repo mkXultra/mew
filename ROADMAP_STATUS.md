@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native responsibility-boundary repair. Provider-native runtime exists, but Phase 0 inventory/static audit showed semantic-ish controls still leak through sidecar/workframe/finish paths. Current work is Phase 1 compact sidecar digest boundary before another live diagnostic. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is the implement_v2 native responsibility-boundary repair. Phase 1 compact sidecar digest boundary is green; next action is one bounded native step-shape diagnostic before any speed_1/proof_5/broad measurement. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -73,15 +73,15 @@ Current controller mode: `m6_24_native_responsibility_boundary`.
 
 Current diagnostic mode: `m6_24_native_step_shape_gate`.
 
-Before another live `step-check-10min`, `speed_1`, `proof_5`, or broad
-measurement, complete Phase 1 of
-`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`.
-Native v2 must keep `NativeTranscript` / provider-native paired tool outputs as
-the source of truth, expose only `native_transcript_window` plus bounded
-`compact_sidecar_digest` as dynamic provider input, and keep `persisted_lane_state`
-and ordinary repair `required_next` out of the default provider-visible path.
-Legacy model-JSON runs, WorkFrame-only projection work, prompt/parser repair,
-and live diagnostic reruns cannot close the active boundary gate.
+Phase 1 of
+`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is
+green. Native v2 keeps `NativeTranscript` / provider-native paired tool outputs
+as the source of truth, exposes only `native_transcript_window` plus bounded
+`compact_sidecar_digest` as dynamic provider input, and keeps full
+`persisted_lane_state`, ordinary repair `required_next`, and prescriptive
+`native_loop_control` policy text out of the default provider-visible path.
+The next step is exactly one bounded native step-shape diagnostic before
+`speed_1`, `proof_5`, or broad measurement.
 
 Scope:
 
@@ -111,17 +111,18 @@ Scope:
   through provider-native `inspect_dir -> write_file -> run_tests -> finish`,
   emitted authoritative native artifacts, and passed
   `scripts/check_implement_v2_native_gate.py`.
-- M6.24 live proof work resumes only after the native responsibility-boundary
-  Phase 1 gate is green or explicitly accepted yellow. The active proof lane is
-  still `implement_v2`, but the active controller is the native boundary repair,
-  not scoped `speed_1` rebaseline. Historical `implement_v1`, model-JSON
-  `implement_v2`, pre-native WorkFrame results, and the tiny native-loop gate
-  remain repair evidence but cannot close the current M6.24 gate.
+- M6.24 live proof work may resume with one bounded native step-shape
+  diagnostic. The active proof lane is still `implement_v2`, and Phase 1
+  boundary validation is green: focused native projection/harness tests,
+  hot-path fastcheck, scoped ruff, `git diff --check`, and
+  `scripts/check_native_tool_loop_boundary.py` passed; codex-ultra review
+  session `019e198a-88e3-7962-886d-072a9b05d997` returned `STATUS: APPROVE`.
+  Historical `implement_v1`, model-JSON `implement_v2`, pre-native WorkFrame
+  results, and the tiny native-loop gate remain repair evidence but cannot
+  replace the next bounded native diagnostic.
 - The prior scoped rebaseline controller
-  (`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`) is suspended until Phase
-  1 compact sidecar digest boundary is implemented, focused projection/harness
-  tests plus `scripts/check_native_tool_loop_boundary.py` pass, and one bounded
-  same-shape diagnostic is explicitly authorized.
+  (`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`) remains suspended until
+  the next bounded same-shape native diagnostic is examined.
 - The first true-v2 `build-cython-ext` speed attempt
   `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215` is excluded from
   product evidence: Docker failed before `mew` launched because the harness
@@ -255,7 +256,7 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 is still the active M6.24 lane, but measurement is paused while the native responsibility-boundary repair is active; continue docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md Phase 1 from commit 3059cca, keep NativeTranscript/provider-native paired outputs as source of truth, remove full persisted_lane_state and ordinary repair required_next from the default provider-visible path, then run focused projection/harness tests plus the boundary audit before any live step-check/speed_1/proof_5/broad measurement
+selected_lane=implement_v2 is still the active M6.24 lane; native responsibility-boundary Phase 1 is green, so run exactly one bounded native step-shape diagnostic next. Keep NativeTranscript/provider-native paired outputs as source of truth, keep full persisted_lane_state and ordinary repair required_next out of the default provider-visible path, and do not jump directly to speed_1/proof_5/broad measurement before analyzing that diagnostic.
 ```
 
 Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
@@ -302,12 +303,12 @@ Controller docs:
 Current native-boundary-gated next action:
 
 ```text
-M6.24 -> native responsibility-boundary Phase 0 audit committed -> implement Phase 1 compact sidecar digest boundary -> focused projection/harness tests plus boundary audit -> then one bounded step-shape diagnostic before speed_1/proof_5/broad measurement
+M6.24 -> native responsibility-boundary Phase 1 green -> run one bounded native step-shape diagnostic -> compare step shape and provider-visible request inventory -> then decide repair vs speed_1/proof_5/broad measurement
 ```
 
 Older scoped-rebaseline, WorkFrame, diagnostic-runner, and native-loop rows
-remain historical evidence only until the Phase 1 boundary gate is green or
-explicitly accepted yellow.
+remain historical evidence. They do not supersede the next bounded native
+diagnostic.
 
 The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
 prior-failure repair is replayable and classified, but codex-ultra marked it
@@ -397,13 +398,12 @@ Native-loop gate evidence:
   returned `ok=true`
 
 Remaining active gap: do not classify the latest bounded 10min native
-step-shape diagnostic as a solver failure yet. Before another live diagnostic,
-close Phase 1 of the boundary design: provider-visible dynamic input must be
-`native_transcript_window` plus bounded `compact_sidecar_digest`; full
-`persisted_lane_state`, ordinary repair `required_next`, and prescriptive
-`native_loop_control` instruction text must leave the default provider-visible
-path. Validate with focused projection/harness tests and
-`scripts/check_native_tool_loop_boundary.py`.
+step-shape diagnostic as a solver failure yet. Phase 1 of the boundary design is
+green: provider-visible dynamic input is `native_transcript_window` plus bounded
+`compact_sidecar_digest`; full `persisted_lane_state`, ordinary repair
+`required_next`, and prescriptive `native_loop_control` instruction text are out
+of the default provider-visible path. Next, run and analyze one bounded native
+step-shape diagnostic.
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 

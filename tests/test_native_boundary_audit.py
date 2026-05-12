@@ -28,7 +28,7 @@ def test_native_boundary_audit_reports_missing_source_marker_in_anchor_window(tm
     _write_complete_fixture(tmp_path)
     harness = tmp_path / "src/mew/implement_lane/native_tool_harness.py"
     harness.write_text(
-        harness.read_text(encoding="utf-8").replace('        "next_action_policy": next_action_policy,\n', ""),
+        harness.read_text(encoding="utf-8").replace('    "compact_sidecar_digest": dict(compact_sidecar_digest),\n', ""),
         encoding="utf-8",
     )
 
@@ -36,7 +36,7 @@ def test_native_boundary_audit_reports_missing_source_marker_in_anchor_window(tm
 
     assert not report.ok
     failed = {check.name for check in report.checks if not check.passed}
-    assert "source_inventory_native_loop_control_policy_state" in failed
+    assert "source_inventory_persisted_lane_state_provider_payload" in failed
 
 
 def test_native_boundary_audit_reports_missing_source_file(tmp_path: Path) -> None:
@@ -76,18 +76,17 @@ def _write_complete_fixture(root: Path) -> None:
         "    provider=provider,\n"
         "    tool_calls=tuple(tool_calls),\n"
         ")\n"
+        "def _responses_input_items():\n"
+        "    compact_sidecar_digest = {}\n"
         "task_payload = {\n"
-        '    "persisted_lane_state": dict(lane_input.persisted_lane_state),\n'
+        '    "compact_sidecar_digest": dict(compact_sidecar_digest),\n'
         "}\n"
         "def _native_loop_control_state():\n"
         "    first_write_due = True\n"
         "    verifier_repair_due = True\n"
-        '    next_action_policy = "continue_transcript_driven_work"\n'
         "    return {\n"
-        '        "next_action_policy": next_action_policy,\n'
-        "    }\n"
-        "def _native_loop_control_input_item(state):\n"
-        '    instruction = "patch/edit/write; Do not continue broad exploration"\n',
+        '        "surface": "native_loop_signals",\n'
+        "    }\n",
         encoding="utf-8",
     )
     (impl / "exec_runtime.py").write_text(
@@ -103,6 +102,10 @@ def _write_complete_fixture(root: Path) -> None:
         encoding="utf-8",
     )
     (impl / "native_sidecar_projection.py").write_text(
+        "def _workframe_projection_digest(workframe):\n"
+        '    "current_phase"\n'
+        '    "attention_hints"\n'
+        '    "loop_signals"\n'
         "def _workframe_digest(workframe_bundle):\n"
         "    required_next = {}\n"
         '    "required_next_kind"\n'

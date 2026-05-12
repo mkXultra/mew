@@ -21,6 +21,7 @@ class SourceControlSpec:
     relative_path: str
     anchor: str
     markers: tuple[str, ...]
+    forbidden_markers: tuple[str, ...] = ()
     window_before: int = 0
     window_after: int = 30
 
@@ -44,21 +45,24 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
         name="native_loop_control_policy_state",
         relative_path="src/mew/implement_lane/native_tool_harness.py",
         anchor="def _native_loop_control_state",
-        markers=("first_write_due", "verifier_repair_due", "next_action_policy =", '"next_action_policy": next_action_policy'),
+        markers=("first_write_due", "verifier_repair_due", '"surface": "native_loop_signals"'),
+        forbidden_markers=("next_action_policy",),
         window_after=58,
     ),
     SourceControlSpec(
-        name="native_loop_control_instruction_text",
+        name="native_loop_control_instruction_removed",
         relative_path="src/mew/implement_lane/native_tool_harness.py",
-        anchor="def _native_loop_control_input_item",
-        markers=("patch/edit/write", "Do not continue broad exploration"),
-        window_after=28,
+        anchor="def _responses_input_items",
+        markers=("compact_sidecar_digest",),
+        forbidden_markers=("_native_loop_control_input_item", "patch/edit/write", "Do not continue broad exploration"),
+        window_after=48,
     ),
     SourceControlSpec(
         name="persisted_lane_state_provider_payload",
         relative_path="src/mew/implement_lane/native_tool_harness.py",
         anchor="task_payload = {",
-        markers=('"persisted_lane_state": dict(lane_input.persisted_lane_state)',),
+        markers=('"compact_sidecar_digest": dict(compact_sidecar_digest)',),
+        forbidden_markers=("persisted_lane_state",),
         window_after=12,
     ),
     SourceControlSpec(
@@ -78,9 +82,10 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
     SourceControlSpec(
         name="sidecar_required_next_digest",
         relative_path="src/mew/implement_lane/native_sidecar_projection.py",
-        anchor="def _workframe_digest",
-        markers=("required_next", '"required_next_kind"', '"required_next_evidence_refs"'),
-        window_after=28,
+        anchor="def _workframe_projection_digest",
+        markers=('"current_phase"', '"attention_hints"', '"loop_signals"'),
+        forbidden_markers=('"required_next_kind"', '"required_next_evidence_refs"'),
+        window_after=34,
     ),
     SourceControlSpec(
         name="sidecar_todo_required_next_projection",
@@ -237,13 +242,20 @@ def _source_window_check(root: Path, spec: SourceControlSpec) -> BoundaryAuditCh
             detail=f"{spec.relative_path} missing anchor: {spec.anchor}",
         )
     missing = [marker for marker in spec.markers if marker not in window]
+    forbidden = [marker for marker in spec.forbidden_markers if marker in window]
+    passed = not missing and not forbidden
+    details: list[str] = []
+    if missing:
+        details.append(f"missing markers: {', '.join(missing)}")
+    if forbidden:
+        details.append(f"forbidden markers present: {', '.join(forbidden)}")
     return BoundaryAuditCheck(
         name=f"source_inventory_{spec.name}",
-        passed=not missing,
+        passed=passed,
         detail=(
             f"{spec.relative_path} around {spec.anchor!r}"
-            if not missing
-            else f"{spec.relative_path} around {spec.anchor!r} missing markers: {', '.join(missing)}"
+            if passed
+            else f"{spec.relative_path} around {spec.anchor!r} {'; '.join(details)}"
         ),
     )
 
