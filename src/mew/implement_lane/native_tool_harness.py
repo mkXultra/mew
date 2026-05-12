@@ -59,7 +59,7 @@ _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
 _CONTROL_FAILURE_SUMMARY_LIMIT = 700
 _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
 _NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
-_NATIVE_MODEL_TIMEOUT_MIN_SECONDS = 5.0
+_NATIVE_MODEL_TIMEOUT_MIN_SECONDS = 30.0
 _COMMAND_RUN_ID_RE = re.compile(r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)")
 _SEMANTIC_VERIFIER_FAILURE_PATTERNS = (
     re.compile(r"\bvm\s+(?:finished|stopped)\s+exit=(?!0\b)\d+\b", re.IGNORECASE),
@@ -246,6 +246,7 @@ def run_native_implement_v2(
     final_verifier_closeout_count = 0
     final_verifier_closeout_reason = ""
     final_verifier_closeout_provider_call_id = ""
+    native_model_budget_block: dict[str, object] | None = None
     start_monotonic = time.monotonic()
     status = "blocked"
     finish_summary = ""
@@ -260,6 +261,12 @@ def run_native_implement_v2(
             if turn_timeout < _NATIVE_MODEL_TIMEOUT_MIN_SECONDS:
                 status = "blocked"
                 finish_summary = "native wall-clock budget exhausted before next provider turn"
+                native_model_budget_block = {
+                    "failure_class": "native_model_budget_insufficient",
+                    "turn_index": turn_index,
+                    "active_model_timeout_seconds": round(max(0.0, turn_timeout), 3),
+                    "minimum_required_model_timeout_seconds": _NATIVE_MODEL_TIMEOUT_MIN_SECONDS,
+                }
                 break
             if hasattr(provider, "timeout"):
                 provider.timeout = turn_timeout
@@ -432,6 +439,8 @@ def run_native_implement_v2(
         "final_verifier_closeout_provider_call_id": final_verifier_closeout_provider_call_id,
         "pairing": validation.as_dict(),
     }
+    if native_model_budget_block is not None:
+        metrics["native_model_turn_budget_block"] = native_model_budget_block
     proof_artifacts: tuple[str, ...] = ()
     if artifact_root is not None:
         paths = _write_native_artifacts(Path(artifact_root), transcript, provider=provider)
@@ -1144,10 +1153,11 @@ def _native_loop_control_state(
             or current_turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD
         )
     )
+    failed_verifier_probe_threshold = _failed_verifier_repair_probe_threshold(latest_failed_verifier)
     verifier_repair_due = bool(
         latest_failed_verifier
         and post_failure_write_count == 0
-        and post_failure_probe_count >= _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD
+        and post_failure_probe_count >= failed_verifier_probe_threshold
     )
     return {
         "schema_version": 1,
@@ -1166,8 +1176,18 @@ def _native_loop_control_state(
         "post_failure_probe_count": post_failure_probe_count,
         "post_failure_verifier_count": post_failure_verifier_count,
         "post_failure_write_count": post_failure_write_count,
+        "failed_verifier_repair_probe_threshold": failed_verifier_probe_threshold,
         "max_additional_probe_turns": 0 if verifier_repair_due else (1 if first_write_due else None),
     }
+
+
+def _failed_verifier_repair_probe_threshold(item: NativeTranscriptItem | None) -> int:
+    if item is None:
+        return _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD
+    status = str(item.status or "").strip().casefold()
+    if status in {"interrupted", "killed", "timed_out", "orphaned"}:
+        return 1
+    return _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD
 
 
 def _native_call_is_probe_or_exec(item: NativeTranscriptItem) -> bool:

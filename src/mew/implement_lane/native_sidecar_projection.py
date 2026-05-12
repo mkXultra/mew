@@ -837,6 +837,10 @@ def _bounded_loop_signals(loop_signals: Mapping[str, object] | None) -> dict[str
         "post_failure_write_count": _safe_int(loop_signals.get("post_failure_write_count"), default=0),
         "verifier_count": _safe_int(loop_signals.get("verifier_count"), default=0),
         "write_count": _safe_int(loop_signals.get("write_count"), default=0),
+        "failed_verifier_repair_probe_threshold": _safe_int(
+            loop_signals.get("failed_verifier_repair_probe_threshold"),
+            default=0,
+        ),
     }
     latest = _compact_failed_verifier_signal(loop_signals.get("latest_failed_verifier"))
     if latest:

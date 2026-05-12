@@ -359,6 +359,21 @@ def test_live_native_provider_failure_rejects_invalid_partial_transcript(tmp_pat
             )
 
 
+def test_native_harness_blocks_before_provider_turn_when_wall_budget_is_too_low(tmp_path: Path) -> None:
+    lane_input = replace(_lane_input(tmp_path), task_contract={"max_wall_seconds": 10})
+    provider = NativeFakeProvider.from_item_batches([])
+    provider.timeout = 60.0  # type: ignore[attr-defined]
+
+    result = run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    assert result.status == "blocked"
+    assert result.finish_summary == "native wall-clock budget exhausted before next provider turn"
+    assert provider.requests == []
+    block = result.metrics["native_model_turn_budget_block"]
+    assert block["failure_class"] == "native_model_budget_insufficient"
+    assert block["active_model_timeout_seconds"] < block["minimum_required_model_timeout_seconds"]
+
+
 def test_live_native_input_carry_forward_omits_reasoning_refs_without_sidecar_bytes(tmp_path: Path) -> None:
     lane_input = _lane_input(tmp_path)
     descriptor = {
@@ -974,6 +989,56 @@ def test_native_harness_adds_repair_control_after_yielded_verifier_poll_failure(
     assert signals["verifier_repair_due"] is True
     assert signals["latest_failed_verifier"]["call_id"] == "poll-failure"
     assert signals["latest_failed_verifier"]["status"] == "failed"
+
+
+def test_native_harness_marks_interrupted_verifier_repair_after_one_probe(tmp_path: Path) -> None:
+    command_run_id = _command_run_id("verify-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("write-1", "write_file", {"path": "vm.js", "content": "bad\n"}, output_index=0),
+                fake_call(
+                    "verify-1",
+                    "run_command",
+                    {
+                        "command": "printf native-output; sleep 2",
+                        "cwd": ".",
+                        "command_intent": "verifier",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 0,
+                    },
+                    output_index=1,
+                ),
+            ],
+            [
+                fake_call(
+                    "cancel-verify",
+                    "cancel_command",
+                    {"command_run_id": command_run_id, "reason": "verifier stuck"},
+                    output_index=0,
+                ),
+            ],
+            [
+                fake_call(
+                    "probe-after-cancel",
+                    "run_command",
+                    {"command": "printf diagnose", "cwd": ".", "command_intent": "diagnostic"},
+                    output_index=0,
+                ),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=4)
+
+    signals = _loop_signals(provider.requests[3])
+    assert signals["verifier_repair_due"] is True
+    assert signals["post_failure_probe_count"] == 1
+    assert signals["failed_verifier_repair_probe_threshold"] == 1
+    assert signals["latest_failed_verifier"]["call_id"] == "cancel-verify"
+    assert signals["latest_failed_verifier"]["status"] == "interrupted"
 
 
 def test_native_harness_repair_control_suppressed_after_later_passing_verifier(tmp_path: Path) -> None:
