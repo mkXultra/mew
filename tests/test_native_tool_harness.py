@@ -541,6 +541,75 @@ def test_native_harness_blocked_finish_continues_and_non_tool_siblings_need_no_p
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_completed_finish_runs_acceptance_gate(tmp_path: Path) -> None:
+    lane_input = replace(
+        _lane_input(tmp_path),
+        task_contract={
+            "title": "runtime task",
+            "description": "Make node vm.js boot correctly. I will check that it prints booted and writes output.",
+            "acceptance_constraints": [
+                "I will check that it prints booted and writes output.",
+            ],
+        },
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_finish(
+                    "finish-early",
+                    {"summary": "artifact exists", "evidence_refs": [], "final_status": "done"},
+                    output_index=0,
+                )
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    assert result.status == "blocked"
+    assert result.metrics["finish_gate_block_count"] == 1
+    blockers = result.metrics["finish_gate_decision"]["blockers"]
+    assert any(blocker["code"] == "acceptance_constraints_unchecked" for blocker in blockers)
+    finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
+    assert finish_output.status == "blocked"
+    assert finish_output.is_error is True
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_unknown_completion_status_still_runs_acceptance_gate(tmp_path: Path) -> None:
+    lane_input = replace(
+        _lane_input(tmp_path),
+        task_contract={
+            "description": "The output should include hello.",
+            "acceptance_constraints": ["The output should include hello."],
+        },
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-unknown", {"summary": "done", "final_status": "finished"}, output_index=0)]]
+    )
+
+    result = run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    assert result.status == "blocked"
+    assert result.metrics["finish_gate_block_count"] == 1
+    blockers = result.metrics["finish_gate_decision"]["blockers"]
+    assert any(blocker["code"] == "acceptance_constraints_unchecked" for blocker in blockers)
+
+
+def test_native_harness_failed_finish_status_does_not_complete(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-failed", {"summary": "failed", "final_status": "failed"}, output_index=0)]]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=1)
+
+    assert result.status == "blocked"
+    assert result.metrics["finish_gate_block_count"] == 0
+    finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
+    assert finish_output.status == "blocked"
+    assert finish_output.is_error is True
+
+
 def test_native_harness_model_json_text_is_not_control(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches([[model_json_text_non_control_item(), fake_finish("finish-1")]])
 

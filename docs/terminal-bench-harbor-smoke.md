@@ -45,7 +45,7 @@ PYTHONPATH=.harbor harbor run \
   --ak command_cwd="/app" \
   --ak container_repo_root="/mew" \
   --ak timeout_seconds=1800 \
-  --ak command_template="mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-read /etc/apt --allow-read /tmp --allow-read /tests --allow-write . --allow-write /usr/local/bin --allow-write /tmp --allow-shell --allow-verify --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 {max_wall_seconds_option} --max-steps 30 --work-guidance 'selected_lane=implement_v2 write_integration_observation_detail=true external_acceptance_tests=/tests inspect_external_tests_before_finish=true' --report {report_path} --artifacts {artifact_dir} --json" \
+  --ak command_template="mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-read /etc/apt --allow-read /tmp --allow-write . --allow-write /usr/local/bin --allow-write /tmp --allow-shell --allow-verify --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 {max_wall_seconds_option} --max-steps 30 --work-guidance 'selected_lane=implement_v2 write_integration_observation_detail=true' --report {report_path} --artifacts {artifact_dir} --json" \
   --mounts-json "[{\"type\":\"bind\",\"source\":\"${MEW_REPO}\",\"target\":\"/mew\"},{\"type\":\"bind\",\"source\":\"/Users/mk/.codex/auth.json\",\"target\":\"/codex-auth/auth.json\"}]"
 ```
 
@@ -64,12 +64,12 @@ uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter
 
 The runner fixes the default diagnostic shape:
 
-- `selected_lane=implement_v2 write_integration_observation_detail=true
-  external_acceptance_tests=/tests inspect_external_tests_before_finish=true`
-  in a single `--work-guidance` string;
+- `selected_lane=implement_v2 write_integration_observation_detail=true` in a
+  single `--work-guidance` string;
 - local checkout mounted at `/mew` and `~/.codex/auth.json` mounted at
   `/codex-auth/auth.json`;
-- Terminal-Bench external acceptance tests exposed read-only at `/tests`;
+- no assumed `/tests` read surface; the 2026-05-12 diagnostic showed that path
+  is absent inside this Harbor agent environment;
 - `timeout_seconds=660` and `timeout_reserve_seconds=60`, which makes
   `{max_wall_seconds_option}` expand to a 600 second mew wall budget;
 - post-run summary that reports whether integration-observation detail was

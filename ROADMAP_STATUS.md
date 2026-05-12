@@ -88,11 +88,18 @@ the model wrote source at `194s`, ran `8` internal verifiers, and finished, but
 the external Terminal-Bench verifier failed because `/tmp/frame.bmp` was never
 created. The internal verifier had accepted nearby frame artifacts
 (`frames/frame000000.rgba` and `frame.ppm`) instead of the actual external
-acceptance surface. Current repair is bounded to the Harbor runner: expose the
-generic Terminal-Bench external test root (`/tests`) as a read root and guidance
-so mew can inspect visible acceptance tests before finish. Do not run `speed_1`,
-`proof_5`, or broad measurement until this runner repair is committed and
-followed by one bounded same-shape native step-shape diagnostic.
+acceptance surface. The first attempted repair (`a958586`) exposed `/tests` as
+a read root and guidance, but the follow-up diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-125506` falsified that
+hypothesis: `/tests` does not exist in the agent environment, native pairing
+remained valid (`57` calls / `57` outputs), and the model still finished after
+only proving `/tmp/frame.bmp` shape/nonblank while missing the semantic
+`booted correctly` stdout obligation. Current repair is native core finish
+gating: remove the false `/tests` guidance and make provider-native `finish`
+calls pass through the deterministic acceptance gate using task-extracted
+constraints. Do not run `speed_1`, `proof_5`, or broad measurement until this
+repair is committed and followed by one bounded same-shape native step-shape
+diagnostic.
 
 Scope:
 

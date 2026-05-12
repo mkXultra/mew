@@ -1545,11 +1545,32 @@ mew accepted self-selected frame artifacts (`frames/frame000000.rgba` and
 `--allow-read .`, `/etc/apt`, and `/tmp`, but not `/tests`, so the visible
 external acceptance surface was not available to the model.
 
-Decision: do not add a MIPS/Doom/frame-specific acceptance rule. Add the
-Terminal-Bench external tests root as a read-only Harbor runner surface
-(`--allow-read /tests`) and surface a generic guidance hint
+Decision at the time: do not add a MIPS/Doom/frame-specific acceptance rule.
+Try exposing the Terminal-Bench external tests root as a read-only Harbor
+runner surface (`--allow-read /tests`) and surface a generic guidance hint
 (`external_acceptance_tests=/tests inspect_external_tests_before_finish=true`).
-This is a benchmark-harness integration repair, not a core implement-lane
-policy change. After focused tests and review, run exactly one same-shape
+This was superseded by the next diagnostic: `/tests` was absent in the agent
+environment, so the durable repair moved to native finish gating.
+
+Native finish-gate decision 2026-05-12 JST:
+
+The follow-up same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-125506` falsified the
+`/tests` runner-surface hypothesis. The provider-visible command attempted to
+inspect `/tests`, but the path did not exist in the agent environment. The
+native transcript stayed valid (`57` calls / `57` outputs), first write happened
+at `325.986s`, and the internal verifier proved only that `/tmp/frame.bmp`
+existed, had BMP headers/dimensions, and was nonblank. The external verifier
+still failed `test_vm_execution` because stdout did not reach the expected
+runtime boot marker before the verifier killed the process. This is not a
+Doom-specific acceptance rule. It is a generic native-loop gap: provider-native
+`finish` accepted self-selected proof without running the deterministic done
+gate, so task-extracted semantic acceptance constraints were not enforced.
+
+Decision: remove the falsified `/tests` guidance from the Harbor runner and
+route native `finish` calls through the same deterministic acceptance gate used
+by the JSON v2 path. Persist task-extracted `acceptance_constraints` into the
+native task contract so provider input and finish gating share the same
+checklist. After focused tests, review, and commit, run exactly one same-shape
 `make-mips-interpreter --mode step-check-10min` diagnostic before any
 `speed_1`, `proof_5`, or broad measurement.

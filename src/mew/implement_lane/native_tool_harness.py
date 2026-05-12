@@ -37,7 +37,12 @@ from .prompt import build_implement_v2_prompt_sections
 from .read_runtime import READ_ONLY_TOOL_NAMES, execute_read_only_tool_call
 from .tool_policy import list_v2_tool_specs_for_mode
 from .types import ImplementLaneInput, ImplementLaneResult, ToolCallEnvelope, ToolResultEnvelope
+from .v2_runtime import (
+    _acceptance_session_from_tool_results,
+    _finish_acceptance_action,
+)
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
+from ..acceptance import acceptance_done_gate_decision
 from ..config import DEFAULT_CODEX_REASONING_EFFORT
 from ..prompt_sections import render_prompt_sections
 
@@ -247,6 +252,8 @@ def run_native_implement_v2(
     final_verifier_closeout_count = 0
     final_verifier_closeout_reason = ""
     final_verifier_closeout_provider_call_id = ""
+    finish_gate_block_count = 0
+    finish_gate_decision: dict[str, object] = {}
     native_model_budget_block: dict[str, object] | None = None
     start_monotonic = time.monotonic()
     status = "blocked"
@@ -336,6 +343,7 @@ def run_native_implement_v2(
                 lane_config=lane_config,
                 exec_runtime=exec_runtime,
                 write_runtime=write_runtime,
+                prior_tool_results=tuple(tool_results),
             )
             latency_finished = time.monotonic()
             output = _native_output_from_result(call, result, sequence=0)
@@ -367,6 +375,9 @@ def run_native_implement_v2(
                     "tool_name": call.tool_name,
                     "wall_seconds": round(latency_finished - start_monotonic, 6),
                 }
+            if call.kind == "finish_call" and _native_finish_gate_blocked(result):
+                finish_gate_block_count += 1
+                finish_gate_decision = _native_finish_gate_decision_payload(result)
             if call.kind == "finish_call" and result.status == "completed" and not result.is_error:
                 accepted_finish = call
                 status = "completed"
@@ -440,6 +451,8 @@ def run_native_implement_v2(
         "final_verifier_closeout_count": final_verifier_closeout_count,
         "final_verifier_closeout_reason": final_verifier_closeout_reason,
         "final_verifier_closeout_provider_call_id": final_verifier_closeout_provider_call_id,
+        "finish_gate_block_count": finish_gate_block_count,
+        "finish_gate_decision": finish_gate_decision,
         "pairing": validation.as_dict(),
     }
     if native_model_budget_block is not None:
@@ -520,6 +533,7 @@ def _execute_native_call(
     lane_config: Mapping[str, object],
     exec_runtime: ImplementV2ManagedExecRuntime,
     write_runtime: ImplementV2WriteRuntime,
+    prior_tool_results: tuple[ToolResultEnvelope, ...] = (),
 ) -> ToolResultEnvelope:
     if not call.call_id:
         return _invalid_result(call, reason="native tool call is missing call_id")
@@ -539,7 +553,7 @@ def _execute_native_call(
         status="validated",
     )
     if call.kind == "finish_call":
-        return _finish_result(envelope)
+        return _finish_result(envelope, lane_input=lane_input, prior_tool_results=prior_tool_results)
     if call.tool_name in READ_ONLY_TOOL_NAMES:
         return execute_read_only_tool_call(envelope, workspace=workspace, allowed_roots=allowed_read_roots)
     if call.tool_name in EXEC_TOOL_NAMES:
@@ -944,10 +958,25 @@ def _native_output_from_result(
     )
 
 
-def _finish_result(call: ToolCallEnvelope) -> ToolResultEnvelope:
-    outcome = str(call.arguments.get("outcome") or call.arguments.get("status") or "").strip().lower()
+def _finish_result(
+    call: ToolCallEnvelope,
+    *,
+    lane_input: ImplementLaneInput,
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> ToolResultEnvelope:
+    outcome = _native_finish_outcome(call.arguments)
     task_done = call.arguments.get("task_done")
     blocked = outcome in {"blocked", "continue"} or task_done is False
+    if not blocked:
+        finish_arguments = dict(call.arguments)
+        finish_arguments["outcome"] = outcome
+        gate = _native_finish_gate_decision(
+            lane_input,
+            finish_arguments,
+            prior_tool_results,
+        )
+        if gate.get("decision") != "allow_complete":
+            return _finish_gate_block_result(call, gate)
     status = "invalid" if blocked else "completed"
     return ToolResultEnvelope(
         lane_attempt_id=call.lane_attempt_id,
@@ -959,6 +988,85 @@ def _finish_result(call: ToolCallEnvelope) -> ToolResultEnvelope:
         content=({"summary": str(call.arguments.get("summary") or ""), "outcome": outcome or status},),
         evidence_refs=("native-finish://accepted",) if status == "completed" else (),
     )
+
+
+def _native_finish_outcome(arguments: Mapping[str, object]) -> str:
+    raw = str(
+        arguments.get("outcome")
+        or arguments.get("status")
+        or arguments.get("final_status")
+        or ""
+    ).strip().lower()
+    if not raw:
+        return "completed"
+    if raw in {"complete", "completed", "done", "success", "succeeded", "ok"}:
+        return "completed"
+    if raw in {"block", "blocked", "continue", "needs_work", "incomplete", "fail", "failed", "failure", "error"}:
+        return "blocked" if raw != "continue" else "continue"
+    return "completed"
+
+
+def _native_finish_gate_decision(
+    lane_input: ImplementLaneInput,
+    finish_arguments: dict[str, object],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    action = _finish_acceptance_action(
+        finish_arguments,
+        prior_tool_results,
+        task_description=_native_task_description(lane_input),
+    )
+    return acceptance_done_gate_decision(
+        _native_task_description(lane_input),
+        action,
+        session=_acceptance_session_from_tool_results(prior_tool_results, lane_input=lane_input),
+    )
+
+
+def _native_task_description(lane_input: ImplementLaneInput) -> str:
+    contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
+    chunks = [
+        str(contract.get("title") or "").strip(),
+        str(contract.get("description") or "").strip(),
+        str(contract.get("guidance") or "").strip(),
+        str(contract.get("verify_command") or "").strip(),
+    ]
+    constraints = contract.get("acceptance_constraints")
+    if isinstance(constraints, list):
+        chunks.extend(str(item or "").strip() for item in constraints)
+    return "\n".join(chunk for chunk in chunks if chunk)
+
+
+def _finish_gate_block_result(call: ToolCallEnvelope, gate: Mapping[str, object]) -> ToolResultEnvelope:
+    continuation = str(gate.get("continuation_prompt") or gate.get("reason") or "finish gate blocked completion")
+    return ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.provider_call_id,
+        mew_tool_call_id=call.mew_tool_call_id,
+        tool_name="finish",
+        status="invalid",
+        is_error=True,
+        content=(
+            {
+                "summary": continuation,
+                "outcome": "continue",
+                "finish_gate": dict(gate),
+            },
+        ),
+    )
+
+
+def _native_finish_gate_blocked(result: ToolResultEnvelope) -> bool:
+    if result.tool_name != "finish" or not result.is_error:
+        return False
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    return isinstance(payload.get("finish_gate"), dict)
+
+
+def _native_finish_gate_decision_payload(result: ToolResultEnvelope) -> dict[str, object]:
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    gate = payload.get("finish_gate")
+    return dict(gate) if isinstance(gate, dict) else {}
 
 
 def _invalid_result(call: NativeTranscriptItem, *, reason: str) -> ToolResultEnvelope:

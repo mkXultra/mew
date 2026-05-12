@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .acceptance import (
     acceptance_done_gate_decision,
+    extract_acceptance_constraints,
     finish_blocker_code,
     finish_continuation_prompt,
     is_model_inference_output_task,
@@ -7325,15 +7326,17 @@ def _work_ai_workspace_roots(roots, workspace):
 
 
 def _work_ai_implement_v2_task_contract(task, *, max_steps, max_wall_seconds, guidance, verify_command):
+    description = (task or {}).get("description") or (task or {}).get("notes") or ""
     return {
         "title": (task or {}).get("title") or "",
-        "description": (task or {}).get("description") or (task or {}).get("notes") or "",
+        "description": description,
         "cwd": (task or {}).get("cwd") or "",
         "kind": task_kind(task or {}),
         "max_steps": max_steps,
         "max_wall_seconds": max_wall_seconds,
         "guidance": _work_guidance_task_contract_guidance(guidance),
         "verify_command": verify_command or "",
+        "acceptance_constraints": extract_acceptance_constraints(description),
     }
 
 

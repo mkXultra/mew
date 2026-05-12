@@ -11034,7 +11034,7 @@ class WorkSessionTests(unittest.TestCase):
                                             "work",
                                             "--oneshot",
                                             "--instruction",
-                                            "Modify this workspace.",
+                                            "Modify this workspace. The output should change.",
                                             "--cwd",
                                             str(workspace),
                                             "--auth",
@@ -11061,6 +11061,10 @@ class WorkSessionTests(unittest.TestCase):
                 lane_input = v2_run.call_args.args[0]
                 self.assertEqual(lane_input.lane, "implement_v2")
                 self.assertEqual(lane_input.lane_config["mode"], "full")
+                self.assertEqual(
+                    lane_input.task_contract["acceptance_constraints"],
+                    ["The output should change."],
+                )
                 self.assertTrue(lane_input.lane_config["auto_approve_writes"])
                 self.assertEqual(lane_input.lane_config["allowed_write_roots"], [str(workspace.resolve())])
                 self.assertEqual(
