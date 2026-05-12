@@ -39,7 +39,7 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
         name="native_final_verifier_closeout_call",
         relative_path="src/mew/implement_lane/native_tool_harness.py",
         anchor="closeout = _native_final_verifier_closeout(",
-        markers=("provider=provider", "tool_calls=tuple(tool_calls)"),
+        markers=("provider=provider", "tool_calls=tuple(scoped_calls)"),
         window_after=18,
     ),
     SourceControlSpec(

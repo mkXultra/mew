@@ -111,6 +111,35 @@ class NativeImplementV2HarnessResult:
         )
 
 
+@dataclass(frozen=True)
+class _NativeCloseoutEvent:
+    kind: str
+    call: NativeTranscriptItem
+    result: ToolResultEnvelope
+    latency: dict[str, object]
+    reason: str
+
+
+@dataclass(frozen=True)
+class _NativeCloseoutContext:
+    closeout_refs: tuple[str, ...] = ()
+    fresh_verifier_refs: tuple[str, ...] = ()
+    blockers: tuple[str, ...] = ()
+    missing_obligations: tuple[str, ...] = ()
+    unsafe_blockers: tuple[str, ...] = ()
+    budget_blockers: tuple[str, ...] = ()
+
+    def merge(self, other: "_NativeCloseoutContext") -> "_NativeCloseoutContext":
+        return _NativeCloseoutContext(
+            closeout_refs=tuple(dict.fromkeys((*self.closeout_refs, *other.closeout_refs))),
+            fresh_verifier_refs=tuple(dict.fromkeys((*self.fresh_verifier_refs, *other.fresh_verifier_refs))),
+            blockers=tuple(dict.fromkeys((*self.blockers, *other.blockers))),
+            missing_obligations=tuple(dict.fromkeys((*self.missing_obligations, *other.missing_obligations))),
+            unsafe_blockers=tuple(dict.fromkeys((*self.unsafe_blockers, *other.unsafe_blockers))),
+            budget_blockers=tuple(dict.fromkeys((*self.budget_blockers, *other.budget_blockers))),
+        )
+
+
 @dataclass
 class NativeCodexResponsesProvider:
     """Live Codex Responses provider for the native implement_v2 harness."""
@@ -274,7 +303,6 @@ def run_native_implement_v2(
     status = "blocked"
     finish_summary = ""
     resolver = CompletionResolver()
-    resolver_blocked_return = False
 
     for turn_index in range(1, max_turns + 1):
         turn_timeout = _native_next_model_timeout_seconds(
@@ -384,6 +412,45 @@ def run_native_implement_v2(
                 prior_tool_results=tuple(tool_results),
             )
             if call.kind == "finish_call" and not _native_finish_protocol_error(result):
+                closeout_events, closeout_context = _run_native_finish_time_closeouts(
+                    lane_input,
+                    lane_attempt_id=lane_attempt_id,
+                    provider=provider,
+                    exec_runtime=exec_runtime,
+                    workspace=workspace,
+                    allowed_read_roots=allowed_read_roots,
+                    allowed_write_roots=allowed_write_roots,
+                    lane_config=lane_config,
+                    tool_calls=tuple(tool_calls),
+                    tool_results=tuple(tool_results),
+                    start_monotonic=start_monotonic,
+                )
+                for closeout_event in closeout_events:
+                    if closeout_event.kind == "active_command":
+                        active_command_closeout_count += 1
+                        active_command_closeout_reason = closeout_event.reason
+                        active_command_closeout_provider_call_id = closeout_event.call.call_id
+                    elif closeout_event.kind == "final_verifier":
+                        final_verifier_closeout_count += 1
+                        final_verifier_closeout_reason = closeout_event.reason
+                        final_verifier_closeout_provider_call_id = closeout_event.call.call_id
+                    items.append(replace(closeout_event.call, sequence=len(items) + 1))
+                    items.append(
+                        replace(
+                            _native_output_from_result(closeout_event.call, closeout_event.result, sequence=0),
+                            sequence=len(items) + 1,
+                        )
+                    )
+                    tool_calls.append(closeout_event.call)
+                    tool_results.append(closeout_event.result)
+                    tool_latencies.append(closeout_event.latency)
+                    if first_verifier_metric is None and _result_is_verifier_like(closeout_event.result):
+                        first_verifier_metric = {
+                            "turn_index": _turn_number(closeout_event.call.turn_id),
+                            "call_id": closeout_event.call.call_id,
+                            "tool_name": closeout_event.call.tool_name,
+                            "wall_seconds": closeout_event.latency["started_ms"] / 1000,
+                        }
                 decision = resolver.resolve(
                     _completion_resolver_input_from_finish(
                         call,
@@ -391,6 +458,8 @@ def run_native_implement_v2(
                         lane_input=lane_input,
                         transcript_items=tuple(items),
                         request_descriptor=request_descriptor,
+                        prior_tool_results=tuple(tool_results),
+                        closeout_context=closeout_context,
                     )
                 )
                 resolver_decisions.append(decision)
@@ -434,7 +503,6 @@ def run_native_implement_v2(
                 finish_summary = _finish_summary(call)
             elif call.kind == "finish_call" and _native_finish_resolver_lane_status(result) == "blocked_return":
                 terminal_blocked_finish = call
-                resolver_blocked_return = True
                 status = "blocked"
                 finish_summary = _native_finish_resolver_reason(result)
 
@@ -442,69 +510,6 @@ def run_native_implement_v2(
             items.append(replace(output, sequence=len(items) + 1))
         if accepted_finish is not None or terminal_blocked_finish is not None:
             break
-
-    active_closeout = None
-    if not resolver_blocked_return:
-        active_closeout = _native_active_command_closeout(
-            lane_input,
-            lane_attempt_id=lane_attempt_id,
-            provider=provider,
-            exec_runtime=exec_runtime,
-            start_monotonic=start_monotonic,
-        )
-    if active_closeout is not None:
-        active_call, active_result, active_latency = active_closeout
-        active_command_closeout_count = 1
-        active_command_closeout_reason = "native active command closeout ran before deterministic final verifier"
-        active_command_closeout_provider_call_id = active_call.call_id
-        items.append(replace(active_call, sequence=len(items) + 1))
-        items.append(replace(_native_output_from_result(active_call, active_result, sequence=0), sequence=len(items) + 1))
-        tool_calls.append(active_call)
-        tool_results.append(active_result)
-        tool_latencies.append(active_latency)
-        if first_verifier_metric is None and _result_is_verifier_like(active_result):
-            first_verifier_metric = {
-                "turn_index": _turn_number(active_call.turn_id),
-                "call_id": active_call.call_id,
-                "tool_name": active_call.tool_name,
-                "wall_seconds": active_latency["started_ms"] / 1000,
-            }
-
-    closeout = None
-    if not resolver_blocked_return:
-        closeout = _native_final_verifier_closeout(
-            lane_input,
-            lane_attempt_id=lane_attempt_id,
-            provider=provider,
-            exec_runtime=exec_runtime,
-            workspace=workspace,
-            allowed_read_roots=allowed_read_roots,
-            allowed_write_roots=allowed_write_roots,
-            lane_config=lane_config,
-            tool_calls=tuple(tool_calls),
-            tool_results=tuple(tool_results),
-            start_monotonic=start_monotonic,
-            current_status=status,
-        )
-    if closeout is not None:
-        closeout_call, closeout_result, closeout_latency = closeout
-        final_verifier_closeout_count = 1
-        final_verifier_closeout_reason = (
-            "native final verifier closeout ran after latest source mutation before max-turn closeout"
-        )
-        final_verifier_closeout_provider_call_id = closeout_call.call_id
-        items.append(replace(closeout_call, sequence=len(items) + 1))
-        items.append(replace(_native_output_from_result(closeout_call, closeout_result, sequence=0), sequence=len(items) + 1))
-        tool_calls.append(closeout_call)
-        tool_results.append(closeout_result)
-        tool_latencies.append(closeout_latency)
-        if first_verifier_metric is None:
-            first_verifier_metric = {
-                "turn_index": _turn_number(closeout_call.turn_id),
-                "call_id": closeout_call.call_id,
-                "tool_name": closeout_call.tool_name,
-                "wall_seconds": closeout_latency["started_ms"] / 1000,
-            }
 
     transcript = NativeTranscript(
         lane_attempt_id=lane_attempt_id,
@@ -678,6 +683,150 @@ def _execute_native_call(
     return _invalid_result(call, reason=f"unknown native tool: {call.tool_name}")
 
 
+def _run_native_finish_time_closeouts(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    provider: object,
+    exec_runtime: ImplementV2ManagedExecRuntime,
+    workspace: Path,
+    allowed_read_roots: tuple[str, ...],
+    allowed_write_roots: tuple[str, ...],
+    lane_config: Mapping[str, object],
+    tool_calls: tuple[NativeTranscriptItem, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    start_monotonic: float,
+) -> tuple[tuple[_NativeCloseoutEvent, ...], _NativeCloseoutContext]:
+    events: list[_NativeCloseoutEvent] = []
+    context = _NativeCloseoutContext()
+    scoped_calls = list(tool_calls)
+    scoped_results = list(tool_results)
+
+    active_closeout = _native_active_command_closeout(
+        lane_input,
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        exec_runtime=exec_runtime,
+        start_monotonic=start_monotonic,
+    )
+    if active_closeout is not None:
+        active_call, active_result, active_latency = active_closeout
+        event = _NativeCloseoutEvent(
+            kind="active_command",
+            call=active_call,
+            result=active_result,
+            latency=active_latency,
+            reason="native active command closeout ran during finish-time resolver evidence collection",
+        )
+        events.append(event)
+        scoped_calls.append(active_call)
+        scoped_results.append(active_result)
+        context = context.merge(_native_closeout_context_from_result(active_call, active_result))
+
+    pending_mutation = _latest_native_source_mutation_without_later_verifier(
+        tuple(scoped_calls),
+        tuple(scoped_results),
+        source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
+    )
+    if not pending_mutation:
+        return tuple(events), context
+    no_run_context = _native_final_verifier_closeout_no_run_context(
+        lane_input,
+        lane_config=lane_config,
+        start_monotonic=start_monotonic,
+    )
+    if no_run_context is not None:
+        return tuple(events), context.merge(no_run_context)
+
+    closeout = _native_final_verifier_closeout(
+        lane_input,
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        exec_runtime=exec_runtime,
+        workspace=workspace,
+        allowed_read_roots=allowed_read_roots,
+        allowed_write_roots=allowed_write_roots,
+        lane_config=lane_config,
+        tool_calls=tuple(scoped_calls),
+        tool_results=tuple(scoped_results),
+        start_monotonic=start_monotonic,
+    )
+    if closeout is None:
+        return tuple(events), context.merge(
+            _NativeCloseoutContext(
+                blockers=("closeout_verifier_not_run",),
+                missing_obligations=("strict_verifier_evidence",),
+            )
+        )
+    closeout_call, closeout_result, closeout_latency = closeout
+    events.append(
+        _NativeCloseoutEvent(
+            kind="final_verifier",
+            call=closeout_call,
+            result=closeout_result,
+            latency=closeout_latency,
+            reason="native final verifier closeout ran during finish-time resolver evidence collection",
+        )
+    )
+    return tuple(events), context.merge(_native_closeout_context_from_result(closeout_call, closeout_result))
+
+
+def _native_final_verifier_closeout_no_run_context(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_config: Mapping[str, object],
+    start_monotonic: float,
+) -> _NativeCloseoutContext | None:
+    if not _native_final_verifier_closeout_allowed(lane_input, lane_config=lane_config):
+        return _NativeCloseoutContext(
+            unsafe_blockers=("closeout_verifier_not_permitted",),
+            missing_obligations=("strict_verifier_evidence",),
+        )
+    if not _configured_native_final_verifier_command(lane_input):
+        return _NativeCloseoutContext(
+            blockers=("closeout_verifier_command_missing",),
+            missing_obligations=("strict_verifier_evidence",),
+        )
+    budget = _native_final_verifier_closeout_budget_seconds(lane_input, run_started=start_monotonic)
+    if budget < _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS:
+        return _NativeCloseoutContext(
+            budget_blockers=("closeout_verifier_budget_insufficient",),
+            missing_obligations=("strict_verifier_evidence",),
+        )
+    return None
+
+
+def _native_closeout_context_from_result(
+    call: NativeTranscriptItem,
+    result: ToolResultEnvelope,
+) -> _NativeCloseoutContext:
+    refs = _native_closeout_refs(call, result)
+    if _native_final_verifier_passed(result):
+        return _NativeCloseoutContext(closeout_refs=refs, fresh_verifier_refs=refs)
+    blocker = "closeout_verifier_failed"
+    payload = _native_result_payload(result)
+    status = str(payload.get("status") or result.status or "").casefold()
+    reason_text = result.natural_result_text().casefold()
+    if status in {"interrupted", "timeout", "timed_out", "yielded"} or "budget" in reason_text:
+        return _NativeCloseoutContext(
+            closeout_refs=refs,
+            budget_blockers=("closeout_verifier_budget_or_timeout",),
+            missing_obligations=("strict_verifier_evidence",),
+        )
+    return _NativeCloseoutContext(
+        closeout_refs=refs,
+        blockers=(blocker,),
+        missing_obligations=("strict_verifier_evidence",),
+    )
+
+
+def _native_closeout_refs(call: NativeTranscriptItem, result: ToolResultEnvelope) -> tuple[str, ...]:
+    refs = tuple(ref for ref in result.evidence_refs if str(ref).strip())
+    if refs:
+        return refs
+    return (f"native-closeout://{call.call_id}",)
+
+
 def _native_active_command_closeout(
     lane_input: ImplementLaneInput,
     *,
@@ -782,7 +931,6 @@ def _native_final_verifier_closeout(
     tool_calls: tuple[NativeTranscriptItem, ...],
     tool_results: tuple[ToolResultEnvelope, ...],
     start_monotonic: float,
-    current_status: str,
 ) -> tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]] | None:
     pending_mutation = _latest_native_source_mutation_without_later_verifier(
         tool_calls,
@@ -1363,10 +1511,16 @@ def _completion_resolver_input_from_finish(
     lane_input: ImplementLaneInput,
     transcript_items: tuple[NativeTranscriptItem, ...],
     request_descriptor: Mapping[str, object],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+    closeout_context: _NativeCloseoutContext,
 ) -> CompletionResolverInput:
     arguments, _ = _arguments(call)
     outcome = _native_finish_outcome(arguments)
-    gate = _native_finish_gate_decision_payload(result)
+    gate: dict[str, object] = {}
+    if outcome == "completed" and arguments.get("task_done") is not False:
+        finish_arguments = dict(arguments)
+        finish_arguments["outcome"] = outcome
+        gate = _native_finish_gate_decision(lane_input, finish_arguments, prior_tool_results)
     blockers: list[str] = []
     missing: list[str] = []
     unsafe_blockers: list[str] = []
@@ -1381,7 +1535,11 @@ def _completion_resolver_input_from_finish(
     missing.extend(_finish_arg_strings(arguments.get("missing_obligations")))
     unsafe_blockers.extend(_finish_arg_strings(arguments.get("unsafe_blockers")))
     budget_blockers.extend(_finish_arg_strings(arguments.get("budget_blockers")))
-    if gate:
+    blockers.extend(closeout_context.blockers)
+    missing.extend(closeout_context.missing_obligations)
+    unsafe_blockers.extend(closeout_context.unsafe_blockers)
+    budget_blockers.extend(closeout_context.budget_blockers)
+    if gate and gate.get("decision") != "allow_complete":
         blockers.append("finish_gate_blocked")
         blockers.extend(_finish_gate_blocker_codes(gate))
         missing.extend(_finish_gate_missing_obligations(gate))
@@ -1405,12 +1563,15 @@ def _completion_resolver_input_from_finish(
         ),
         compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
         typed_evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *_finish_arg_strings(arguments.get("evidence_refs"))))),
+        fresh_verifier_refs=tuple(closeout_context.fresh_verifier_refs),
         missing_obligations=tuple(dict.fromkeys(missing)),
-        closeout_refs=tuple(_finish_arg_strings(arguments.get("closeout_refs"))),
+        closeout_refs=tuple(
+            dict.fromkeys((*_finish_arg_strings(arguments.get("closeout_refs")), *closeout_context.closeout_refs))
+        ),
         blockers=tuple(dict.fromkeys(blockers)),
         unsafe_blockers=tuple(dict.fromkeys(unsafe_blockers)),
         budget_blockers=tuple(dict.fromkeys(budget_blockers)),
-        verifier_required=bool(gate),
+        verifier_required=bool(gate and gate.get("decision") != "allow_complete"),
     )
 
 
@@ -1423,6 +1584,7 @@ def _finish_result_with_resolver_decision(
     payload["resolver_decision_id"] = decision.decision_id
     payload["lane_status"] = decision.lane_status
     if decision.result == "allow":
+        payload.pop("finish_gate", None)
         payload["summary"] = payload.get("summary") or decision.reason
         payload["outcome"] = "completed"
         return replace(

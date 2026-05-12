@@ -506,6 +506,18 @@ Tests:
 
 ### Phase 4: Verifier Closeout Boundary
 
+Implementation status 2026-05-12: green. Verifier closeout now runs only on the
+valid `finish_call` path, before `CompletionResolver` decides lane status.
+Finish-time closeout evidence, blockers, missing obligations, unsafe blockers,
+and budget blockers are folded into `CompletionResolverInput`; no valid finish
+means no completion closeout path. Missing verifier command, no permission, and
+insufficient closeout budget are represented as resolver blockers without
+dispatching a tool. Fresh verifier evidence suppresses deterministic closeout
+before resolver. Focused native/resolver/transcript/projection tests, broader
+`test_implement_lane`, boundary audit, scoped ruff, `git diff --check`, and
+codex-ultra review session `019e1c1d-5ab2-7ca0-8f8f-3c24a41e7906` passed. Next
+action is Phase 5 replay / fastcheck.
+
 作業:
 
 - `_native_final_verifier_closeout` を「実行 dispatch」と「completion 判定」に分離する。
