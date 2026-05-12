@@ -252,6 +252,9 @@ def run_native_implement_v2(
     final_verifier_closeout_count = 0
     final_verifier_closeout_reason = ""
     final_verifier_closeout_provider_call_id = ""
+    active_command_closeout_count = 0
+    active_command_closeout_reason = ""
+    active_command_closeout_provider_call_id = ""
     finish_gate_block_count = 0
     finish_gate_decision: dict[str, object] = {}
     native_model_budget_block: dict[str, object] | None = None
@@ -388,6 +391,37 @@ def run_native_implement_v2(
         if accepted_finish is not None:
             break
 
+    active_closeout = _native_active_command_closeout(
+        lane_input,
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        exec_runtime=exec_runtime,
+        start_monotonic=start_monotonic,
+    )
+    if active_closeout is not None:
+        active_call, active_result, active_latency = active_closeout
+        active_command_closeout_count = 1
+        active_command_closeout_reason = "native active command closeout ran before deterministic final verifier"
+        active_command_closeout_provider_call_id = active_call.call_id
+        items.append(replace(active_call, sequence=len(items) + 1))
+        items.append(replace(_native_output_from_result(active_call, active_result, sequence=0), sequence=len(items) + 1))
+        tool_calls.append(active_call)
+        tool_results.append(active_result)
+        tool_latencies.append(active_latency)
+        if first_verifier_metric is None and _result_is_verifier_like(active_result):
+            first_verifier_metric = {
+                "turn_index": _turn_number(active_call.turn_id),
+                "call_id": active_call.call_id,
+                "tool_name": active_call.tool_name,
+                "wall_seconds": active_latency["started_ms"] / 1000,
+            }
+        if _native_final_verifier_passed(active_result):
+            status = "completed"
+            finish_summary = "native active verifier closeout passed; completing without another model turn"
+        else:
+            status = "blocked"
+            finish_summary = ""
+
     closeout = _native_final_verifier_closeout(
         lane_input,
         lane_attempt_id=lane_attempt_id,
@@ -451,6 +485,9 @@ def run_native_implement_v2(
         "final_verifier_closeout_count": final_verifier_closeout_count,
         "final_verifier_closeout_reason": final_verifier_closeout_reason,
         "final_verifier_closeout_provider_call_id": final_verifier_closeout_provider_call_id,
+        "active_command_closeout_count": active_command_closeout_count,
+        "active_command_closeout_reason": active_command_closeout_reason,
+        "active_command_closeout_provider_call_id": active_command_closeout_provider_call_id,
         "finish_gate_block_count": finish_gate_block_count,
         "finish_gate_decision": finish_gate_decision,
         "pairing": validation.as_dict(),
@@ -572,6 +609,97 @@ def _execute_native_call(
             )
         return write_runtime.execute(envelope)
     return _invalid_result(call, reason=f"unknown native tool: {call.tool_name}")
+
+
+def _native_active_command_closeout(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    provider: object,
+    exec_runtime: ImplementV2ManagedExecRuntime,
+    start_monotonic: float,
+) -> tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]] | None:
+    command_run_id = _native_active_command_run_id(exec_runtime)
+    if not command_run_id:
+        return None
+    budget = _native_final_verifier_closeout_budget_seconds(lane_input, run_started=start_monotonic)
+    turn_index = len(getattr(provider, "requests", []) or ()) + 1
+    call = _native_active_command_closeout_call(
+        lane_input,
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        turn_index=turn_index,
+        command_run_id=command_run_id,
+        timeout_seconds=budget,
+    )
+    prior = ToolResultEnvelope(
+        lane_attempt_id=lane_attempt_id,
+        provider_call_id=call.call_id,
+        mew_tool_call_id=f"native:{call.call_id}",
+        tool_name="poll_command",
+        status="yielded",
+        is_error=False,
+        content=({"command_run_id": command_run_id, "status": "yielded"},),
+    )
+    latency_start = time.monotonic()
+    if budget < _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS:
+        payloads = exec_runtime.cancel_active_commands(
+            reason="native active command closeout budget exhausted before deterministic final verifier"
+        )
+    else:
+        payloads = exec_runtime.finalize_active_commands(timeout_seconds=budget)
+    payload = next(
+        (item for item in payloads if str(item.get("command_run_id") or "") == command_run_id),
+        payloads[0] if payloads else {"command_run_id": command_run_id, "status": "orphaned"},
+    )
+    result = exec_runtime.project_result_payload(prior, payload)
+    latency_finished = time.monotonic()
+    latency = {
+        "call_id": call.call_id,
+        "tool_name": call.tool_name,
+        "turn_index": turn_index,
+        "queued_ms": 0,
+        "started_ms": round((latency_start - start_monotonic) * 1000, 3),
+        "first_output_ms": round((latency_finished - latency_start) * 1000, 3),
+        "finished_ms": round((latency_finished - latency_start) * 1000, 3),
+    }
+    return call, result, latency
+
+
+def _native_active_command_run_id(exec_runtime: ImplementV2ManagedExecRuntime) -> str:
+    active = getattr(getattr(exec_runtime, "runner", None), "active", None)
+    return str(getattr(active, "command_run_id", "") or "").strip()
+
+
+def _native_active_command_closeout_call(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    provider: object,
+    turn_index: int,
+    command_run_id: str,
+    timeout_seconds: float,
+) -> NativeTranscriptItem:
+    call_id = f"call-active-command-closeout-{turn_index:03d}"
+    arguments = {
+        "command_run_id": command_run_id,
+        "wait_seconds": round(max(0.0, timeout_seconds), 3),
+        "purpose": "finalize active managed command before starting any deterministic final verifier",
+    }
+    return NativeTranscriptItem(
+        sequence=0,
+        turn_id=f"turn-{turn_index}-active-command-closeout",
+        lane_attempt_id=lane_attempt_id,
+        provider=str(getattr(provider, "provider", "") or "native-controller"),
+        model=str(getattr(provider, "model", "") or lane_input.model or ""),
+        response_id=f"native-active-command-closeout-{turn_index}",
+        provider_item_id=f"item-{call_id}",
+        output_index=0,
+        kind="function_call",
+        call_id=call_id,
+        tool_name="poll_command",
+        arguments_json_text=json.dumps(arguments, sort_keys=True),
+    )
 
 
 def _native_final_verifier_closeout(
@@ -917,8 +1045,25 @@ def _native_final_verifier_passed(result: ToolResultEnvelope) -> bool:
     payload = _native_result_payload(result)
     verifier = payload.get("verifier_evidence")
     if isinstance(verifier, dict):
-        return str(verifier.get("verdict") or "").casefold() == "pass"
+        verdict = str(verifier.get("verdict") or "").casefold()
+        if verdict == "pass":
+            return True
+        if verdict in {"fail", "failed", "partial"}:
+            return False
+        return _native_completed_verifier_exit_zero(result)
     return True
+
+
+def _native_completed_verifier_exit_zero(result: ToolResultEnvelope) -> bool:
+    payload = _native_result_payload(result)
+    if payload.get("exit_code") not in (0, "0"):
+        return False
+    if str(payload.get("tool_name") or "").strip() == "run_tests":
+        return True
+    contract = payload.get("execution_contract_normalized") or payload.get("execution_contract")
+    return _native_execution_contract_is_verifier_like(contract) or str(
+        payload.get("command_intent") or ""
+    ).strip().casefold() in {"verify", "verifier", "verification", "finish_verifier", "test", "acceptance"}
 
 
 def _command_run_id_from_result(result: ToolResultEnvelope) -> str:

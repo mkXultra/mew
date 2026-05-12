@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is native step-shape diagnosis. Native finish gating is committed; the latest step-check proved the gate blocks false completion and exposed exact artifact-obligation projection as the next generic repair. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is native step-shape diagnosis. Exact artifact-obligation projection is committed; the latest step-check proved the model targets `/tmp/frame.bmp` and exposed active verifier closeout lifecycle as the next generic repair. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -98,14 +98,22 @@ task-extracted constraints. The follow-up diagnostic
 `mew-make-mips-interpreter-step-check-10min-20260512-134343` proved the gate
 works: pairing stayed valid (`66` calls / `66` outputs), the premature finish
 was blocked, and the model continued with another verifier. The remaining gap
-is generic projection, not task-specific solver logic: the gate knew the exact
+was generic projection, not task-specific solver logic: the gate knew the exact
 external artifact obligation `/tmp/frame.bmp`, but the continuation turn
 verified nearby model-selected artifacts (`first_frame.bmp`,
-`frame_000000.bmp`) instead. Current repair is to preserve exact typed and
-legacy finish-gate obligations, including artifact paths, in continuation
-prompts and recovery cards. Do not run `speed_1`, `proof_5`, or broad
-measurement until this projection repair is committed and followed by one
-bounded same-shape native step-shape diagnostic.
+`frame_000000.bmp`) instead. Commit `90e5dd1` preserved exact typed and legacy
+finish-gate obligations, including artifact paths, in continuation prompts and
+recovery cards. The follow-up diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-141746` proved that
+projection repair worked: the model's final verifier targeted `/tmp/frame.bmp`
+directly. The new generic gap is active managed-command lifecycle: that
+verifier yielded, then native final-verifier closeout tried to start another
+`run_command` while the yielded verifier was still active and failed with
+`a managed command is already running`. Current repair is to finalize or cancel
+any active verifier command before deterministic final-verifier closeout. Do
+not run `speed_1`, `proof_5`, or broad measurement until this lifecycle repair
+is committed and followed by one bounded same-shape native step-shape
+diagnostic.
 
 Scope:
 
