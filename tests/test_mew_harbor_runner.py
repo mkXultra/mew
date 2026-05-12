@@ -4,6 +4,7 @@ import datetime as dt
 import json
 
 from mew.mew_harbor_runner import (
+    DEFAULT_WORK_GUIDANCE,
     MewHarborRun,
     RUN_MODE_DEFAULTS,
     build_parser,
@@ -34,7 +35,7 @@ def _config(tmp_path, **overrides):
         "timeout_seconds": 660,
         "timeout_reserve_seconds": 60,
         "agent_timeout_multiplier": 2,
-        "work_guidance": "selected_lane=implement_v2 write_integration_observation_detail=true",
+        "work_guidance": DEFAULT_WORK_GUIDANCE,
         "install_command": "python3 -m pip install -e /mew",
         "run_mode": "step-check-10min",
     }
@@ -45,10 +46,12 @@ def _config(tmp_path, **overrides):
 def test_mew_command_template_enables_implement_v2_and_observer_detail(tmp_path):
     template = build_mew_work_command_template(_config(tmp_path))
 
-    assert "--work-guidance 'selected_lane=implement_v2 write_integration_observation_detail=true'" in template
+    assert "selected_lane=implement_v2 write_integration_observation_detail=true" in template
+    assert "external_acceptance_tests=/tests inspect_external_tests_before_finish=true" in template
     assert "--auth /codex-auth/auth.json" in template
     assert "--model gpt-5.5" in template
     assert "{max_wall_seconds_option}" in template
+    assert "--allow-read /tests" in template
     assert "--report {report_path}" in template
     assert "--artifacts {artifact_dir}" in template
 

@@ -16,7 +16,12 @@ from mew.reference_trace_runner import latest_run_dir, trial_dirs
 
 DEFAULT_DATASET = "terminal-bench/terminal-bench-2"
 DEFAULT_JOBS_ROOT = Path("proof-artifacts/terminal-bench/harbor-smoke")
-DEFAULT_WORK_GUIDANCE = "selected_lane=implement_v2 write_integration_observation_detail=true"
+DEFAULT_EXTERNAL_ACCEPTANCE_TESTS_ROOT = Path("/tests")
+DEFAULT_WORK_GUIDANCE = (
+    "selected_lane=implement_v2 write_integration_observation_detail=true "
+    f"external_acceptance_tests={DEFAULT_EXTERNAL_ACCEPTANCE_TESTS_ROOT} "
+    "inspect_external_tests_before_finish=true"
+)
 DEFAULT_INSTALL_COMMAND = (
     "apt-get update && apt-get install -y python3 python3-pip python3-venv "
     "&& python3 -m pip install --break-system-packages -e /mew"
@@ -129,6 +134,7 @@ def build_mew_work_command_template(config: MewHarborRun) -> str:
         "--allow-read . "
         "--allow-read /etc/apt "
         "--allow-read /tmp "
+        f"--allow-read {DEFAULT_EXTERNAL_ACCEPTANCE_TESTS_ROOT} "
         "--allow-write . "
         "--allow-write /usr/local/bin "
         "--allow-write /tmp "

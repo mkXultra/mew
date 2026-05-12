@@ -1531,3 +1531,25 @@ micro checks. The old live sequence is historical; the current sequence is
 Phase 1 boundary implementation -> focused projection/harness tests plus
 boundary audit -> exactly one authorized same-shape diagnostic -> only then
 `speed_1` or `proof_5`.
+
+Native external acceptance surface decision 2026-05-12 JST:
+
+The post-`40264ff` same-shape diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-122713` shows the prewrite
+plateau repair worked: native transcript pairing stayed valid, first source
+mutation happened at `194s`, and the model ran `8` internal verifiers before
+finish. The remaining miss is a different, generic Harbor integration issue:
+mew accepted self-selected frame artifacts (`frames/frame000000.rgba` and
+`frame.ppm`) while the external Terminal-Bench verifier expected
+`/tmp/frame.bmp` according to `/tests/test_outputs.py`. The runner command had
+`--allow-read .`, `/etc/apt`, and `/tmp`, but not `/tests`, so the visible
+external acceptance surface was not available to the model.
+
+Decision: do not add a MIPS/Doom/frame-specific acceptance rule. Add the
+Terminal-Bench external tests root as a read-only Harbor runner surface
+(`--allow-read /tests`) and surface a generic guidance hint
+(`external_acceptance_tests=/tests inspect_external_tests_before_finish=true`).
+This is a benchmark-harness integration repair, not a core implement-lane
+policy change. After focused tests and review, run exactly one same-shape
+`make-mips-interpreter --mode step-check-10min` diagnostic before any
+`speed_1`, `proof_5`, or broad measurement.

@@ -80,21 +80,19 @@ as the source of truth, exposes only `native_transcript_window` plus bounded
 `compact_sidecar_digest` as dynamic provider input, and keeps full
 `persisted_lane_state`, ordinary repair `required_next`, and prescriptive
 `native_loop_control` policy text out of the default provider-visible path.
-The low-budget/interrupted-verifier repair was committed as `85e5a88`. The next
-bounded diagnostic,
-`mew-make-mips-interpreter-step-check-10min-20260512-114504`, preserved paired
-native transcript evidence (`58` native calls / `58` outputs, valid pairing, no
-model-json parse path). It is still not clean solver evidence: it spent `37`
-native model turns and `58` read/probe calls with `0` writes and `0` verifiers,
-while the compact digest had already projected `first_write_due=true` from turn
-4 onward. Current repair is bounded and generic: after a prewrite probe plateau,
-allow `write_file` / `edit_file` / `apply_patch` or finish, but block more
-read/exec probes until the model mutates source or exits blocked. Focused
-native validation is green; codex-ultra review session
-`019e1a30-9aab-7411-a3d9-5d65d52f62e6` returned `STATUS: APPROVE` and its
-minor test-gap note was addressed. Do not run
-`speed_1`, `proof_5`, or broad measurement until this repair is committed and
-followed by one bounded native step-shape diagnostic.
+The prewrite probe plateau repair was committed as `40264ff`; focused native
+validation and codex-ultra review were green. The follow-up bounded diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-122713` moved the failure
+class: paired native transcript evidence is valid (`59` calls / `59` outputs),
+the model wrote source at `194s`, ran `8` internal verifiers, and finished, but
+the external Terminal-Bench verifier failed because `/tmp/frame.bmp` was never
+created. The internal verifier had accepted nearby frame artifacts
+(`frames/frame000000.rgba` and `frame.ppm`) instead of the actual external
+acceptance surface. Current repair is bounded to the Harbor runner: expose the
+generic Terminal-Bench external test root (`/tests`) as a read root and guidance
+so mew can inspect visible acceptance tests before finish. Do not run `speed_1`,
+`proof_5`, or broad measurement until this runner repair is committed and
+followed by one bounded same-shape native step-shape diagnostic.
 
 Scope:
 
