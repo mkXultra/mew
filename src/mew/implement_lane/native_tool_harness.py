@@ -319,6 +319,47 @@ def run_native_implement_v2(
     finish_summary = ""
     resolver = CompletionResolver()
 
+    def append_closeout_event(closeout_event: _NativeCloseoutEvent) -> None:
+        nonlocal active_command_closeout_count
+        nonlocal active_command_closeout_reason
+        nonlocal active_command_closeout_provider_call_id
+        nonlocal final_verifier_closeout_count
+        nonlocal final_verifier_closeout_reason
+        nonlocal final_verifier_closeout_provider_call_id
+        nonlocal first_verifier_metric
+
+        if closeout_event.kind == "active_command":
+            active_command_closeout_count += 1
+            active_command_closeout_reason = closeout_event.reason
+            active_command_closeout_provider_call_id = closeout_event.call.call_id
+        elif closeout_event.kind == "final_verifier":
+            final_verifier_closeout_count += 1
+            final_verifier_closeout_reason = closeout_event.reason
+            final_verifier_closeout_provider_call_id = closeout_event.call.call_id
+        items.append(replace(closeout_event.call, sequence=len(items) + 1))
+        items.append(
+            replace(
+                _native_output_from_result(
+                    closeout_event.call,
+                    closeout_event.result,
+                    sequence=0,
+                    lane_input=lane_input,
+                    lane_config=lane_config,
+                ),
+                sequence=len(items) + 1,
+            )
+        )
+        tool_calls.append(closeout_event.call)
+        tool_results.append(closeout_event.result)
+        tool_latencies.append(closeout_event.latency)
+        if first_verifier_metric is None and _result_is_verifier_like(closeout_event.result):
+            first_verifier_metric = {
+                "turn_index": _turn_number(closeout_event.call.turn_id),
+                "call_id": closeout_event.call.call_id,
+                "tool_name": closeout_event.call.tool_name,
+                "wall_seconds": closeout_event.latency["started_ms"] / 1000,
+            }
+
     for turn_index in range(1, max_turns + 1):
         turn_timeout = _native_next_model_timeout_seconds(
             lane_input,
@@ -327,6 +368,24 @@ def run_native_implement_v2(
         )
         if turn_timeout is not None:
             if turn_timeout < _NATIVE_MODEL_TIMEOUT_MIN_SECONDS:
+                active_closeout = _native_active_command_closeout(
+                    lane_input,
+                    lane_attempt_id=lane_attempt_id,
+                    provider=provider,
+                    exec_runtime=exec_runtime,
+                    start_monotonic=start_monotonic,
+                )
+                if active_closeout is not None:
+                    active_call, active_result, active_latency = active_closeout
+                    append_closeout_event(
+                        _NativeCloseoutEvent(
+                            kind="active_command",
+                            call=active_call,
+                            result=active_result,
+                            latency=active_latency,
+                            reason="native active command closeout ran before low-budget provider turn",
+                        )
+                    )
                 status = "blocked"
                 finish_summary = "native wall-clock budget exhausted before next provider turn"
                 native_model_budget_block = {
@@ -446,37 +505,7 @@ def run_native_implement_v2(
                     start_monotonic=start_monotonic,
                 )
                 for closeout_event in closeout_events:
-                    if closeout_event.kind == "active_command":
-                        active_command_closeout_count += 1
-                        active_command_closeout_reason = closeout_event.reason
-                        active_command_closeout_provider_call_id = closeout_event.call.call_id
-                    elif closeout_event.kind == "final_verifier":
-                        final_verifier_closeout_count += 1
-                        final_verifier_closeout_reason = closeout_event.reason
-                        final_verifier_closeout_provider_call_id = closeout_event.call.call_id
-                    items.append(replace(closeout_event.call, sequence=len(items) + 1))
-                    items.append(
-                        replace(
-                            _native_output_from_result(
-                                closeout_event.call,
-                                closeout_event.result,
-                                sequence=0,
-                                lane_input=lane_input,
-                                lane_config=lane_config,
-                            ),
-                            sequence=len(items) + 1,
-                        )
-                    )
-                    tool_calls.append(closeout_event.call)
-                    tool_results.append(closeout_event.result)
-                    tool_latencies.append(closeout_event.latency)
-                    if first_verifier_metric is None and _result_is_verifier_like(closeout_event.result):
-                        first_verifier_metric = {
-                            "turn_index": _turn_number(closeout_event.call.turn_id),
-                            "call_id": closeout_event.call.call_id,
-                            "tool_name": closeout_event.call.tool_name,
-                            "wall_seconds": closeout_event.latency["started_ms"] / 1000,
-                        }
+                    append_closeout_event(closeout_event)
                 decision = resolver.resolve(
                     _completion_resolver_input_from_finish(
                         call,

@@ -71,6 +71,20 @@ patches are execution-intent writes under the existing write approval gate.
 Keep JSON/function `apply_patch` dry-run behavior unchanged unless its arguments
 explicitly request apply.
 
+Post-commit diagnostic `mew-make-mips-interpreter-step-check-10min-20260513-050426`
+showed custom `apply_patch` now mutates source correctly: the lane reached four
+edits and six verifier-shaped command attempts with valid native pairing. The
+next generic blocker is closeout observability under low remaining wall budget,
+not task VM semantics. The final `run_tests` command remained `yielded`, but
+the lane stopped before the next provider turn with
+`native_model_budget_insufficient` and `active_command_closeout_count=0`. This
+left the latest verifier evidence unfinalized in the transcript. Repair the
+native harness so before it refuses a low-budget provider turn, it first
+deterministically closes any active managed command and records the paired
+closeout call/output in the native transcript. Keep the lane blocked unless a
+normal finish/resolver path accepts completion; this is an evidence closeout,
+not an auto-complete shortcut.
+
 ## Controller Rule
 
 M6.24 scope decision on 2026-05-03: the controller applies only to the 25

@@ -664,6 +664,47 @@ def test_native_harness_blocks_before_provider_turn_when_wall_budget_is_too_low(
     assert block["active_model_timeout_seconds"] < block["minimum_required_model_timeout_seconds"]
 
 
+def test_native_harness_closes_active_command_before_low_budget_provider_turn(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "verify-1",
+                    "run_tests",
+                    {
+                        "command": "sleep 0.05; true",
+                        "cwd": ".",
+                        "foreground_budget_seconds": 0,
+                        "timeout": 3,
+                    },
+                    output_index=0,
+                )
+            ]
+        ]
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness._native_next_model_timeout_seconds",
+        side_effect=[30.0, 20.0],
+    ):
+        result = run_native_implement_v2(_lane_input(tmp_path, allow_verify=True), provider=provider, max_turns=2)
+
+    assert result.status == "blocked"
+    assert result.finish_summary == "native wall-clock budget exhausted before next provider turn"
+    assert result.metrics["active_command_closeout_count"] == 1
+    assert result.metrics["active_command_closeout_reason"] == (
+        "native active command closeout ran before low-budget provider turn"
+    )
+    assert result.metrics["active_command_closeout_provider_call_id"] == "call-active-command-closeout-002"
+    closeout_output = next(
+        item
+        for item in result.transcript.items
+        if item.call_id == "call-active-command-closeout-002" and item.kind.endswith("_output")
+    )
+    assert closeout_output.status == "completed"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_live_native_input_carry_forward_omits_reasoning_refs_without_sidecar_bytes(tmp_path: Path) -> None:
     lane_input = _lane_input(tmp_path)
     descriptor = {
