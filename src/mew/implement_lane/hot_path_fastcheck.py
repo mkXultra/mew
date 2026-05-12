@@ -497,12 +497,27 @@ def _native_trace_summary(
         "command_count": sum(1 for item in calls if item.tool_name in {"run_command", "run_tests"}),
         "edit_count": sum(1 for item in calls if item.tool_name in {"write_file", "edit_file", "apply_patch"}),
         "verifier_count": sum(1 for item in calls if _native_call_is_verifier(item)),
-        "parse_error_count": sum(
-            1
-            for item in transcript.items
-            if item.status == "invalid" or (item.is_error and item.status == "synthetic_error")
-        ),
+        "parse_error_count": sum(1 for item in transcript.items if _native_trace_item_is_protocol_parse_error(item)),
     }
+
+
+def _native_trace_item_is_protocol_parse_error(item: NativeTranscriptItem) -> bool:
+    if _native_finish_output_is_protocol_invalid(item):
+        return True
+    if not item.is_error or item.status not in {"invalid", "synthetic_error"}:
+        return False
+    text = str(item.output_text_or_ref or "").casefold()
+    return any(
+        marker in text
+        for marker in (
+            "invalid native response",
+            "invalid json arguments",
+            "model json",
+            "parse error",
+            "protocol_error",
+            "schema invalid",
+        )
+    )
 
 
 def _check_native_loop_control_replay(transcript: NativeTranscript) -> HotPathCheck:

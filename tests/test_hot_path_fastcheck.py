@@ -942,6 +942,107 @@ def test_hot_path_fastcheck_accepts_fake_native_transport_kind(tmp_path):
     assert check["details"]["native_transport"] is True
 
 
+def test_hot_path_fastcheck_allows_native_policy_invalid_outputs_in_trace_summary(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    items = list(transcript.items)
+    items.extend(
+        [
+            NativeTranscriptItem(
+                sequence=7,
+                turn_id="turn-4",
+                lane_attempt_id=transcript.lane_attempt_id,
+                provider=transcript.provider,
+                model=transcript.model,
+                kind="function_call",
+                call_id="probe-after-first-write-due",
+                tool_name="search_text",
+                arguments_json_text='{"path":".","query":"main"}',
+            ),
+            NativeTranscriptItem(
+                sequence=8,
+                turn_id="turn-4",
+                lane_attempt_id=transcript.lane_attempt_id,
+                provider=transcript.provider,
+                model=transcript.model,
+                kind="function_call_output",
+                call_id="probe-after-first-write-due",
+                tool_name="search_text",
+                status="invalid",
+                is_error=True,
+                output_text_or_ref=(
+                    "search_text result: invalid; error=true; reason=first-write due overrun: "
+                    "enough read/probe evidence has been gathered"
+                ),
+            ),
+        ]
+    )
+    write_native_transcript_artifacts(
+        artifact,
+        NativeTranscript(
+            lane_attempt_id=transcript.lane_attempt_id,
+            provider=transcript.provider,
+            model=transcript.model,
+            items=tuple(items),
+        ),
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert result["status"] == "pass"
+    assert checks["native_trace_summary"]["details"]["parse_error_count"] == 0
+
+
+def test_hot_path_fastcheck_rejects_non_finish_invalid_json_output_in_trace_summary(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    items = list(transcript.items)
+    items.extend(
+        [
+            NativeTranscriptItem(
+                sequence=7,
+                turn_id="turn-4",
+                lane_attempt_id=transcript.lane_attempt_id,
+                provider=transcript.provider,
+                model=transcript.model,
+                kind="function_call",
+                call_id="bad-read-json",
+                tool_name="read_file",
+                arguments_json_text="{not-json",
+            ),
+            NativeTranscriptItem(
+                sequence=8,
+                turn_id="turn-4",
+                lane_attempt_id=transcript.lane_attempt_id,
+                provider=transcript.provider,
+                model=transcript.model,
+                kind="function_call_output",
+                call_id="bad-read-json",
+                tool_name="read_file",
+                status="invalid",
+                is_error=True,
+                output_text_or_ref="read_file result: invalid; summary=invalid JSON arguments",
+            ),
+        ]
+    )
+    write_native_transcript_artifacts(
+        artifact,
+        NativeTranscript(
+            lane_attempt_id=transcript.lane_attempt_id,
+            provider=transcript.provider,
+            model=transcript.model,
+            items=tuple(items),
+        ),
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_trace_summary"]["details"]["parse_error_count"] == 1
+
+
 def test_hot_path_fastcheck_rejects_read_only_native_artifact_without_trace(tmp_path):
     artifact = _write_read_only_native_artifact(tmp_path)
 
