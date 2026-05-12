@@ -3,6 +3,8 @@ from pathlib import Path
 from dataclasses import replace
 from unittest.mock import patch
 
+import pytest
+
 from mew.implement_lane.native_fake_provider import (
     NativeFakeProvider,
     fake_call,
@@ -219,6 +221,8 @@ def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_pat
     assert result.status == "failed"
     assert result.metrics["provider_request_inventory_available"] is True
     assert result.metrics["turn_count"] == 1
+    assert result.updated_lane_state["runtime_id"] == "implement_v2_native_transcript_loop"
+    assert result.updated_lane_state["transport_kind"] == "provider_native"
     request_path = artifact_root / "native-provider-requests.json"
     inventory_path = artifact_root / "provider-request-inventory.json"
     assert request_path.exists()
@@ -231,6 +235,128 @@ def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_pat
         "native_transcript_window",
         "compact_sidecar_digest",
     ]
+
+
+def test_live_native_first_turn_value_error_writes_failure_artifacts(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        side_effect=ValueError("malformed provider payload"),
+    ):
+        result = run_live_native_implement_v2(
+            lane_input,
+            model_auth={"access_token": "x"},
+            base_url="https://example.invalid",
+            timeout=3,
+            max_turns=1,
+        )
+
+    assert result.status == "failed"
+    assert "malformed provider payload" in result.user_visible_summary
+    assert result.updated_lane_state["runtime_id"] == "implement_v2_native_transcript_loop"
+    assert (artifact_root / "response_transcript.json").exists()
+    request_payload = json.loads((artifact_root / "native-provider-requests.json").read_text(encoding="utf-8"))
+    assert request_payload["error"] == "malformed provider payload"
+    assert request_payload["request_count"] == 1
+
+
+def test_live_native_provider_failure_preserves_partial_transcript_artifacts(tmp_path: Path) -> None:
+    (tmp_path / "sample.txt").write_text("hello\n", encoding="utf-8")
+    artifact_root = tmp_path / "artifacts"
+    lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
+    first_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+            items=(
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id="ws-native:task-native:implement_v2:native",
+                    provider="openai",
+                    model="gpt-5.5",
+                    response_id="resp-live-1",
+                    provider_item_id="item-read",
+                    output_index=0,
+                    kind="function_call",
+                    call_id="read-live",
+                    tool_name="read_file",
+                    arguments_json_text='{"path":"sample.txt"}',
+                ),
+            ),
+        ),
+        response_id="resp-live-1",
+        status="completed",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        side_effect=[first_turn, RuntimeError("request timed out")],
+    ):
+        result = run_live_native_implement_v2(
+            lane_input,
+            model_auth={"access_token": "x"},
+            base_url="https://example.invalid",
+            timeout=3,
+            max_turns=2,
+        )
+
+    assert result.status == "failed"
+    assert result.metrics["turn_count"] == 2
+    assert result.metrics["pairing"]["valid"] is True
+    transcript_payload = json.loads((artifact_root / "response_transcript.json").read_text(encoding="utf-8"))
+    item_kinds = [item["kind"] for item in transcript_payload["items"]]
+    assert item_kinds == ["function_call", "function_call_output"]
+    assert (artifact_root / "response_items.jsonl").read_text(encoding="utf-8").strip()
+    request_payload = json.loads((artifact_root / "native-provider-requests.json").read_text(encoding="utf-8"))
+    assert request_payload["status"] == "failed_before_native_response"
+    assert request_payload["request_count"] == 2
+
+
+def test_live_native_provider_failure_rejects_invalid_partial_transcript(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
+    invalid_first_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+            items=(
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id="ws-native:task-native:implement_v2:native",
+                    provider="openai",
+                    model="gpt-5.5",
+                    response_id="resp-live-1",
+                    provider_item_id="output-without-call",
+                    output_index=0,
+                    kind="function_call_output",
+                    call_id="missing-call",
+                    tool_name="read_file",
+                    output_text_or_ref="orphan output",
+                ),
+            ),
+        ),
+        response_id="resp-live-1",
+        status="completed",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        side_effect=[invalid_first_turn, RuntimeError("request timed out")],
+    ):
+        with pytest.raises(ValueError, match="invalid native transcript"):
+            run_live_native_implement_v2(
+                lane_input,
+                model_auth={"access_token": "x"},
+                base_url="https://example.invalid",
+                timeout=3,
+                max_turns=2,
+            )
 
 
 def test_live_native_input_carry_forward_omits_reasoning_refs_without_sidecar_bytes(tmp_path: Path) -> None:

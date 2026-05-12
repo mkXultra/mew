@@ -72,6 +72,10 @@ _SEMANTIC_VERIFIER_FAILURE_PATTERNS = (
 )
 
 
+class InvalidNativeTranscriptError(ValueError):
+    """Raised when the native transcript itself violates pairing invariants."""
+
+
 @dataclass(frozen=True)
 class NativeImplementV2HarnessResult:
     status: str
@@ -179,6 +183,8 @@ def run_live_native_implement_v2(
             artifact_root=artifact_root,
             max_turns=max_turns,
         )
+    except InvalidNativeTranscriptError:
+        raise
     except Exception as exc:
         return _live_failure_lane_result(lane_input, error=str(exc), provider=provider)
     lane_result = result.as_lane_result()
@@ -263,7 +269,19 @@ def run_native_implement_v2(
             turn_index=turn_index,
             transcript_items=items,
         )
-        response = provider.next_response(request_descriptor)
+        try:
+            response = provider.next_response(request_descriptor)
+        except Exception as exc:
+            if not items:
+                raise
+            return _partial_failure_harness_result(
+                lane_input,
+                lane_attempt_id=lane_attempt_id,
+                provider=provider,
+                items=items,
+                artifact_root=artifact_root,
+                error=str(exc),
+            )
         if response is None:
             break
 
@@ -397,7 +415,7 @@ def run_native_implement_v2(
     )
     validation = validate_native_transcript_pairing(transcript)
     if not validation.valid:
-        raise ValueError(f"invalid native transcript: {', '.join(validation.errors)}")
+        raise InvalidNativeTranscriptError(f"invalid native transcript: {', '.join(validation.errors)}")
 
     metrics = {
         **_native_surface_for_provider(provider),
@@ -1443,17 +1461,68 @@ def _live_failure_lane_result(
     )
 
 
+def _partial_failure_harness_result(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    provider: object,
+    items: list[NativeTranscriptItem],
+    artifact_root: str | Path | None,
+    error: str,
+) -> NativeImplementV2HarnessResult:
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider=str(getattr(provider, "provider", "")),
+        model=str(getattr(provider, "model", "")),
+        items=tuple(items),
+    )
+    validation = validate_native_transcript_pairing(transcript)
+    if not validation.valid:
+        raise InvalidNativeTranscriptError(f"invalid native transcript: {', '.join(validation.errors)}")
+    metrics = {
+        **_native_surface_for_provider(provider),
+        "status": "failed",
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "transcript_hash": native_transcript_hash(transcript),
+        "error": error,
+        "turn_count": len(getattr(provider, "requests", []) or ()),
+        "provider_request_inventory_available": bool(getattr(provider, "requests", []) or ()),
+        "pairing": validation.as_dict(),
+    }
+    proof_artifacts: tuple[str, ...] = ()
+    if artifact_root is not None:
+        if isinstance(provider, NativeCodexResponsesProvider):
+            proof_artifacts = _write_live_failure_artifacts(
+                lane_input,
+                transcript=transcript,
+                provider=provider,
+                error=error,
+                artifact_root=Path(artifact_root),
+            )
+        else:
+            paths = _write_native_artifacts(Path(artifact_root), transcript, provider=provider)
+            proof_artifacts = tuple(str(path) for path in paths.values())
+    return NativeImplementV2HarnessResult(
+        status="failed",
+        transcript=transcript,
+        proof_artifacts=proof_artifacts,
+        metrics=metrics,
+        finish_summary=f"native provider failed: {error}",
+    )
+
+
 def _write_live_failure_artifacts(
     lane_input: ImplementLaneInput,
     *,
     transcript: NativeTranscript,
     provider: NativeCodexResponsesProvider,
     error: str,
+    artifact_root: Path | None = None,
 ) -> tuple[str, ...]:
-    artifact_root = _artifact_root(lane_input)
-    if artifact_root is None:
+    root_path = artifact_root or _artifact_root(lane_input)
+    if root_path is None:
         return ()
-    root = Path(artifact_root)
+    root = Path(root_path)
     root.mkdir(parents=True, exist_ok=True)
     paths = write_native_transcript_artifacts(root, transcript)
     request_path = root / "native-provider-requests.json"
