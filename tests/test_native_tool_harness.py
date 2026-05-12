@@ -17,6 +17,7 @@ from mew.implement_lane.native_provider_adapter import NativeResponsesStreamPars
 from mew.implement_lane.native_tool_harness import (
     NativeCodexResponsesProvider,
     PHASE3_NATIVE_SURFACE,
+    _prewrite_probe_plateau_result,
     run_live_native_implement_v2,
     run_native_implement_v2,
     run_unavailable_native_implement_v2,
@@ -30,7 +31,12 @@ from mew.implement_lane.native_transcript import (
 from mew.implement_lane.types import ImplementLaneInput
 
 
-def _lane_input(tmp_path: Path, **lane_config: object) -> ImplementLaneInput:
+def _lane_input(
+    tmp_path: Path,
+    *,
+    task_contract: dict[str, object] | None = None,
+    **lane_config: object,
+) -> ImplementLaneInput:
     config = {
         "allowed_read_roots": [str(tmp_path)],
         "allowed_write_roots": [str(tmp_path)],
@@ -46,6 +52,7 @@ def _lane_input(tmp_path: Path, **lane_config: object) -> ImplementLaneInput:
         model_backend="fake-native",
         model="fake-native-model",
         lane_config=config,
+        task_contract=task_contract or {},
     )
 
 
@@ -217,6 +224,212 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
         "native_transcript_window",
         "compact_sidecar_digest",
     ]
+
+
+def test_live_native_request_hides_write_file_for_hard_runtime_artifact_task(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    live_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+            items=(
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id="ws-native:task-native:implement_v2:native",
+                    provider="openai",
+                    model="gpt-5.5",
+                    response_id="resp-live-1",
+                    provider_item_id="item-finish",
+                    output_index=0,
+                    kind="finish_call",
+                    call_id="finish-live",
+                    tool_name="finish",
+                    arguments_json_text='{"outcome":"blocked","summary":"surface checked"}',
+                ),
+            ),
+        ),
+        response_id="resp-live-1",
+        status="completed",
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        artifact_dir=str(artifact_root),
+        mode="full",
+        task_contract={
+            "goal": (
+                "Build a MIPS ELF interpreter runtime from provided source and write "
+                "a /tmp/frame.bmp artifact."
+            )
+        },
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        return_value=live_turn,
+    ) as call:
+        run_live_native_implement_v2(
+            lane_input,
+            model_auth={"access_token": "x"},
+            base_url="https://example.invalid",
+            timeout=3,
+            max_turns=1,
+        )
+
+    descriptor = call.call_args.kwargs["descriptor"]
+    tool_names = {str(tool.get("name") or "") for tool in descriptor["request_body"]["tools"]}
+    assert "write_file" not in tool_names
+    assert {"edit_file", "apply_patch"} <= tool_names
+    assert "write_file" not in str(descriptor["request_body"]["instructions"])
+
+
+def test_native_hard_runtime_rejects_write_file_call_without_mutation(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "bad\n", "create": True, "apply": True},
+                    output_index=0,
+                ),
+                fake_finish("finish-1", {"outcome": "blocked", "summary": "surface checked"}, output_index=1),
+            ]
+        ]
+    )
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            mode="full",
+            task_contract={
+                "goal": (
+                    "Build a MIPS ELF interpreter runtime from provided source and write "
+                    "a /tmp/frame.bmp artifact."
+                )
+            },
+        ),
+        provider=provider,
+    )
+
+    output = next(item for item in result.transcript.items if item.call_id == "write-1" and item.kind.endswith("_output"))
+    assert output.status == "invalid"
+    assert output.is_error is True
+    assert "write tool is not available" in output.output_text_or_ref
+    assert "write_file" not in output.output_text_or_ref
+    assert not (tmp_path / "vm.js").exists()
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_hard_runtime_sanitizes_missing_target_edit_guidance(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "edit-1",
+                    "edit_file",
+                    {"path": "vm.js", "old_string": "old", "new_string": "new", "apply": True},
+                    output_index=0,
+                ),
+                fake_finish("finish-1", {"outcome": "blocked", "summary": "surface checked"}, output_index=1),
+            ]
+        ]
+    )
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            mode="full",
+            task_contract={
+                "goal": (
+                    "Build a MIPS ELF interpreter runtime from provided source and write "
+                    "a /tmp/frame.bmp artifact."
+                )
+            },
+        ),
+        provider=provider,
+    )
+
+    output = next(item for item in result.transcript.items if item.call_id == "edit-1" and item.kind.endswith("_output"))
+    assert output.status == "failed"
+    assert output.is_error is True
+    assert "create=True" in output.output_text_or_ref
+    assert "write_file" not in output.output_text_or_ref
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_native_hard_runtime_carry_forward_sanitizes_hidden_write_file_call(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "bad\n", "create": True, "apply": True},
+                    output_index=0,
+                )
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "surface checked"}, output_index=0)],
+        ]
+    )
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            mode="full",
+            task_contract={
+                "goal": (
+                    "Build the provided emulator runtime from source and write "
+                    "a /tmp/output.png image artifact."
+                )
+            },
+        ),
+        provider=provider,
+        max_turns=2,
+    )
+
+    assert result.status == "blocked"
+    assert len(provider.requests) == 2
+    second_request = json.dumps(provider.requests[1], ensure_ascii=False, sort_keys=True)
+    assert "unavailable_write_tool" in second_request
+    assert "write_file" not in second_request
+    assert not (tmp_path / "vm.js").exists()
+
+
+def test_native_hard_runtime_prewrite_plateau_guidance_excludes_write_file(tmp_path: Path) -> None:
+    lane_input = _lane_input(
+        tmp_path,
+        mode="full",
+        task_contract={
+            "goal": (
+                "Build a MIPS ELF interpreter runtime from provided source and write "
+                "a /tmp/frame.bmp artifact."
+            )
+        },
+    )
+    result = _prewrite_probe_plateau_result(
+        NativeTranscriptItem(
+            sequence=1,
+            turn_id="turn-1",
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="fake-native",
+            model="fake-native-model",
+            response_id="resp-1",
+            provider_item_id="item-read",
+            output_index=0,
+            kind="function_call",
+            call_id="read-1",
+            tool_name="read_file",
+            arguments_json_text='{"path":"doomgeneric/i_video.c"}',
+        ),
+        {"first_write_due_overrun": True},
+        lane_input=lane_input,
+        lane_config=lane_input.lane_config,
+    )
+
+    assert result is not None
+    assert result.status == "invalid"
+    reason = str(result.content[0]["reason"])
+    assert "edit_file/apply_patch" in reason
+    assert "write_file" not in reason
 
 
 def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_path: Path) -> None:

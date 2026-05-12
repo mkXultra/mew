@@ -15,7 +15,12 @@ from ..prompt_sections import (
     PromptSection,
     prompt_section_metrics,
 )
-from .tool_policy import ImplementLaneToolSpec, list_v2_tool_specs_for_mode
+from .tool_policy import (
+    ImplementLaneToolSpec,
+    is_hard_runtime_artifact_task,
+    list_v2_tool_specs_for_mode,
+    list_v2_tool_specs_for_task,
+)
 from .types import ImplementLaneInput
 from .workframe import WorkFrameInputs
 from .workframe_variants import (
@@ -65,7 +70,27 @@ def build_implement_v2_prompt_sections(
     """Build provider-neutral v2 prompt sections without provider cache transport."""
 
     mode = str(lane_input.lane_config.get("mode") or "read_only")
-    specs = tool_specs if tool_specs is not None else list_v2_tool_specs_for_mode(mode)
+    specs = (
+        tool_specs
+        if tool_specs is not None
+        else list_v2_tool_specs_for_task(mode, task_contract=lane_input.task_contract)
+    )
+    tool_names = {spec.name for spec in specs}
+    if "write_file" in tool_names:
+        mutation_tools_phrase = "write_file, edit_file, or apply_patch"
+        mutation_paths_phrase = "write_file/edit_file/apply_patch"
+        large_source_guidance = (
+            "For large generated or replacement source, avoid one huge provider-native "
+            "write_file/content_lines JSON payload: prefer a custom apply_patch/freeform patch "
+            "for concrete edits, or a bounded run_command writer when the content can be generated compactly. "
+        )
+    else:
+        mutation_tools_phrase = "edit_file or apply_patch"
+        mutation_paths_phrase = "edit_file/apply_patch"
+        large_source_guidance = (
+            "For large generated or replacement source, prefer a custom apply_patch/freeform patch "
+            "for concrete edits, or a bounded run_command writer when the content can be generated compactly. "
+        )
     sections = [
         PromptSection(
             id="implement_v2_lane_base",
@@ -102,17 +127,15 @@ def build_implement_v2_prompt_sections(
             content=(
                 "Keep the normal coding hot path small and transcript-driven: cheap probe -> coherent "
                 "patch/edit -> verifier -> latest-failure repair. Use read/search/inspect/run_command "
-                "for cheap source, environment, ABI, or verifier probes; then move to write_file, "
-                "edit_file, or apply_patch once the compatibility surface is known. After a concrete "
+                "for cheap source, environment, ABI, or verifier probes; then move to "
+                f"{mutation_tools_phrase} once the compatibility surface is known. After a concrete "
                 "runtime, verifier, or artifact failure yields an actionable hypothesis, spend at most "
                 "one focused diagnostic/read turn before a patch/edit plus verifier, or finish blocked "
                 "with the exact missing information. Do not keep re-reading generated source or full "
                 "proof objects when the latest command exit, bounded stdout/stderr tail, artifact miss, "
-                "and blocker class are enough to act. Keep source mutation on write_file/edit_file/"
-                "apply_patch paths by default for scoped edits. For large generated or replacement source, "
-                "avoid one huge provider-native write_file/content_lines JSON payload: prefer a custom "
-                "apply_patch/freeform patch for concrete edits, or a bounded run_command writer when the "
-                "content can be generated compactly. Split very large mutations into smaller source-producing "
+                f"and blocker class are enough to act. Keep source mutation on {mutation_paths_phrase} "
+                f"paths by default for scoped edits. {large_source_guidance}"
+                "Split very large mutations into smaller source-producing "
                 "steps rather than spending a model turn on one huge tool call. Never minify generated source "
                 "into one long line just to fit JSON. If you use a bounded writer, immediately run a syntax "
                 "check or verifier. Use run_command otherwise for probes, builds, runtime execution, and "
@@ -1376,50 +1399,6 @@ def _bounded_compact_json(value: object, *, max_chars: int) -> str:
     if len(marker) <= max_chars:
         return marker
     return '{"__mew_truncated__":"true"}'
-
-
-def is_hard_runtime_artifact_task(task_contract: object) -> bool:
-    text = _contract_text(task_contract)
-    if not text:
-        return False
-    runtime_markers = (
-        "vm",
-        "emulator",
-        "interpreter",
-        "elf",
-        "binary",
-        "cross-compile",
-        "cross compile",
-        "runtime",
-        "node ",
-    )
-    artifact_markers = (
-        "/tmp/",
-        "frame",
-        "screenshot",
-        "image",
-        "bmp",
-        "stdout",
-        "boot",
-        "log",
-        "socket",
-        "pid file",
-    )
-    source_markers = (
-        "provided",
-        "source",
-        "source code",
-        "build",
-        "compile",
-        "make",
-        "project",
-        "repository",
-    )
-    return (
-        any(marker in text for marker in runtime_markers)
-        and any(marker in text for marker in artifact_markers)
-        and any(marker in text for marker in source_markers)
-    )
 
 
 def is_deep_probe_hard_runtime_task(task_contract: object) -> bool:

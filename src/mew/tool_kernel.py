@@ -126,9 +126,15 @@ class ToolKernel:
         return self.exec_runtime.poll_active_commands(wait_seconds=wait_seconds)
 
     def _available(self, tool_name: object) -> bool:
-        from .implement_lane.tool_policy import list_v2_tool_specs_for_mode
+        from .implement_lane.tool_policy import list_v2_tool_specs_for_task
 
-        return str(tool_name or "") in {spec.name for spec in list_v2_tool_specs_for_mode(self.config.mode)}
+        return str(tool_name or "") in {
+            spec.name
+            for spec in list_v2_tool_specs_for_task(
+                self.config.mode,
+                task_contract=self.config.task_contract,
+            )
+        }
 
 
 def make_tool_call_envelope(

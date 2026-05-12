@@ -33,7 +33,6 @@ from .prompt import (
     build_implement_v2_prompt_sections,
     implement_v2_prompt_section_metrics,
     is_deep_probe_hard_runtime_task,
-    is_hard_runtime_artifact_task,
 )
 from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
 from .registry import get_implement_lane_runtime_view
@@ -50,7 +49,14 @@ from .tool_harness_contract import (
     transcript_jsonl_lines,
     write_jsonl,
 )
-from .tool_policy import ImplementLaneToolSpec, list_v2_base_tool_specs, list_v2_tool_specs_for_mode
+from .tool_policy import (
+    ImplementLaneToolSpec,
+    hide_unavailable_write_file_guidance,
+    is_hard_runtime_artifact_task,
+    list_v2_base_tool_specs,
+    list_v2_tool_specs_for_mode,
+    list_v2_tool_specs_for_task,
+)
 from .transcript import lane_artifact_namespace
 from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
 from .types import ToolCallEnvelope
@@ -483,7 +489,7 @@ def run_live_json_implement_v2(
         result = _latest_tool_contract_misuse_result(tool_result_slice)
         tool_contract_recovery_turns_used += 1
         turn_budget_limit += 1
-        tool_contract_recovery_instruction = _tool_contract_recovery_instruction(result)
+        tool_contract_recovery_instruction = _tool_contract_recovery_instruction(result, lane_input=lane_input)
         if progress:
             progress(
                 "implement_v2 extending one tool-contract recovery turn "
@@ -1552,6 +1558,7 @@ def run_live_json_implement_v2(
         probe_threshold=_first_write_probe_threshold(lane_input),
         requires_deep_runtime_coverage=is_deep_probe_hard_runtime_task(lane_input.task_contract),
         source_mutation_roots=_source_mutation_roots(lane_input),
+        write_file_visible=_v2_tool_available(lane_input, "write_file"),
     )
     if active_work_todo_state:
         active_work_todo_state = _merge_active_work_todo_first_write_readiness(
@@ -1561,6 +1568,7 @@ def run_live_json_implement_v2(
             probe_threshold=_first_write_probe_threshold(lane_input),
             requires_deep_runtime_coverage=is_deep_probe_hard_runtime_task(lane_input.task_contract),
             source_mutation_roots=_source_mutation_roots(lane_input),
+            write_file_visible=_v2_tool_available(lane_input, "write_file"),
         )
     integration_observation = _integration_observation_summary(
         lane_input,
@@ -4276,18 +4284,23 @@ def _tool_contract_recovery_tools_available(lane_input: ImplementLaneInput, resu
     return False
 
 
-def _tool_contract_recovery_instruction(result: ToolResultEnvelope | None) -> str:
+def _tool_contract_recovery_instruction(
+    result: ToolResultEnvelope | None,
+    *,
+    lane_input: ImplementLaneInput,
+) -> str:
     payload = next((item for item in (result.content if result is not None else ()) if isinstance(item, dict)), {})
     command = _clip_recovery_command(payload.get("preserved_command"))
     if not command:
         return ""
     cwd = str(payload.get("cwd") or ".")
     if str(payload.get("failure_subclass") or "") == "run_command_source_exploration_shell_surface":
+        mutation_tools = _source_mutation_tool_phrase(write_file_visible=_v2_tool_available(lane_input, "write_file"))
         return (
             "Tool-contract recovery turn: the last action failed because run_command was used as a "
             "broad source scanner. Do not rerun or rewrite that scanner. Use native glob/search_text/"
             "read_file, or one bounded grep/rg/sed probe over a specific path, to ground the exact "
-            "source window. Then make one coherent write_file/edit_file/apply_patch source mutation "
+            f"source window. Then make one coherent {mutation_tools} source mutation "
             "and run a verifier. If the needed source window cannot be grounded safely, finish blocked "
             "with the exact blocker.\n"
             f"cwd: {cwd}\n"
@@ -4413,7 +4426,13 @@ def _tool_kernel_for_lane(
 
 def _v2_tool_available(lane_input: ImplementLaneInput, tool_name: object) -> bool:
     mode = lane_input.lane_config.get("mode") or "full"
-    return str(tool_name or "") in {spec.name for spec in list_v2_tool_specs_for_mode(mode)}
+    return str(tool_name or "") in {
+        spec.name
+        for spec in list_v2_tool_specs_for_task(
+            mode,
+            task_contract=lane_input.task_contract,
+        )
+    }
 
 
 def _tool_call_identity_errors(
@@ -4906,6 +4925,7 @@ def _merge_active_work_todo_first_write_readiness(
     probe_threshold: int,
     requires_deep_runtime_coverage: bool = False,
     source_mutation_roots: tuple[str, ...] = (),
+    write_file_visible: bool = True,
 ) -> dict[str, object]:
     active_todo = _compact_active_work_todo_state(existing)
     if not active_todo:
@@ -4917,6 +4937,7 @@ def _merge_active_work_todo_first_write_readiness(
         probe_threshold=probe_threshold,
         requires_deep_runtime_coverage=requires_deep_runtime_coverage,
         source_mutation_roots=source_mutation_roots,
+        write_file_visible=write_file_visible,
     )
     write_repair = _write_repair_from_trace(tool_calls=tool_calls, tool_results=tool_results)
     if write_repair:
@@ -5655,7 +5676,10 @@ def _model_visible_tool_specs_for_turn(
     prior_tool_calls: tuple[object, ...],
     prior_tool_results: tuple[ToolResultEnvelope, ...],
 ) -> tuple[ImplementLaneToolSpec, ...]:
-    specs = list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode") or "read_only")
+    specs = list_v2_tool_specs_for_task(
+        lane_input.lane_config.get("mode") or "read_only",
+        task_contract=lane_input.task_contract,
+    )
     repair_lock = _write_repair_lock_state(
         active_work_todo_state=active_work_todo_state,
         prior_tool_calls=prior_tool_calls,
@@ -6802,6 +6826,7 @@ def _first_write_readiness_from_trace(
     probe_threshold: int,
     requires_deep_runtime_coverage: bool = False,
     source_mutation_roots: tuple[str, ...] = (),
+    write_file_visible: bool = True,
 ) -> dict[str, object]:
     if not active_work_todo:
         return {}
@@ -6901,9 +6926,10 @@ def _first_write_readiness_from_trace(
     if first_write_due:
         target_text = ", ".join(target_paths[:3]) if target_paths else "active_work_todo.source.target_paths"
         readiness["required_next_action"] = (
-            "make one scoped source mutation with write_file/edit_file/apply_patch by default; "
-            "if the next mutation is a large generated file, avoid one huge provider-native write_file "
-            "payload and use a compact bounded run_command writer only when it can generate the content, "
+            f"make one scoped source mutation with {_source_mutation_tool_phrase(write_file_visible=write_file_visible)} "
+            "by default; "
+            f"{_large_source_mutation_phrase(write_file_visible=write_file_visible)}"
+            "Use a compact bounded run_command writer only when it can generate the content, "
             f"inside {target_text} before another broad search or verifier"
         )
     return _drop_empty_frontier_values(readiness)
@@ -8090,8 +8116,27 @@ def _live_json_prompt(
     history: tuple[dict[str, object], ...],
     tool_results: tuple[ToolResultEnvelope, ...] = (),
 ) -> str:
-    specs = tool_specs if tool_specs is not None else list_v2_tool_specs_for_mode(lane_input.lane_config.get("mode"))
+    specs = (
+        tool_specs
+        if tool_specs is not None
+        else list_v2_tool_specs_for_task(
+            lane_input.lane_config.get("mode"),
+            task_contract=lane_input.task_contract,
+        )
+    )
     available_tool_names = " | ".join(spec.name for spec in specs if spec.access != "finish") or "no tool calls"
+    write_file_visible = any(spec.name == "write_file" for spec in specs)
+    if write_file_visible:
+        accept_edits_sentence = (
+            "write/edit/apply_patch calls without dry_run=true or apply=false are intended to mutate; "
+            "mew defaults omitted apply to true and supplies independent approval outside the model output. "
+            "For a missing write_file target, mew also defaults omitted create to true. "
+        )
+    else:
+        accept_edits_sentence = (
+            "edit/apply_patch calls without dry_run=true or apply=false are intended to mutate; "
+            "mew defaults omitted apply to true and supplies independent approval outside the model output. "
+        )
     sections = render_prompt_sections(
         build_implement_v2_prompt_sections(
             _lane_input_with_runtime_prompt_state(
@@ -8166,8 +8211,9 @@ def _live_json_prompt(
     if terminal_failure_reaction_turns_used > 0 and not tool_contract_recovery_instruction:
         terminal_reaction_guidance = _terminal_failure_reaction_guidance(
             hard_runtime_frontier_state=hard_runtime_frontier_state,
+            write_file_visible=write_file_visible,
         )
-    return (
+    prompt = (
         f"{sections}\n\n"
         "[section:implement_v2_live_json_transport version=v0 stability=dynamic cache_policy=dynamic]\n"
         "Implement V2 Live JSON Transport\n"
@@ -8177,9 +8223,8 @@ def _live_json_prompt(
         "set finish.outcome to continue or omit finish. For edits, prefer exact edit_file old/new "
         "(old_string/new_string aliases are accepted) or apply_patch with patch_lines for multi-line patches. "
         "If the CLI grants accept-edits, "
-        "write/edit/apply_patch calls without dry_run=true or apply=false are intended to mutate; "
-        "mew defaults omitted apply to true and supplies independent approval outside the model output. "
-        "For a missing write_file target, mew also defaults omitted create to true. If tests or an external verifier matter, "
+        f"{accept_edits_sentence}"
+        "If tests or an external verifier matter, "
         "run a concrete run_command or run_tests before claiming completed. Finish completed with cited "
         "finish.evidence_refs/oracle_refs from the latest verifier or typed evidence; do not rely on prose-only "
         "acceptance_evidence claims.\n"
@@ -8199,9 +8244,16 @@ def _live_json_prompt(
         f"history_json:\n{_render_prompt_history_json(history)}\n"
         "[/section:implement_v2_live_json_transport]"
     )
+    if not write_file_visible:
+        return hide_unavailable_write_file_guidance(prompt)
+    return prompt
 
 
-def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str, object] | None) -> str:
+def _terminal_failure_reaction_guidance(
+    *,
+    hard_runtime_frontier_state: dict[str, object] | None,
+    write_file_visible: bool = True,
+) -> str:
     guidance = (
         "If this is a terminal-failure reaction turn, do not broaden the task: make the smallest "
         "repair/check that directly responds to the latest failed terminal result, or finish blocked "
@@ -8218,10 +8270,11 @@ def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str
             guidance
             + "First-write frontier stall: prior source/probe evidence is already available, but no "
             "source mutation happened before the model failure. Do not rediscover the same missing target "
-            f"or run an external verifier first. Create or update {target} with write_file/edit_file/"
-            "apply_patch by default for scoped edits. For a large generated file, avoid one huge "
-            "provider-native write_file payload and use one compact bounded run_command writer only "
-            "when it can generate the content, then run one verifier-shaped command."
+            f"or run an external verifier first. Create or update {target} with "
+            f"{_source_mutation_tool_phrase(write_file_visible=write_file_visible)} by default for scoped edits. "
+            f"{_large_source_mutation_phrase(write_file_visible=write_file_visible)}"
+            "Use one compact bounded run_command writer only when it can generate the content, "
+            "then run one verifier-shaped command."
             f"{required_hint}\n"
         )
     latest_failure = hard_runtime_frontier_state.get("latest_runtime_failure")
@@ -8242,12 +8295,25 @@ def _terminal_failure_reaction_guidance(*, hard_runtime_frontier_state: dict[str
         + "Hard-runtime frontier continuation gate: continue from lane_hard_runtime_frontier instead of "
         "rediscovering the whole task. Inspect the producing substep/artifact path, make the smallest "
         "source/runtime repair, then run one verifier-shaped command tied to the expected runtime artifact. "
-        "If mutating source/config, use write_file/edit_file/apply_patch by default for scoped edits; "
-        "for large generated files avoid one huge provider-native write_file payload and use a compact "
-        "bounded run_command writer only when it can generate the content. Keep run_command otherwise "
+        "If mutating source/config, use "
+        f"{_source_mutation_tool_phrase(write_file_visible=write_file_visible)} by default for scoped edits; "
+        f"{_large_source_mutation_phrase(write_file_visible=write_file_visible)}"
+        "Use a compact bounded run_command writer only when it can generate the content. Keep run_command otherwise "
         "for build, runtime, and verification."
         f"{class_hint}{next_probe_hint}{verifier_hint}\n"
     )
+
+
+def _source_mutation_tool_phrase(*, write_file_visible: bool) -> str:
+    if write_file_visible:
+        return "write_file/edit_file/apply_patch"
+    return "edit_file/apply_patch"
+
+
+def _large_source_mutation_phrase(*, write_file_visible: bool) -> str:
+    if write_file_visible:
+        return "For a large generated file, avoid one huge provider-native write_file payload. "
+    return "For a large generated file, avoid one huge provider-native JSON payload. "
 
 
 def _normalize_live_json_payload(payload: object, *, turn_index: int) -> dict[str, object]:

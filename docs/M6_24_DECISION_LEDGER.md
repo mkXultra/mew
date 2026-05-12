@@ -31,6 +31,19 @@ and immediately verify after any writer. After repair, run focused tests,
 HOT_PATH fastcheck against the saved artifact, codex-ultra review, commit, then
 one same-shape 10 minute step-check before any scoring proof.
 
+Post-commit diagnostic `mew-make-mips-interpreter-step-check-10min-20260513-014859`
+showed guidance alone was insufficient: the model still selected `write_file`
+with about 24.6k argument characters and 423 `content_lines`, with first edit
+at about 516 seconds. Escalate the same generic repair structurally: for
+hard-runtime artifact tasks, keep patch/edit tools visible but remove
+provider-visible `write_file` so large first mutations flow through custom
+`apply_patch`, scoped `edit_file`, or a compact bounded writer. Validate with
+focused tool-surface tests and review before another same-shape step-check.
+The repair must cover all provider-visible paths, not only tool schemas:
+native execution availability, live JSON prompt text, native instructions, and
+native tool-result output are all sanitized when `write_file` is hidden. Normal
+non-hard-runtime tasks still keep `write_file`.
+
 ## Controller Rule
 
 M6.24 scope decision on 2026-05-03: the controller applies only to the 25

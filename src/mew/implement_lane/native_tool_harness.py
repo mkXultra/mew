@@ -43,7 +43,11 @@ from .native_transcript import (
 from .native_workframe_projection import build_native_prompt_input_inventory
 from .prompt import build_implement_v2_prompt_sections
 from .read_runtime import READ_ONLY_TOOL_NAMES, execute_read_only_tool_call
-from .tool_policy import list_v2_tool_specs_for_mode
+from .tool_policy import (
+    hide_unavailable_write_file_guidance,
+    list_v2_tool_specs_for_mode,
+    list_v2_tool_specs_for_task,
+)
 from .types import ImplementLaneInput, ImplementLaneResult, ToolCallEnvelope, ToolResultEnvelope
 from .v2_runtime import (
     _acceptance_session_from_tool_results,
@@ -401,7 +405,12 @@ def run_native_implement_v2(
                     call_loop_signals["first_write_due_overrun"] = True
                     call_loop_signals["first_write_grace_exhausted"] = True
                     call_loop_signals["max_additional_probe_turns"] = 0
-            result = _prewrite_probe_plateau_result(call, call_loop_signals) or _execute_native_call(
+            result = _prewrite_probe_plateau_result(
+                call,
+                call_loop_signals,
+                lane_input=lane_input,
+                lane_config=lane_config,
+            ) or _execute_native_call(
                 call,
                 lane_input=lane_input,
                 workspace=workspace,
@@ -438,7 +447,13 @@ def run_native_implement_v2(
                     items.append(replace(closeout_event.call, sequence=len(items) + 1))
                     items.append(
                         replace(
-                            _native_output_from_result(closeout_event.call, closeout_event.result, sequence=0),
+                            _native_output_from_result(
+                                closeout_event.call,
+                                closeout_event.result,
+                                sequence=0,
+                                lane_input=lane_input,
+                                lane_config=lane_config,
+                            ),
                             sequence=len(items) + 1,
                         )
                     )
@@ -466,7 +481,13 @@ def run_native_implement_v2(
                 resolver_decisions.append(decision)
                 result = _finish_result_with_resolver_decision(result, decision)
             latency_finished = time.monotonic()
-            output = _native_output_from_result(call, result, sequence=0)
+            output = _native_output_from_result(
+                call,
+                result,
+                sequence=0,
+                lane_input=lane_input,
+                lane_config=lane_config,
+            )
             output_records.append(output)
             tool_calls.append(call)
             tool_results.append(result)
@@ -664,6 +685,14 @@ def _execute_native_call(
         )
     if call.kind == "finish_call":
         return _finish_result(envelope, lane_input=lane_input, prior_tool_results=prior_tool_results)
+    if not _native_tool_available(call.tool_name, lane_input=lane_input, lane_config=lane_config):
+        return _invalid_result(
+            call,
+            reason=(
+                f"{call.tool_name} is not available in implement_v2 "
+                f"{str(lane_config.get('mode') or 'full')} mode"
+            ),
+        )
     if call.tool_name in READ_ONLY_TOOL_NAMES:
         return execute_read_only_tool_call(envelope, workspace=workspace, allowed_roots=allowed_read_roots)
     if call.tool_name in EXEC_TOOL_NAMES:
@@ -682,6 +711,22 @@ def _execute_native_call(
             )
         return write_runtime.execute(envelope)
     return _invalid_result(call, reason=f"unknown native tool: {call.tool_name}")
+
+
+def _native_tool_available(
+    tool_name: object,
+    *,
+    lane_input: ImplementLaneInput,
+    lane_config: Mapping[str, object],
+) -> bool:
+    mode = str(lane_config.get("mode") or "full").strip() or "full"
+    return str(tool_name or "") in {
+        spec.name
+        for spec in list_v2_tool_specs_for_task(
+            mode,
+            task_contract=lane_input.task_contract,
+        )
+    }
 
 
 def _run_native_finish_time_closeouts(
@@ -1292,6 +1337,8 @@ def _native_output_from_result(
     result: ToolResultEnvelope,
     *,
     sequence: int,
+    lane_input: ImplementLaneInput,
+    lane_config: Mapping[str, object],
 ) -> NativeTranscriptItem:
     if call.kind == "finish_call":
         output_kind = "finish_output"
@@ -1299,6 +1346,9 @@ def _native_output_from_result(
         output_kind = "custom_tool_call_output"
     else:
         output_kind = "function_call_output"
+    output_text = result.natural_result_text()
+    if not _native_tool_available("write_file", lane_input=lane_input, lane_config=lane_config):
+        output_text = hide_unavailable_write_file_guidance(output_text)
     return NativeTranscriptItem(
         sequence=sequence,
         turn_id=call.turn_id,
@@ -1311,7 +1361,7 @@ def _native_output_from_result(
         kind=output_kind,
         call_id=call.call_id,
         tool_name=call.tool_name,
-        output_text_or_ref=result.natural_result_text(),
+        output_text_or_ref=output_text,
         status=_native_output_status(call, result),
         is_error=result.is_error,
         content_refs=result.content_refs,
@@ -1746,10 +1796,14 @@ def _request_descriptor(
     loop_signals: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     loop_signals = loop_signals or _native_loop_control_state(transcript_items, current_turn_index=turn_index)
+    provider_visible_transcript_items = [
+        _provider_visible_native_item(item, lane_input=lane_input)
+        for item in transcript_items
+    ]
     compact_sidecar_digest = _compact_sidecar_digest_for_request(
         lane_input=lane_input,
         lane_attempt_id=lane_attempt_id,
-        transcript_items=transcript_items,
+        transcript_items=provider_visible_transcript_items,
         loop_signals=loop_signals,
     )
     return {
@@ -1761,10 +1815,10 @@ def _request_descriptor(
         "input_item_count": len(transcript_items),
         "input_items": _responses_input_items(
             lane_input,
-            transcript_items,
+            provider_visible_transcript_items,
             compact_sidecar_digest=compact_sidecar_digest,
         ),
-        "transcript_window": [item.as_dict() for item in transcript_items],
+        "transcript_window": [item.as_dict() for item in provider_visible_transcript_items],
         "provider_request_inventory": build_native_prompt_input_inventory(
             compact_sidecar_digest=compact_sidecar_digest,
         ),
@@ -1786,7 +1840,7 @@ def _live_responses_request_descriptor(
         model=model,
         instructions=str(request_descriptor.get("instructions") or _native_instructions(lane_input)),
         input_items=_provider_safe_input_items(request_descriptor.get("input_items")),
-        tool_specs=list_v2_tool_specs_for_mode(mode),
+        tool_specs=list_v2_tool_specs_for_task(mode, task_contract=lane_input.task_contract),
         transcript_window=request_descriptor.get("transcript_window") or (),
         reasoning=reasoning,
         provider_request_id=f"{request_descriptor.get('lane_attempt_id')}:turn:{request_descriptor.get('turn_index')}",
@@ -1795,9 +1849,16 @@ def _live_responses_request_descriptor(
 
 
 def _native_instructions(lane_input: ImplementLaneInput) -> str:
+    tool_specs = list_v2_tool_specs_for_task(
+        lane_input.lane_config.get("mode") or "full",
+        task_contract=lane_input.task_contract,
+    )
     sections = [
         section
-        for section in build_implement_v2_prompt_sections(lane_input)
+        for section in build_implement_v2_prompt_sections(
+            lane_input,
+            tool_specs=tool_specs,
+        )
         if section.id
         not in {
             "implement_v2_workframe",
@@ -1805,7 +1866,10 @@ def _native_instructions(lane_input: ImplementLaneInput) -> str:
             "implement_v2_lane_state",
         }
     ]
-    return render_prompt_sections(sections)
+    rendered = render_prompt_sections(sections)
+    if not any(spec.name == "write_file" for spec in tool_specs):
+        return hide_unavailable_write_file_guidance(rendered)
+    return rendered
 
 
 def _responses_input_items(
@@ -1832,7 +1896,9 @@ def _responses_input_items(
         }
     ]
     for item in transcript_items:
-        converted = _responses_input_item_from_transcript_item(item)
+        converted = _responses_input_item_from_transcript_item(
+            _provider_visible_native_item(item, lane_input=lane_input),
+        )
         if converted:
             items.append(converted)
     return items
@@ -1849,7 +1915,7 @@ def _compact_sidecar_digest_for_request(
         lane_attempt_id=lane_attempt_id or _lane_attempt_id(lane_input),
         provider="codex" if _provider_is_live(lane_input) else "fake_native",
         model=str(lane_input.model or "gpt-5.5"),
-        items=tuple(transcript_items),
+        items=tuple(_provider_visible_native_item(item, lane_input=lane_input) for item in transcript_items),
     )
     return build_compact_native_sidecar_digest(
         transcript,
@@ -1935,6 +2001,9 @@ def _native_loop_control_state(
 def _prewrite_probe_plateau_result(
     call: NativeTranscriptItem,
     loop_signals: Mapping[str, object],
+    *,
+    lane_input: ImplementLaneInput,
+    lane_config: Mapping[str, object],
 ) -> ToolResultEnvelope | None:
     first_write_due_overrun = bool(loop_signals.get("first_write_due_overrun"))
     prewrite_probe_plateau = bool(loop_signals.get("prewrite_probe_plateau"))
@@ -1944,14 +2013,19 @@ def _prewrite_probe_plateau_result(
         return None
     if not _native_call_is_prewrite_probe(call):
         return None
+    mutation_tools = (
+        "write_file/edit_file/apply_patch"
+        if _native_tool_available("write_file", lane_input=lane_input, lane_config=lane_config)
+        else "edit_file/apply_patch"
+    )
     reason = (
         "first-write due overrun: enough read/probe evidence has been gathered; "
-        "perform a source mutation with write_file/edit_file/apply_patch or finish blocked before more probes"
+        f"perform a source mutation with {mutation_tools} or finish blocked before more probes"
     )
     if prewrite_probe_plateau:
         reason = (
             "prewrite probe plateau: enough read/probe evidence has been gathered; "
-            "perform a source mutation with write_file/edit_file/apply_patch or finish blocked before more probes"
+            f"perform a source mutation with {mutation_tools} or finish blocked before more probes"
         )
     return _invalid_result(
         call,
@@ -2205,6 +2279,33 @@ def _responses_input_item_from_transcript_item(item: NativeTranscriptItem) -> di
     if item.kind in {"function_call_output", "finish_output"}:
         return build_function_call_output_input_item(call_id=item.call_id, output=item.output_text_or_ref)
     return {}
+
+
+def _provider_visible_native_item(
+    item: NativeTranscriptItem,
+    *,
+    lane_input: ImplementLaneInput,
+) -> NativeTranscriptItem:
+    if _native_tool_available("write_file", lane_input=lane_input, lane_config=lane_input.lane_config):
+        return item
+    output_text = hide_unavailable_write_file_guidance(item.output_text_or_ref)
+    if item.tool_name != "write_file":
+        if output_text == item.output_text_or_ref:
+            return item
+        return replace(item, output_text_or_ref=output_text)
+    if item.kind in {"function_call", "custom_tool_call"}:
+        return replace(
+            item,
+            tool_name="unavailable_write_tool",
+            arguments_json_text='{"unavailable_tool":true,"redacted_arguments":true}',
+            custom_input_text="",
+            output_text_or_ref=output_text,
+        )
+    return replace(
+        item,
+        tool_name="unavailable_write_tool",
+        output_text_or_ref=output_text,
+    )
 
 
 def _mapping_list(value: object) -> list[dict[str, object]]:

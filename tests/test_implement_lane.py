@@ -1775,7 +1775,7 @@ def test_implement_v2_prewrite_generic_search_suggestions_use_regex(tmp_path) ->
         assert "|" in suggestion["arguments"]["query"]
 
 
-def test_implement_v2_allows_hard_runtime_write_after_more_probes_follow_blocked_write(tmp_path) -> None:
+def test_implement_v2_allows_hard_runtime_patch_after_more_probes_follow_blocked_write(tmp_path) -> None:
     (tmp_path / "doomgeneric_mips").write_bytes(b"\x7fELFfake")
     (tmp_path / "doomgeneric").mkdir()
     (tmp_path / "doomgeneric" / "i_video.c").write_text("void I_FinishUpdate(void) {}\n", encoding="utf-8")
@@ -1823,15 +1823,22 @@ def test_implement_v2_allows_hard_runtime_write_after_more_probes_follow_blocked
             "finish": {"outcome": "continue"},
         },
         {
-            "summary": "write after enough probes",
+            "summary": "patch after enough probes",
             "tool_calls": [
                 {
-                    "id": "write-vm",
-                    "name": "write_file",
-                    "arguments": {"path": "vm.js", "content": "module.exports = {}\n"},
+                    "id": "patch-vm",
+                    "name": "apply_patch",
+                    "arguments": {
+                        "patch_lines": [
+                            "*** Begin Patch",
+                            "*** Add File: vm.js",
+                            "+module.exports = {}",
+                            "*** End Patch",
+                        ],
+                    },
                 }
             ],
-            "finish": {"outcome": "blocked", "summary": "stop after write"},
+            "finish": {"outcome": "blocked", "summary": "stop after patch"},
         },
     ]
 
@@ -1870,18 +1877,18 @@ def test_implement_v2_allows_hard_runtime_write_after_more_probes_follow_blocked
     )
     tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
     premature_write = next(item for item in tool_results if item["provider_call_id"] == "write-too-early")
-    final_write = next(item for item in tool_results if item["provider_call_id"] == "write-vm")
+    final_patch = next(item for item in tool_results if item["provider_call_id"] == "patch-vm")
     readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
 
     assert premature_write["status"] == "invalid"
     assert "deep_runtime_prewrite_probe_budget_not_met" in premature_write["content"][0]["reason"]
-    assert final_write["status"] == "completed"
+    assert final_patch["status"] == "completed"
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "module.exports = {}\n"
     assert readiness["probe_threshold"] == 8
     assert readiness["probe_count_before_first_write"] == 8
     assert readiness["prewrite_probe_missing_categories"] == ()
-    assert readiness["first_write_tool"] == "write_file"
-    assert readiness["first_write_provider_call_id"] == "write-vm"
+    assert readiness["first_write_tool"] == "apply_patch"
+    assert readiness["first_write_provider_call_id"] == "patch-vm"
 
 
 def test_implement_v2_blocks_hard_runtime_prewrite_even_without_active_work_todo(tmp_path) -> None:
@@ -2011,7 +2018,7 @@ def test_implement_v2_shell_writer_source_like_path_detection_is_artifact_safe()
     assert not _shell_command_may_mutate_source_tree("printf frame > frame.txt && test -s frame.txt")
 
 
-def test_implement_v2_surfaces_write_tools_from_hard_runtime_prompt_before_probe_budget(tmp_path) -> None:
+def test_implement_v2_surfaces_patch_tools_from_hard_runtime_prompt_before_probe_budget(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-hard-runtime",
@@ -2043,12 +2050,14 @@ def test_implement_v2_surfaces_write_tools_from_hard_runtime_prompt_before_probe
     )
     response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
 
-    assert {"write_file", "edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
+    assert {"edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
+    assert "write_file" not in {spec.name for spec in specs}
+    assert "write_file" not in prompt
     assert "write tools are temporarily hidden for this turn" not in response_contract
     assert "write tools are available" in response_contract
     assert "first source mutation is execution-gated" in response_contract
     assert "source/output contract" in response_contract
-    assert "write_file" in response_contract
+    assert "write_file" not in response_contract
     assert "edit_file" in response_contract
     assert "apply_patch" in response_contract
     response_shape = json.loads(response_contract)
@@ -2059,7 +2068,33 @@ def test_implement_v2_surfaces_write_tools_from_hard_runtime_prompt_before_probe
     assert "run_command" in response_contract
 
 
-def test_implement_v2_keeps_write_tools_visible_after_many_shallow_source_probes(tmp_path) -> None:
+def test_implement_v2_hard_runtime_tool_filter_is_generic_non_mips_artifact_task(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-generic-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={
+            "goal": (
+                "Build the provided emulator runtime from source and render a screenshot image "
+                "artifact to /tmp/output.png."
+            )
+        },
+        lane_config={"mode": "full"},
+    )
+
+    specs = _model_visible_tool_specs_for_turn(
+        lane_input,
+        active_work_todo_state={},
+        prior_tool_calls=(),
+        prior_tool_results=(),
+    )
+
+    assert "write_file" not in {spec.name for spec in specs}
+    assert {"edit_file", "apply_patch"} <= {spec.name for spec in specs}
+
+
+def test_implement_v2_keeps_patch_tools_visible_after_many_shallow_source_probes(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-hard-runtime",
@@ -2109,7 +2144,8 @@ def test_implement_v2_keeps_write_tools_visible_after_many_shallow_source_probes
         requires_deep_runtime_coverage=True,
     )
 
-    assert {"write_file", "edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
+    assert {"edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
+    assert "write_file" not in {spec.name for spec in specs}
     assert readiness["probe_count_before_first_write"] == 8
     assert readiness["first_write_due"] is False
     assert "runtime_binary_layout" in readiness["prewrite_probe_missing_categories"]
@@ -3238,7 +3274,7 @@ def test_implement_v2_does_not_label_exec_mode_as_prewrite_hidden(tmp_path) -> N
     assert "tool_surface_note" not in response_contract
 
 
-def test_implement_v2_reveals_write_tools_after_hard_runtime_probe_budget(tmp_path) -> None:
+def test_implement_v2_reveals_patch_tools_after_hard_runtime_probe_budget(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-hard-runtime",
@@ -3310,7 +3346,8 @@ def test_implement_v2_reveals_write_tools_after_hard_runtime_probe_budget(tmp_pa
         prior_tool_results=results,
     )
 
-    assert {"write_file", "edit_file", "apply_patch"} <= {spec.name for spec in specs}
+    assert {"edit_file", "apply_patch"} <= {spec.name for spec in specs}
+    assert "write_file" not in {spec.name for spec in specs}
 
 
 def test_implement_v2_allows_normal_task_write_without_deep_prewrite_probe_budget(tmp_path) -> None:
@@ -5975,6 +6012,44 @@ def test_implement_v2_live_json_prompt_surfaces_prewrite_required_next_probe(tmp
 
     assert "Required next probe" in prompt
     assert "read_file doomgeneric/doomgeneric/doomgeneric_img.c" in prompt
+
+
+def test_implement_v2_hard_runtime_live_json_prompt_excludes_hidden_write_file_guidance(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-hard-runtime",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={
+            "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
+        },
+        lane_config={"mode": "full"},
+    )
+    tool_specs = tuple(spec for spec in list_v2_tool_specs_for_mode("full") if spec.name != "write_file")
+
+    prompt = _live_json_prompt(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        turn_index=4,
+        max_turns=8,
+        base_max_turns=8,
+        tool_specs=tool_specs,
+        active_work_todo_state={
+            "id": "todo-1",
+            "status": "drafting",
+            "source": {"target_paths": ["vm.js"]},
+            "first_write_readiness": {
+                "first_write_due": True,
+                "required_next_action": (
+                    "make one scoped source mutation with write_file/edit_file/apply_patch before more probes"
+                ),
+            },
+        },
+        history=(),
+    )
+
+    assert "edit_file/apply_patch" in prompt
+    assert "write_file" not in prompt
 
 
 def test_implement_v2_finish_gate_history_projects_compact_recovery_card() -> None:
@@ -21134,6 +21209,44 @@ def test_implement_v2_write_file_approved_apply_records_mutation_evidence(tmp_pa
     assert tool_result["side_effects"][0]["approval_id"] == "approval-1"
 
 
+def test_implement_v2_hard_runtime_write_file_is_unavailable_and_does_not_mutate(tmp_path) -> None:
+    target = tmp_path / "vm.js"
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+            task_contract={
+                "goal": (
+                    "Build a MIPS ELF interpreter runtime from provided source and write "
+                    "a /tmp/frame.bmp artifact."
+                )
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "vm.js",
+                    "content_lines": ["console.log('bad');"],
+                    "create": True,
+                    "apply": True,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "write should be unavailable"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+
+    assert result.status in {"blocked", "failed"}
+    assert tool_result["status"] == "invalid"
+    assert "write_file is not available" in tool_result["content"][0]["reason"]
+    assert not target.exists()
+
+
 def test_implement_v2_write_file_rejects_large_single_line_source(tmp_path) -> None:
     target = tmp_path / "vm.js"
     single_line_source = "const fs = require('fs');" + ("x" * 5000)
@@ -22353,7 +22466,12 @@ def _expected_command_run_id(*, lane_attempt_id: str, provider_call_id: str) -> 
     return f"{lane_attempt_id}:command:{provider_call_id}-{digest[:8]}"
 
 
-def _write_lane_input(tmp_path, *, approved_write_calls=()) -> ImplementLaneInput:
+def _write_lane_input(
+    tmp_path,
+    *,
+    approved_write_calls=(),
+    task_contract: dict[str, object] | None = None,
+) -> ImplementLaneInput:
     return ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
@@ -22364,6 +22482,7 @@ def _write_lane_input(tmp_path, *, approved_write_calls=()) -> ImplementLaneInpu
             "allowed_write_roots": ["."],
             "approved_write_calls": list(approved_write_calls),
         },
+        task_contract=task_contract or {},
     )
 
 
