@@ -859,6 +859,96 @@ def test_native_harness_blocks_more_probes_after_prewrite_plateau(tmp_path: Path
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "patched\n"
 
 
+def test_native_harness_blocks_more_probes_after_first_write_due_grace(tmp_path: Path) -> None:
+    for index in range(10):
+        (tmp_path / f"missing-{index}.txt").write_text(f"seed {index}\n", encoding="utf-8")
+    for index in range(5):
+        (tmp_path / f"extra-missing-{index}.txt").write_text(f"extra {index}\n", encoding="utf-8")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(f"read-{index}", "read_file", {"path": f"missing-{index}.txt"}, output_index=index)
+                for index in range(10)
+            ],
+            [
+                fake_call(
+                    f"extra-read-{index}",
+                    "read_file",
+                    {"path": f"extra-missing-{index}.txt"},
+                    output_index=index,
+                )
+                for index in range(5)
+            ],
+            [fake_call("read-too-late", "search_text", {"path": ".", "query": "more"}, output_index=0)],
+            [
+                fake_call(
+                    "write-after-overrun",
+                    "write_file",
+                    {"path": "vm.js", "content": "patched\n", "apply": True, "create": True},
+                    output_index=0,
+                )
+            ],
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=4)
+
+    third_signals = _loop_signals(provider.requests[2])
+    assert third_signals["first_write_due"] is True
+    assert third_signals["first_write_due_overrun"] is True
+    assert third_signals["max_additional_probe_turns"] == 0
+    due_turn_outputs = [
+        item
+        for item in result.transcript.items
+        if item.kind.endswith("_output") and item.call_id.startswith("extra-read-")
+    ]
+    assert [item.status for item in due_turn_outputs] == ["completed", "invalid", "invalid", "invalid", "invalid"]
+    assert "first-write due overrun" not in due_turn_outputs[0].output_text_or_ref
+    assert all("first-write due overrun" in item.output_text_or_ref for item in due_turn_outputs[1:])
+    blocked = next(item for item in result.transcript.items if item.call_id == "read-too-late" and item.kind.endswith("_output"))
+    assert blocked.status == "invalid"
+    assert blocked.is_error is True
+    assert "first-write due overrun" in blocked.output_text_or_ref
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "patched\n"
+
+
+def test_native_harness_source_mutation_exec_clears_first_write_due(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(f"read-{index}", "read_file", {"path": f"missing-{index}.txt"}, output_index=index)
+                for index in range(10)
+            ],
+            [
+                fake_call(
+                    "generate-source",
+                    "run_command",
+                    {
+                        "command": "printf 'ok\\n' > generated.py",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 3,
+                        "foreground_budget_seconds": 3,
+                        "command_intent": "source_mutation",
+                    },
+                    output_index=0,
+                )
+            ],
+            [fake_call("read-generated", "read_file", {"path": "generated.py"}, output_index=0)],
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    third_signals = _loop_signals(provider.requests[2])
+    assert third_signals["write_count"] == 1
+    assert third_signals["first_write_due"] is False
+    generated = next(item for item in result.transcript.items if item.call_id == "read-generated" and item.kind.endswith("_output"))
+    assert generated.status == "completed"
+    assert "first-write due overrun" not in generated.output_text_or_ref
+    assert "ok" in generated.output_text_or_ref
+
+
 def test_native_harness_instructions_do_not_leak_persisted_lane_state(tmp_path: Path) -> None:
     lane_input = replace(
         _lane_input(tmp_path),

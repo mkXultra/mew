@@ -60,12 +60,16 @@ PHASE3_NATIVE_SURFACE = {
 }
 _FIRST_WRITE_DUE_PROBE_THRESHOLD = 10
 _FIRST_WRITE_DUE_TURN_THRESHOLD = 6
+_FIRST_WRITE_DUE_GRACE_PROBE_CALLS = 1
 _PREWRITE_PROBE_PLATEAU_THRESHOLD = 30
 _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
 _CONTROL_FAILURE_SUMMARY_LIMIT = 700
 _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
 _NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
 _NATIVE_MODEL_TIMEOUT_MIN_SECONDS = 30.0
+_SOURCE_MUTATION_COMMAND_INTENTS = frozenset(
+    {"implement", "implementation", "write", "edit", "mutation", "source_mutation"}
+)
 _COMMAND_RUN_ID_RE = re.compile(r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)")
 _SEMANTIC_VERIFIER_FAILURE_PATTERNS = (
     re.compile(r"\bvm\s+(?:finished|stopped)\s+exit=(?!0\b)\d+\b", re.IGNORECASE),
@@ -325,6 +329,7 @@ def run_native_implement_v2(
         )
         accepted_finish: NativeTranscriptItem | None = None
         output_records: list[NativeTranscriptItem] = []
+        prewrite_probe_calls_this_turn = 0
         for call in calls:
             if accepted_finish is not None and _call_order_key(call) > _call_order_key(accepted_finish):
                 output_records.append(
@@ -337,7 +342,14 @@ def run_native_implement_v2(
                 continue
 
             latency_start = time.monotonic()
-            result = _prewrite_probe_plateau_result(call, turn_entry_loop_signals) or _execute_native_call(
+            call_loop_signals = dict(turn_entry_loop_signals)
+            if _native_call_is_prewrite_probe(call) and bool(turn_entry_loop_signals.get("first_write_due")):
+                prewrite_probe_calls_this_turn += 1
+                if prewrite_probe_calls_this_turn > _FIRST_WRITE_DUE_GRACE_PROBE_CALLS:
+                    call_loop_signals["first_write_due_overrun"] = True
+                    call_loop_signals["first_write_grace_exhausted"] = True
+                    call_loop_signals["max_additional_probe_turns"] = 0
+            result = _prewrite_probe_plateau_result(call, call_loop_signals) or _execute_native_call(
                 call,
                 lane_input=lane_input,
                 workspace=workspace,
@@ -1390,7 +1402,7 @@ def _native_loop_control_state(
     current_turn_index: int,
 ) -> dict[str, object]:
     calls = [item for item in transcript_items if item.kind in CALL_ITEM_KINDS]
-    write_count = sum(1 for item in calls if item.tool_name in WRITE_TOOL_NAMES)
+    write_count = sum(1 for item in calls if item.tool_name in WRITE_TOOL_NAMES or _native_call_is_source_mutating_exec(item))
     verifier_count = sum(1 for item in calls if _native_call_is_verifier(item))
     probe_count = sum(1 for item in calls if _native_call_is_probe_or_exec(item))
     command_count = sum(1 for item in calls if item.tool_name in EXEC_TOOL_NAMES)
@@ -1408,6 +1420,15 @@ def _native_loop_control_state(
             probe_count >= _FIRST_WRITE_DUE_PROBE_THRESHOLD
             or current_turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD
         )
+    )
+    first_write_due_entry_turn = _first_write_due_entry_turn(
+        transcript_items,
+        current_turn_index=current_turn_index,
+    )
+    first_write_due_overrun = bool(
+        first_write_due
+        and first_write_due_entry_turn is not None
+        and current_turn_index > first_write_due_entry_turn
     )
     prewrite_probe_plateau = bool(
         write_count == 0
@@ -1432,6 +1453,9 @@ def _native_loop_control_state(
         "write_count": write_count,
         "verifier_count": verifier_count,
         "first_write_due": first_write_due,
+        "first_write_due_entry_turn": first_write_due_entry_turn,
+        "first_write_due_overrun": first_write_due_overrun,
+        "first_write_grace_probe_calls": _FIRST_WRITE_DUE_GRACE_PROBE_CALLS if first_write_due else None,
         "prewrite_probe_plateau": prewrite_probe_plateau,
         "verifier_repair_due": verifier_repair_due,
         "latest_failed_verifier": _failed_verifier_payload(latest_failed_verifier),
@@ -1440,7 +1464,9 @@ def _native_loop_control_state(
         "post_failure_write_count": post_failure_write_count,
         "failed_verifier_repair_probe_threshold": failed_verifier_probe_threshold,
         "max_additional_probe_turns": (
-            0 if (verifier_repair_due or prewrite_probe_plateau) else (1 if first_write_due else None)
+            0
+            if (verifier_repair_due or prewrite_probe_plateau or first_write_due_overrun)
+            else (0 if first_write_due else None)
         ),
     }
 
@@ -1449,19 +1475,72 @@ def _prewrite_probe_plateau_result(
     call: NativeTranscriptItem,
     loop_signals: Mapping[str, object],
 ) -> ToolResultEnvelope | None:
-    if not bool(loop_signals.get("prewrite_probe_plateau")):
+    first_write_due_overrun = bool(loop_signals.get("first_write_due_overrun"))
+    prewrite_probe_plateau = bool(loop_signals.get("prewrite_probe_plateau"))
+    if not first_write_due_overrun and not prewrite_probe_plateau:
         return None
     if call.kind == "finish_call" or call.tool_name in WRITE_TOOL_NAMES:
         return None
-    if call.tool_name not in READ_ONLY_TOOL_NAMES and call.tool_name not in EXEC_TOOL_NAMES:
+    if not _native_call_is_prewrite_probe(call):
         return None
-    return _invalid_result(
-        call,
-        reason=(
+    reason = (
+        "first-write due overrun: enough read/probe evidence has been gathered; "
+        "perform a source mutation with write_file/edit_file/apply_patch or finish blocked before more probes"
+    )
+    if prewrite_probe_plateau:
+        reason = (
             "prewrite probe plateau: enough read/probe evidence has been gathered; "
             "perform a source mutation with write_file/edit_file/apply_patch or finish blocked before more probes"
-        ),
+        )
+    return _invalid_result(
+        call,
+        reason=reason,
     )
+
+
+def _first_write_due_entry_turn(
+    transcript_items: list[NativeTranscriptItem],
+    *,
+    current_turn_index: int,
+) -> int | None:
+    for turn_index in range(1, max(1, current_turn_index) + 1):
+        prior_calls = [
+            item
+            for item in transcript_items
+            if item.kind in CALL_ITEM_KINDS and _turn_number(item.turn_id) < turn_index
+        ]
+        write_count = sum(
+            1 for item in prior_calls if item.tool_name in WRITE_TOOL_NAMES or _native_call_is_source_mutating_exec(item)
+        )
+        verifier_count = sum(1 for item in prior_calls if _native_call_is_verifier(item))
+        if write_count or verifier_count:
+            return None
+        probe_count = sum(1 for item in prior_calls if _native_call_is_probe_or_exec(item))
+        if probe_count >= _FIRST_WRITE_DUE_PROBE_THRESHOLD or turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD:
+            return turn_index
+    return current_turn_index if current_turn_index >= _FIRST_WRITE_DUE_TURN_THRESHOLD else None
+
+
+def _native_call_is_prewrite_probe(item: NativeTranscriptItem) -> bool:
+    if item.tool_name in READ_ONLY_TOOL_NAMES:
+        return True
+    if item.tool_name not in EXEC_TOOL_NAMES:
+        return False
+    if _native_call_is_source_mutating_exec(item):
+        return False
+    if item.tool_name in {"poll_command", "cancel_command", "read_command_output", "run_tests"}:
+        return True
+    arguments, _ = _arguments(item)
+    command_intent = str(arguments.get("command_intent") or arguments.get("intent") or "").strip().casefold()
+    return command_intent in {"", "probe", "diagnostic", "inspect", "read", "analysis"}
+
+
+def _native_call_is_source_mutating_exec(item: NativeTranscriptItem) -> bool:
+    if item.tool_name != "run_command":
+        return False
+    arguments, _ = _arguments(item)
+    command_intent = str(arguments.get("command_intent") or arguments.get("intent") or "").strip().casefold()
+    return command_intent in _SOURCE_MUTATION_COMMAND_INTENTS
 
 
 def _failed_verifier_repair_probe_threshold(item: NativeTranscriptItem | None) -> int:
@@ -1474,6 +1553,8 @@ def _failed_verifier_repair_probe_threshold(item: NativeTranscriptItem | None) -
 
 
 def _native_call_is_probe_or_exec(item: NativeTranscriptItem) -> bool:
+    if _native_call_is_source_mutating_exec(item):
+        return False
     return item.tool_name in READ_ONLY_TOOL_NAMES or item.tool_name in EXEC_TOOL_NAMES
 
 

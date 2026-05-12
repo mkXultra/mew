@@ -827,11 +827,13 @@ def _bounded_loop_signals(loop_signals: Mapping[str, object] | None) -> dict[str
     if not isinstance(loop_signals, Mapping):
         return {
             "first_write_due": False,
+            "first_write_due_overrun": False,
             "prewrite_probe_plateau": False,
             "verifier_repair_due": False,
         }
     signals: dict[str, object] = {
         "first_write_due": bool(loop_signals.get("first_write_due")),
+        "first_write_due_overrun": bool(loop_signals.get("first_write_due_overrun")),
         "prewrite_probe_plateau": bool(loop_signals.get("prewrite_probe_plateau")),
         "verifier_repair_due": bool(loop_signals.get("verifier_repair_due")),
         "probe_count_without_write": _safe_int(loop_signals.get("probe_count_without_write"), default=0),
@@ -839,6 +841,8 @@ def _bounded_loop_signals(loop_signals: Mapping[str, object] | None) -> dict[str
         "post_failure_write_count": _safe_int(loop_signals.get("post_failure_write_count"), default=0),
         "verifier_count": _safe_int(loop_signals.get("verifier_count"), default=0),
         "write_count": _safe_int(loop_signals.get("write_count"), default=0),
+        "first_write_due_entry_turn": _safe_int(loop_signals.get("first_write_due_entry_turn"), default=0),
+        "first_write_grace_probe_calls": _safe_int(loop_signals.get("first_write_grace_probe_calls"), default=0),
         "failed_verifier_repair_probe_threshold": _safe_int(
             loop_signals.get("failed_verifier_repair_probe_threshold"),
             default=0,
