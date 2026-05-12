@@ -226,7 +226,15 @@ def test_collect_mew_trial_summary_accepts_native_artifacts_at_task_root(tmp_pat
                     "pairing_valid": True,
                     "provider_native_tool_loop": True,
                     "model_json_main_path_detected": False,
+                    "native_evidence_observation": {
+                        "artifact_ref": "native-evidence-observation.json",
+                        "finish_claim_count": 1,
+                        "cited_evidence_ref_count": 2,
+                        "unresolved_cited_evidence_ref_count": 1,
+                        "resolver_block_count": 1,
+                    },
                 },
+                "native_evidence_observation_ref": "native-evidence-observation.json",
             }
         ),
         encoding="utf-8",
@@ -251,6 +259,10 @@ def test_collect_mew_trial_summary_accepts_native_artifacts_at_task_root(tmp_pat
         ),
         encoding="utf-8",
     )
+    (unknown_task / "native-evidence-observation.json").write_text(
+        json.dumps({"summary": {"unresolved_cited_evidence_ref_count": 1}}),
+        encoding="utf-8",
+    )
     (unknown_task / "mew-report.json").write_text(
         json.dumps({"work_exit_code": 1, "work_report": {"stop_reason": "implement_v2_blocked"}}),
         encoding="utf-8",
@@ -264,6 +276,10 @@ def test_collect_mew_trial_summary_accepts_native_artifacts_at_task_root(tmp_pat
     assert summary["native_observation_present"] is True
     assert summary["native_pairing_valid"] is True
     assert summary["provider_request_inventory_present"] is True
+    assert summary["native_evidence_observation_present"] is True
+    assert summary["native_evidence_observation_path"] == str(unknown_task / "native-evidence-observation.json")
+    assert summary["native_evidence_finish_claim_count"] == 1
+    assert summary["native_evidence_unresolved_cited_ref_count"] == 1
     assert observer_detail_missing([summary]) is False
 
 

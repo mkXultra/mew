@@ -853,9 +853,16 @@ def test_native_harness_proof_manifest_replays_from_response_transcript(tmp_path
     manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
     assert manifest["resolver_decisions_ref"] == "resolver_decisions.jsonl"
     assert str(manifest["resolver_decisions_sha256"]).startswith("sha256:")
+    assert manifest["native_evidence_observation_ref"] == "native-evidence-observation.json"
+    assert str(manifest["native_evidence_observation_sha256"]).startswith("sha256:")
+    assert (artifact_root / "native-evidence-observation.json").exists()
     manifest_without_resolver = dict(manifest)
     manifest_without_resolver.pop("resolver_decisions_ref")
     manifest_without_resolver.pop("resolver_decisions_sha256")
+    manifest_without_resolver.pop("native_evidence_observation_ref")
+    manifest_without_resolver.pop("native_evidence_observation_sha256")
+    manifest_without_resolver["metrics"] = dict(manifest_without_resolver["metrics"])
+    manifest_without_resolver["metrics"].pop("native_evidence_observation")
     assert manifest_without_resolver == expected
 
 

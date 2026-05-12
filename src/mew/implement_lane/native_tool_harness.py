@@ -37,6 +37,7 @@ from .native_transcript import (
     native_transcript_hash,
     normalize_codex_response_items,
     validate_native_transcript_pairing,
+    write_native_evidence_observation,
     write_native_transcript_artifacts,
 )
 from .native_workframe_projection import build_native_prompt_input_inventory
@@ -2458,6 +2459,14 @@ def _write_native_artifacts(
                 proof_manifest_path=paths.get("proof_manifest"),
             )
         )
+    paths.update(
+        write_native_evidence_observation(
+            root,
+            transcript,
+            resolver_decisions=resolver_decisions,
+            proof_manifest_path=paths.get("proof_manifest"),
+        )
+    )
     paths.update(_write_provider_request_artifacts(root, provider=provider, status=status, error=error))
     if not isinstance(provider, NativeFakeProvider):
         return paths

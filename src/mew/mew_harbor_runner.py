@@ -260,6 +260,11 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
     metrics = {**manifest_metrics, **report_metrics}
     workframe_metrics = metrics.get("workframe") if isinstance(metrics.get("workframe"), dict) else {}
     observation = metrics.get("integration_observation") if isinstance(metrics.get("integration_observation"), dict) else {}
+    native_evidence = (
+        metrics.get("native_evidence_observation")
+        if isinstance(metrics.get("native_evidence_observation"), dict)
+        else {}
+    )
     observation_summary = (
         observation.get("summary")
         if isinstance(observation.get("summary"), dict)
@@ -267,6 +272,14 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
     )
     artifact_ref = observation.get("artifact_ref") if isinstance(observation.get("artifact_ref"), str) else ""
     detail_path = manifest_dir / artifact_ref if artifact_ref else None
+    native_evidence_ref = (
+        manifest.get("native_evidence_observation_ref")
+        if isinstance(manifest.get("native_evidence_observation_ref"), str)
+        else native_evidence.get("artifact_ref")
+        if isinstance(native_evidence.get("artifact_ref"), str)
+        else ""
+    )
+    native_evidence_path = manifest_dir / native_evidence_ref if native_evidence_ref else None
     native_status = _native_artifact_status(manifest_dir)
     return {
         "external_reward": extract_harbor_reward(result),
@@ -296,6 +309,13 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
         "provider_request_inventory_entry_count": provider_request_inventory_status["entry_count"],
         "provider_request_inventory_path": str(provider_request_inventory_path) if provider_request_inventory_status["exists"] else "",
         "native_provider_requests_path": str(provider_requests_path) if provider_requests_path.exists() else "",
+        "native_evidence_observation_present": bool(native_evidence_path and native_evidence_path.exists()),
+        "native_evidence_observation_ref": native_evidence_ref,
+        "native_evidence_observation_path": str(native_evidence_path) if native_evidence_path else "",
+        "native_evidence_finish_claim_count": native_evidence.get("finish_claim_count"),
+        "native_evidence_cited_ref_count": native_evidence.get("cited_evidence_ref_count"),
+        "native_evidence_unresolved_cited_ref_count": native_evidence.get("unresolved_cited_evidence_ref_count"),
+        "native_evidence_resolver_block_count": native_evidence.get("resolver_block_count"),
         "proof_manifest_path": str(proof_manifest_path),
         "history_path": str(history_path),
         "transcript_path": str(transcript_path),

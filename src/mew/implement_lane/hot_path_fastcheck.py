@@ -280,6 +280,7 @@ def _run_native_hot_path_fastcheck(
                 transcript=transcript,
             )
         )
+        checks.append(_check_native_evidence_observation(manifest_path=manifest_path, manifest=manifest, transcript=transcript))
     else:
         checks.extend(
             [
@@ -292,6 +293,7 @@ def _run_native_hot_path_fastcheck(
                 _check("native_compact_digest_replay", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_provider_visible_state", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_resolver_decisions", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_evidence_observation", False, "native transcript is unreadable", {"skipped": True}),
             ]
         )
     status = "pass" if all(check.status == "pass" for check in checks) else "fail"
@@ -794,6 +796,71 @@ def _native_valid_finish_call_ids(transcript: NativeTranscript) -> set[str]:
             continue
         valid.add(item.call_id)
     return valid
+
+
+def _check_native_evidence_observation(
+    *,
+    manifest_path: Path,
+    manifest: Mapping[str, object],
+    transcript: NativeTranscript,
+) -> HotPathCheck:
+    finish_call_count = sum(1 for item in transcript.items if item.kind == "finish_call")
+    observation_ref = str(manifest.get("native_evidence_observation_ref") or "").strip()
+    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    observation_metrics = (
+        metrics.get("native_evidence_observation")
+        if isinstance(metrics.get("native_evidence_observation"), dict)
+        else {}
+    )
+    if not finish_call_count and not observation_ref:
+        return _check(
+            "native_evidence_observation",
+            True,
+            "no finish claim requires native evidence observation artifact",
+            {"finish_call_count": 0, "native_evidence_observation_ref": ""},
+        )
+    observation_path = (manifest_path.parent / observation_ref).resolve(strict=False) if observation_ref else manifest_path.parent / ""
+    loaded_payload = _load_json(observation_path) if observation_ref and observation_path.is_file() else {}
+    payload = loaded_payload if isinstance(loaded_payload, dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    claim_count = _int_or_default(summary.get("finish_claim_count"), default=-1)
+    known_ref_count = _int_or_default(summary.get("known_tool_evidence_ref_count"), default=-1)
+    unresolved_count = _int_or_default(summary.get("unresolved_cited_evidence_ref_count"), default=-1)
+    expected_sha = str(manifest.get("native_evidence_observation_sha256") or "").strip()
+    metrics_sha = str(observation_metrics.get("artifact_sha256") or "").strip()
+    actual_sha = _file_sha256(observation_path) if observation_path.is_file() else ""
+    expected_transcript_hash = native_transcript_hash(transcript)
+    checks = {
+        "ref_present": bool(observation_ref),
+        "path_exists": observation_path.is_file(),
+        "manifest_sha_matches": bool(expected_sha) and expected_sha == actual_sha,
+        "manifest_metrics_sha_matches": bool(metrics_sha) and metrics_sha == actual_sha,
+        "source_of_truth": payload.get("source_of_truth") == "response_transcript.json",
+        "transcript_hash_matches": payload.get("transcript_hash") == expected_transcript_hash,
+        "finish_claim_count_matches": claim_count == finish_call_count,
+        "known_ref_count_available": known_ref_count >= 0,
+        "unresolved_count_available": unresolved_count >= 0,
+        "manifest_metrics_present": bool(observation_metrics),
+    }
+    ok = all(checks.values())
+    return _check(
+        "native_evidence_observation",
+        ok,
+        "native evidence observation links finish claims, known tool evidence refs, and resolver blockers"
+        if ok
+        else "native evidence observation artifact is missing or not aligned with transcript",
+        {
+            **checks,
+            "native_evidence_observation_ref": observation_ref,
+            "native_evidence_observation_sha256": expected_sha,
+            "native_evidence_observation_actual_sha256": actual_sha,
+            "expected_transcript_hash": expected_transcript_hash,
+            "observed_transcript_hash": payload.get("transcript_hash"),
+            "finish_call_count": finish_call_count,
+            "summary": summary,
+            "manifest_metrics": observation_metrics,
+        },
+    )
 
 
 def _native_finish_output_is_protocol_invalid(output: NativeTranscriptItem) -> bool:
@@ -2208,6 +2275,13 @@ def _nonnegative_int(value: object) -> int:
         return max(0, int(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _int_or_default(value: object, *, default: int) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
 
 
 def _nonnegative_float(value: object) -> float:

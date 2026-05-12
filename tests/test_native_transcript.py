@@ -4,6 +4,7 @@ from mew.implement_lane import (
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
     NativeTranscript,
     NativeTranscriptItem,
+    build_native_evidence_observation,
     build_synthetic_error_output,
     native_artifact_contract,
     native_proof_manifest_from_transcript,
@@ -14,6 +15,7 @@ from mew.implement_lane import (
     reduce_workframe,
     validate_native_transcript_pairing,
     WorkFrameInputs,
+    write_native_evidence_observation,
     write_native_transcript_artifacts,
 )
 from mew.implement_lane.native_transcript import LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID
@@ -362,3 +364,112 @@ def test_native_transcript_artifacts_and_derived_manifest_are_regenerable(tmp_pa
     assert initial_manifest["pairing"]["valid"] is True
     assert paths["response_transcript"].exists()
     assert paths["response_items"].read_text(encoding="utf-8").count("\n") == len(transcript.items)
+
+
+def test_native_evidence_observation_resolves_finish_refs_without_finish_echo(tmp_path) -> None:
+    transcript = NativeTranscript(
+        lane_attempt_id="attempt-1",
+        provider="codex",
+        model="gpt-5.5",
+        items=(
+            NativeTranscriptItem(
+                sequence=1,
+                turn_id="turn-1",
+                kind="function_call",
+                call_id="write-1",
+                tool_name="write_file",
+            ),
+            NativeTranscriptItem(
+                sequence=2,
+                turn_id="turn-1",
+                kind="function_call_output",
+                call_id="write-1",
+                tool_name="write_file",
+                status="completed",
+                evidence_refs=("implement-v2-write://attempt-1/write-1/mutation",),
+            ),
+            NativeTranscriptItem(
+                sequence=3,
+                turn_id="turn-2",
+                kind="finish_call",
+                call_id="finish-1",
+                tool_name="finish",
+                arguments_json_text=json.dumps(
+                    {
+                        "summary": "done",
+                        "evidence_refs": (
+                            "implement-v2-write://attempt-1/write-1/mutation",
+                            "implement-v2-evidence://attempt-1/missing/verifier",
+                        ),
+                    }
+                ),
+            ),
+            NativeTranscriptItem(
+                sequence=4,
+                turn_id="turn-2",
+                kind="finish_output",
+                call_id="finish-1",
+                tool_name="finish",
+                status="blocked",
+                is_error=True,
+                evidence_refs=(
+                    "implement-v2-write://attempt-1/write-1/mutation",
+                    "implement-v2-evidence://attempt-1/missing/verifier",
+                ),
+            ),
+            NativeTranscriptItem(
+                sequence=5,
+                turn_id="turn-3",
+                kind="function_call",
+                call_id="verify-late",
+                tool_name="run_tests",
+            ),
+            NativeTranscriptItem(
+                sequence=6,
+                turn_id="turn-3",
+                kind="function_call_output",
+                call_id="verify-late",
+                tool_name="run_tests",
+                status="completed",
+                evidence_refs=("implement-v2-evidence://attempt-1/missing/verifier",),
+            ),
+        ),
+    )
+
+    observation = build_native_evidence_observation(
+        transcript,
+        resolver_decisions=(
+            {
+                "finish_call_id": "finish-1",
+                "result": "block",
+                "blockers": ["verifier_evidence_missing"],
+                "missing_obligations": ["strict_verifier_evidence"],
+            },
+        ),
+    )
+
+    assert observation["summary"]["finish_claim_count"] == 1
+    assert observation["summary"]["known_tool_evidence_ref_count"] == 2
+    assert observation["summary"]["cited_evidence_ref_count"] == 2
+    assert observation["summary"]["unresolved_cited_evidence_ref_count"] == 1
+    claim = observation["finish_claims"][0]
+    assert claim["known_tool_evidence_ref_count_before_finish"] == 1
+    assert claim["resolved_cited_evidence_refs"] == ["implement-v2-write://attempt-1/write-1/mutation"]
+    assert claim["unresolved_cited_evidence_refs"] == ["implement-v2-evidence://attempt-1/missing/verifier"]
+    assert claim["finish_output_evidence_refs"] == [
+        "implement-v2-write://attempt-1/write-1/mutation",
+        "implement-v2-evidence://attempt-1/missing/verifier",
+    ]
+
+    manifest_path = tmp_path / "proof-manifest.json"
+    manifest_path.write_text(json.dumps(native_proof_manifest_from_transcript(transcript)), encoding="utf-8")
+    paths = write_native_evidence_observation(
+        tmp_path,
+        transcript,
+        resolver_decisions=({"finish_call_id": "finish-1", "result": "block"},),
+        proof_manifest_path=manifest_path,
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert paths["native_evidence_observation"].name == "native-evidence-observation.json"
+    assert manifest["native_evidence_observation_ref"] == "native-evidence-observation.json"
+    assert manifest["metrics"]["native_evidence_observation"]["unresolved_cited_evidence_ref_count"] == 1

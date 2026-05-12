@@ -50,6 +50,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "WorkFrameTrace": ("mew.implement_lane.workframe", "WorkFrameTrace"),
     "build_implement_v2_prompt_sections": ("mew.implement_lane.prompt", "build_implement_v2_prompt_sections"),
     "build_invalid_tool_result": ("mew.implement_lane.replay", "build_invalid_tool_result"),
+    "build_native_evidence_observation": ("mew.implement_lane.native_transcript", "build_native_evidence_observation"),
     "build_synthetic_error_output": ("mew.implement_lane.native_transcript", "build_synthetic_error_output"),
     "build_transcript_event": ("mew.implement_lane.transcript", "build_transcript_event"),
     "canonicalize_common_workframe_inputs": ("mew.implement_lane.workframe_variants", "canonicalize_common_workframe_inputs"),
@@ -98,6 +99,7 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "workframe_debug_bundle_format": ("mew.implement_lane.workframe", "workframe_debug_bundle_format"),
     "workframe_output_hash": ("mew.implement_lane.workframe", "workframe_output_hash"),
     "write_completion_resolver_artifacts": ("mew.implement_lane.completion_resolver", "write_completion_resolver_artifacts"),
+    "write_native_evidence_observation": ("mew.implement_lane.native_transcript", "write_native_evidence_observation"),
     "write_native_transcript_artifacts": ("mew.implement_lane.native_transcript", "write_native_transcript_artifacts"),
 }
 

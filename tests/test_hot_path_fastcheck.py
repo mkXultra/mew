@@ -9,7 +9,12 @@ from mew.implement_lane.hot_path_fastcheck import _workframe_resolvable_refs, ru
 from mew.implement_lane.native_sidecar_projection import build_compact_native_sidecar_digest
 from mew.implement_lane.native_tool_harness import _native_loop_control_state
 from mew.implement_lane.native_workframe_projection import build_native_prompt_input_inventory
-from mew.implement_lane.native_transcript import NativeTranscript, NativeTranscriptItem, write_native_transcript_artifacts
+from mew.implement_lane.native_transcript import (
+    NativeTranscript,
+    NativeTranscriptItem,
+    write_native_evidence_observation,
+    write_native_transcript_artifacts,
+)
 from mew.implement_lane.workframe import WorkFrameInputs, canonicalize_workframe_inputs, reduce_workframe
 from mew.implement_lane.workframe_variants import (
     canonicalize_common_workframe_inputs,
@@ -436,6 +441,7 @@ def _write_native_finish_artifact(tmp_path: Path) -> Path:
         [decision],
         proof_manifest_path=paths["proof_manifest"],
     )
+    write_native_evidence_observation(artifact, transcript, resolver_decisions=[decision], proof_manifest_path=paths["proof_manifest"])
     return artifact
 
 
@@ -674,6 +680,28 @@ def test_hot_path_fastcheck_rejects_resolver_decision_hash_drift(tmp_path):
     assert check["details"]["sha_matches"] is False
 
 
+def test_hot_path_fastcheck_rejects_native_evidence_observation_transcript_hash_drift(tmp_path):
+    artifact = _write_native_finish_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    observation_path = artifact / "native-evidence-observation.json"
+    observation = json.loads(observation_path.read_text(encoding="utf-8"))
+    observation["transcript_hash"] = "stale-transcript-hash"
+    observation_path.write_text(json.dumps(observation, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    updated_sha = "sha256:" + hashlib.sha256(observation_path.read_bytes()).hexdigest()
+    manifest["native_evidence_observation_sha256"] = updated_sha
+    manifest["metrics"]["native_evidence_observation"]["artifact_sha256"] = updated_sha
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    assert result["status"] == "fail"
+    check = [item for item in result["checks"] if item["name"] == "native_evidence_observation"][0]
+    assert check["status"] == "fail"
+    assert check["details"]["manifest_sha_matches"] is True
+    assert check["details"]["transcript_hash_matches"] is False
+
+
 def test_hot_path_fastcheck_rejects_extra_resolver_decision_row_even_with_matching_hash(tmp_path):
     artifact = _write_native_finish_artifact(tmp_path)
     manifest_path = artifact / "proof-manifest.json"
@@ -817,6 +845,7 @@ def test_hot_path_fastcheck_allows_invalid_finish_retry_with_one_valid_resolver_
         reason="retried",
     )
     write_completion_resolver_artifacts(artifact, [decision], proof_manifest_path=paths["proof_manifest"])
+    write_native_evidence_observation(artifact, transcript, resolver_decisions=[decision], proof_manifest_path=paths["proof_manifest"])
 
     result = run_hot_path_fastcheck(artifact)
 
@@ -918,6 +947,7 @@ def test_hot_path_fastcheck_allows_resolver_blocked_invalid_finish_output(tmp_pa
         reason="finish blocked; more evidence or repair is required",
     )
     write_completion_resolver_artifacts(artifact, [decision], proof_manifest_path=paths["proof_manifest"])
+    write_native_evidence_observation(artifact, transcript, resolver_decisions=[decision], proof_manifest_path=paths["proof_manifest"])
 
     result = run_hot_path_fastcheck(artifact)
 

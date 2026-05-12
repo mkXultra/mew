@@ -57,6 +57,7 @@ DERIVED_NATIVE_TRANSCRIPT_FILES = (
     "provider_events.jsonl",
     "reasoning_sidecar.json",
     "native_turn_observation.json",
+    "native-evidence-observation.json",
     "call_result_pairing.json",
     "transcript_metrics.json",
     "proof-manifest.json",
@@ -400,6 +401,124 @@ def native_transcript_sidecar_events(transcript: NativeTranscript) -> tuple[dict
     return tuple(events)
 
 
+def build_native_evidence_observation(
+    transcript: NativeTranscript,
+    *,
+    resolver_decisions: Iterable[Mapping[str, object] | object] = (),
+) -> dict[str, object]:
+    """Build a debugger-facing evidence observation from native artifacts.
+
+    The authoritative data remains ``response_transcript.json``.  This derived
+    artifact intentionally excludes finish output echoes from the known evidence
+    index, so a finish claim only counts as resolved when it cites evidence
+    produced by a previous tool result.
+    """
+
+    known_by_ref: dict[str, list[dict[str, object]]] = {}
+    finish_output_by_call: dict[str, NativeTranscriptItem] = {}
+    finish_claims: list[dict[str, object]] = []
+    decision_by_finish_call = {
+        _text(decision.get("finish_call_id") if isinstance(decision, Mapping) else getattr(decision, "finish_call_id", "")): _decision_dict(decision)
+        for decision in resolver_decisions
+    }
+
+    for item in transcript.items:
+        if item.kind == "finish_output" and item.call_id:
+            finish_output_by_call[item.call_id] = item
+
+    for item in transcript.items:
+        if item.kind in OUTPUT_ITEM_KINDS and item.kind != "finish_output":
+            for ref in item.evidence_refs:
+                ref_text = _text(ref).strip()
+                if not ref_text:
+                    continue
+                known_by_ref.setdefault(ref_text, []).append(_evidence_origin(item))
+            continue
+        if item.kind != "finish_call":
+            continue
+        args = _json_object(item.arguments_json_text)
+        cited_refs = _strings(args.get("evidence_refs") or args.get("evidence_ref"))
+        output = finish_output_by_call.get(item.call_id)
+        resolver_decision = decision_by_finish_call.get(item.call_id, {})
+        prior_known_by_ref = {ref: list(origins) for ref, origins in known_by_ref.items()}
+        unresolved_refs = tuple(ref for ref in cited_refs if ref not in known_by_ref)
+        finish_claims.append(
+            {
+                "turn_id": item.turn_id,
+                "finish_call_id": item.call_id,
+                "outcome": _text(args.get("outcome") or args.get("final_status") or args.get("status")),
+                "summary": _bounded(_text(args.get("summary")), limit=600),
+                "cited_evidence_refs": list(cited_refs),
+                "resolved_cited_evidence_refs": [ref for ref in cited_refs if ref in known_by_ref],
+                "unresolved_cited_evidence_refs": list(unresolved_refs),
+                "known_tool_evidence_ref_count_before_finish": len(prior_known_by_ref),
+                "finish_output_status": output.status if output else "",
+                "finish_output_is_error": bool(output.is_error) if output else False,
+                "finish_output_evidence_refs": list(output.evidence_refs) if output else [],
+                "resolver_decision": resolver_decision,
+                "resolver_blockers": list(resolver_decision.get("blockers") or [])
+                if isinstance(resolver_decision.get("blockers"), list)
+                else [],
+                "resolver_missing_obligations": list(resolver_decision.get("missing_obligations") or [])
+                if isinstance(resolver_decision.get("missing_obligations"), list)
+                else [],
+            }
+        )
+
+    unresolved_count = sum(len(claim["unresolved_cited_evidence_refs"]) for claim in finish_claims)
+    cited_count = sum(len(claim["cited_evidence_refs"]) for claim in finish_claims)
+    resolver_rows = tuple(_decision_dict(decision) for decision in resolver_decisions)
+    summary = {
+        "finish_claim_count": len(finish_claims),
+        "known_tool_evidence_ref_count": len(known_by_ref),
+        "cited_evidence_ref_count": cited_count,
+        "resolved_cited_evidence_ref_count": cited_count - unresolved_count,
+        "unresolved_cited_evidence_ref_count": unresolved_count,
+        "resolver_decision_count": len(resolver_rows),
+        "resolver_block_count": sum(1 for row in resolver_rows if _text(row.get("result")) == "block"),
+        "resolver_allow_count": sum(1 for row in resolver_rows if _text(row.get("result")) == "allow"),
+    }
+    return {
+        "schema_version": 1,
+        "observation_kind": "native_evidence_observation",
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "transport_kind": "provider_native",
+        "source_of_truth": "response_transcript.json",
+        "lane_attempt_id": transcript.lane_attempt_id,
+        "provider": transcript.provider,
+        "model": transcript.model,
+        "transcript_hash": native_transcript_hash(transcript),
+        "summary": summary,
+        "finish_claims": finish_claims,
+        "known_tool_evidence_refs": {
+            ref: origins for ref, origins in sorted(known_by_ref.items(), key=lambda item: item[0])
+        },
+        "resolver_decisions": list(resolver_rows),
+    }
+
+
+def write_native_evidence_observation(
+    root: Path | str,
+    transcript: NativeTranscript,
+    *,
+    resolver_decisions: Iterable[Mapping[str, object] | object] = (),
+    proof_manifest_path: str | Path | None = None,
+) -> dict[str, Path]:
+    """Write native evidence observation and mirror its summary into manifest."""
+
+    artifact_root = Path(root)
+    path = artifact_root / "native-evidence-observation.json"
+    payload = build_native_evidence_observation(transcript, resolver_decisions=resolver_decisions)
+    _write_json(path, payload)
+    if proof_manifest_path is not None:
+        _patch_manifest_with_native_evidence_observation(
+            Path(proof_manifest_path),
+            observation_path=path,
+            payload=payload,
+        )
+    return {"native_evidence_observation": path}
+
+
 def write_native_transcript_artifacts(root: Path | str, transcript: NativeTranscript) -> dict[str, Path]:
     """Write authoritative and Phase 1 derived native transcript artifacts."""
 
@@ -686,6 +805,34 @@ def _write_jsonl(path: Path, records: Iterable[Mapping[str, object]]) -> None:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
+def _patch_manifest_with_native_evidence_observation(
+    manifest_path: Path,
+    *,
+    observation_path: Path,
+    payload: Mapping[str, object],
+) -> None:
+    manifest: dict[str, object] = {}
+    if manifest_path.exists():
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            manifest = loaded
+    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    manifest["native_evidence_observation_ref"] = observation_path.name
+    manifest["native_evidence_observation_sha256"] = _file_sha256(observation_path)
+    metrics["native_evidence_observation"] = {
+        "artifact_ref": observation_path.name,
+        "artifact_sha256": _file_sha256(observation_path),
+        **summary,
+    }
+    manifest["metrics"] = metrics
+    _write_json(manifest_path, manifest)
+
+
+def _file_sha256(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _canonical_json(payload: object) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -698,12 +845,30 @@ def _json_text(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _json_object(text: object) -> dict[str, object]:
+    if not isinstance(text, str) or not text.strip():
+        return {}
+    try:
+        loaded = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def _text(value: object) -> str:
     if value is None:
         return ""
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _strings(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,) if value.strip() else ()
+    if not isinstance(value, (list, tuple, set)):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
 
 
 def _int(value: object, *, default: int) -> int:
@@ -713,6 +878,35 @@ def _int(value: object, *, default: int) -> int:
         return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return default
+
+
+def _bounded(value: str, *, limit: int) -> str:
+    compact = " ".join(value.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _decision_dict(decision: Mapping[str, object] | object) -> dict[str, object]:
+    if isinstance(decision, Mapping):
+        return dict(decision)
+    as_dict = getattr(decision, "as_dict", None)
+    if callable(as_dict):
+        loaded = as_dict()
+        return dict(loaded) if isinstance(loaded, Mapping) else {}
+    return {}
+
+
+def _evidence_origin(item: NativeTranscriptItem) -> dict[str, object]:
+    return {
+        "sequence": item.sequence,
+        "turn_id": item.turn_id,
+        "kind": item.kind,
+        "tool_name": item.tool_name,
+        "call_id": item.call_id,
+        "status": item.status,
+        "is_error": item.is_error,
+    }
 
 
 __all__ = [
@@ -732,6 +926,7 @@ __all__ = [
     "NativeTranscriptOutputStatus",
     "NativeTranscriptValidationResult",
     "build_synthetic_error_output",
+    "build_native_evidence_observation",
     "native_artifact_contract",
     "native_proof_manifest_from_transcript",
     "native_transcript_hash",
@@ -741,5 +936,6 @@ __all__ = [
     "normalize_claude_tool_events",
     "normalize_codex_response_items",
     "validate_native_transcript_pairing",
+    "write_native_evidence_observation",
     "write_native_transcript_artifacts",
 ]
