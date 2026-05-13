@@ -1318,8 +1318,34 @@ def test_native_hard_runtime_allows_deeper_prewrite_probe_budget(tmp_path: Path)
     signals = _loop_signals(provider.requests[1])
     assert signals["first_write_due"] is False
     assert signals["probe_count_without_write"] == 10
-    assert signals["first_write_probe_threshold"] == 18
-    assert signals["first_write_turn_threshold"] == 8
+    assert signals["first_write_probe_threshold"] == 30
+    assert signals["first_write_turn_threshold"] == 10_000
+
+
+def test_native_hard_runtime_first_write_due_ignores_turn_count_before_plateau(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [fake_call(f"read-{index}", "read_file", {"path": f"missing-{index}.txt"}, output_index=0)]
+            for index in range(9)
+        ]
+        + [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "goal": (
+                "Implement a MIPS ELF interpreter from provided source code "
+                "and write the rendered frame to /tmp/frame.bmp."
+            )
+        },
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=10)
+
+    signals = _loop_signals(provider.requests[9])
+    assert signals["probe_count_without_write"] == 9
+    assert signals["first_write_due"] is False
+    assert signals["first_write_due_overrun"] is False
 
 
 def test_native_harness_blocks_more_probes_after_prewrite_plateau(tmp_path: Path) -> None:
