@@ -93,13 +93,16 @@ proof authority. Replay must be able to explain what the provider saw even when
 the provider request used server-side continuation.
 
 When `previous_response_id` is active, refreshed compact sidecar context is a
-local replay/inventory concern by default. The live wire request should send
-only the newly paired tool/function outputs unless the prefix no longer
-matches and a full refresh is required. This keeps the provider-visible hot
-path closer to Codex: the server carries the prior user/task context, while the
-next request contributes the latest tool output. Request descriptors still
-record the refreshed compact digest hash, suppressed refresh count, and logical
-input hash for audit.
+local replay/inventory concern by default. The live wire request should replace
+the full refreshed context with a minimal task-context refresh plus the newly
+paired tool/function outputs unless the prefix no longer matches and a full
+refresh is required. The minimal refresh may include only task contract,
+workspace, and lane identity. It must not include compact sidecar, WorkFrame,
+frontier, proof, todo, or controller-pressure fields. This keeps the
+provider-visible hot path close to Codex without depending on provider memory
+to preserve task intent across long runs. Request descriptors still record the
+refreshed compact digest hash, suppressed refresh count, and logical input hash
+for audit.
 
 The provider-visible repair is generic. It must work for ordinary coding tasks,
 hard-runtime artifact tasks, and future implementation tasks without
@@ -550,8 +553,9 @@ The provider inventory must report:
 
 - dynamic sections included in each request;
 - whether `previous_response_id` was used;
-- whether a refreshed compact sidecar context item was suppressed from the
-  wire request because `previous_response_id` carried the prior context;
+- whether a refreshed compact sidecar context item was replaced by a minimal
+  task-context refresh because `previous_response_id` carried the prior
+  transcript;
 - transcript/window hash or equivalent local continuation hash;
 - compact digest hash and byte size;
 - compact digest top-level key count;

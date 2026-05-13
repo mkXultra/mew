@@ -769,11 +769,24 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
             request.get("previous_response_suppressed_context_refresh_item_count")
             or inventory.get("previous_response_suppressed_context_refresh_item_count")
         )
+        leading_refresh_count = _nonnegative_int(
+            request.get("previous_response_leading_refresh_item_count")
+            or inventory.get("previous_response_leading_refresh_item_count")
+        )
         expected_sections = (
-            ["native_transcript_window"]
+            ["native_transcript_window", "task_context_refresh"]
+            if suppressed_refresh_count and leading_refresh_count
+            else ["native_transcript_window"]
             if suppressed_refresh_count
             else ["native_transcript_window", "compact_sidecar_digest"]
         )
+        if suppressed_refresh_count and not leading_refresh_count:
+            violations.append(
+                {
+                    "request": index,
+                    "reason": "suppressed_context_refresh_without_task_context_refresh",
+                }
+            )
         if inventory.get("model_visible_sections") != expected_sections:
             violations.append(
                 {

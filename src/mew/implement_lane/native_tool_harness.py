@@ -234,11 +234,14 @@ class NativeCodexResponsesProvider:
         if suppressed_refresh_count:
             sections = inventory.get("model_visible_sections")
             if isinstance(sections, list):
-                inventory["model_visible_sections"] = [
+                visible_sections = [
                     section
                     for section in sections
                     if section != "compact_sidecar_digest"
                 ]
+                if inventory["previous_response_leading_refresh_item_count"]:
+                    visible_sections.append("task_context_refresh")
+                inventory["model_visible_sections"] = visible_sections
             inventory["compact_sidecar_digest_wire_visible"] = False
         else:
             inventory["compact_sidecar_digest_wire_visible"] = True

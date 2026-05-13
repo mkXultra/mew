@@ -262,23 +262,25 @@ def apply_previous_response_delta(
     )
     logical_input_hash = stable_json_hash(full_input)
 
-    context_refresh_items = (
-        ()
-        if match.mode == "delta_context_refresh_local_only"
-        else match.leading_refresh_items
-    )
-    suppressed_context_refresh_items = tuple(
-        item
-        for item in match.leading_refresh_items
-        if item not in context_refresh_items
-    )
+    delta_mode = match.mode
+    if match.mode == "delta_minimal_context_refresh":
+        context_refresh_items = _minimal_context_refresh_items(match.leading_refresh_items)
+        if context_refresh_items:
+            suppressed_context_refresh_items = match.leading_refresh_items
+        else:
+            delta_mode = "delta_full_context_refresh_fallback"
+            context_refresh_items = match.leading_refresh_items
+            suppressed_context_refresh_items = ()
+    else:
+        context_refresh_items = match.leading_refresh_items
+        suppressed_context_refresh_items = ()
 
     if match.matched:
         request_body["previous_response_id"] = previous_response_id
         request_body["input"] = list(context_refresh_items) + list(
             full_input[match.prefix_item_count :]
         )
-        mode = match.mode
+        mode = delta_mode
     else:
         request_body.pop("previous_response_id", None)
         request_body["input"] = list(full_input)
@@ -358,7 +360,7 @@ def _previous_response_prefix_match(
         if _input_prefix_matches(full_input[1:], refreshed_prefix):
             return _PreviousResponsePrefixMatch(
                 matched=True,
-                mode="delta_context_refresh_local_only",
+                mode="delta_minimal_context_refresh",
                 prefix_item_count=1 + len(refreshed_prefix),
                 leading_refresh_items=(dict(full_input[0]),),
             )
@@ -383,6 +385,54 @@ def _is_provider_context_refresh_item(item: Mapping[str, object]) -> bool:
         return False
     text = "\n".join(text_chunks)
     return "compact_sidecar_digest" in text and "task_contract" in text
+
+
+def _minimal_context_refresh_items(
+    items: Sequence[Mapping[str, object]],
+) -> tuple[dict[str, object], ...]:
+    if not items:
+        return ()
+    item = _minimal_context_refresh_item(items[0])
+    return (item,) if item else ()
+
+
+def _minimal_context_refresh_item(item: Mapping[str, object]) -> dict[str, object]:
+    if item.get("role") != "user":
+        return {}
+    content = item.get("content")
+    if not isinstance(content, Sequence) or isinstance(content, (str, bytes, bytearray)):
+        return {}
+    for part in content:
+        if not isinstance(part, Mapping):
+            continue
+        if str(part.get("type") or "") != "input_text":
+            continue
+        text = str(part.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(decoded, Mapping):
+            continue
+        minimal = {
+            key: decoded[key]
+            for key in ("task_contract", "workspace", "lane")
+            if key in decoded
+        }
+        if not minimal:
+            return {}
+        return {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": json.dumps(minimal, ensure_ascii=False, sort_keys=True),
+                }
+            ],
+        }
+    return {}
 
 
 def _jsonish_mapping(value: object) -> dict[str, object]:

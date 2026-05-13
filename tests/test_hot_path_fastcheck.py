@@ -716,23 +716,39 @@ def test_hot_path_fastcheck_accepts_previous_response_id_for_multi_turn_live_pro
     second_request["turn_index"] = 2
     second_request["previous_response_id"] = "resp-prev"
     second_request["previous_response_id_in_request_body"] = True
-    second_request["previous_response_delta_mode"] = "delta_context_refresh_local_only"
+    second_request["previous_response_delta_mode"] = "delta_minimal_context_refresh"
     second_request["previous_response_suppressed_context_refresh_item_count"] = 1
-    second_request["previous_response_leading_refresh_item_count"] = 0
+    second_request["previous_response_leading_refresh_item_count"] = 1
     second_request["request_body"]["previous_response_id"] = "resp-prev"
     output_item = {
         "type": "function_call_output",
         "call_id": "call-read",
         "output": "read_file result: completed",
     }
+    task_payload = json.loads(first_request["request_body"]["input"][0]["content"][0]["text"])
+    minimal_payload = {
+        key: task_payload[key]
+        for key in ("task_contract", "workspace", "lane")
+        if key in task_payload
+    }
+    minimal_context = {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": json.dumps(minimal_payload, ensure_ascii=False, sort_keys=True),
+            }
+        ],
+    }
     second_request["logical_input_items"] = list(first_request["request_body"]["input"]) + [output_item]
     second_request["suppressed_context_refresh_items"] = list(first_request["request_body"]["input"])
-    second_request["request_body"]["input"] = [output_item]
+    second_request["request_body"]["input"] = [minimal_context, output_item]
     inventory = dict(second_request["provider_request_inventory"])
-    inventory["model_visible_sections"] = ["native_transcript_window"]
+    inventory["model_visible_sections"] = ["native_transcript_window", "task_context_refresh"]
     inventory["compact_sidecar_digest_wire_visible"] = False
-    inventory["previous_response_delta_mode"] = "delta_context_refresh_local_only"
+    inventory["previous_response_delta_mode"] = "delta_minimal_context_refresh"
     inventory["previous_response_suppressed_context_refresh_item_count"] = 1
+    inventory["previous_response_leading_refresh_item_count"] = 1
     second_request["provider_request_inventory"] = inventory
     payload["request_count"] = 2
     payload["requests"] = [first_request, second_request]
@@ -743,6 +759,45 @@ def test_hot_path_fastcheck_accepts_previous_response_id_for_multi_turn_live_pro
     checks = {check["name"]: check for check in result["checks"]}
     assert checks["native_previous_response_id"]["status"] == "pass"
     assert checks["native_previous_response_id"]["details"]["observed"] == 1
+
+
+def test_hot_path_fastcheck_rejects_suppressed_context_without_task_refresh(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2, live_shape=True)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    request = payload["requests"][0]
+    request["previous_response_id"] = "resp-prev"
+    request["previous_response_id_in_request_body"] = True
+    request["previous_response_delta_mode"] = "delta_minimal_context_refresh"
+    request["previous_response_suppressed_context_refresh_item_count"] = 1
+    request["previous_response_leading_refresh_item_count"] = 0
+    request["request_body"]["previous_response_id"] = "resp-prev"
+    request["request_body"]["input"] = [
+        {
+            "type": "function_call_output",
+            "call_id": "call-read",
+            "output": "read_file result: completed",
+        }
+    ]
+    inventory = dict(request["provider_request_inventory"])
+    inventory["model_visible_sections"] = ["native_transcript_window"]
+    inventory["compact_sidecar_digest_wire_visible"] = False
+    inventory["previous_response_delta_mode"] = "delta_minimal_context_refresh"
+    inventory["previous_response_suppressed_context_refresh_item_count"] = 1
+    inventory["previous_response_leading_refresh_item_count"] = 0
+    request["provider_request_inventory"] = inventory
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_provider_visible_state"]["status"] == "fail"
+    assert any(
+        violation["reason"] == "suppressed_context_refresh_without_task_context_refresh"
+        for violation in checks["native_provider_visible_state"]["details"]["violations"]
+    )
 
 
 def test_hot_path_fastcheck_replays_live_openai_request_against_codex_digest_identity(tmp_path):
