@@ -87,6 +87,8 @@ from mew.implement_lane.v2_runtime import (
     run_unavailable_implement_v2,
 )
 from mew.implement_lane.prompt import build_implement_v2_workframe_debug_bundle
+from mew.implement_lane.shell_metadata import classify_shell_command_metadata
+from mew.implement_lane.tool_routes import build_tool_route_decision
 from mew.read_tools import read_file
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
@@ -13356,6 +13358,237 @@ def test_implement_v2_exec_short_command_finalizes_with_terminal_evidence(tmp_pa
     assert tool_result["status"] == "completed"
     assert tool_result["evidence_refs"]
     assert "ok" in tool_result["content"][0]["stdout"]
+
+
+def test_implement_v2_exec_attaches_simple_shell_metadata_to_route(tmp_path) -> None:
+    command = "printf ok && ls ."
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1, "use_shell": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "shell metadata ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+    classification = payload["command_classification"]
+    route_classification = payload["tool_route_decision"]["command_classification"]
+
+    assert tool_result["status"] == "completed"
+    assert classification["result"] == "simple"
+    assert classification["features"]["base_commands"] == ["printf", "ls"]
+    assert classification["features"]["connectors"] == ["&&"]
+    assert classification["features"]["read_search_list_hint"] == "list"
+    assert classification["not_source_mutation_classifier"] is True
+    assert route_classification == classification
+    assert payload["tool_route"] == "process_runner"
+
+
+def test_implement_v2_exec_complex_shell_metadata_fails_closed_without_typed_mutation(tmp_path) -> None:
+    command = "printf \"$(date)\""
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1, "use_shell": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "complex shell metadata ready"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+    classification = payload["command_classification"]
+
+    assert tool_result["status"] == "completed"
+    assert classification["result"] == "too_complex"
+    assert classification["reason"] == "shell_expansion"
+    assert classification["shortcut_consumers_enabled"] is False
+    assert payload["tool_route"] == "process_runner"
+    assert payload["tool_route_decision"]["bridge_registry_id"] == ""
+    assert not any("source-mutation" in str(ref) for ref in tool_result.get("evidence_refs", []))
+
+
+@pytest.mark.parametrize("command", ("echo $FOO", "cat *.py", "echo {a,b}", "cd ~/tmp", "cat <(printf ok)"))
+def test_implement_v2_exec_shell_expansion_metadata_fails_closed(tmp_path, command: str) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 1, "foreground_budget_seconds": 0, "use_shell": True},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "expansion metadata ready"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+    classification = payload["command_classification"]
+
+    assert classification["result"] == "too_complex"
+    assert classification["reason"] == "shell_expansion"
+    assert classification["shortcut_consumers_enabled"] is False
+
+
+def test_implement_v2_exec_argv_shell_metacharacters_are_metadata_not_shell(tmp_path) -> None:
+    command = [sys.executable, "-c", "print('a|b && c > d')"]
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec"},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"argv": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1},
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "argv metadata ready"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+    classification = payload["command_classification"]
+
+    assert payload["command_source"] == "argv"
+    assert classification["result"] == "simple"
+    assert classification["features"]["use_shell"] is False
+    assert classification["features"]["base_commands"] == [Path(sys.executable).name]
+    assert "a|b && c > d" in payload["stdout"]
+
+
+def test_implement_v2_route_bridge_requires_simple_shell_metadata() -> None:
+    call = ToolCallEnvelope(
+        lane_attempt_id="lane-1",
+        provider="fake",
+        provider_call_id="call-1",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        arguments={"command": "apply_patch <<'PATCH'\n*** Begin Patch\n*** End Patch\nPATCH"},
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="failed",
+        content=(
+            {
+                "bridge_registry_id": "shell_invoked_apply_patch",
+                "command_classification": {
+                    "schema_version": 1,
+                    "result": "too_complex",
+                    "parser": "shell_words",
+                    "reason": "heredoc",
+                    "command_hash": "sha256:abc",
+                    "features": {},
+                    "not_source_mutation_classifier": True,
+                    "shortcut_consumers_enabled": True,
+                },
+            },
+        ),
+    )
+
+    decision = build_tool_route_decision(call, result)
+    classification = decision.command_classification.as_dict() if decision.command_classification is not None else {}
+
+    assert decision.tool_route == "invalid_tool_contract"
+    assert classification["result"] == "too_complex"
+    assert classification["shortcut_consumers_enabled"] is False
+
+
+@pytest.mark.parametrize(
+    "classification_update",
+    (
+        {"result": "simple", "shortcut_consumers_enabled": "False"},
+        {"result": "simple", "schema_version": "bad"},
+        {"result": "simple", "schema_version": 1.5},
+        {"result": "simple", "schema_version": True},
+    ),
+)
+def test_implement_v2_route_bridge_fails_closed_for_malformed_shell_metadata(
+    classification_update: dict[str, object],
+) -> None:
+    classification = {
+        "schema_version": 1,
+        "result": "simple",
+        "parser": "shell_words",
+        "reason": "parsed_plain_command_sequence",
+        "command_hash": "sha256:abc",
+        "features": {},
+        "not_source_mutation_classifier": True,
+        "shortcut_consumers_enabled": True,
+    }
+    classification.update(classification_update)
+    call = ToolCallEnvelope(
+        lane_attempt_id="lane-1",
+        provider="fake",
+        provider_call_id="call-1",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        arguments={"command": "apply_patch <<'PATCH'\n*** Begin Patch\n*** End Patch\nPATCH"},
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id="lane-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="tool-1",
+        tool_name="run_command",
+        status="failed",
+        content=(
+            {
+                "bridge_registry_id": "shell_invoked_apply_patch",
+                "command_classification": classification,
+            },
+        ),
+    )
+
+    decision = build_tool_route_decision(call, result)
+
+    assert decision.tool_route == "invalid_tool_contract"
+
+
+def test_implement_v2_shell_metadata_unavailable_is_not_read_or_edit_safe() -> None:
+    classification = classify_shell_command_metadata(
+        "rg TODO src",
+        command_source="command",
+        use_shell=True,
+        parser_available=False,
+    )
+
+    assert classification["result"] == "unavailable"
+    assert classification["reason"] == "parser_not_installed"
+    assert classification["shortcut_consumers_enabled"] is False
+    assert classification["features"]["read_search_list_hint"] == "unknown"
+    assert classification["features"]["process_lifecycle_hint"] == "unknown"
+    assert classification["not_source_mutation_classifier"] is True
 
 
 def test_implement_v2_exec_accepts_cmd_alias(tmp_path) -> None:

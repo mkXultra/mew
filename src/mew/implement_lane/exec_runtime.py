@@ -27,6 +27,7 @@ from .execution_evidence import (
 )
 from .read_runtime import DEFAULT_V2_READ_RESULT_MAX_CHARS
 from .replay import build_invalid_tool_result
+from .shell_metadata import classify_shell_command_metadata
 from .types import ToolCallEnvelope, ToolResultEnvelope
 
 EXEC_TOOL_NAMES = frozenset({"run_command", "run_tests", "poll_command", "cancel_command", "read_command_output"})
@@ -320,6 +321,11 @@ class ImplementV2ManagedExecRuntime:
                     "failure_class": misuse.get("failure_class"),
                     "failure_subclass": misuse.get("failure_subclass"),
                 }
+        command_classification = classify_shell_command_metadata(
+            command,
+            command_source=command_source,
+            use_shell=use_shell,
+        )
         timeout = _bounded_float(args.get("timeout"), default=300.0, minimum=1.0, maximum=3600.0)
         foreground_budget = _bounded_float(
             args.get("foreground_budget_seconds"),
@@ -404,6 +410,7 @@ class ImplementV2ManagedExecRuntime:
             "tool_name": call.tool_name,
             "effective_tool_name": effective_tool_name,
             "command_source": command_source,
+            "command_classification": command_classification,
             "command_intent": command_intent,
             "execution_contract_normalized": normalized_contract.as_dict(),
             "pre_run_artifact_stats": pre_run_artifact_stats,
@@ -424,6 +431,7 @@ class ImplementV2ManagedExecRuntime:
         payload["tool_name"] = call.tool_name
         payload["effective_tool_name"] = effective_tool_name
         payload["command_source"] = command_source
+        payload["command_classification"] = command_classification
         payload["command_intent"] = command_intent
         if unchecked_expected_artifacts:
             payload["unchecked_expected_artifacts"] = list(unchecked_expected_artifacts)

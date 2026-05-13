@@ -59,18 +59,29 @@ class CommandClassificationResult:
     parser: str = ""
     reason: str = ""
     command_hash: str = ""
-    features: tuple[str, ...] = ()
+    features: Mapping[str, object] | tuple[str, ...] = ()
+    shortcut_consumers_enabled: bool | None = None
     schema_version: int = COMMAND_CLASSIFICATION_SCHEMA_VERSION
 
     def as_dict(self) -> dict[str, object]:
+        features: object
+        if isinstance(self.features, Mapping):
+            features = dict(self.features)
+        else:
+            features = list(self.features)
+        requested_shortcut = self.result == "simple" if self.shortcut_consumers_enabled is None else bool(
+            self.shortcut_consumers_enabled
+        )
+        shortcut_enabled = self.result == "simple" and requested_shortcut
         return {
             "schema_version": self.schema_version,
             "result": self.result,
             "parser": self.parser,
             "reason": self.reason,
             "command_hash": self.command_hash,
-            "features": list(self.features),
+            "features": features,
             "not_source_mutation_classifier": True,
+            "shortcut_consumers_enabled": shortcut_enabled,
         }
 
 
@@ -124,16 +135,15 @@ def build_tool_route_decision(
     declared_tool = str(call.tool_name or result.tool_name or "")
     resolved_effective_tool = str(effective_tool or result.tool_name or declared_tool)
     route, reason = _route_for_result(declared_tool, result)
-    classification = (
-        CommandClassificationResult(
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    classification = None
+    if route in {"process_runner", "process_lifecycle", "invalid_tool_contract"}:
+        classification = _command_classification_from_payload(payload) or CommandClassificationResult(
             result="unavailable",
             parser="not-yet-attached",
             reason="Phase 1 route metadata only; Phase 3 owns parser-backed shell metadata",
             command_hash=_command_hash(call.arguments),
         )
-        if route in {"process_runner", "process_lifecycle", "invalid_tool_contract"}
-        else None
-    )
     return ToolRouteDecision(
         tool_route=route,  # type: ignore[arg-type]
         declared_tool=declared_tool,
@@ -248,8 +258,11 @@ def route_records_from_native_transcript_items(items: Iterable[Mapping[str, obje
 
 def _route_for_result(tool_name: str, result: ToolResultEnvelope) -> tuple[str, str]:
     payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
-    if _bridge_registry_id(result):
+    bridge_registry_id = _bridge_registry_id(result)
+    if bridge_registry_id and _bridge_classification_allows_route(payload):
         return "legacy_shell_edit_bridge", "named legacy bridge result"
+    if bridge_registry_id:
+        return "invalid_tool_contract", "bridge parser metadata did not fail open"
     if _invalid_tool_contract_payload(payload):
         return "invalid_tool_contract", "explicit tool contract misuse payload"
     return _route_for_tool_name(tool_name, status=result.status)
@@ -288,6 +301,46 @@ def _invalid_tool_contract_payload(payload: object) -> bool:
 def _bridge_registry_id(result: ToolResultEnvelope) -> str:
     payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
     return str(payload.get("bridge_registry_id") or "") if isinstance(payload, dict) else ""
+
+
+def _bridge_classification_allows_route(payload: object) -> bool:
+    classification = _command_classification_from_payload(payload)
+    return classification is not None and classification.result == "simple" and classification.as_dict().get(
+        "shortcut_consumers_enabled"
+    ) is True
+
+
+def _command_classification_from_payload(payload: object) -> CommandClassificationResult | None:
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("command_classification")
+    if not isinstance(raw, dict):
+        return None
+    result = str(raw.get("result") or "")
+    if result not in COMMAND_CLASSIFICATION_VALUES:
+        return None
+    features = raw.get("features")
+    shortcut_raw = raw.get("shortcut_consumers_enabled") if "shortcut_consumers_enabled" in raw else None
+    schema_version = _classification_schema_version(raw.get("schema_version"))
+    if schema_version is None:
+        return None
+    return CommandClassificationResult(
+        result=result,  # type: ignore[arg-type]
+        parser=str(raw.get("parser") or ""),
+        reason=str(raw.get("reason") or ""),
+        command_hash=str(raw.get("command_hash") or ""),
+        features=dict(features) if isinstance(features, Mapping) else tuple(str(item) for item in features or ()),
+        shortcut_consumers_enabled=shortcut_raw is True,
+        schema_version=schema_version,
+    )
+
+
+def _classification_schema_version(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value == COMMAND_CLASSIFICATION_SCHEMA_VERSION:
+        return value
+    return None
 
 
 def _content_with_route_metadata(
