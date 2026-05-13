@@ -8,12 +8,14 @@ state channel.
 
 from __future__ import annotations
 
+import json
 from typing import Iterable, Mapping
 
 from .native_sidecar_projection import (
     NATIVE_RESPONSE_ITEMS_SOURCE_OF_TRUTH,
     NATIVE_SIDECAR_TRANSPORT_CHANGE,
     NATIVE_TRANSCRIPT_SOURCE_OF_TRUTH,
+    PROVIDER_VISIBLE_STEERING_KEYS,
     build_compact_native_sidecar_digest,
     build_native_evidence_ref_index,
     build_native_evidence_sidecar,
@@ -34,6 +36,7 @@ from .workframe_variants import (
 
 NATIVE_WORKFRAME_PROJECTION_SCHEMA_VERSION = 1
 NATIVE_PROMPT_INPUT_INVENTORY_SCHEMA_VERSION = 1
+NATIVE_PROVIDER_VISIBLE_FORBIDDEN_FIELDS_SCHEMA_VERSION = 1
 
 
 def build_native_workframe_sidecar_events(
@@ -241,6 +244,9 @@ def build_native_prompt_input_inventory(
     *,
     compact_sidecar_digest: Mapping[str, object],
     source_prompt_inventory: Iterable[Mapping[str, object]] = (),
+    provider_visible_forbidden_fields: Mapping[str, object] | None = None,
+    diagnostic_only_fields: Iterable[object] = (),
+    diagnostic_loop_signals: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Describe the native provider input inventory for Phase 4 tests."""
 
@@ -254,9 +260,46 @@ def build_native_prompt_input_inventory(
             "proof": False,
             "evidence_object": False,
         },
-        "debug_only_sections": ["workframe_projection", "model_turn_index"],
+        "debug_only_sections": ["workframe_projection", "model_turn_index", "native_loop_signals"],
+        "diagnostic_only_fields": sorted(str(item) for item in diagnostic_only_fields if str(item).strip()),
+        "diagnostic_loop_signals": dict(diagnostic_loop_signals or {}),
+        "provider_visible_forbidden_fields": dict(
+            provider_visible_forbidden_fields
+            or {
+                "schema_version": NATIVE_PROVIDER_VISIBLE_FORBIDDEN_FIELDS_SCHEMA_VERSION,
+                "report_kind": "provider_visible_forbidden_fields",
+                "ok": True,
+                "detected": [],
+                "checked": sorted(PROVIDER_VISIBLE_STEERING_KEYS),
+            }
+        ),
         "compact_sidecar_digest_hash": compact_sidecar_digest.get("digest_hash") or "",
         "source_prompt_inventory": [dict(item) for item in source_prompt_inventory if isinstance(item, Mapping)],
+    }
+
+
+def build_provider_visible_forbidden_fields_report(
+    *,
+    input_items: Iterable[Mapping[str, object]],
+    instructions: str,
+    compact_sidecar_digest: Mapping[str, object],
+) -> dict[str, object]:
+    """Report steering/control fields visible to the provider request hot path."""
+
+    provider_visible_payload = {
+        "input_items": [dict(item) for item in input_items if isinstance(item, Mapping)],
+        "instructions": instructions,
+        "compact_sidecar_digest": dict(compact_sidecar_digest),
+    }
+    serialized = json.dumps(provider_visible_payload, ensure_ascii=False, sort_keys=True, default=str)
+    detected = sorted(token for token in PROVIDER_VISIBLE_STEERING_KEYS if token in serialized)
+    return {
+        "schema_version": NATIVE_PROVIDER_VISIBLE_FORBIDDEN_FIELDS_SCHEMA_VERSION,
+        "report_kind": "provider_visible_forbidden_fields",
+        "ok": not detected,
+        "detected": detected,
+        "checked": sorted(PROVIDER_VISIBLE_STEERING_KEYS),
+        "payload_sha256": stable_json_hash(provider_visible_payload),
     }
 
 

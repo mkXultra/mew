@@ -47,6 +47,24 @@ NATIVE_WORKFRAME_PHASE_ALLOWED_VALUES = frozenset(
 NATIVE_TRANSCRIPT_SOURCE_OF_TRUTH = "response_transcript.json"
 NATIVE_RESPONSE_ITEMS_SOURCE_OF_TRUTH = "response_items.jsonl"
 NATIVE_SIDECAR_TRANSPORT_CHANGE = "sidecar-only"
+PROVIDER_VISIBLE_STEERING_KEYS = frozenset(
+    {
+        "first_write_due",
+        "first_write_due_entry_turn",
+        "first_write_due_overrun",
+        "first_write_grace_probe_calls",
+        "first_write_probe_threshold",
+        "first_write_turn_threshold",
+        "max_additional_probe_turns",
+        "next_action",
+        "next_action_policy",
+        "prewrite_probe_plateau",
+        "required_next",
+        "required_next_action",
+        "required_next_evidence_refs",
+        "required_next_kind",
+    }
+)
 MODEL_AUTHORED_STATE_KEYS = frozenset(
     {
         "active_work_todo",
@@ -393,6 +411,7 @@ def build_compact_native_sidecar_digest(
     model_turn_index: Mapping[str, object] | None = None,
     workframe_bundle: Mapping[str, object] | None = None,
     loop_signals: Mapping[str, object] | None = None,
+    include_diagnostic_loop_signals: bool = False,
     max_tool_results: int = 6,
 ) -> dict[str, object]:
     """Build compact sidecar context suitable for future provider requests."""
@@ -406,7 +425,8 @@ def build_compact_native_sidecar_digest(
     ordered_refs = [str(ref) for ref in tool_index.get("ordered_refs") or []]
     workframe_projection = _workframe_projection_digest(
         workframe,
-        loop_signals=loop_signals,
+        loop_signals=loop_signals if include_diagnostic_loop_signals else None,
+        include_diagnostic_loop_signals=include_diagnostic_loop_signals,
         latest_evidence_refs=_bounded_refs(list((evidence_index.get("by_evidence_ref") or {}).keys())[-12:], max_items=12),
         latest_tool_result_refs=_bounded_refs(ordered_refs[-12:], max_items=12),
     )
@@ -795,12 +815,13 @@ def _workframe_projection_digest(
     workframe: Mapping[str, object],
     *,
     loop_signals: Mapping[str, object] | None = None,
+    include_diagnostic_loop_signals: bool = False,
     latest_evidence_refs: Iterable[object] = (),
     latest_tool_result_refs: Iterable[object] = (),
 ) -> dict[str, object]:
-    signals = _bounded_loop_signals(loop_signals)
     current_phase = _allowed_workframe_phase(_text(workframe.get("current_phase")))
-    if current_phase == "orient":
+    signals = _bounded_loop_signals(loop_signals) if include_diagnostic_loop_signals else {}
+    if include_diagnostic_loop_signals and current_phase == "orient":
         current_phase = _phase_from_loop_signals(signals)
     evidence_refs = _bounded_refs(
         _dedupe((*_strings(latest_evidence_refs), *_strings(workframe.get("finish_required_evidence_refs")))),
@@ -808,7 +829,6 @@ def _workframe_projection_digest(
     )
     projection: dict[str, object] = {
         "current_phase": current_phase,
-        "attention_hints": _attention_hints(signals),
         "tool_context": {
             "latest_tool_result_refs": _bounded_refs(_strings(latest_tool_result_refs), max_items=12),
         },
@@ -817,9 +837,11 @@ def _workframe_projection_digest(
             "missing_evidence_refs": _bounded_refs(_strings(workframe.get("finish_required_evidence_refs")), max_items=12),
         },
         "verifier_state": _verifier_state_from_loop_signals(signals),
-        "loop_signals": signals,
         "evidence_refs": evidence_refs,
     }
+    if include_diagnostic_loop_signals:
+        projection["attention_hints"] = _attention_hints(signals)
+        projection["loop_signals"] = signals
     return projection
 
 

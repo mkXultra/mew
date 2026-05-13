@@ -17,7 +17,6 @@ from mew.implement_lane.native_provider_adapter import NativeResponsesStreamPars
 from mew.implement_lane.native_tool_harness import (
     NativeCodexResponsesProvider,
     PHASE3_NATIVE_SURFACE,
-    _prewrite_probe_plateau_result,
     run_live_native_implement_v2,
     run_native_implement_v2,
     run_unavailable_native_implement_v2,
@@ -74,8 +73,11 @@ def _compact_sidecar_digest(request: dict[str, object]) -> dict[str, object]:
 
 
 def _loop_signals(request: dict[str, object]) -> dict[str, object]:
-    digest = _compact_sidecar_digest(request)
-    return digest["workframe_projection"]["loop_signals"]
+    inventory = request.get("provider_request_inventory")
+    assert isinstance(inventory, dict)
+    signals = inventory.get("diagnostic_loop_signals")
+    assert isinstance(signals, dict)
+    return signals
 
 
 def _verifier_state(request: dict[str, object]) -> dict[str, object]:
@@ -232,6 +234,9 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
         "native_transcript_window",
         "compact_sidecar_digest",
     ]
+    forbidden = inventory_payload["provider_request_inventory"][0]["provider_visible_forbidden_fields"]
+    assert forbidden["ok"] is True
+    assert forbidden["detected"] == []
 
 
 def test_live_native_request_surfaces_write_file_for_hard_runtime_artifact_task(tmp_path: Path) -> None:
@@ -399,80 +404,6 @@ def test_native_hard_runtime_carry_forward_preserves_write_file_call(tmp_path: P
     assert "unavailable_write_tool" not in second_request
     assert "write_file" in second_request
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "bad\n"
-
-
-def test_native_hard_runtime_prewrite_plateau_guidance_includes_write_file(tmp_path: Path) -> None:
-    lane_input = _lane_input(
-        tmp_path,
-        mode="full",
-        task_contract={
-            "goal": (
-                "Build a MIPS ELF interpreter runtime from provided source and write "
-                "a /tmp/frame.bmp artifact."
-            )
-        },
-    )
-    result = _prewrite_probe_plateau_result(
-        NativeTranscriptItem(
-            sequence=1,
-            turn_id="turn-1",
-            lane_attempt_id="ws-native:task-native:implement_v2:native",
-            provider="fake-native",
-            model="fake-native-model",
-            response_id="resp-1",
-            provider_item_id="item-read",
-            output_index=0,
-            kind="function_call",
-            call_id="read-1",
-            tool_name="read_file",
-            arguments_json_text='{"path":"doomgeneric/i_video.c"}',
-        ),
-        {"first_write_due_overrun": True},
-        lane_input=lane_input,
-        lane_config=lane_input.lane_config,
-    )
-
-    assert result is not None
-    assert result.status == "invalid"
-    reason = str(result.content[0]["reason"])
-    assert "write_file/edit_file/apply_patch" in reason
-
-
-def test_native_first_write_overrun_allows_command_lifecycle_tools(tmp_path: Path) -> None:
-    lane_input = _lane_input(tmp_path)
-    lifecycle_calls = [
-        NativeTranscriptItem(
-            sequence=index,
-            turn_id="turn-3",
-            lane_attempt_id="ws-native:task-native:implement_v2:native",
-            provider="fake-native",
-            model="fake-native-model",
-            response_id="resp-3",
-            provider_item_id=f"item-{tool_name}",
-            output_index=index,
-            kind="function_call",
-            call_id=f"{tool_name}-{index}",
-            tool_name=tool_name,
-            arguments_json_text=json.dumps(arguments),
-        )
-        for index, (tool_name, arguments) in enumerate(
-            [
-                ("poll_command", {"command_run_id": "cmd-1", "wait_seconds": 0}),
-                ("read_command_output", {"command_run_id": "cmd-1"}),
-                ("cancel_command", {"command_run_id": "cmd-1"}),
-            ],
-            start=1,
-        )
-    ]
-
-    for call in lifecycle_calls:
-        result = _prewrite_probe_plateau_result(
-            call,
-            {"first_write_due_overrun": True},
-            lane_input=lane_input,
-            lane_config=lane_input.lane_config,
-        )
-        assert result is None
 
 
 def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_path: Path) -> None:
@@ -1287,6 +1218,9 @@ def test_native_harness_adds_first_write_control_after_probe_budget(tmp_path: Pa
         "compact_sidecar_digest",
     ]
     assert second_request["provider_request_inventory"]["compact_sidecar_digest_hash"] == payload["compact_sidecar_digest"]["digest_hash"]
+    assert second_request["provider_request_inventory"]["provider_visible_forbidden_fields"]["ok"] is True
+    assert "first_write_due" not in json.dumps(_compact_sidecar_digest(second_request), sort_keys=True)
+    assert "prewrite_probe_plateau" not in json.dumps(_compact_sidecar_digest(second_request), sort_keys=True)
     signals = _loop_signals(second_request)
     assert signals["first_write_due"] is True
     assert signals["probe_count_without_write"] == 10
@@ -1376,7 +1310,7 @@ def test_native_hard_runtime_first_write_due_still_uses_probe_budget(tmp_path: P
     assert signals["first_write_due_overrun"] is False
 
 
-def test_native_harness_blocks_more_probes_after_prewrite_plateau(tmp_path: Path) -> None:
+def test_native_harness_observes_prewrite_plateau_without_blocking_live_probes(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -1408,14 +1342,15 @@ def test_native_harness_blocks_more_probes_after_prewrite_plateau(tmp_path: Path
     ]
     assert len(first_batch_outputs) == 30
     assert all("prewrite probe plateau" not in item.output_text_or_ref for item in first_batch_outputs)
-    blocked = next(item for item in result.transcript.items if item.call_id == "read-too-late" and item.kind.endswith("_output"))
-    assert blocked.status == "invalid"
-    assert blocked.is_error is True
-    assert "prewrite probe plateau" in blocked.output_text_or_ref
+    late_probe = next(
+        item for item in result.transcript.items if item.call_id == "read-too-late" and item.kind.endswith("_output")
+    )
+    assert "prewrite probe plateau" not in late_probe.output_text_or_ref
+    assert "perform a source mutation" not in late_probe.output_text_or_ref
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "patched\n"
 
 
-def test_native_harness_blocks_more_probes_after_first_write_due_grace(tmp_path: Path) -> None:
+def test_native_harness_observes_first_write_due_without_blocking_live_probes(tmp_path: Path) -> None:
     for index in range(10):
         (tmp_path / f"missing-{index}.txt").write_text(f"seed {index}\n", encoding="utf-8")
     for index in range(5):
@@ -1458,13 +1393,13 @@ def test_native_harness_blocks_more_probes_after_first_write_due_grace(tmp_path:
         for item in result.transcript.items
         if item.kind.endswith("_output") and item.call_id.startswith("extra-read-")
     ]
-    assert [item.status for item in due_turn_outputs] == ["completed", "invalid", "invalid", "invalid", "invalid"]
-    assert "first-write due overrun" not in due_turn_outputs[0].output_text_or_ref
-    assert all("first-write due overrun" in item.output_text_or_ref for item in due_turn_outputs[1:])
-    blocked = next(item for item in result.transcript.items if item.call_id == "read-too-late" and item.kind.endswith("_output"))
-    assert blocked.status == "invalid"
-    assert blocked.is_error is True
-    assert "first-write due overrun" in blocked.output_text_or_ref
+    assert [item.status for item in due_turn_outputs] == ["completed", "completed", "completed", "completed", "completed"]
+    assert all("first-write due overrun" not in item.output_text_or_ref for item in due_turn_outputs)
+    late_probe = next(
+        item for item in result.transcript.items if item.call_id == "read-too-late" and item.kind.endswith("_output")
+    )
+    assert "first-write due overrun" not in late_probe.output_text_or_ref
+    assert "perform a source mutation" not in late_probe.output_text_or_ref
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "patched\n"
 
 

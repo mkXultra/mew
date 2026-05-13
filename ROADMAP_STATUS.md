@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Command/edit boundary redesign Phase 0-6 is implemented/reviewed/validated locally; next work is Phase 7 validation before speed. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Command/edit boundary Phase 0-6 is implemented/reviewed/validated; current next work is Codex-like native hot-path Phase 0 contract/static gates from `docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md`. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,10 +70,20 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_command_edit_boundary_redesign_phase_7_ready`.
+`m6_24_codex_like_native_hot_path_phase_0_contract`.
 
 Current diagnostic mode:
-`phase_7_before_speed_validation`.
+`no_live_speed_until_hot_path_contract_gate`.
+
+Current reentry decision:
+`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md` is the active
+M6.24 design. Do not resume command/edit Phase 7 validation, 10 minute
+step-shape, `speed_1`, `proof_5`, or hard-runtime threshold polish until
+Codex-like native hot-path Phase 0 contract/static gates are implemented and
+committed. The target is Codex-like live path plus mew sidecar proof: native
+transcript window + compact factual tool-result digest as provider-visible
+input; WorkFrame/proof/replay/typed evidence/loop signals remain internal
+sidecars or diagnostics, not live `next_action` steering.
 
 Latest phase status: Phase 0-6 of
 `docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md` is implemented.
@@ -149,16 +159,17 @@ Current implementation rule:
 - Phase 6: `implemented/reviewed/validated`; live production routes no longer
   call old shell mutation classifier entry points, and full-suite validation
   passed.
-- Phase 7: serial validation before speed: run replay, dogfood/emulator,
-  fastcheck, 10 minute step-shape, and speed proof in that order.
+- Phase 7: deferred. Serial validation before speed remains valid only after
+  the Codex-like native hot-path contract gate is green.
 
-Next action: commit Phase 6 for
-`docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md`, save
-context, then start Phase 7 validation before speed.
+Next action: implement Phase 0 of
+`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md`: provider-visible
+contract/static gates, provider request inventory checks, and sidecar-only
+diagnostic field allowlists.
 
-Do not resume regex/shlex command-classifier polish, 10 minute step-shape,
-`speed_1`, `proof_5`, or broad measurement before Phase 6 is committed and
-Phase 7 local validation has run.
+Do not resume regex/shlex command-classifier polish, hard-runtime threshold
+polish, 10 minute step-shape, `speed_1`, `proof_5`, or broad measurement
+before the Codex-like native hot-path Phase 0 gate is committed.
 
 Phase 1 of
 `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is

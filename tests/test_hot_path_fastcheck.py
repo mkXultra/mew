@@ -1112,7 +1112,7 @@ def test_hot_path_fastcheck_accepts_fake_native_transport_kind(tmp_path):
     assert check["details"]["native_transport"] is True
 
 
-def test_hot_path_fastcheck_allows_native_policy_invalid_outputs_in_trace_summary(tmp_path):
+def test_hot_path_fastcheck_rejects_native_controller_steering_outputs(tmp_path):
     artifact = _write_native_artifact(tmp_path)
     transcript = _read_native_transcript(artifact)
     items = list(transcript.items)
@@ -1160,8 +1160,12 @@ def test_hot_path_fastcheck_allows_native_policy_invalid_outputs_in_trace_summar
     result = run_hot_path_fastcheck(artifact)
 
     checks = {check["name"]: check for check in result["checks"]}
-    assert result["status"] == "pass"
+    assert result["status"] == "fail"
     assert checks["native_trace_summary"]["details"]["parse_error_count"] == 0
+    assert checks["native_controller_steering_outputs"]["status"] == "fail"
+    assert checks["native_controller_steering_outputs"]["details"]["violations"][0]["call_id"] == (
+        "probe-after-first-write-due"
+    )
 
 
 def test_hot_path_fastcheck_rejects_non_finish_invalid_json_output_in_trace_summary(tmp_path):

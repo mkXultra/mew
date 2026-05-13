@@ -176,9 +176,12 @@ def test_compact_sidecar_digest_is_provider_request_context_not_state_object() -
     assert "frontier_state_update" not in serialized
     assert '"active_work_todo"' not in serialized
     assert '"proof"' not in serialized
+    assert "first_write_due" not in serialized
+    assert "prewrite_probe_plateau" not in serialized
+    assert "required_next" not in serialized
 
 
-def test_compact_sidecar_digest_preserves_loop_signals_without_policy_text() -> None:
+def test_compact_sidecar_digest_omits_loop_signals_by_default() -> None:
     digest = build_compact_native_sidecar_digest(
         _native_transcript_dict(),
         loop_signals={
@@ -191,19 +194,17 @@ def test_compact_sidecar_digest_preserves_loop_signals_without_policy_text() -> 
     )
     serialized = json.dumps(digest, sort_keys=True)
     projection = digest["workframe_projection"]
-    signals = projection["loop_signals"]
 
-    assert signals["first_write_due"] is True
-    assert signals["prewrite_probe_plateau"] is False
-    assert signals["probe_count_without_write"] == 10
-    assert signals["latest_failed_verifier"]["call_id"].startswith("verify-")
-    assert len(signals["latest_failed_verifier"]["call_id"]) <= 120
-    assert projection["current_phase"] == "prewrite_blocked"
+    assert "loop_signals" not in projection
+    assert "attention_hints" not in projection
+    assert projection["current_phase"] == "orient"
+    assert "first_write_due" not in serialized
+    assert "probe_count_without_write" not in serialized
     assert "must-not-leak" not in serialized
     assert "next_action_policy" not in serialized
 
 
-def test_compact_sidecar_digest_preserves_prewrite_plateau_signal() -> None:
+def test_compact_sidecar_digest_can_emit_diagnostic_loop_signals_when_requested() -> None:
     digest = build_compact_native_sidecar_digest(
         _native_transcript_dict(),
         loop_signals={
@@ -213,6 +214,7 @@ def test_compact_sidecar_digest_preserves_prewrite_plateau_signal() -> None:
             "probe_count_without_write": 30,
             "max_additional_probe_turns": 0,
         },
+        include_diagnostic_loop_signals=True,
     )
     projection = digest["workframe_projection"]
     signals = projection["loop_signals"]

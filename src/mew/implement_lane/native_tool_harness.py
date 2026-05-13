@@ -40,7 +40,10 @@ from .native_transcript import (
     write_native_evidence_observation,
     write_native_transcript_artifacts,
 )
-from .native_workframe_projection import build_native_prompt_input_inventory
+from .native_workframe_projection import (
+    build_native_prompt_input_inventory,
+    build_provider_visible_forbidden_fields_report,
+)
 from .prompt import build_implement_v2_prompt_sections
 from .read_runtime import READ_ONLY_TOOL_NAMES, execute_read_only_tool_call
 from .tool_policy import (
@@ -460,7 +463,6 @@ def run_native_implement_v2(
         accepted_finish: NativeTranscriptItem | None = None
         terminal_blocked_finish: NativeTranscriptItem | None = None
         output_records: list[NativeTranscriptItem] = []
-        prewrite_probe_calls_this_turn = 0
         for call in calls:
             if accepted_finish is not None and _call_order_key(call) > _call_order_key(accepted_finish):
                 output_records.append(
@@ -485,19 +487,7 @@ def run_native_implement_v2(
                 continue
 
             latency_start = time.monotonic()
-            call_loop_signals = dict(turn_entry_loop_signals)
-            if _native_call_is_prewrite_probe(call) and bool(turn_entry_loop_signals.get("first_write_due")):
-                prewrite_probe_calls_this_turn += 1
-                if prewrite_probe_calls_this_turn > _FIRST_WRITE_DUE_GRACE_PROBE_CALLS:
-                    call_loop_signals["first_write_due_overrun"] = True
-                    call_loop_signals["first_write_grace_exhausted"] = True
-                    call_loop_signals["max_additional_probe_turns"] = 0
-            result = _prewrite_probe_plateau_result(
-                call,
-                call_loop_signals,
-                lane_input=lane_input,
-                lane_config=lane_config,
-            ) or _execute_native_call(
+            result = _execute_native_call(
                 call,
                 lane_input=lane_input,
                 workspace=workspace,
@@ -1900,6 +1890,17 @@ def _request_descriptor(
         transcript_items=provider_visible_transcript_items,
         loop_signals=loop_signals,
     )
+    input_items = _responses_input_items(
+        lane_input,
+        provider_visible_transcript_items,
+        compact_sidecar_digest=compact_sidecar_digest,
+    )
+    instructions = _native_instructions(lane_input)
+    forbidden_fields_report = build_provider_visible_forbidden_fields_report(
+        input_items=input_items,
+        instructions=instructions,
+        compact_sidecar_digest=compact_sidecar_digest,
+    )
     return {
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "transport_kind": "provider_native" if _provider_is_live(lane_input) else "fake_native",
@@ -1907,16 +1908,15 @@ def _request_descriptor(
         "lane_attempt_id": lane_attempt_id,
         "turn_index": turn_index,
         "input_item_count": len(transcript_items),
-        "input_items": _responses_input_items(
-            lane_input,
-            provider_visible_transcript_items,
-            compact_sidecar_digest=compact_sidecar_digest,
-        ),
+        "input_items": input_items,
         "transcript_window": [item.as_dict() for item in provider_visible_transcript_items],
         "provider_request_inventory": build_native_prompt_input_inventory(
             compact_sidecar_digest=compact_sidecar_digest,
+            provider_visible_forbidden_fields=forbidden_fields_report,
+            diagnostic_only_fields=loop_signals.keys(),
+            diagnostic_loop_signals=loop_signals,
         ),
-        "instructions": _native_instructions(lane_input),
+        "instructions": instructions,
         "model_json_main_path_detected": False,
     }
 
@@ -2100,41 +2100,6 @@ def _native_loop_control_state(
             else (0 if first_write_due else None)
         ),
     }
-
-
-def _prewrite_probe_plateau_result(
-    call: NativeTranscriptItem,
-    loop_signals: Mapping[str, object],
-    *,
-    lane_input: ImplementLaneInput,
-    lane_config: Mapping[str, object],
-) -> ToolResultEnvelope | None:
-    first_write_due_overrun = bool(loop_signals.get("first_write_due_overrun"))
-    prewrite_probe_plateau = bool(loop_signals.get("prewrite_probe_plateau"))
-    if not first_write_due_overrun and not prewrite_probe_plateau:
-        return None
-    if call.kind == "finish_call" or call.tool_name in WRITE_TOOL_NAMES:
-        return None
-    if not _native_call_is_prewrite_probe(call):
-        return None
-    mutation_tools = (
-        "write_file/edit_file/apply_patch"
-        if _native_tool_available("write_file", lane_input=lane_input, lane_config=lane_config)
-        else "edit_file/apply_patch"
-    )
-    reason = (
-        "first-write due overrun: enough read/probe evidence has been gathered; "
-        f"perform a source mutation with {mutation_tools} or finish blocked before more probes"
-    )
-    if prewrite_probe_plateau:
-        reason = (
-            "prewrite probe plateau: enough read/probe evidence has been gathered; "
-            f"perform a source mutation with {mutation_tools} or finish blocked before more probes"
-        )
-    return _invalid_result(
-        call,
-        reason=reason,
-    )
 
 
 def _first_write_due_entry_turn(

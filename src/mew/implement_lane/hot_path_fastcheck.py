@@ -268,6 +268,7 @@ def _run_native_hot_path_fastcheck(
         checks.append(_check_native_pairing(transcript))
         checks.append(_check_native_response_items(response_items_path, transcript=transcript))
         checks.append(_check_native_trace_summary(artifact_path=artifact_path, manifest_path=manifest_path, transcript=transcript))
+        checks.append(_check_native_controller_steering_outputs(transcript))
         checks.append(_check_native_generation_observation(transcript))
         checks.append(_check_native_loop_control_replay(transcript))
         checks.append(_check_native_search_text_anchor_projection(transcript))
@@ -289,6 +290,7 @@ def _run_native_hot_path_fastcheck(
                 _check("native_pairing", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_response_items_match", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_trace_summary", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_controller_steering_outputs", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_generation_observation", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_loop_control_replay", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_search_text_anchor_projection", False, "native transcript is unreadable", {"skipped": True}),
@@ -479,6 +481,42 @@ def _check_native_trace_summary(
     )
 
 
+def _check_native_controller_steering_outputs(transcript: NativeTranscript) -> HotPathCheck:
+    markers = (
+        "first-write due overrun",
+        "prewrite probe plateau",
+        "perform a source mutation",
+        "enough read/probe evidence has been gathered",
+        "max_additional_probe_turns",
+    )
+    violations: list[dict[str, object]] = []
+    for item in transcript.items:
+        if not item.kind.endswith("_output"):
+            continue
+        text = str(item.output_text_or_ref or "").casefold()
+        hits = [marker for marker in markers if marker in text]
+        if hits:
+            violations.append(
+                {
+                    "turn_id": item.turn_id,
+                    "call_id": item.call_id,
+                    "tool_name": item.tool_name,
+                    "status": item.status,
+                    "markers": hits,
+                    "summary": item.output_text_or_ref[:300],
+                }
+            )
+    ok = not violations
+    return _check(
+        "native_controller_steering_outputs",
+        ok,
+        "native transcript tool outputs do not contain controller-authored next-action steering"
+        if ok
+        else "native transcript tool outputs contain controller-authored next-action steering",
+        {"violations": violations[:10]},
+    )
+
+
 def _native_trace_summary(
     *,
     artifact_path: Path,
@@ -594,12 +632,7 @@ def _check_native_compact_digest_replay(
             mismatches.append({"request": index, "reason": "missing_compact_sidecar_digest"})
             continue
         transcript = _native_request_transcript(request, fallback_transcript=fallback_transcript)
-        loop_state = _native_loop_control_state(
-            list(transcript.items),
-            current_turn_index=_nonnegative_int(request.get("turn_index")) or _native_next_turn_index(transcript.items),
-            task_contract=_native_request_task_contract(request),
-        )
-        recomputed = build_compact_native_sidecar_digest(transcript, loop_signals=loop_state)
+        recomputed = build_compact_native_sidecar_digest(transcript)
         checked += 1
         if digest != recomputed:
             mismatches.append(
@@ -643,7 +676,6 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
             {
                 "input_items": _native_request_input_items(request),
                 "instructions": _native_request_instructions(request),
-                "provider_request_inventory": inventory,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -674,21 +706,6 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
             violations.append(
                 {"request": index, "reason": "workframe_projection_key_cap", "key_count": len(projection)}
             )
-        forbidden_tokens = [
-            token
-            for token in (
-                "persisted_lane_state",
-                "frontier_state_update",
-                "hard_runtime_frontier",
-                "proof_manifest",
-                "model_authored_todo",
-                "model_authored_proof",
-                "next_action_policy",
-            )
-            if token in provider_visible or token in serialized_digest
-        ]
-        if forbidden_tokens:
-            violations.append({"request": index, "reason": "legacy_state_leak", "tokens": forbidden_tokens})
         if not transition_contract:
             required_next_tokens = [
                 token
@@ -699,6 +716,30 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
                 violations.append(
                     {"request": index, "reason": "default_required_next_leak", "tokens": required_next_tokens}
                 )
+        forbidden_tokens = [
+            token
+            for token in (
+                "persisted_lane_state",
+                "frontier_state_update",
+                "hard_runtime_frontier",
+                "proof_manifest",
+                "model_authored_todo",
+                "model_authored_proof",
+                "next_action_policy",
+                "next_action",
+                "required_next_action",
+                "first_write_due",
+                "first_write_due_overrun",
+                "first_write_probe_threshold",
+                "first_write_turn_threshold",
+                "first_write_grace_probe_calls",
+                "prewrite_probe_plateau",
+                "max_additional_probe_turns",
+            )
+            if token in provider_visible or token in serialized_digest
+        ]
+        if forbidden_tokens:
+            violations.append({"request": index, "reason": "legacy_state_leak", "tokens": forbidden_tokens})
         imperative_hints = _native_imperative_hint_leaks(projection)
         if imperative_hints:
             violations.append({"request": index, "reason": "imperative_instruction_hint", "hints": imperative_hints})
