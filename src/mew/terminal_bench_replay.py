@@ -391,7 +391,7 @@ def _implement_v2_native_replay_summary(report_path, report, *, artifact_dir, ma
         and manifest_hash_matches
         and manifest_pairing_matches
     )
-    latest_failure = _implement_v2_native_latest_failure(failed_outputs)
+    latest_failure = _implement_v2_native_latest_failure(outputs)
     return {
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "lane": "implement_v2",
@@ -419,7 +419,7 @@ def _implement_v2_native_replay_summary(report_path, report, *, artifact_dir, ma
         },
         "model_error": _implement_v2_model_error_from_report(report, history=[], metrics=metrics, manifest=manifest),
         "first_write_frontier_stall": {},
-        "active_command_closeout_failed": False,
+        "active_command_closeout_failed": _implement_v2_native_active_command_closeout_failed(outputs),
         "tool_contract_shell_surface_misuse": False,
         "tool_contract_shell_surface_misuse_seen": False,
         "tool_contract_recovery_observed": False,
@@ -541,12 +541,59 @@ def _native_trace_summary(artifact_dir):
     return data if isinstance(data, dict) else {}
 
 
-def _implement_v2_native_latest_failure(failed_outputs):
-    if not failed_outputs:
+def _implement_v2_native_latest_failure(outputs):
+    failed_indexes = [
+        index
+        for index, item in enumerate(outputs if isinstance(outputs, list) else [])
+        if _implement_v2_native_output_is_failed(item)
+    ]
+    if not failed_indexes:
         return {}
-    item = failed_outputs[-1]
+    latest_index = failed_indexes[-1]
+    item = outputs[latest_index]
+    if _implement_v2_native_output_is_low_signal_active_command_closeout(item):
+        prior = _implement_v2_native_prior_actionable_terminal_output(
+            outputs[:latest_index],
+            command_run_id=_implement_v2_native_output_command_run_id(item),
+        )
+        if prior is not None:
+            return _implement_v2_native_failure_from_output(
+                prior,
+                source="native_transcript_prior_terminal_output",
+                suppressed_closeout_provider_call_id=str(item.call_id or ""),
+            )
+    return _implement_v2_native_failure_from_output(item, source="native_transcript_output")
+
+
+def _implement_v2_native_active_command_closeout_failed(outputs):
+    failed_indexes = [
+        index
+        for index, item in enumerate(outputs if isinstance(outputs, list) else [])
+        if _implement_v2_native_output_is_failed(item)
+    ]
+    for index in reversed(failed_indexes):
+        item = outputs[index]
+        if not _implement_v2_native_output_is_terminal(item):
+            continue
+        if not _implement_v2_native_output_is_active_command_closeout(item):
+            return False
+        if _implement_v2_native_output_is_low_signal_active_command_closeout(item) and _implement_v2_native_prior_actionable_terminal_output(
+            outputs[:index],
+            command_run_id=_implement_v2_native_output_command_run_id(item),
+        ) is not None:
+            return False
+        return True
+    return False
+
+
+def _implement_v2_native_failure_from_output(
+    item,
+    *,
+    source,
+    suppressed_closeout_provider_call_id="",
+):
     text = str(item.output_text_or_ref or "")
-    return {
+    latest = {
         "provider_call_id": str(item.call_id or ""),
         "tool_name": str(item.tool_name or ""),
         "status": str(item.status or ""),
@@ -555,8 +602,105 @@ def _implement_v2_native_latest_failure(failed_outputs):
         "timed_out": "timed_out=true" in text.casefold() or "timed out" in text.casefold(),
         "stderr_tail": _extract_labeled_tail(text, "stderr_tail"),
         "stdout_tail": _extract_labeled_tail(text, "stdout_tail"),
-        "source": "native_transcript_output",
+        "source": source,
     }
+    if suppressed_closeout_provider_call_id:
+        latest["suppressed_closeout_provider_call_id"] = suppressed_closeout_provider_call_id
+    return latest
+
+
+def _implement_v2_native_output_is_failed(item):
+    return (
+        isinstance(item, NativeTranscriptItem)
+        and item.kind in OUTPUT_ITEM_KINDS
+        and (
+            item.is_error
+            or str(item.status or "").casefold()
+            in {"failed", "interrupted", "invalid", "denied", "synthetic_error", "blocked"}
+        )
+    )
+
+
+def _implement_v2_native_output_is_active_command_closeout(item):
+    if not isinstance(item, NativeTranscriptItem):
+        return False
+    call_id = str(item.call_id or "")
+    if call_id.startswith("call-active-command-closeout-"):
+        return True
+    text = str(item.output_text_or_ref or "").casefold()
+    return "active command closeout" in text
+
+
+def _implement_v2_native_output_is_terminal(item):
+    return isinstance(item, NativeTranscriptItem) and str(item.tool_name or "") in _IMPLEMENT_V2_TERMINAL_TOOLS
+
+
+def _implement_v2_native_output_is_low_signal_active_command_closeout(item):
+    if not _implement_v2_native_output_is_active_command_closeout(item):
+        return False
+    text = str(item.output_text_or_ref or "")
+    lowered = text.casefold()
+    if not any(marker in lowered for marker in ("timed_out", "timed out", "budget exhausted", "orphaned")):
+        return False
+    stdout_tail = _extract_labeled_tail(text, "stdout_tail").strip()
+    stderr_tail = _extract_labeled_tail(text, "stderr_tail").strip()
+    if stdout_tail:
+        return False
+    if not stderr_tail:
+        return True
+    normalized = re.sub(r"\s+", " ", stderr_tail.casefold()).strip()
+    timeout_only = normalized.startswith("command timed out after ") or normalized in {
+        "timed out",
+        "timeout",
+    }
+    return timeout_only
+
+
+def _implement_v2_native_prior_actionable_terminal_output(outputs, *, command_run_id):
+    candidates = [
+        item
+        for item in reversed(outputs if isinstance(outputs, list) else [])
+        if _implement_v2_native_output_is_actionable_terminal_evidence(item)
+    ]
+    if command_run_id:
+        for item in candidates:
+            if _implement_v2_native_output_command_run_id(item) == command_run_id:
+                return item
+        return None
+    return candidates[0] if candidates else None
+
+
+def _implement_v2_native_output_is_actionable_terminal_evidence(item):
+    if not isinstance(item, NativeTranscriptItem):
+        return False
+    if item.kind not in OUTPUT_ITEM_KINDS:
+        return False
+    if str(item.tool_name or "") not in _IMPLEMENT_V2_TERMINAL_TOOLS:
+        return False
+    if _implement_v2_native_output_is_active_command_closeout(item):
+        return False
+    text = str(item.output_text_or_ref or "")
+    stdout_tail = _extract_labeled_tail(text, "stdout_tail").strip()
+    stderr_tail = _extract_labeled_tail(text, "stderr_tail").strip()
+    if stdout_tail or stderr_tail:
+        return True
+    lowered = text.casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "exit_code=",
+            "failure_classification",
+            "verifier_evidence",
+            "artifact_evidence",
+        )
+    )
+
+
+def _implement_v2_native_output_command_run_id(item):
+    if not isinstance(item, NativeTranscriptItem):
+        return ""
+    match = re.search(r"command_run_id=([^;\s]+)", str(item.output_text_or_ref or ""))
+    return str(match.group(1) if match else "").strip()
 
 
 def _extract_exit_code(text):

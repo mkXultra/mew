@@ -750,6 +750,324 @@ class TerminalBenchReplayTests(unittest.TestCase):
             self.assertEqual(current_v2["latest_failure"]["tool_name"], "run_tests")
             self.assertIn("latest failed run_tests", trial["current"]["next_action"])
 
+    def test_replay_terminal_bench_job_ignores_native_low_signal_active_closeout_for_prior_runtime_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp)
+            agent_dir = next(Path(job_dir).rglob("unknown-task"))
+            lane_attempt_id = "native-replay:task-1"
+            transcript = NativeTranscript(
+                lane_attempt_id=lane_attempt_id,
+                provider="openai",
+                model="gpt-5.5",
+                items=(
+                    NativeTranscriptItem(
+                        sequence=1,
+                        turn_id="turn-1",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="openai",
+                        model="gpt-5.5",
+                        kind="function_call",
+                        call_id="call-runtime",
+                        tool_name="run_tests",
+                        arguments_json_text='{"command":"node vm.js"}',
+                    ),
+                    NativeTranscriptItem(
+                        sequence=2,
+                        turn_id="turn-1",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="openai",
+                        model="gpt-5.5",
+                        kind="function_call_output",
+                        call_id="call-runtime",
+                        tool_name="run_tests",
+                        status="yielded",
+                        output_text_or_ref=(
+                            "run_tests result: yielded; status=yielded; command_run_id=cmd-1; "
+                            "stdout_tail: DoomGeneric initialized. Frames will be saved to /tmp/frame.bmp "
+                            "Error: Unknown format specifier '%c'"
+                        ),
+                    ),
+                    NativeTranscriptItem(
+                        sequence=3,
+                        turn_id="turn-2",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="openai",
+                        model="gpt-5.5",
+                        kind="function_call",
+                        call_id="call-poll",
+                        tool_name="poll_command",
+                        arguments_json_text='{"command_run_id":"cmd-1"}',
+                    ),
+                    NativeTranscriptItem(
+                        sequence=4,
+                        turn_id="turn-2",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="openai",
+                        model="gpt-5.5",
+                        kind="function_call_output",
+                        call_id="call-poll",
+                        tool_name="poll_command",
+                        status="yielded",
+                        output_text_or_ref=(
+                            "poll_command result: yielded; status=yielded; command_run_id=cmd-1; "
+                            "stdout_tail: DoomGeneric initialized. Frames will be saved to /tmp/frame.bmp "
+                            "Error: Unknown format specifier '%c'"
+                        ),
+                    ),
+                    NativeTranscriptItem(
+                        sequence=5,
+                        turn_id="turn-3-active-command-closeout",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="native-controller",
+                        model="gpt-5.5",
+                        kind="function_call",
+                        call_id="call-active-command-closeout-003",
+                        tool_name="poll_command",
+                        arguments_json_text='{"command_run_id":"cmd-1","wait_seconds":26.0}',
+                    ),
+                    NativeTranscriptItem(
+                        sequence=6,
+                        turn_id="turn-3-active-command-closeout",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="native-controller",
+                        model="gpt-5.5",
+                        kind="function_call_output",
+                        call_id="call-active-command-closeout-003",
+                        tool_name="poll_command",
+                        status="failed",
+                        is_error=True,
+                        output_text_or_ref=(
+                            "poll_command result: failed; error=true; status=timed_out; "
+                            "command_run_id=cmd-1; stderr_tail: command timed out after 26 second(s)"
+                        ),
+                    ),
+                ),
+            )
+            write_native_transcript_artifacts(agent_dir, transcript)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["latest_failure"]["provider_call_id"], "call-poll")
+            self.assertEqual(current_v2["latest_failure"]["source"], "native_transcript_prior_terminal_output")
+            self.assertEqual(
+                current_v2["latest_failure"]["suppressed_closeout_provider_call_id"],
+                "call-active-command-closeout-003",
+            )
+            self.assertIn("Unknown format specifier", current_v2["latest_failure"]["stdout_tail"])
+            self.assertFalse(current_v2["active_command_closeout_failed"])
+
+    def test_replay_terminal_bench_job_keeps_native_active_closeout_when_no_prior_signal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp)
+            agent_dir = next(Path(job_dir).rglob("unknown-task"))
+            lane_attempt_id = "native-replay:task-1"
+            transcript = NativeTranscript(
+                lane_attempt_id=lane_attempt_id,
+                provider="openai",
+                model="gpt-5.5",
+                items=(
+                    NativeTranscriptItem(
+                        sequence=1,
+                        turn_id="turn-1-active-command-closeout",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="native-controller",
+                        model="gpt-5.5",
+                        kind="function_call",
+                        call_id="call-active-command-closeout-001",
+                        tool_name="poll_command",
+                        arguments_json_text='{"command_run_id":"cmd-1","wait_seconds":0.01}',
+                    ),
+                    NativeTranscriptItem(
+                        sequence=2,
+                        turn_id="turn-1-active-command-closeout",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="native-controller",
+                        model="gpt-5.5",
+                        kind="function_call_output",
+                        call_id="call-active-command-closeout-001",
+                        tool_name="poll_command",
+                        status="failed",
+                        is_error=True,
+                        output_text_or_ref=(
+                            "poll_command result: failed; error=true; status=timed_out; "
+                            "command_run_id=cmd-1; stderr_tail: command timed out after 0.01 second(s)"
+                        ),
+                    ),
+                ),
+            )
+            write_native_transcript_artifacts(agent_dir, transcript)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["latest_failure"]["provider_call_id"], "call-active-command-closeout-001")
+            self.assertTrue(current_v2["active_command_closeout_failed"])
+
+    def test_replay_terminal_bench_job_keeps_native_closeout_when_prior_signal_is_different_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp)
+            agent_dir = next(Path(job_dir).rglob("unknown-task"))
+            lane_attempt_id = "native-replay:task-1"
+            transcript = NativeTranscript(
+                lane_attempt_id=lane_attempt_id,
+                provider="openai",
+                model="gpt-5.5",
+                items=(
+                    NativeTranscriptItem(
+                        sequence=1,
+                        turn_id="turn-1",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="openai",
+                        model="gpt-5.5",
+                        kind="function_call",
+                        call_id="call-old-runtime",
+                        tool_name="run_tests",
+                        arguments_json_text='{"command":"node old.js"}',
+                    ),
+                    NativeTranscriptItem(
+                        sequence=2,
+                        turn_id="turn-1",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="openai",
+                        model="gpt-5.5",
+                        kind="function_call_output",
+                        call_id="call-old-runtime",
+                        tool_name="run_tests",
+                        status="yielded",
+                        output_text_or_ref=(
+                            "run_tests result: yielded; status=yielded; command_run_id=cmd-old; "
+                            "stdout_tail: useful but unrelated runtime output"
+                        ),
+                    ),
+                    NativeTranscriptItem(
+                        sequence=3,
+                        turn_id="turn-2-active-command-closeout",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="native-controller",
+                        model="gpt-5.5",
+                        kind="function_call",
+                        call_id="call-active-command-closeout-002",
+                        tool_name="poll_command",
+                        arguments_json_text='{"command_run_id":"cmd-new","wait_seconds":0.01}',
+                    ),
+                    NativeTranscriptItem(
+                        sequence=4,
+                        turn_id="turn-2-active-command-closeout",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="native-controller",
+                        model="gpt-5.5",
+                        kind="function_call_output",
+                        call_id="call-active-command-closeout-002",
+                        tool_name="poll_command",
+                        status="failed",
+                        is_error=True,
+                        output_text_or_ref=(
+                            "poll_command result: failed; error=true; status=timed_out; "
+                            "command_run_id=cmd-new; stderr_tail: command timed out after 0.01 second(s)"
+                        ),
+                    ),
+                ),
+            )
+            write_native_transcript_artifacts(agent_dir, transcript)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["latest_failure"]["provider_call_id"], "call-active-command-closeout-002")
+            self.assertTrue(current_v2["active_command_closeout_failed"])
+
+    def test_replay_terminal_bench_job_does_not_keep_stale_native_closeout_after_later_terminal_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = self._write_native_transcript_replay_fixture(tmp)
+            agent_dir = next(Path(job_dir).rglob("unknown-task"))
+            lane_attempt_id = "native-replay:task-1"
+            transcript = NativeTranscript(
+                lane_attempt_id=lane_attempt_id,
+                provider="openai",
+                model="gpt-5.5",
+                items=(
+                    NativeTranscriptItem(
+                        sequence=1,
+                        turn_id="turn-1-active-command-closeout",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="native-controller",
+                        model="gpt-5.5",
+                        kind="function_call",
+                        call_id="call-active-command-closeout-001",
+                        tool_name="poll_command",
+                        arguments_json_text='{"command_run_id":"cmd-1","wait_seconds":0.01}',
+                    ),
+                    NativeTranscriptItem(
+                        sequence=2,
+                        turn_id="turn-1-active-command-closeout",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="native-controller",
+                        model="gpt-5.5",
+                        kind="function_call_output",
+                        call_id="call-active-command-closeout-001",
+                        tool_name="poll_command",
+                        status="failed",
+                        is_error=True,
+                        output_text_or_ref=(
+                            "poll_command result: failed; error=true; status=timed_out; "
+                            "command_run_id=cmd-1; stderr_tail: command timed out after 0.01 second(s)"
+                        ),
+                    ),
+                    NativeTranscriptItem(
+                        sequence=3,
+                        turn_id="turn-2",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="openai",
+                        model="gpt-5.5",
+                        kind="function_call",
+                        call_id="call-real-failure",
+                        tool_name="run_tests",
+                        arguments_json_text='{"command":"node vm.js"}',
+                    ),
+                    NativeTranscriptItem(
+                        sequence=4,
+                        turn_id="turn-2",
+                        lane_attempt_id=lane_attempt_id,
+                        provider="openai",
+                        model="gpt-5.5",
+                        kind="function_call_output",
+                        call_id="call-real-failure",
+                        tool_name="run_tests",
+                        status="failed",
+                        is_error=True,
+                        output_text_or_ref="run_tests result: failed; exit_code=1; stderr_tail: real terminal failure",
+                    ),
+                ),
+            )
+            write_native_transcript_artifacts(agent_dir, transcript)
+
+            report = replay_terminal_bench_job(
+                job_dir,
+                task="make-mips-interpreter",
+                assertions={"mew_exit_code": 1, "external_reward": 0.0},
+            )
+            current_v2 = report["trials"][0]["current"]["implement_v2"]
+
+            self.assertEqual(report["status"], "pass")
+            self.assertEqual(current_v2["latest_failure"]["provider_call_id"], "call-real-failure")
+            self.assertFalse(current_v2["active_command_closeout_failed"])
+
     def test_replay_terminal_bench_job_prefers_root_native_artifact_over_stale_legacy_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             job_dir = self._write_native_transcript_replay_fixture(tmp, stale_legacy_dir=True)
