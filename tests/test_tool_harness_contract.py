@@ -118,6 +118,33 @@ def test_command_failure_visible_card_puts_latest_failure_before_output_tail() -
     assert "mutation" not in card
 
 
+def test_command_semantic_failure_visible_card_has_latest_failure_when_tool_completed() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "status": "failed",
+                "exit_code": 127,
+                "stderr_tail": "/bin/bash: line 1: readelf: command not found",
+                "stdout_tail": "generic stdout",
+                "command_run_id": "cmd-1",
+            },
+        ),
+    )
+
+    visible = result.provider_visible_content()
+    rendered = visible["natural_result_text"]
+
+    assert "latest_failure:" in rendered
+    assert "exit_code=127" in visible["tool_output_card"]["latest_failure"]
+    assert "readelf: command not found" in visible["tool_output_card"]["latest_failure"]
+
+
 def test_visible_tool_output_card_redacts_forbidden_latest_failure_fields() -> None:
     result = ToolResultEnvelope(
         lane_attempt_id="attempt-1",

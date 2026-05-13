@@ -357,7 +357,14 @@ def _visible_latest_failure(tool_name: str, payload: dict[str, object], *, is_er
         return _clip_preview(_compact_mapping_text(explicit), limit=1200)
     if isinstance(explicit, str) and explicit.strip():
         return _clip_preview(_redact_forbidden_visible_markers(" ".join(explicit.strip().split())), limit=1200)
-    failed = is_error or status in {"failed", "invalid", "denied", "interrupted"}
+    payload_status = str(payload.get("status") or "").strip().lower()
+    exit_code = payload.get("exit_code")
+    failed = (
+        is_error
+        or status in {"failed", "invalid", "denied", "interrupted"}
+        or payload_status in {"failed", "invalid", "denied", "interrupted", "killed"}
+        or _nonzero_exit_code(exit_code)
+    )
     if not failed:
         return ""
     facts = []
@@ -383,6 +390,13 @@ def _visible_output_tail(tool_name: str, payload: dict[str, object]) -> str:
             tail = "\n".join(value.strip().splitlines()[-20:])
             return _head_tail_preview(value, tail, limit=1200)
     return ""
+
+
+def _nonzero_exit_code(value: object) -> bool:
+    try:
+        return int(value) != 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _visible_read_excerpt(tool_name: str, payload: dict[str, object]) -> str:

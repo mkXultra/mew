@@ -406,11 +406,6 @@ def _command_schema() -> dict[str, object]:
             ),
             "cwd": _nullable_string("Workspace-relative working directory."),
             "timeout_ms": _nullable_integer("Maximum command runtime in milliseconds."),
-            "command_intent": _nullable_enum(
-                "Optional command intent.",
-                ("probe", "diagnostic", "verifier", "implementation", "other"),
-            ),
-            "justification": _nullable_string("Short reason this command is needed."),
         }
     )
 

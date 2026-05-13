@@ -79,7 +79,7 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="run_command",
         access="execute",
         description=(
-            "Run a bounded command, build, runtime, or diagnostic through managed exec. "
+            "Run a bounded command, build, or runtime through managed exec. "
             "Use source mutation tools for edits. Output returns compact terminal text with refs."
         ),
         approval_required=True,

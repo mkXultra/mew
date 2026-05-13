@@ -98,6 +98,23 @@ def test_lowered_provider_tool_descriptions_remove_probe_frontier_salience() -> 
     assert "custom/freeform patch input" in descriptions
 
 
+def test_execute_tool_schemas_do_not_expose_command_self_labeling() -> None:
+    lowered = lower_implement_lane_tool_specs(list_v2_base_tool_specs())
+    by_name = {tool.name: tool for tool in lowered}
+
+    for tool_name in ("run_command", "run_tests"):
+        provider_tool = by_name[tool_name].provider_tool
+        serialized = str(provider_tool)
+        properties = provider_tool["parameters"]["properties"]  # type: ignore[index]
+
+        assert "command_intent" not in properties
+        assert "justification" not in properties
+        assert "command_intent" not in serialized
+        assert "justification" not in serialized
+        assert "probe" not in serialized
+        assert "diagnostic" not in serialized
+
+
 def test_write_file_tool_contract_discourages_large_source_payloads() -> None:
     lowered = lower_implement_lane_tool_specs(list_v2_base_tool_specs())
     write_file = {tool.name: tool for tool in lowered}["write_file"].provider_tool
