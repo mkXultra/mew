@@ -158,6 +158,7 @@ def build_tool_result_index_artifact(
             "changed_paths": compact_card["changed_paths"],
             "artifact_refs": compact_card["artifact_refs"],
             "mutation_refs": compact_card["mutation_refs"],
+            "source_mutation_effect_kinds": compact_card["source_mutation_effect_kinds"],
             "side_effect_count": len(result.side_effects),
             "natural_result_text": result.natural_result_text(),
             "compact_result_card": compact_card,
@@ -516,6 +517,7 @@ def _compact_tool_result_card(
         "changed_paths": _changed_paths_from_result(result),
         "artifact_refs": artifact_refs,
         "mutation_refs": mutation_refs,
+        "source_mutation_effect_kinds": _source_mutation_effect_kinds_from_result(result),
         "side_effect_count": len(result.side_effects),
         "natural_result_text": result.natural_result_text(),
         "mutation_output_card": _payload_mutation_output_card(result),
@@ -586,7 +588,7 @@ def _is_source_mutation_effect(effect: object) -> bool:
     kind = str(effect.get("kind") or "")
     if kind == "file_write":
         return effect.get("written") is True
-    if kind == "source_tree_mutation":
+    if kind in {"source_tree_mutation", "process_source_observation"}:
         record = effect.get("record") if isinstance(effect.get("record"), dict) else {}
         changed_count = record.get("changed_count")
         return bool(changed_count)
@@ -645,10 +647,30 @@ def _mutation_refs_from_result(result: ToolResultEnvelope) -> list[str]:
         _append_unique(refs, str(typed.get("mutation_ref") or ""))
     if isinstance(card, dict):
         _append_unique(refs, str(card.get("mutation_ref") or ""))
-    for effect in result.side_effects:
-        if isinstance(effect, dict):
-            _append_unique(refs, str(effect.get("mutation_ref") or ""))
+    for effect_index, effect in enumerate(result.side_effects, start=1):
+        if not isinstance(effect, dict):
+            continue
+        _append_unique(refs, str(effect.get("mutation_ref") or ""))
+        if _is_source_mutation_effect(effect):
+            _append_unique(
+                refs,
+                _source_mutation_ref_for_effect(
+                    result,
+                    effect,
+                    tool_result_ref=f"tool-result:{result.provider_call_id or effect_index}",
+                    effect_index=effect_index,
+                ),
+            )
     return refs
+
+
+def _source_mutation_effect_kinds_from_result(result: ToolResultEnvelope) -> list[str]:
+    kinds: list[str] = []
+    for effect in result.side_effects:
+        if not _is_source_mutation_effect(effect):
+            continue
+        _append_unique(kinds, str(effect.get("kind") or "source_mutation") if isinstance(effect, dict) else "source_mutation")
+    return kinds
 
 
 def _payload_artifact_refs(payload: dict[str, object]) -> list[str]:
@@ -723,11 +745,11 @@ def _source_mutation_ref_for_effect(
     if not isinstance(effect, dict):
         return f"{tool_result_ref}:mutation:{effect_index}"
     kind = str(effect.get("kind") or "")
-    if kind == "source_tree_mutation":
+    if kind in {"source_tree_mutation", "process_source_observation"}:
         record = effect.get("record") if isinstance(effect.get("record"), dict) else {}
         identifier = str(record.get("command_run_id") or record.get("provider_call_id") or "")
         if identifier:
-            return f"implement-v2-evidence://{result.lane_attempt_id}/source_tree_mutation/{_safe_ref_part(identifier, 'source-tree-mutation')}"
+            return f"implement-v2-evidence://{result.lane_attempt_id}/{kind}/{_safe_ref_part(identifier, kind)}"
     for ref in result.evidence_refs:
         text = str(ref)
         if "mutation" in text:

@@ -219,6 +219,149 @@ def test_normalize_mew_native_response_transcript_excludes_read_command_output_f
     assert summary["command_count"] == 0
 
 
+def test_normalize_mew_native_response_transcript_counts_process_source_observations(tmp_path):
+    task_dir = tmp_path / "task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "mew-report.json").write_text(json.dumps({"work_report": {"steps": []}}), encoding="utf-8")
+    (task_dir / "command-transcript.json").write_text(json.dumps({}), encoding="utf-8")
+    items = [
+        {
+            "sequence": 1,
+            "kind": "function_call",
+            "turn_id": "turn-1",
+            "call_id": "call-shell-write",
+            "tool_name": "run_command",
+            "arguments_json_text": "{\"command\":\"python3 - <<'PY'\\nopen('vm.js','w').write('x')\\nPY\"}",
+            "output_index": 1,
+        },
+        {
+            "sequence": 2,
+            "kind": "function_call_output",
+            "turn_id": "turn-1",
+            "call_id": "call-shell-write",
+            "tool_name": "run_command",
+            "status": "completed",
+            "output_text_or_ref": "run_command result: completed; exit_code=0",
+        },
+        {
+            "sequence": 3,
+            "kind": "function_call",
+            "turn_id": "turn-2",
+            "call_id": "call-test",
+            "tool_name": "run_tests",
+            "arguments_json_text": "{\"command\":\"node --check vm.js\"}",
+            "output_index": 1,
+        },
+        {
+            "sequence": 4,
+            "kind": "function_call_output",
+            "turn_id": "turn-2",
+            "call_id": "call-test",
+            "tool_name": "run_tests",
+            "status": "completed",
+            "output_text_or_ref": "run_tests result: completed; exit_code=0",
+        },
+    ]
+    (task_dir / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    (task_dir / "tool_result_index.json").write_text(
+        json.dumps(
+            {
+                "by_provider_call_id": {
+                    "call-shell-write": {
+                        "changed_paths": ["vm.js"],
+                        "mutation_refs": ["implement-v2-evidence://attempt/process_source_observation/call-shell-write"],
+                        "source_mutation_effect_kinds": ["process_source_observation"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (task_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "tool_latency": [
+                        {
+                            "call_id": "call-shell-write",
+                            "tool_name": "run_command",
+                            "started_ms": 2000,
+                            "finished_ms": 5,
+                        },
+                        {"call_id": "call-test", "tool_name": "run_tests", "started_ms": 3000, "finished_ms": 5},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["edit_count"] == 0
+    assert summary["source_mutation_count"] == 1
+    assert summary["process_source_mutation_count"] == 1
+    assert summary["first_edit_seconds"] is None
+    assert summary["first_source_mutation_seconds"] == 2.005
+    mutation_events = [event for event in events if event.get("source_mutation")]
+    assert mutation_events[0]["source_mutation"]["changed_paths"] == ["vm.js"]
+    assert mutation_events[0]["source_mutation_effect_kinds"] == ["process_source_observation"]
+
+
+def test_normalize_mew_native_response_transcript_rejects_sidecar_on_read_only_call(tmp_path):
+    task_dir = tmp_path / "task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "mew-report.json").write_text(json.dumps({"work_report": {"steps": []}}), encoding="utf-8")
+    (task_dir / "command-transcript.json").write_text(json.dumps({}), encoding="utf-8")
+    (task_dir / "response_transcript.json").write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "sequence": 1,
+                        "kind": "function_call",
+                        "turn_id": "turn-1",
+                        "call_id": "call-read",
+                        "tool_name": "read_file",
+                        "arguments_json_text": "{\"path\":\"vm.js\"}",
+                    },
+                    {
+                        "sequence": 2,
+                        "kind": "function_call_output",
+                        "turn_id": "turn-1",
+                        "call_id": "call-read",
+                        "tool_name": "read_file",
+                        "status": "completed",
+                        "output_text_or_ref": "read_file result: completed",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (task_dir / "tool_result_index.json").write_text(
+        json.dumps(
+            {
+                "by_provider_call_id": {
+                    "call-read": {
+                        "tool_name": "run_command",
+                        "changed_paths": ["vm.js"],
+                        "mutation_refs": ["implement-v2-evidence://attempt/process_source_observation/call-read"],
+                        "source_mutation_effect_kinds": ["process_source_observation"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _events, summary = normalize_harbor_agent_trace(agent="mew", task_dir=task_dir)
+
+    assert summary["edit_count"] == 0
+    assert summary["source_mutation_count"] == 0
+    assert summary["process_source_mutation_count"] == 0
+
+
 def test_normalize_mew_native_response_transcript_flags_duplicate_call_ids(tmp_path):
     task_dir = tmp_path / "task"
     task_dir.mkdir(parents=True)

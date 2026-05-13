@@ -48,6 +48,13 @@ from .native_workframe_projection import (
 )
 from .prompt import build_implement_v2_prompt_sections
 from .read_runtime import READ_ONLY_TOOL_NAMES, execute_read_only_tool_call
+from .tool_harness_contract import (
+    build_evidence_ref_index_artifact,
+    build_evidence_sidecar_artifact,
+    build_tool_result_index_artifact,
+    tool_results_jsonl_lines,
+    write_jsonl,
+)
 from .tool_policy import (
     ImplementLaneToolSpec,
     hide_unavailable_write_file_guidance,
@@ -2717,6 +2724,7 @@ def _write_live_failure_artifacts(
     root = Path(root_path)
     root.mkdir(parents=True, exist_ok=True)
     paths = write_native_transcript_artifacts(root, transcript)
+    paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
     route_records = route_records_from_results(tool_results)
     tool_routes_path = root / "tool_routes.jsonl"
     tool_routes_path.write_text(
@@ -2829,6 +2837,7 @@ def _write_native_artifacts(
     resolver_decisions: tuple[CompletionResolverDecision, ...] = (),
 ) -> dict[str, Path]:
     paths = write_native_transcript_artifacts(root, transcript)
+    paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
     route_records = route_records_from_results(tool_results)
     tool_routes_path = root / "tool_routes.jsonl"
     tool_routes_path.write_text(
@@ -2865,6 +2874,41 @@ def _write_native_artifacts(
             payload["metrics"]["native_transport_kind"] = "provider_native"
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return paths
+
+
+def _write_native_tool_result_sidecars(
+    root: Path,
+    *,
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, Path]:
+    """Write derived tool-result sidecars for native transcript artifacts."""
+
+    tool_results_path = root / "tool_results.jsonl"
+    tool_result_index_path = root / "tool_result_index.json"
+    evidence_sidecar_path = root / "evidence_sidecar.json"
+    evidence_ref_index_path = root / "evidence_ref_index.json"
+    write_jsonl(tool_results_path, tool_results_jsonl_lines(tool_results))
+    tool_result_index = build_tool_result_index_artifact(tool_results)
+    evidence_sidecar = build_evidence_sidecar_artifact(tool_results)
+    evidence_ref_index = build_evidence_ref_index_artifact(evidence_sidecar)
+    tool_result_index_path.write_text(
+        json.dumps(tool_result_index, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    evidence_sidecar_path.write_text(
+        json.dumps(evidence_sidecar, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    evidence_ref_index_path.write_text(
+        json.dumps(evidence_ref_index, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "tool_results": tool_results_path,
+        "tool_result_index": tool_result_index_path,
+        "evidence_sidecar": evidence_sidecar_path,
+        "evidence_ref_index": evidence_ref_index_path,
+    }
 
 
 def _provider_request_records(provider: object) -> tuple[dict[str, object], ...]:

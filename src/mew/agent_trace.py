@@ -608,6 +608,17 @@ def normalize_mew_native_response_transcript(
     manifest = _read_json(manifest_path or transcript_path.parent / "proof-manifest.json")
     latency_by_call = _native_latency_by_call(manifest, report_metrics=report_metrics or {})
     output_by_call, pairing_errors = _native_output_by_call(items)
+    call_tool_names = {
+        str(item.get("call_id")): str(item.get("tool_name") or "")
+        for item in items
+        if isinstance(item, dict)
+        and item.get("kind") in {"function_call", "custom_tool_call", "finish_call"}
+        and item.get("call_id")
+    }
+    source_mutation_by_call = _native_source_mutation_by_call(
+        transcript_path.parent,
+        call_tool_names=call_tool_names,
+    )
     events: list[dict[str, Any]] = []
     for message in pairing_errors:
         events.append(_native_parse_error_event(transcript_path, line_number=1, summary=message))
@@ -687,6 +698,13 @@ def normalize_mew_native_response_transcript(
         if item.get("output_index") is not None:
             started["sequence_index"] = item.get("output_index")
             completed["sequence_index"] = item.get("output_index")
+        source_mutation = source_mutation_by_call.get(call_id, {})
+        if source_mutation:
+            completed["source_mutation"] = source_mutation
+            effect_kinds = source_mutation.get("effect_kinds")
+            if isinstance(effect_kinds, list) and effect_kinds:
+                completed["source_mutation_effect_kinds"] = effect_kinds
+                completed["side_effect_kinds"] = effect_kinds
         events.append(started)
         if output:
             events.append(completed)
@@ -753,6 +771,65 @@ def _native_output_by_call(items: list[Any]) -> tuple[dict[str, dict[str, Any]],
             continue
         output_by_call[call_id] = output_by_call_candidate[call_id]
     return output_by_call, errors
+
+
+def _native_source_mutation_by_call(
+    artifact_root: Path,
+    *,
+    call_tool_names: dict[str, str],
+) -> dict[str, dict[str, Any]]:
+    """Return sidecar-observed source mutations keyed by provider call id."""
+
+    index = _read_json(artifact_root / "tool_result_index.json")
+    by_call = index.get("by_provider_call_id") if isinstance(index.get("by_provider_call_id"), dict) else {}
+    result: dict[str, dict[str, Any]] = {}
+    for call_id, payload in by_call.items():
+        transcript_tool_name = call_tool_names.get(str(call_id))
+        if transcript_tool_name is None:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        card = payload.get("compact_result_card") if isinstance(payload.get("compact_result_card"), dict) else {}
+        indexed_tool_name = str(payload.get("tool_name") or card.get("tool_name") or "")
+        if indexed_tool_name and indexed_tool_name != transcript_tool_name:
+            continue
+        changed_paths = _strings_from_any(payload.get("changed_paths"))
+        if not changed_paths:
+            changed_paths = _strings_from_any(card.get("changed_paths")) if isinstance(card, dict) else []
+        mutation_refs = _strings_from_any(payload.get("mutation_refs"))
+        if not mutation_refs:
+            mutation_refs = _strings_from_any(card.get("mutation_refs")) if isinstance(card, dict) else []
+        effect_kinds = _strings_from_any(payload.get("source_mutation_effect_kinds"))
+        if not effect_kinds and isinstance(card, dict):
+            effect_kinds = _strings_from_any(card.get("source_mutation_effect_kinds"))
+        changed_count = len(changed_paths)
+        if not changed_count and (mutation_refs or effect_kinds):
+            changed_count = 1
+        if changed_count <= 0:
+            continue
+        effect_kind_set = {str(item) for item in effect_kinds}
+        if "process_source_observation" in effect_kind_set:
+            if transcript_tool_name not in {"run_command", "run_tests"}:
+                continue
+        elif effect_kind_set & {"file_write", "source_tree_mutation"}:
+            if transcript_tool_name not in {"write_file", "edit_file", "apply_patch"}:
+                continue
+        elif transcript_tool_name not in {"write_file", "edit_file", "apply_patch"}:
+            continue
+        result[str(call_id)] = {
+            "changed_count": changed_count,
+            "changed_paths": changed_paths,
+            "mutation_refs": mutation_refs,
+            "effect_kinds": effect_kinds,
+            "source": "tool_result_index.json",
+        }
+    return result
+
+
+def _strings_from_any(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
 
 
 def _native_parse_error_event(source_path: Path, *, line_number: int, summary: str) -> dict[str, Any]:
@@ -1188,6 +1265,12 @@ def summarize_trace(
     command_invocations = _count_invocations(command_events)
     edit_invocations = _count_invocations(edit_events)
     verifier_invocations = _count_invocations(verifier_events)
+    source_mutation_events = [event for event in tool_events if _event_has_source_mutation(event)]
+    process_source_mutation_events = [
+        event for event in source_mutation_events if _event_has_source_mutation_kind(event, "process_source_observation")
+    ]
+    source_mutation_invocations = _count_invocations(source_mutation_events)
+    process_source_mutation_invocations = _count_invocations(process_source_mutation_events)
     elapsed_values = [event.get("elapsed_ms") for event in events if isinstance(event.get("elapsed_ms"), int)]
     command_durations = [
         event.get("duration_ms")
@@ -1207,6 +1290,11 @@ def summarize_trace(
         "command_count": command_invocations,
         "edit_event_count": len(edit_events),
         "edit_count": edit_invocations,
+        "typed_edit_count": edit_invocations,
+        "source_mutation_event_count": len(source_mutation_events),
+        "source_mutation_count": source_mutation_invocations,
+        "process_source_mutation_event_count": len(process_source_mutation_events),
+        "process_source_mutation_count": process_source_mutation_invocations,
         "verifier_event_count": len(verifier_events),
         "verifier_count": verifier_invocations,
         "parse_error_count": sum(1 for event in events if event.get("kind") == "parse_error"),
@@ -1220,6 +1308,8 @@ def summarize_trace(
         "first_tool_seconds": _first_elapsed_seconds(tool_events),
         "first_command_seconds": _first_elapsed_seconds(command_events),
         "first_edit_seconds": _first_elapsed_seconds(edit_events),
+        "first_source_mutation_seconds": _first_elapsed_seconds(source_mutation_events),
+        "first_process_source_mutation_seconds": _first_elapsed_seconds(process_source_mutation_events),
         "first_verifier_seconds": _first_elapsed_seconds(verifier_events),
         "command_duration_seconds": round(sum(command_durations) / 1000, 3) if command_durations else None,
         "command_duration_observed_count": len(command_durations),
@@ -1250,6 +1340,30 @@ def _is_verifier_event(event: dict[str, Any]) -> bool:
     if "coqc" in summary and "--version" not in summary:
         return True
     return False
+
+
+def _event_has_source_mutation(event: dict[str, Any]) -> bool:
+    mutation = event.get("source_mutation")
+    if isinstance(mutation, dict):
+        changed_count = mutation.get("changed_count")
+        try:
+            if int(changed_count) > 0:
+                return True
+        except (TypeError, ValueError):
+            pass
+        if mutation.get("changed_paths") or mutation.get("mutation_refs"):
+            return True
+    return _event_has_source_mutation_kind(event, "source_tree_mutation") or _event_has_source_mutation_kind(
+        event,
+        "process_source_observation",
+    )
+
+
+def _event_has_source_mutation_kind(event: dict[str, Any], kind: str) -> bool:
+    kinds = event.get("source_mutation_effect_kinds") or event.get("side_effect_kinds")
+    if not isinstance(kinds, list):
+        return False
+    return kind in {str(item) for item in kinds}
 
 
 def _event_text(event: dict[str, Any]) -> str:

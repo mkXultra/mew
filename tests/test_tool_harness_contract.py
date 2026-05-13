@@ -513,6 +513,37 @@ def test_tool_result_index_carries_concise_mutation_card_refs() -> None:
     assert "source-diff" in card["artifact_refs"][0]
 
 
+def test_tool_result_index_carries_process_source_observation_refs() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        side_effects=(
+            {
+                "kind": "process_source_observation",
+                "record": {
+                    "command_run_id": "cmd-1",
+                    "provider_call_id": "call-run",
+                    "changed_count": 1,
+                    "changes": [{"path": "vm.js", "change": "created"}],
+                },
+            },
+        ),
+    )
+
+    index = build_tool_result_index_artifact((result,))
+    card = index["by_provider_call_id"]["call-run"]["compact_result_card"]
+
+    assert index["by_provider_call_id"]["call-run"]["changed_paths"] == ["vm.js"]
+    assert index["by_provider_call_id"]["call-run"]["source_mutation_effect_kinds"] == [
+        "process_source_observation"
+    ]
+    assert card["source_mutation_effect_kinds"] == ["process_source_observation"]
+    assert "process_source_observation" in index["by_provider_call_id"]["call-run"]["mutation_refs"][0]
+
+
 def test_evidence_sidecar_does_not_treat_non_file_side_effects_as_mutations() -> None:
     result = ToolResultEnvelope(
         lane_attempt_id="attempt-1",

@@ -1285,6 +1285,140 @@ def test_hot_path_fastcheck_rejects_read_only_native_artifact_with_empty_trace(t
     assert check["status"] == "fail"
 
 
+def test_hot_path_fastcheck_counts_native_process_source_observation_sidecar(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    response_path = artifact / "response_transcript.json"
+    data = json.loads(response_path.read_text(encoding="utf-8"))
+    for item in data["items"]:
+        if item.get("call_id") == "call-write-1":
+            item["tool_name"] = "run_command"
+            if item["kind"] == "function_call":
+                item["arguments_json_text"] = '{"command":"python3 - <<\'PY\'\\nopen(\'vm.js\',\'w\').write(\'x\')\\nPY"}'
+            else:
+                item["output_text_or_ref"] = "run_command result: completed; exit_code=0"
+    response_path.write_text(json.dumps(data), encoding="utf-8")
+    items_path = artifact / "response_items.jsonl"
+    items_path.write_text(
+        "\n".join(json.dumps(item, ensure_ascii=False, sort_keys=True) for item in data["items"]) + "\n",
+        encoding="utf-8",
+    )
+    (artifact / "tool_result_index.json").write_text(
+        json.dumps(
+            {
+                "by_provider_call_id": {
+                    "call-write-1": {
+                        "changed_paths": ["vm.js"],
+                        "mutation_refs": ["implement-v2-evidence://attempt/process_source_observation/call-write-1"],
+                        "source_mutation_effect_kinds": ["process_source_observation"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_trace_summary"]["status"] == "pass"
+    assert checks["native_trace_summary"]["details"]["edit_count"] == 0
+    assert checks["native_trace_summary"]["details"]["source_mutation_count"] == 1
+    assert checks["native_trace_summary"]["details"]["process_source_mutation_count"] == 1
+
+
+def test_hot_path_fastcheck_ignores_stale_native_process_source_observation_sidecar(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    (artifact / "tool_result_index.json").write_text(
+        json.dumps(
+            {
+                "by_provider_call_id": {
+                    "stale-call": {
+                        "changed_paths": ["vm.js"],
+                        "mutation_refs": ["implement-v2-evidence://attempt/process_source_observation/stale-call"],
+                        "source_mutation_effect_kinds": ["process_source_observation"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_trace_summary"]["status"] == "pass"
+    assert checks["native_trace_summary"]["details"]["edit_count"] == 1
+    assert checks["native_trace_summary"]["details"]["source_mutation_count"] == 1
+    assert checks["native_trace_summary"]["details"]["process_source_mutation_count"] == 0
+
+
+def test_hot_path_fastcheck_rejects_process_source_observation_on_read_only_call(tmp_path):
+    artifact = _write_read_only_native_artifact(tmp_path)
+    (artifact / "tool_result_index.json").write_text(
+        json.dumps(
+            {
+                "by_provider_call_id": {
+                    "call-read-1": {
+                        "tool_name": "run_command",
+                        "changed_paths": ["vm.js"],
+                        "mutation_refs": ["implement-v2-evidence://attempt/process_source_observation/call-read-1"],
+                        "source_mutation_effect_kinds": ["process_source_observation"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_trace_summary"]["status"] == "fail"
+    assert checks["native_trace_summary"]["details"]["edit_count"] == 0
+    assert checks["native_trace_summary"]["details"]["source_mutation_count"] == 0
+    assert checks["native_trace_summary"]["details"]["process_source_mutation_count"] == 0
+
+
+def test_hot_path_fastcheck_revalidates_stale_normalized_trace_source_mutation(tmp_path):
+    artifact = _write_read_only_native_artifact(tmp_path)
+    trace_dir = artifact / "normalized-trace"
+    trace_dir.mkdir()
+    (trace_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "parse_error_count": 0,
+                "edit_count": 0,
+                "source_mutation_count": 1,
+                "process_source_mutation_count": 1,
+                "verifier_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact / "tool_result_index.json").write_text(
+        json.dumps(
+            {
+                "by_provider_call_id": {
+                    "call-read-1": {
+                        "tool_name": "run_command",
+                        "changed_paths": ["vm.js"],
+                        "mutation_refs": ["implement-v2-evidence://attempt/process_source_observation/call-read-1"],
+                        "source_mutation_effect_kinds": ["process_source_observation"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_trace_summary"]["status"] == "fail"
+    assert checks["native_trace_summary"]["details"]["source_mutation_count"] == 0
+    assert checks["native_trace_summary"]["details"]["process_source_mutation_count"] == 0
+
+
 def test_hot_path_fastcheck_rejects_native_response_items_drift(tmp_path):
     artifact = _write_native_artifact(tmp_path)
     items_path = artifact / "response_items.jsonl"

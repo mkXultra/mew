@@ -481,16 +481,18 @@ def _check_native_trace_summary(
     summary = _native_trace_summary(artifact_path=artifact_path, manifest_path=manifest_path, transcript=transcript)
     parse_error_count = _nonnegative_int(summary.get("parse_error_count"))
     edit_count = _nonnegative_int(summary.get("edit_count"))
+    source_mutation_count = _nonnegative_int(summary.get("source_mutation_count"))
     verifier_count = _nonnegative_int(summary.get("verifier_count"))
-    has_hot_path_shape = edit_count > 0 and verifier_count > 0
+    has_source_mutation = edit_count > 0 or source_mutation_count > 0
+    has_hot_path_shape = has_source_mutation and verifier_count > 0
     ok = parse_error_count == 0 and has_hot_path_shape
     if ok:
-        message = "native trace summary is available, parse-clean, and contains edit plus verifier"
+        message = "native trace summary is available, parse-clean, and contains source mutation plus verifier"
     elif parse_error_count:
         message = "native trace summary has parse errors"
-    elif edit_count <= 0 and verifier_count <= 0:
+    elif not has_source_mutation and verifier_count <= 0:
         message = "native trace summary has no source mutation or verifier calls"
-    elif edit_count <= 0:
+    elif not has_source_mutation:
         message = "native trace summary has no source mutation calls"
     else:
         message = "native trace summary has no verifier calls"
@@ -551,18 +553,90 @@ def _native_trace_summary(
         if candidate.is_file():
             data = _load_json(candidate)
             if isinstance(data, dict):
-                return dict(data)
+                return _native_trace_summary_with_authoritative_source_mutations(
+                    dict(data),
+                    manifest_path=manifest_path,
+                    transcript=transcript,
+                )
     if transcript is None:
         return {}
     calls = [item for item in transcript.items if item.kind in {"function_call", "custom_tool_call", "finish_call"}]
+    indexed_source_mutations, indexed_process_mutations = _native_tool_result_index_source_mutation_counts(
+        manifest_path.parent / "tool_result_index.json",
+        call_tool_names={str(item.call_id): str(item.tool_name or "") for item in calls if item.call_id},
+    )
+    typed_edit_count = sum(1 for item in calls if item.tool_name in {"write_file", "edit_file", "apply_patch"})
     return {
         "source": "computed_from_native_transcript",
         "turn_count": len({item.turn_id for item in transcript.items if item.turn_id}),
         "command_count": sum(1 for item in calls if item.tool_name in {"run_command", "run_tests"}),
-        "edit_count": sum(1 for item in calls if item.tool_name in {"write_file", "edit_file", "apply_patch"}),
+        "edit_count": typed_edit_count,
+        "source_mutation_count": max(typed_edit_count, indexed_source_mutations),
+        "process_source_mutation_count": indexed_process_mutations,
         "verifier_count": sum(1 for item in calls if _native_call_is_verifier(item)),
         "parse_error_count": sum(1 for item in transcript.items if _native_trace_item_is_protocol_parse_error(item)),
     }
+
+
+def _native_trace_summary_with_authoritative_source_mutations(
+    summary: dict[str, object],
+    *,
+    manifest_path: Path,
+    transcript: NativeTranscript | None,
+) -> dict[str, object]:
+    if transcript is None:
+        return summary
+    calls = [item for item in transcript.items if item.kind in {"function_call", "custom_tool_call", "finish_call"}]
+    indexed_source_mutations, indexed_process_mutations = _native_tool_result_index_source_mutation_counts(
+        manifest_path.parent / "tool_result_index.json",
+        call_tool_names={str(item.call_id): str(item.tool_name or "") for item in calls if item.call_id},
+    )
+    typed_edit_count = sum(1 for item in calls if item.tool_name in {"write_file", "edit_file", "apply_patch"})
+    summary["edit_count"] = typed_edit_count
+    summary["typed_edit_count"] = typed_edit_count
+    summary["source_mutation_count"] = max(typed_edit_count, indexed_source_mutations)
+    summary["process_source_mutation_count"] = indexed_process_mutations
+    return summary
+
+
+def _native_tool_result_index_source_mutation_counts(path: Path, *, call_tool_names: dict[str, str]) -> tuple[int, int]:
+    if not path.is_file():
+        return 0, 0
+    data = _load_json(path)
+    if not isinstance(data, dict):
+        return 0, 0
+    by_call = data.get("by_provider_call_id") if isinstance(data.get("by_provider_call_id"), dict) else {}
+    source_count = 0
+    process_count = 0
+    for provider_call_id, payload in by_call.items():
+        transcript_tool_name = call_tool_names.get(str(provider_call_id))
+        if transcript_tool_name is None:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        card = payload.get("compact_result_card") if isinstance(payload.get("compact_result_card"), dict) else {}
+        indexed_tool_name = str(payload.get("tool_name") or card.get("tool_name") or "")
+        if indexed_tool_name and indexed_tool_name != transcript_tool_name:
+            continue
+        changed_paths = payload.get("changed_paths") or card.get("changed_paths")
+        mutation_refs = payload.get("mutation_refs") or card.get("mutation_refs")
+        effect_kinds = payload.get("source_mutation_effect_kinds") or card.get("source_mutation_effect_kinds")
+        has_source_mutation = bool(changed_paths or mutation_refs or effect_kinds)
+        if not has_source_mutation:
+            continue
+        effect_kind_set = {str(item) for item in effect_kinds} if isinstance(effect_kinds, list) else set()
+        if "process_source_observation" in effect_kind_set:
+            if transcript_tool_name not in {"run_command", "run_tests"}:
+                continue
+        elif effect_kind_set & {"file_write", "source_tree_mutation"}:
+            if transcript_tool_name not in {"write_file", "edit_file", "apply_patch"}:
+                continue
+        elif transcript_tool_name not in {"write_file", "edit_file", "apply_patch"}:
+            continue
+        source_count += 1
+        if "process_source_observation" in effect_kind_set:
+            process_count += 1
+    return source_count, process_count
 
 
 def _native_trace_item_is_protocol_parse_error(item: NativeTranscriptItem) -> bool:
