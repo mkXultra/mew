@@ -229,7 +229,23 @@ def test_evidence_sidecar_does_not_treat_non_file_side_effects_as_mutations() ->
     assert index["by_mutation_ref"] == {}
 
 
-def test_tool_kernel_rejects_run_command_source_creation_when_write_tools_available(tmp_path: Path) -> None:
+def _assert_process_source_observation(result, *, changed_name: str, change: str) -> None:
+    assert result.status == "completed"
+    assert result.route_decision["tool_route"] == "process_runner"
+    payload = result.content[0]
+    assert payload["tool_route"] == "process_runner"
+    assert payload["observed_source_side_effect"] is True
+    observations = payload["process_source_observations"]
+    assert observations
+    assert any(
+        Path(item["path"]).name == changed_name and item["change"] == change
+        for observation in observations
+        for item in observation["changes"]
+    )
+    assert any(effect["kind"] == "process_source_observation" for effect in result.side_effects)
+
+
+def test_tool_kernel_observes_run_command_source_creation_as_process_side_effect(tmp_path: Path) -> None:
     kernel = ToolKernel(
         ToolKernelConfig(
             workspace=str(tmp_path),
@@ -254,14 +270,11 @@ def test_tool_kernel_rejects_run_command_source_creation_when_write_tools_availa
 
     result = kernel.execute(call)
 
-    assert result.status == "failed"
-    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
-    assert result.route_decision["tool_route"] == "invalid_tool_contract"
-    assert result.content[0]["tool_route"] == "invalid_tool_contract"
-    assert not (tmp_path / "generated.py").exists()
+    _assert_process_source_observation(result, changed_name="generated.py", change="created")
+    assert (tmp_path / "generated.py").read_text(encoding="utf-8") == "ok\n"
 
 
-def test_tool_kernel_rejects_run_command_source_move_to_runtime_artifact_when_write_tools_available(
+def test_tool_kernel_observes_run_command_source_move_to_runtime_artifact_as_process_side_effect(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "vm.js"
@@ -290,12 +303,11 @@ def test_tool_kernel_rejects_run_command_source_move_to_runtime_artifact_when_wr
 
     result = kernel.execute(call)
 
-    assert result.status == "failed"
-    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
-    assert source.read_text(encoding="utf-8") == "console.log('ok')\n"
+    _assert_process_source_observation(result, changed_name="vm.js", change="deleted")
+    assert not source.exists()
 
 
-def test_tool_kernel_rejects_run_command_source_creation_through_shell_argv_when_write_tools_available(
+def test_tool_kernel_observes_run_command_source_creation_through_shell_argv_as_process_side_effect(
     tmp_path: Path,
 ) -> None:
     kernel = ToolKernel(
@@ -321,12 +333,11 @@ def test_tool_kernel_rejects_run_command_source_creation_through_shell_argv_when
 
     result = kernel.execute(call)
 
-    assert result.status == "failed"
-    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
-    assert not (tmp_path / "generated.py").exists()
+    _assert_process_source_observation(result, changed_name="generated.py", change="created")
+    assert (tmp_path / "generated.py").read_text(encoding="utf-8") == "ok\n"
 
 
-def test_tool_kernel_rejects_run_command_source_creation_through_shell_argv_options_when_write_tools_available(
+def test_tool_kernel_observes_run_command_source_creation_through_shell_argv_options_as_process_side_effect(
     tmp_path: Path,
 ) -> None:
     kernel = ToolKernel(
@@ -352,12 +363,11 @@ def test_tool_kernel_rejects_run_command_source_creation_through_shell_argv_opti
 
     result = kernel.execute(call)
 
-    assert result.status == "failed"
-    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
-    assert not (tmp_path / "generated.py").exists()
+    _assert_process_source_observation(result, changed_name="generated.py", change="created")
+    assert (tmp_path / "generated.py").read_text(encoding="utf-8") == "ok\n"
 
 
-def test_tool_kernel_rejects_run_command_source_creation_through_shell_argv_pipefail_when_write_tools_available(
+def test_tool_kernel_observes_run_command_source_creation_through_shell_argv_pipefail_as_process_side_effect(
     tmp_path: Path,
 ) -> None:
     kernel = ToolKernel(
@@ -383,9 +393,8 @@ def test_tool_kernel_rejects_run_command_source_creation_through_shell_argv_pipe
 
     result = kernel.execute(call)
 
-    assert result.status == "failed"
-    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
-    assert not (tmp_path / "generated.py").exists()
+    _assert_process_source_observation(result, changed_name="generated.py", change="created")
+    assert (tmp_path / "generated.py").read_text(encoding="utf-8") == "ok\n"
 
 
 def test_evidence_sidecar_indexes_exec_source_tree_mutations() -> None:

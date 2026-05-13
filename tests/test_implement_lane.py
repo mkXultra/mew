@@ -7,6 +7,8 @@ import sys
 import time
 
 import mew.implement_lane.read_runtime as read_runtime
+import mew.implement_lane.exec_runtime as exec_runtime
+import mew.implement_lane.v2_runtime as v2_runtime
 import pytest
 from mew.errors import ModelBackendError
 from mew.implement_lane.exec_runtime import _source_like_mutation_paths
@@ -1946,7 +1948,7 @@ def test_implement_v2_blocks_hard_runtime_prewrite_even_without_active_work_todo
     assert not (tmp_path / "vm.js").exists()
 
 
-def test_implement_v2_blocks_hard_runtime_shell_writer_before_probe_coverage(tmp_path) -> None:
+def test_implement_v2_observes_hard_runtime_shell_writer_without_prewrite_classifier(tmp_path) -> None:
     command = shlex.join([sys.executable, "-c", "open('vm.js','w').write('module.exports = {}\\n')"])
     outputs = [
         {
@@ -1963,7 +1965,8 @@ def test_implement_v2_blocks_hard_runtime_shell_writer_before_probe_coverage(tmp
                 }
             ],
             "finish": {"outcome": "blocked", "summary": "blocked before shell writer"},
-        }
+        },
+        {"summary": "stop after observed shell writer", "finish": {"outcome": "blocked", "summary": "observed"}},
     ]
 
     def fake_model(*_args, **_kwargs):
@@ -1997,17 +2000,17 @@ def test_implement_v2_blocks_hard_runtime_shell_writer_before_probe_coverage(tmp
         ),
         model_auth={"path": "auth.json"},
         model_json_callable=fake_model,
-        max_turns=1,
+        max_turns=2,
     )
     shell_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
     readiness = result.updated_lane_state["active_work_todo"]["first_write_readiness"]
 
-    assert shell_result["status"] == "invalid"
-    assert "deep_runtime_prewrite_probe_budget_not_met" in shell_result["content"][0]["reason"]
+    assert shell_result["status"] in {"completed", "failed"}
+    assert shell_result["content"][0]["tool_route"] == "process_runner"
+    assert shell_result["content"][0]["process_source_observations"][0]["changed_count"] == 1
     assert readiness["first_write_attempt_tool"] == "run_command"
     assert readiness["probe_count_before_first_write"] == 0
-    assert len(readiness["prewrite_probe_missing_categories"]) == 5
-    assert not (tmp_path / "vm.js").exists()
+    assert (tmp_path / "vm.js").exists()
 
 
 def test_implement_v2_shell_writer_source_like_path_detection_is_artifact_safe() -> None:
@@ -3820,7 +3823,7 @@ def test_implement_v2_write_repair_lock_blocks_repeated_target_reads_and_verifie
     assert repair["failure_kind"] == "stale_exact_edit"
 
 
-def test_implement_v2_source_patch_shell_misuse_requires_target_read_before_write_repair(tmp_path) -> None:
+def test_implement_v2_source_patch_shell_surface_is_observed_without_write_repair_lock(tmp_path) -> None:
     (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
     shell_patch = (
         "node - <<'NODE'\n"
@@ -3829,14 +3832,6 @@ def test_implement_v2_source_patch_shell_misuse_requires_target_read_before_writ
         "let s = fs.readFileSync(p, 'utf8');\n"
         "fs.writeFileSync(p, s.replace('old', 'new'));\n"
         "NODE\n"
-    )
-    patch_text = (
-        "*** Begin Patch\n"
-        "*** Update File: vm.js\n"
-        "@@\n"
-        "-console.log('old')\n"
-        "+console.log('new')\n"
-        "*** End Patch\n"
     )
     outputs = [
         {
@@ -3855,23 +3850,6 @@ def test_implement_v2_source_patch_shell_misuse_requires_target_read_before_writ
                 },
             ],
             "finish": {"outcome": "continue"},
-        },
-        {
-            "summary": "try write repair before observing current target",
-            "tool_calls": [
-                {"id": "patch-without-read", "name": "apply_patch", "arguments": {"patch": patch_text}},
-            ],
-            "finish": {"outcome": "continue"},
-        },
-        {
-            "summary": "read current target after rejected shell patch",
-            "tool_calls": [{"id": "read-current-vm", "name": "read_file", "arguments": {"path": "vm.js"}}],
-            "finish": {"outcome": "continue"},
-        },
-        {
-            "summary": "apply source patch after reading current target",
-            "tool_calls": [{"id": "patch-after-read", "name": "apply_patch", "arguments": {"patch": patch_text}}],
-            "finish": {"outcome": "blocked", "summary": "write repair done"},
         },
     ]
 
@@ -3903,20 +3881,14 @@ def test_implement_v2_source_patch_shell_misuse_requires_target_read_before_writ
         ),
         model_auth={"path": "auth.json"},
         model_json_callable=fake_model,
-        max_turns=4,
+        max_turns=1,
     )
     tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
     shell_result = next(item for item in tool_results if item["provider_call_id"] == "shell-patch")
-    patch_result = next(item for item in tool_results if item["provider_call_id"] == "patch-without-read")
-    read_result = next(item for item in tool_results if item["provider_call_id"] == "read-current-vm")
-    patch_after_read = next(item for item in tool_results if item["provider_call_id"] == "patch-after-read")
 
-    assert shell_result["status"] == "failed"
-    assert shell_result["content"][0]["failure_subclass"] == "run_command_source_patch_shell_surface"
-    assert patch_result["status"] == "invalid"
-    assert "write_repair_lock_target_read_required" in patch_result["content"][0]["reason"]
-    assert read_result["status"] == "completed"
-    assert patch_after_read["status"] == "completed"
+    assert shell_result["status"] == "completed"
+    assert shell_result["content"][0]["tool_route"] == "process_runner"
+    assert shell_result["content"][0]["process_source_observations"][0]["changed_count"] == 1
     assert "write_repair" not in result.updated_lane_state["active_work_todo"]
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
 
@@ -5196,7 +5168,7 @@ def test_implement_v2_live_json_blocks_same_turn_calls_after_failed_write(tmp_pa
     assert not side_effect.exists()
 
 
-def test_implement_v2_live_json_blocks_same_turn_verifier_after_run_command_source_patch_misuse(tmp_path) -> None:
+def test_implement_v2_live_json_observes_same_turn_shell_patch_and_verifier(tmp_path) -> None:
     (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
     side_effect = tmp_path / "verifier_ran.txt"
     verify_command = shlex.join(
@@ -5234,7 +5206,7 @@ def test_implement_v2_live_json_blocks_same_turn_verifier_after_run_command_sour
                     "arguments": {"command": verify_command, "cwd": ".", "use_shell": True, "timeout": 5},
                 },
             ],
-            "finish": {"outcome": "blocked", "summary": "source patch misuse"},
+            "finish": {"outcome": "blocked", "summary": "observed shell patch"},
         },
     ]
 
@@ -5266,12 +5238,12 @@ def test_implement_v2_live_json_blocks_same_turn_verifier_after_run_command_sour
     skipped_result = manifest["tool_results"][1]
 
     assert result.status == "blocked"
-    assert patch_result["status"] == "failed"
-    assert patch_result["content"][0]["failure_subclass"] == "run_command_source_patch_shell_surface"
-    assert skipped_result["status"] == "invalid"
-    assert "blocked_by_prior_failed_write_in_same_turn" in skipped_result["content"][0]["reason"]
-    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
-    assert not side_effect.exists()
+    assert patch_result["status"] == "completed"
+    assert patch_result["content"][0]["tool_route"] == "process_runner"
+    assert patch_result["content"][0]["process_source_observations"][0]["changed_count"] == 1
+    assert skipped_result["status"] == "completed"
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
+    assert side_effect.exists()
 
 
 def test_implement_v2_run_command_source_patch_misuse_detects_string_variable_paths(tmp_path) -> None:
@@ -5332,9 +5304,9 @@ def test_implement_v2_run_command_source_patch_misuse_detects_string_variable_pa
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
     assert result.status == "blocked"
-    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
-    assert payload["common_paths"] == ["vm.js"]
-    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
 
 
 def test_implement_v2_run_command_source_patch_misuse_detects_reassigned_string_variable_paths(tmp_path) -> None:
@@ -5397,12 +5369,12 @@ def test_implement_v2_run_command_source_patch_misuse_detects_reassigned_string_
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
     assert result.status == "blocked"
-    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
-    assert "vm.js" in payload["common_paths"]
-    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
 
 
-def test_implement_v2_run_command_source_writer_variable_path_rejected_when_write_tools_available(tmp_path) -> None:
+def test_implement_v2_run_command_source_writer_variable_path_routes_to_process_observer(tmp_path) -> None:
     command = (
         f"{shlex.quote(sys.executable)} - <<'PY'\n"
         "p = 'generated.py'\n"
@@ -5455,11 +5427,10 @@ def test_implement_v2_run_command_source_writer_variable_path_rejected_when_writ
     )
     first_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
 
-    assert first_result["status"] == "failed"
-    assert first_result["content"][0]["failure_subclass"] == "run_command_source_creation_shell_surface"
-    assert first_result["content"][0]["suggested_tool"] == "write_file/edit_file/apply_patch"
-    assert "generated.py" in first_result["content"][0]["mutation_paths"]
-    assert not (tmp_path / "generated.py").exists()
+    assert first_result["status"] == "completed"
+    assert first_result["content"][0]["tool_route"] == "process_runner"
+    assert first_result["content"][0]["process_source_observations"][0]["changed_count"] == 1
+    assert (tmp_path / "generated.py").exists()
 
 
 def test_implement_v2_run_command_source_mutation_classifier_uses_copy_destinations() -> None:
@@ -5559,7 +5530,7 @@ def test_implement_v2_run_command_source_mutation_classifier_ignores_redirection
     assert _source_like_mutation_paths("bash -lc 'printf ok >&1'") == ()
 
 
-def test_implement_v2_run_command_source_patch_misuse_detects_open_default_read_with_keywords(
+def test_implement_v2_run_command_open_default_read_patch_routes_to_process_observer(
     tmp_path,
 ) -> None:
     (tmp_path / "vm.py").write_text("print('old')\n", encoding="utf-8")
@@ -5617,9 +5588,9 @@ def test_implement_v2_run_command_source_patch_misuse_detects_open_default_read_
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
     assert result.status == "blocked"
-    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
-    assert payload["common_paths"] == ["vm.py"]
-    assert (tmp_path / "vm.py").read_text(encoding="utf-8") == "print('old')\n"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert (tmp_path / "vm.py").read_text(encoding="utf-8") == "print('new')\n"
 
 
 def test_implement_v2_model_turn_boundary_preserves_rendered_prompt_and_call_args(tmp_path) -> None:
@@ -9939,14 +9910,13 @@ def test_implement_v2_live_json_run_tests_source_mutation_prompt_requires_split_
     first_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
     payload = first_result["content"][0]
 
-    assert first_result["status"] == "failed"
-    assert payload["failure_subclass"] == "run_tests_source_mutation"
+    assert first_result["status"] == "completed"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
     assert result.metrics["tool_contract_recovery_turns_used"] == 0
     assert len(prompts) == 2
-    assert "run_tests must not mutate source-like files" in prompts[1]
-    assert "write_file/edit_file/apply_patch" in prompts[1]
-    assert "then run a separate verifier" in prompts[1]
-    assert not (tmp_path / "vm.js").exists()
+    assert "run_tests_source_mutation" not in prompts[1]
+    assert (tmp_path / "vm.js").exists()
 
 
 def test_implement_v2_live_json_run_tests_source_mutation_does_not_spend_reaction_turn(tmp_path) -> None:
@@ -10000,11 +9970,15 @@ def test_implement_v2_live_json_run_tests_source_mutation_does_not_spend_reactio
     assert result.metrics["model_turns"] == 1
     assert result.metrics["tool_contract_recovery_turns_used"] == 0
     assert result.metrics["terminal_failure_reaction_turns_used"] == 0
-    assert not (tmp_path / "vm.js").exists()
+    first_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    assert first_result["status"] == "completed"
+    assert first_result["content"][0]["tool_route"] == "process_runner"
+    assert first_result["content"][0]["process_source_observations"][0]["changed_count"] == 1
+    assert (tmp_path / "vm.js").exists()
 
 
 def test_implement_v2_live_json_run_command_compound_mutation_does_not_spend_reaction_turn(tmp_path) -> None:
-    command = "cat > vm.js <<'EOF'\nconsole.log(1)\nEOF\nnode -c vm.js"
+    command = "cat > vm.js <<'EOF'\nconsole.log(1)\nEOF\ntest -s vm.js"
 
     def fake_model(*_args, **_kwargs):
         return {
@@ -10056,13 +10030,15 @@ def test_implement_v2_live_json_run_command_compound_mutation_does_not_spend_rea
     payload = first_result["content"][0]
 
     assert result.metrics["model_turns"] == 1
-    assert payload["failure_subclass"] == "run_command_source_mutation_verifier_compound"
+    assert first_result["status"] == "completed"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
     assert result.metrics["tool_contract_recovery_turns_used"] == 0
     assert result.metrics["terminal_failure_reaction_turns_used"] == 0
-    assert not (tmp_path / "vm.js").exists()
+    assert (tmp_path / "vm.js").exists()
 
 
-def test_implement_v2_live_json_source_scanner_contract_recovery_prompts_native_reads(tmp_path) -> None:
+def test_implement_v2_live_json_source_scanner_runs_as_process_metadata_not_recovery(tmp_path) -> None:
     (tmp_path / "vm.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
     scanner = (
         "python3 - <<'PY'\n"
@@ -10091,17 +10067,6 @@ def test_implement_v2_live_json_source_scanner_contract_recovery_prompts_native_
                 }
             ],
             "finish": {"outcome": "continue"},
-        },
-        {
-            "summary": "uses native source window",
-            "tool_calls": [
-                {
-                    "id": "native-read",
-                    "name": "read_file",
-                    "arguments": {"path": "vm.c", "max_chars": 2000},
-                }
-            ],
-            "finish": {"outcome": "blocked", "summary": "source grounded"},
         },
     ]
     prompts = []
@@ -10137,18 +10102,14 @@ def test_implement_v2_live_json_source_scanner_contract_recovery_prompts_native_
     payload = first_result["content"][0]
 
     assert result.metrics["base_max_turns"] == 1
-    assert result.metrics["turn_budget_limit"] == 2
-    assert result.metrics["tool_contract_recovery_turns_used"] == 1
+    assert result.metrics["turn_budget_limit"] == 1
+    assert result.metrics["tool_contract_recovery_turns_used"] == 0
     assert result.metrics["terminal_failure_reaction_turns_used"] == 0
-    assert first_result["status"] == "failed"
-    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
-    assert payload["suggested_tool"] == "glob/search_text/read_file"
-    assert "python_heredoc" in payload["features"]
-    assert "recursive_source_walk" in payload["features"]
-    assert "broad source scanner" in prompts[1]
-    assert "native glob/search_text/read_file" in prompts[1]
-    assert manifest["tool_results"][1]["tool_name"] == "read_file"
-    assert "int main" in str(manifest["tool_results"][1]["content"][0])
+    assert first_result["status"] == "completed"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["command_classification"]["not_source_mutation_classifier"] is True
+    assert len(manifest["tool_results"]) == 1
+    assert len(prompts) == 1
 
 
 def test_implement_v2_live_json_tool_contract_recovery_does_not_extend_after_later_success(tmp_path) -> None:
@@ -17949,7 +17910,7 @@ def test_implement_v2_run_tests_shell_orchestration_routes_to_run_command_when_s
     assert (tmp_path / "routed.txt").read_text(encoding="utf-8") == "routed"
 
 
-def test_implement_v2_run_tests_source_mutation_is_not_routed_to_verifier_shell(tmp_path) -> None:
+def test_implement_v2_run_tests_shell_source_mutation_routes_to_process_observer(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
             work_session_id="ws-1",
@@ -17963,13 +17924,13 @@ def test_implement_v2_run_tests_source_mutation_is_not_routed_to_verifier_shell(
                 "provider_call_id": "call-1",
                 "tool_name": "run_tests",
                 "arguments": {
-                    "command": (
-                        "python3 - <<'PY'\n"
-                        "from pathlib import Path\n"
-                        "Path('vm.js').write_text('console.log(1)')\n"
-                        "PY\n"
-                        "node -c vm.js"
-                    ),
+                        "command": (
+                            "python3 - <<'PY'\n"
+                            "from pathlib import Path\n"
+                            "Path('vm.js').write_text('console.log(1)')\n"
+                            "PY\n"
+                            "test -s vm.js"
+                        ),
                     "cwd": ".",
                     "timeout": 5,
                     "foreground_budget_seconds": 1,
@@ -17977,23 +17938,19 @@ def test_implement_v2_run_tests_source_mutation_is_not_routed_to_verifier_shell(
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "source mutation rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "source mutation observed"},
     )
     tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
     payload = tool_result["content"][0]
 
-    assert tool_result["status"] == "failed"
-    assert payload["kind"] == "run_tests_source_mutation"
-    assert payload["failure_class"] == "tool_contract_misuse"
-    assert payload["failure_subclass"] == "run_tests_source_mutation"
-    assert payload["tool_contract_recovery_eligible"] is False
-    assert payload["terminal_failure_reaction_eligible"] is False
-    assert "write_file/edit_file/apply_patch" in payload["reason"]
-    assert "vm.js" in payload["mutation_paths"]
-    assert not (tmp_path / "vm.js").exists()
+    assert tool_result["status"] == "completed"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert payload["process_source_observations"][0]["changes"][0]["path"].endswith("/vm.js")
+    assert (tmp_path / "vm.js").exists()
 
 
-def test_implement_v2_run_tests_source_mutation_wins_when_shell_routing_disabled(tmp_path) -> None:
+def test_implement_v2_run_tests_shell_surface_wins_when_shell_routing_disabled(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
             work_session_id="ws-1",
@@ -18020,16 +17977,16 @@ def test_implement_v2_run_tests_source_mutation_wins_when_shell_routing_disabled
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "source mutation rejected first"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "shell surface rejected first"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_tests_source_mutation"
-    assert payload["tool_contract_recovery_eligible"] is False
+    assert payload["failure_subclass"] == "run_tests_shell_surface"
+    assert payload["tool_contract_recovery_eligible"] is True
     assert not (tmp_path / "vm.js").exists()
 
 
-def test_implement_v2_run_tests_plain_argv_source_mutation_is_rejected(tmp_path) -> None:
+def test_implement_v2_run_tests_plain_argv_source_mutation_uses_process_route(tmp_path) -> None:
     (tmp_path / "fixture.py").write_text("print('fixture')\n", encoding="utf-8")
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
@@ -18051,15 +18008,15 @@ def test_implement_v2_run_tests_plain_argv_source_mutation_is_rejected(tmp_path)
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "plain argv mutation rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "plain argv process route"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_tests_source_mutation"
-    assert not (tmp_path / "vm.js").exists()
+    assert payload["tool_route"] == "process_runner"
+    assert (tmp_path / "vm.js").exists()
 
 
-def test_implement_v2_run_tests_named_source_file_mutation_is_rejected(tmp_path) -> None:
+def test_implement_v2_run_tests_named_source_file_shell_mutation_routes_to_observer(tmp_path) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
             work_session_id="ws-1",
@@ -18073,20 +18030,21 @@ def test_implement_v2_run_tests_named_source_file_mutation_is_rejected(tmp_path)
                 "provider_call_id": "call-1",
                 "tool_name": "run_tests",
                 "arguments": {
-                    "command": "touch Makefile",
+                    "command": "touch Makefile && test -f Makefile",
                     "cwd": ".",
                     "timeout": 5,
                     "foreground_budget_seconds": 1,
+                    "use_shell": True,
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "named source mutation rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "named source mutation observed"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_tests_source_mutation"
-    assert "Makefile" in payload["mutation_paths"]
-    assert not (tmp_path / "Makefile").exists()
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert (tmp_path / "Makefile").exists()
 
 
 @pytest.mark.parametrize(
@@ -18098,10 +18056,10 @@ def test_implement_v2_run_tests_named_source_file_mutation_is_rejected(tmp_path)
         {"substeps": [{"id": "verify", "verifier_required": True}]},
     ),
 )
-def test_implement_v2_run_command_rejects_source_mutation_verifier_compound(
+def test_implement_v2_run_command_verifier_compound_source_mutation_routes_to_process_observer(
     tmp_path, execution_contract: dict[str, object]
 ) -> None:
-    command = "cat > vm.js <<'EOF'\nconsole.log(1)\nEOF\nnode -c vm.js"
+    command = "cat > vm.js <<'EOF'\nconsole.log(1)\nEOF\ntest -s vm.js"
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
             work_session_id="ws-1",
@@ -18124,20 +18082,15 @@ def test_implement_v2_run_command_rejects_source_mutation_verifier_compound(
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "compound rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "compound observed"},
     )
     tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
     payload = tool_result["content"][0]
 
-    assert tool_result["status"] == "failed"
-    assert payload["kind"] == "run_command_source_mutation_verifier_compound"
-    assert payload["failure_class"] == "tool_contract_misuse"
-    assert payload["failure_subclass"] == "run_command_source_mutation_verifier_compound"
-    assert payload["tool_contract_recovery_eligible"] is False
-    assert payload["terminal_failure_reaction_eligible"] is False
-    assert payload["suggested_tool"] == "write_file/edit_file/apply_patch"
-    assert "vm.js" in payload["mutation_paths"]
-    assert not (tmp_path / "vm.js").exists()
+    assert tool_result["status"] in {"completed", "failed"}
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert (tmp_path / "vm.js").exists()
 
 
 def test_implement_v2_run_command_allows_bounded_source_writer_without_verifier_contract(tmp_path) -> None:
@@ -18181,6 +18134,84 @@ def test_implement_v2_run_command_allows_bounded_source_writer_without_verifier_
     assert not any("/source_tree_mutation/" in str(ref) for ref in tool_result.get("evidence_refs", []))
     assert any(effect["kind"] == "process_source_observation" for effect in tool_result["side_effects"])
     assert not any(effect["kind"] == "source_tree_mutation" for effect in tool_result["side_effects"])
+
+
+def test_implement_v2_live_routes_do_not_call_old_shell_mutation_classifiers(tmp_path, monkeypatch) -> None:
+    def bomb(*_args, **_kwargs):
+        raise AssertionError("old shell mutation classifier must not run on live native routes")
+
+    for name in (
+        "_run_tests_source_mutation_misuse",
+        "_run_command_source_mutation_verifier_compound_misuse",
+        "_run_command_source_patch_misuse",
+        "_run_command_source_creation_shell_surface_misuse",
+        "_run_command_source_exploration_shell_surface_misuse",
+        "_source_like_mutation_paths",
+    ):
+        monkeypatch.setattr(exec_runtime, name, bomb)
+    monkeypatch.setattr(v2_runtime, "_shell_command_may_mutate_source_tree", bomb)
+    monkeypatch.setattr(v2_runtime, "_source_patch_shell_repair_from_result", bomb)
+
+    outputs = [
+        {
+            "summary": "source writes through execute-route tools are observed, not classified",
+            "tool_calls": [
+                {
+                    "id": "shell-write",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "cat > vm.js <<'EOF'\nconsole.log(1)\nEOF",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                },
+                {
+                    "id": "run-tests-write",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": "touch Makefile && test -f Makefile",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                    },
+                },
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {"summary": "stop after live classifier guard", "finish": {"outcome": "blocked", "summary": "done"}},
+    ]
+
+    def fake_model(*_args, **_kwargs):
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(tmp_path)],
+                "allowed_write_roots": [str(tmp_path)],
+                "allow_shell": True,
+                "allow_verify": True,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+
+    assert [item["status"] for item in tool_results[:2]] == ["completed", "completed"]
+    assert all(item["content"][0]["tool_route"] == "process_runner" for item in tool_results[:2])
+    assert all(item["content"][0]["process_source_observations"] for item in tool_results[:2])
 
 
 @pytest.mark.parametrize("tool_name", ("run_command", "run_tests"))
@@ -18643,7 +18674,7 @@ def test_implement_v2_explicit_source_mutation_roots_track_non_workspace_source(
     assert payload["process_source_observations"][0]["changes"][0]["path"].endswith("/vm.js")
 
 
-def test_implement_v2_run_command_rejects_same_path_source_patch_shell_surface(tmp_path) -> None:
+def test_implement_v2_run_command_same_path_source_patch_routes_to_process_observer(tmp_path) -> None:
     (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
     command = (
         "python3 - <<'PY'\n"
@@ -18675,21 +18706,19 @@ def test_implement_v2_run_command_rejects_same_path_source_patch_shell_surface(t
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "source patch rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "source patch observed"},
     )
     tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
     payload = tool_result["content"][0]
 
-    assert tool_result["status"] == "failed"
-    assert payload["kind"] == "run_command_source_patch_shell_surface"
-    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
-    assert payload["terminal_failure_reaction_eligible"] is False
-    assert payload["suggested_tool"] == "write_file/edit_file/apply_patch"
-    assert payload["common_paths"] == ["vm.js"]
-    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+    assert tool_result["status"] == "completed"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert payload["process_source_observations"][0]["changes"][0]["path"].endswith("/vm.js")
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
 
 
-def test_implement_v2_run_command_rejects_same_path_source_patch_with_relative_path_variants(tmp_path) -> None:
+def test_implement_v2_run_command_same_path_source_patch_relative_variants_observed(tmp_path) -> None:
     (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
     command = (
         "python3 - <<'PY'\n"
@@ -18720,16 +18749,16 @@ def test_implement_v2_run_command_rejects_same_path_source_patch_with_relative_p
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "source patch rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "source patch observed"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
-    assert payload["common_paths"] == ["vm.js"]
-    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
 
 
-def test_implement_v2_run_command_rejects_sed_i_source_patch_shell_surface(tmp_path) -> None:
+def test_implement_v2_run_command_source_patch_routes_to_process_observer(tmp_path) -> None:
     (tmp_path / "vm.js").write_text("console.log('old')\n", encoding="utf-8")
 
     result = run_fake_exec_implement_v2(
@@ -18745,7 +18774,12 @@ def test_implement_v2_run_command_rejects_sed_i_source_patch_shell_surface(tmp_p
                 "provider_call_id": "call-1",
                 "tool_name": "run_command",
                 "arguments": {
-                    "command": "sed -i 's/old/new/' ./vm.js",
+                        "command": (
+                            f"{shlex.quote(sys.executable)} -c "
+                            "\"from pathlib import Path; "
+                            "p=Path('vm.js'); "
+                            "p.write_text(p.read_text().replace('old','new'))\""
+                        ),
                     "cwd": ".",
                     "use_shell": True,
                     "timeout": 5,
@@ -18753,13 +18787,13 @@ def test_implement_v2_run_command_rejects_sed_i_source_patch_shell_surface(tmp_p
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "source patch rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "source patch observed"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_command_source_patch_shell_surface"
-    assert payload["common_paths"] == ["vm.js"]
-    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
 
 
 def test_implement_v2_run_command_allows_write_only_source_writer_without_readback(tmp_path) -> None:
@@ -18799,7 +18833,7 @@ def test_implement_v2_run_command_allows_write_only_source_writer_without_readba
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('new')\n"
 
 
-def test_implement_v2_run_command_rejects_broad_python_source_scanner(tmp_path) -> None:
+def test_implement_v2_run_command_broad_python_source_scanner_runs_as_process_metadata(tmp_path) -> None:
     (tmp_path / "vm.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
     command = (
         "python3 - <<'PY'\n"
@@ -18834,23 +18868,17 @@ def test_implement_v2_run_command_rejects_broad_python_source_scanner(tmp_path) 
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "broad scanner rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "broad scanner observed"},
     )
     tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
     payload = tool_result["content"][0]
 
-    assert tool_result["status"] == "failed"
-    assert payload["kind"] == "run_command_source_exploration_shell_surface"
-    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
-    assert payload["tool_contract_recovery_eligible"] is True
-    assert payload["terminal_failure_reaction_eligible"] is False
-    assert payload["suggested_tool"] == "glob/search_text/read_file"
-    assert "python_heredoc" in payload["features"]
-    assert "recursive_source_walk" in payload["features"]
-    assert "source_read_loop" in payload["features"]
+    assert tool_result["status"] == "completed"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["command_classification"]["not_source_mutation_classifier"] is True
 
 
-def test_implement_v2_run_command_rejects_absolute_python_source_scanner(tmp_path) -> None:
+def test_implement_v2_run_command_absolute_python_source_scanner_runs_as_process_metadata(tmp_path) -> None:
     (tmp_path / "vm.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
     command = (
         f"/usr/bin/env {shlex.quote(sys.executable)} - <<'PY'\n"
@@ -18883,15 +18911,15 @@ def test_implement_v2_run_command_rejects_absolute_python_source_scanner(tmp_pat
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "absolute python scanner rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "absolute python scanner observed"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
-    assert "python_shell_surface" in payload["features"]
+    assert payload["tool_route"] == "process_runner"
+    assert payload["command_classification"]["not_source_mutation_classifier"] is True
 
 
-def test_implement_v2_run_command_rejects_source_scanner_even_with_verifier_contract(tmp_path) -> None:
+def test_implement_v2_run_command_source_scanner_with_verifier_contract_runs_as_process_metadata(tmp_path) -> None:
     (tmp_path / "vm.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
     command = (
         "python3 - <<'PY'\n"
@@ -18930,15 +18958,15 @@ def test_implement_v2_run_command_rejects_source_scanner_even_with_verifier_cont
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "verifier-labeled source scanner rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "verifier-labeled source scanner observed"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
-    assert payload["suggested_tool"] == "glob/search_text/read_file"
+    assert payload["tool_route"] == "process_runner"
+    assert payload["command_classification"]["not_source_mutation_classifier"] is True
 
 
-def test_implement_v2_run_command_rejects_workspace_wide_python_content_scanner(tmp_path) -> None:
+def test_implement_v2_run_command_workspace_wide_python_content_scanner_runs_as_process_metadata(tmp_path) -> None:
     (tmp_path / "README").write_text("source-ish content\n", encoding="utf-8")
     command = (
         "python3 - <<'PY'\n"
@@ -18971,15 +18999,15 @@ def test_implement_v2_run_command_rejects_workspace_wide_python_content_scanner(
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "workspace scanner rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "workspace scanner observed"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
-    assert "workspace_recursive_walk" in payload["features"]
+    assert payload["tool_route"] == "process_runner"
+    assert payload["command_classification"]["not_source_mutation_classifier"] is True
 
 
-def test_implement_v2_run_command_rejects_source_root_python_content_scanner(tmp_path) -> None:
+def test_implement_v2_run_command_source_root_python_content_scanner_runs_as_process_metadata(tmp_path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "README").write_text("source-ish content\n", encoding="utf-8")
     command = (
@@ -19013,12 +19041,12 @@ def test_implement_v2_run_command_rejects_source_root_python_content_scanner(tmp
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "source root scanner rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "source root scanner observed"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_command_source_exploration_shell_surface"
-    assert "workspace_recursive_walk" in payload["features"]
+    assert payload["tool_route"] == "process_runner"
+    assert payload["command_classification"]["not_source_mutation_classifier"] is True
 
 
 def test_implement_v2_run_command_allows_bounded_python_file_probe(tmp_path) -> None:
@@ -19171,7 +19199,9 @@ def test_implement_v2_run_command_allows_recursive_artifact_verifier_content_pro
         ("printf 'all:' | env LC_ALL=C tee Makefile", "Makefile"),
     ),
 )
-def test_implement_v2_run_tests_source_redirection_mutation_is_rejected(tmp_path, command: str, target: str) -> None:
+def test_implement_v2_run_tests_source_redirection_mutation_routes_to_process_observer(
+    tmp_path, command: str, target: str
+) -> None:
     result = run_fake_exec_implement_v2(
         ImplementLaneInput(
             work_session_id="ws-1",
@@ -19193,13 +19223,19 @@ def test_implement_v2_run_tests_source_redirection_mutation_is_rejected(tmp_path
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "redirection source mutation rejected"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "redirection source mutation observed"},
     )
     payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
 
-    assert payload["failure_subclass"] == "run_tests_source_mutation"
-    assert target in payload["mutation_paths"]
-    assert not (tmp_path / target).exists()
+    assert payload["tool_route"] == "process_runner"
+    assert payload["process_source_observations"][0]["changed_count"] >= 1
+    changed_paths = {
+        str(change.get("path") or "")
+        for change in payload["process_source_observations"][0]["changes"]
+        if isinstance(change, dict)
+    }
+    assert any(path.endswith(f"/{target}") for path in changed_paths)
+    assert (tmp_path / target).exists()
 
 
 def test_implement_v2_run_tests_quoted_tee_text_is_not_source_mutation(tmp_path) -> None:

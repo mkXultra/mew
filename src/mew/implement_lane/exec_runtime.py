@@ -336,9 +336,6 @@ class ImplementV2ManagedExecRuntime:
         effective_tool_name = call.tool_name
         tool_contract_recovery: dict[str, object] | None = None
         if call.tool_name == "run_tests":
-            mutation_misuse = _run_tests_source_mutation_misuse(command, use_shell=use_shell, cwd=cwd)
-            if mutation_misuse is not None:
-                raise RunTestsShellSurfaceMisuse(mutation_misuse)
             misuse = _run_tests_shell_surface_misuse(command, use_shell=use_shell)
             if misuse is not None:
                 misuse["cwd"] = str(args.get("cwd") or ".")
@@ -369,36 +366,6 @@ class ImplementV2ManagedExecRuntime:
         )
         command_intent = _command_intent(args)
         raw_contract = args.get("execution_contract") if isinstance(args.get("execution_contract"), dict) else {}
-        compound_misuse = _run_command_source_mutation_verifier_compound_misuse(
-            command,
-            raw_contract=raw_contract,
-            tool_name=call.tool_name,
-            cwd=cwd,
-        )
-        if compound_misuse is not None:
-            raise ExecToolContractMisuse(compound_misuse)
-        patch_misuse = _run_command_source_patch_misuse(
-            command,
-            tool_name=call.tool_name,
-            cwd=cwd,
-        )
-        if patch_misuse is not None:
-            raise ExecToolContractMisuse(patch_misuse)
-        creation_misuse = _run_command_source_creation_shell_surface_misuse(
-            command,
-            tool_name=call.tool_name,
-            source_write_tools_available=self.source_write_tools_available,
-            cwd=cwd,
-        )
-        if creation_misuse is not None:
-            raise ExecToolContractMisuse(creation_misuse)
-        exploration_misuse = _run_command_source_exploration_shell_surface_misuse(
-            command,
-            tool_name=call.tool_name,
-        )
-        if exploration_misuse is not None:
-            exploration_misuse["cwd"] = str(args.get("cwd") or ".")
-            raise ExecToolContractMisuse(exploration_misuse)
         command_run_id = _command_run_id(call)
         output_ref = f"{call.lane_attempt_id}/{command_run_id}/output.log"
         output_path = _output_path(self.workspace, output_ref)

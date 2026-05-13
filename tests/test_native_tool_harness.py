@@ -1414,7 +1414,8 @@ def test_native_harness_blocks_more_probes_after_first_write_due_grace(tmp_path:
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "patched\n"
 
 
-def test_native_harness_rejects_run_command_source_creation_when_write_tools_available(tmp_path: Path) -> None:
+def test_native_harness_observes_run_command_source_creation_as_process_side_effect(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -1440,16 +1441,19 @@ def test_native_harness_rejects_run_command_source_creation_when_write_tools_ava
         ]
     )
 
-    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, artifact_root=artifact_root, max_turns=2)
 
     output = next(
         item for item in result.transcript.items if item.call_id == "generate-source" and item.kind.endswith("_output")
     )
-    assert output.status == "failed"
-    assert output.is_error is True
-    assert "must not create or rewrite source-like files" in output.output_text_or_ref
-    assert "write_file/edit_file/apply_patch" in output.output_text_or_ref
-    assert not (tmp_path / "generated.py").exists()
+    assert output.status == "completed"
+    assert output.is_error is False
+    assert (tmp_path / "generated.py").read_text(encoding="utf-8") == "ok\n"
+    tool_route_rows = [
+        json.loads(line) for line in (artifact_root / "tool_routes.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    source_creation_route = next(row for row in tool_route_rows if row["provider_call_id"] == "generate-source")
+    assert source_creation_route["tool_route"] == "process_runner"
 
 
 def test_native_harness_instructions_do_not_leak_persisted_lane_state(tmp_path: Path) -> None:

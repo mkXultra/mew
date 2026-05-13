@@ -1,7 +1,7 @@
 # Design 2026-05-13 - M6.24 Command/Edit Boundary Redesign
 
-Status: implementation in progress. Phase 0-4 are implemented and reviewed;
-Phase 5-7 remain open.
+Status: implementation in progress. Phase 0-6 are implemented locally;
+Phase 7 remains open.
 
 Scope: `implement_v2` native tool loop command/edit boundary. This document
 does not authorize code changes by itself. It intentionally does not preserve
@@ -861,6 +861,37 @@ Close gate:
 - Old model-visible instructions that suggested shell edits are absent.
 - Historical replay compatibility, if retained, is explicitly named and cannot
   be selected by live native runs.
+
+Phase 6 implementation note (2026-05-13):
+
+- Live `exec_runtime.py` no longer calls the Phase 0 shell mutation classifier
+  gates for `run_tests` source mutation, `run_command` verifier+mutation
+  compounds, same-path shell patches, shell-created source files, or broad
+  source-exploration shell surfaces.
+- Live `v2_runtime.py` no longer treats `run_command`/`run_tests` shell text as
+  a prewrite source-mutation attempt and no longer converts historical
+  `run_command_source_patch_shell_surface` failures into live write-repair
+  locks.
+- The old classifier helpers remain only as quarantined historical/direct
+  diagnostic helpers for now; production native route tests monkeypatch them to
+  raise and prove live routes do not call them.
+- Shell-originated source changes now run as `process_runner` and surface
+  `process_source_observation` side effects from Phase 4 snapshots/diffs rather
+  than pre-exec source-mutation classifications.
+- Focused validation: `uv run ruff check
+  src/mew/implement_lane/exec_runtime.py
+  src/mew/implement_lane/v2_runtime.py tests/test_implement_lane.py
+  tests/test_native_tool_harness.py tests/test_tool_harness_contract.py`
+  passed; `uv run pytest --no-testmon -q tests/test_implement_lane.py
+  tests/test_native_tool_harness.py tests/test_tool_harness_contract.py`
+  passed with `606 passed`; and
+  `uv run pytest --no-testmon -q tests/test_implement_lane.py` passed with
+  `526 passed`.
+- codex-ultra reviewer session `019e1fe5-1926-7ea2-8534-8d5a33ba5cf2`
+  returned `STATUS: APPROVED` with no findings and recommended full-suite
+  validation before commit.
+- Full-suite validation: `uv run pytest --no-testmon -q` passed with
+  `3722 passed, 1 warning, 112 subtests passed`.
 
 ### Phase 7: Validation Before Speed
 

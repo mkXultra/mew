@@ -5347,7 +5347,7 @@ def _deep_runtime_prewrite_probe_gate_result(
 ) -> ToolResultEnvelope | None:
     if not is_deep_probe_hard_runtime_task(lane_input.task_contract):
         return None
-    if not _is_deep_runtime_prewrite_source_mutation_attempt(call):
+    if not _is_typed_source_mutation_attempt(call):
         return None
     source_mutation_roots = _source_mutation_roots(lane_input)
     if _has_completed_source_tree_mutation(prior_tool_results, source_mutation_roots=source_mutation_roots):
@@ -6095,14 +6095,9 @@ def _shell_path_is_source_read_surface(path: object) -> bool:
     return any(part.casefold() in source_dirs for part in PurePosixPath(clean).parts)
 
 
-def _is_deep_runtime_prewrite_source_mutation_attempt(call: object) -> bool:
+def _is_typed_source_mutation_attempt(call: object) -> bool:
     tool_name = str(getattr(call, "tool_name", "") or "").strip()
-    if tool_name in WRITE_TOOL_NAMES:
-        return True
-    if tool_name not in {"run_command", "run_tests"}:
-        return False
-    command = _call_command_text(call)
-    return _shell_command_may_mutate_source_tree(command)
+    return tool_name in WRITE_TOOL_NAMES
 
 
 def _call_command_text(call: object) -> str:
@@ -6607,14 +6602,6 @@ def _write_repair_from_trace(
     for call, result in zip(tool_calls, tool_results):
         tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
         if tool_name not in WRITE_TOOL_NAMES:
-            source_patch_repair = _source_patch_shell_repair_from_result(
-                call=call,
-                result=result,
-                prior_success_paths=tuple(prior_success_paths),
-                failed_ids=tuple(failed_ids),
-            )
-            if source_patch_repair:
-                latest_repair = source_patch_repair
             continue
         path = _write_call_path(call)
         result_paths = _write_result_paths(result)
@@ -6882,9 +6869,7 @@ def _first_write_readiness_from_trace(
                 and _write_result_has_source_root_side_effect(result, source_mutation_roots=source_mutation_roots)
             )
         )
-        source_tree_mutation_attempt = tool_name in WRITE_TOOL_NAMES or _is_deep_runtime_prewrite_source_mutation_attempt(
-            call
-        )
+        source_tree_mutation_attempt = tool_name in WRITE_TOOL_NAMES or _is_typed_source_mutation_attempt(call)
         if source_tree_mutation_attempt or source_tree_mutation_write:
             if first_write_attempt_turn <= 0:
                 first_write_attempt_turn = int(getattr(call, "turn_index", 0) or 0)
@@ -6913,7 +6898,7 @@ def _first_write_readiness_from_trace(
     write_count = sum(
         1
         for call, result in zip(tool_calls, tool_results)
-        if _is_deep_runtime_prewrite_source_mutation_attempt(call)
+        if _is_typed_source_mutation_attempt(call)
         or bool(_process_source_observation_from_result(result))
         or bool(_source_tree_mutation_from_result(result))
         or (
