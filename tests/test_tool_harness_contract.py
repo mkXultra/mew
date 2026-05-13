@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from mew.implement_lane.provider import FakeProviderAdapter
+from mew.implement_lane.affordance_visibility import scan_forbidden_provider_visible
 from mew.implement_lane.tool_harness_contract import (
     build_evidence_ref_index_artifact,
     build_evidence_sidecar_artifact,
@@ -49,6 +50,136 @@ def test_tool_result_provider_content_includes_natural_text_and_output_refs() ->
     assert "exit_code=2" in visible["natural_result_text"]
     assert "fatal error" in visible["natural_result_text"]
     assert "ev:compile-error" in visible["natural_result_text"]
+    assert scan_forbidden_provider_visible(visible["tool_output_card"], surface="tool_output_card") == []
+
+
+def test_read_file_natural_text_exposes_bounded_path_line_excerpt() -> None:
+    long_line = "x" * 400
+    text = "\n".join([long_line, "needle = value", "tail"]) + "\n"
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-read",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="read_file",
+        status="completed",
+        content=(
+            {
+                "path": "src/app.py",
+                "line_start": 10,
+                "line_end": 12,
+                "text": text,
+                "truncated": False,
+            },
+        ),
+        content_refs=("read://attempt-1/call-read/content",),
+    )
+
+    visible = result.provider_visible_content()
+    card = visible["tool_output_card"]
+    rendered = visible["natural_result_text"]
+
+    assert "src/app.py:10-12" in card["paths"]
+    assert "src/app.py:10:" in card["excerpt"]
+    assert "src/app.py:11: needle = value" in card["excerpt"]
+    assert long_line[:220] in card["excerpt"]
+    assert long_line[:260] not in card["excerpt"]
+    assert len(json.dumps(card, ensure_ascii=False)) <= 6144
+    assert "src/app.py:11: needle = value" in rendered
+
+
+def test_command_failure_visible_card_puts_latest_failure_before_output_tail() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "exit_code": 1,
+                "failure_class": "test_failure",
+                "stderr_tail": "tests/test_app.py:42: AssertionError: bad value\nolder context",
+                "stdout_tail": "generic log tail",
+                "output_ref": "exec://attempt-1/call-run/output",
+            },
+        ),
+        content_refs=("exec://attempt-1/call-run/output",),
+    )
+
+    rendered = result.natural_result_text()
+    latest_index = rendered.index("latest_failure:")
+    output_index = rendered.index("output_tail:")
+
+    assert latest_index < output_index
+    assert "tests/test_app.py:42" in rendered
+    card = result.provider_visible_content()["tool_output_card"]
+    assert len(card["latest_failure"]) <= 1200
+    assert "mutation" not in card
+
+
+def test_visible_tool_output_card_redacts_forbidden_latest_failure_fields() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "exit_code": 2,
+                "latest_failure": {
+                    "summary": "artifact missing",
+                    "required_next_probe": "read_file src/main.c",
+                    "required_next_action": "patch src/main.c",
+                },
+                "stderr_tail": "required_next_probe should not leak as steering text",
+            },
+        ),
+    )
+
+    visible = result.provider_visible_content()
+    card = visible["tool_output_card"]
+
+    assert "artifact missing" in card["latest_failure"]
+    assert "required_next" not in json.dumps(card, ensure_ascii=False)
+    assert "required_next" not in visible["natural_result_text"]
+    assert scan_forbidden_provider_visible(card, surface="tool_output_card") == []
+
+
+def test_visible_tool_output_card_enforces_hard_caps_for_paths_and_mutation() -> None:
+    huge_path = "src/" + ("deep/" * 120) + "file.py"
+    huge_stats = {f"file_{index}_{'x' * 80}.py": {"added": "y" * 500} for index in range(80)}
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-edit",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="apply_patch",
+        status="completed",
+        content=(
+            {
+                "mutation_output_card": {
+                    "operation": "apply_patch",
+                    "status": "applied",
+                    "changed_paths": [huge_path for _ in range(50)],
+                    "diff_ref": "mutation://" + ("d" * 2000),
+                    "mutation_ref": "mutation://" + ("m" * 2000),
+                    "diff_stats": huge_stats,
+                },
+                "text": "patched\n" * 2000,
+            },
+        ),
+    )
+
+    visible = result.provider_visible_content()
+    card = visible["tool_output_card"]
+    mutation = card["mutation"]
+
+    assert len(json.dumps(card, ensure_ascii=False, default=str).encode("utf-8")) <= 6144
+    assert len(json.dumps(mutation, ensure_ascii=False, default=str).encode("utf-8")) <= 4096
+    assert all(len(path) <= 260 for path in mutation["changed_paths"])
+    assert scan_forbidden_provider_visible(card, surface="tool_output_card") == []
 
 
 def test_run_command_natural_text_includes_bounded_stdout_head_and_tail() -> None:

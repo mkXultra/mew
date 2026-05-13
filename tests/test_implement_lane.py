@@ -10735,8 +10735,9 @@ def test_implement_v2_history_compacts_large_tool_output_for_next_turn() -> None
     assert item["content_history_chars"] == len(large_output)
     assert item["content_history_truncated"] is True
     assert len(item["content"]) < 3000
-    assert "first error" in item["content"]
-    assert "final linker error" in item["content"]
+    assert len(history_content["natural_result_text"]) < 1400
+    assert "first error" in history_content["natural_result_text"]
+    assert "final linker error" in history_content["natural_result_text"]
     assert history_content["content_refs"] == ["implement-v2-exec://lane-v2-1/cmd-1/output"]
 
 
@@ -10772,6 +10773,7 @@ def test_implement_v2_history_projects_terminal_output_to_tails_for_next_turn() 
     visible = _provider_visible_tool_result_for_history(result)
     history_content = visible["content"]
     item = history_content["content"][0]
+    card = history_content["tool_output_card"]
 
     assert history_content["history_projected"] is True
     assert item["provider_history_projection"] == "terminal_result_v0"
@@ -10782,9 +10784,15 @@ def test_implement_v2_history_projects_terminal_output_to_tails_for_next_turn() 
     assert item["stderr_tail"] == "fatal linker error\n"
     assert item["stdout_chars"] == len(noisy_stdout)
     assert item["stderr_chars"] == len(noisy_stderr)
+    assert card["status_line"].startswith("run_command result: failed")
+    assert "fatal linker error" in card["latest_failure"]
+    assert "final line" in card["output_tail"]
     assert "stdout" not in item
     assert "stderr" not in item
+    assert "stdout" not in card
+    assert "stderr" not in card
     assert "output_path" not in item
+    assert "output_path" not in card
     assert noisy_stdout not in json.dumps(visible)
     assert noisy_stderr not in json.dumps(visible)
 
@@ -10856,6 +10864,8 @@ def test_implement_v2_history_projects_terminal_side_effects_for_next_turn() -> 
     assert tool_run_record["stdout_ref"] == "implement-v2-exec://lane-v2-1/cmd-1/stdout"
     assert tool_run_record["semantic_exit"] == {"ok": True, "category": "ok"}
     assert "stdout_preview" not in tool_run_record
+    assert content["tool_output_card"]["status_line"].startswith("run_command result: completed")
+    assert "implement-v2-exec://lane-v2-1/cmd-1/output" in content["content_refs"]
     assert "large readelf output" not in serialized
     assert len(serialized) < 5000
 
