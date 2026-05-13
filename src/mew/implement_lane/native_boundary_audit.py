@@ -71,7 +71,7 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
         relative_path="src/mew/implement_lane/exec_runtime.py",
         anchor="finish_gate = apply_finish_gate(",
         markers=('payload["structured_finish_gate"]', "_contract_failure_blocks_tool_status"),
-        window_after=24,
+        window_after=40,
     ),
     SourceControlSpec(
         name="execution_evidence_finish_gate_producer",

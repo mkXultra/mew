@@ -314,13 +314,23 @@ def _collect_source_tree_mutations(results: tuple[ToolResultEnvelope, ...]) -> l
     for result in results:
         records: list[dict[str, object]] = []
         for effect in result.side_effects:
-            if effect.get("kind") == "source_tree_mutation" and isinstance(effect.get("record"), dict):
-                records.append(dict(effect["record"]))
+            if effect.get("kind") in {"source_tree_mutation", "process_source_observation"} and isinstance(
+                effect.get("record"), dict
+            ):
+                records.append({**dict(effect["record"]), "observation_kind": str(effect.get("kind") or "")})
         if not records:
             for content in result.content:
-                if not isinstance(content, dict) or not isinstance(content.get("source_tree_mutations"), list):
+                if not isinstance(content, dict):
                     continue
-                records.extend(dict(item) for item in content["source_tree_mutations"] if isinstance(item, dict))
+                for key, kind in (
+                    ("source_tree_mutations", "source_tree_mutation"),
+                    ("process_source_observations", "process_source_observation"),
+                ):
+                    if not isinstance(content.get(key), list):
+                        continue
+                    records.extend(
+                        {**dict(item), "observation_kind": kind} for item in content[key] if isinstance(item, dict)
+                    )
         for record in records:
             for change in _list_of_dicts(record.get("changes")):
                 path = str(change.get("path") or "")
@@ -336,6 +346,7 @@ def _collect_source_tree_mutations(results: tuple[ToolResultEnvelope, ...]) -> l
                         "change": str(change.get("change") or ""),
                         "before_size": change.get("before_size"),
                         "after_size": change.get("after_size"),
+                        "observation_kind": str(record.get("observation_kind") or ""),
                     }
                 )
     return mutations
@@ -377,7 +388,9 @@ def _side_effects_with_trusted_source_mutations(
 ) -> tuple[dict[str, object], ...]:
     trusted: list[dict[str, object]] = []
     for effect in effects:
-        if effect.get("kind") != "source_tree_mutation" or not isinstance(effect.get("record"), dict):
+        if effect.get("kind") not in {"source_tree_mutation", "process_source_observation"} or not isinstance(
+            effect.get("record"), dict
+        ):
             trusted.append(dict(effect))
             continue
         record = _trusted_source_mutation_record(
@@ -400,22 +413,30 @@ def _content_with_trusted_source_mutations(
 ) -> tuple[object, ...]:
     trusted_items: list[object] = []
     for item in content_items:
-        if not isinstance(item, dict) or not isinstance(item.get("source_tree_mutations"), list):
+        if not isinstance(item, dict):
             trusted_items.append(item)
             continue
         copied = dict(item)
-        trusted_records = []
-        for record in copied.get("source_tree_mutations") or []:
-            if isinstance(record, dict):
-                trusted_record = _trusted_source_mutation_record(
-                    record,
-                    workspace=workspace,
-                    source_mutation_roots=source_mutation_roots,
-                    target_paths=target_paths,
-                )
-                if trusted_record:
-                    trusted_records.append(trusted_record)
-        copied["source_tree_mutations"] = trusted_records
+        saw_source_mutation_shape = False
+        for key in ("source_tree_mutations", "process_source_observations"):
+            if not isinstance(copied.get(key), list):
+                continue
+            saw_source_mutation_shape = True
+            trusted_records = []
+            for record in copied.get(key) or []:
+                if isinstance(record, dict):
+                    trusted_record = _trusted_source_mutation_record(
+                        record,
+                        workspace=workspace,
+                        source_mutation_roots=source_mutation_roots,
+                        target_paths=target_paths,
+                    )
+                    if trusted_record:
+                        trusted_records.append(trusted_record)
+            copied[key] = trusted_records
+        if not saw_source_mutation_shape:
+            trusted_items.append(item)
+            continue
         trusted_items.append(copied)
     return tuple(trusted_items)
 

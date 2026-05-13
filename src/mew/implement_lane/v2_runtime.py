@@ -2750,6 +2750,8 @@ def _workframe_sidecar_event_from_tool_result(
         return _drop_empty_frontier_values(event)
 
     if result.tool_name in EXEC_TOOL_NAMES:
+        process_observation = _process_source_observation_from_result(result)
+        source_tree_mutation = _source_tree_mutation_from_result(result)
         verifier_like = _result_is_configured_verifier_step(result)
         diagnostic_like = _result_is_diagnostic_command_step(result, payload, contract=contract)
         diagnostic_summary = _workframe_diagnostic_summary(result, payload) if diagnostic_like else ""
@@ -2773,7 +2775,7 @@ def _workframe_sidecar_event_from_tool_result(
             return _drop_empty_frontier_values(event)
         elif result.status in {"failed", "interrupted", "invalid"} or result.is_error:
             event["kind"] = "latest_failure"
-        elif _source_tree_mutation_from_result(result):
+        elif process_observation or source_tree_mutation:
             event["kind"] = "run_command"
         else:
             return {}
@@ -2784,6 +2786,16 @@ def _workframe_sidecar_event_from_tool_result(
             event["failure_kind"] = _workframe_failure_kind(payload)
             event["summary"] = _workframe_failure_summary(result, payload)
         else:
+            observation = process_observation or source_tree_mutation
+            observed_paths = _source_tree_mutation_changed_paths(observation) if observation else ()
+            if observed_paths:
+                event["target_paths"] = list(observed_paths[:8])
+            if process_observation:
+                event["process_source_observation"] = {
+                    "changed_count": int(process_observation.get("changed_count") or 0),
+                    "changed_paths": list(observed_paths[:8]),
+                    "source_diff_ref": str(process_observation.get("source_diff_ref") or ""),
+                }
             event["summary"] = _frontier_clip_text(payload.get("summary") or payload.get("status") or "command completed")
         return _drop_empty_frontier_values(event)
 
@@ -6264,7 +6276,8 @@ def _has_completed_source_tree_mutation(
     return any(
         result.status == "completed"
         and (
-            bool(_source_tree_mutation_from_result(result))
+            bool(_process_source_observation_from_result(result))
+            or bool(_source_tree_mutation_from_result(result))
             or _write_result_has_source_root_side_effect(result, source_mutation_roots=source_mutation_roots)
         )
         for result in results
@@ -6846,9 +6859,13 @@ def _first_write_readiness_from_trace(
     probe_call_ids: list[str] = []
     for call, result in zip(tool_calls, tool_results):
         tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "").strip()
-        source_tree_mutation_write = bool(_source_tree_mutation_from_result(result)) or (
-            result.status == "completed"
-            and _write_result_has_source_root_side_effect(result, source_mutation_roots=source_mutation_roots)
+        source_tree_mutation_write = (
+            bool(_process_source_observation_from_result(result))
+            or bool(_source_tree_mutation_from_result(result))
+            or (
+                result.status == "completed"
+                and _write_result_has_source_root_side_effect(result, source_mutation_roots=source_mutation_roots)
+            )
         )
         source_tree_mutation_attempt = tool_name in WRITE_TOOL_NAMES or _is_deep_runtime_prewrite_source_mutation_attempt(
             call
@@ -6882,6 +6899,7 @@ def _first_write_readiness_from_trace(
         1
         for call, result in zip(tool_calls, tool_results)
         if _is_deep_runtime_prewrite_source_mutation_attempt(call)
+        or bool(_process_source_observation_from_result(result))
         or bool(_source_tree_mutation_from_result(result))
         or (
             result.status == "completed"
@@ -6949,7 +6967,7 @@ def _is_first_write_probe_result(tool_name: str, result: ToolResultEnvelope) -> 
     if result.status == "invalid" and _invalid_result_is_synthetic_non_observation(result):
         return False
     if tool_name == "run_command":
-        if _source_tree_mutation_from_result(result):
+        if _process_source_observation_from_result(result) or _source_tree_mutation_from_result(result):
             return False
         payload = _first_result_payload(result)
         contract = _payload_execution_contract(payload)
@@ -7820,7 +7838,7 @@ def _post_failure_source_mutation_count(tool_results: tuple[ToolResultEnvelope, 
 
 
 def _result_has_real_mutation_effect(result: ToolResultEnvelope) -> bool:
-    if _source_tree_mutation_from_result(result):
+    if _process_source_observation_from_result(result) or _source_tree_mutation_from_result(result):
         return True
     for effect in result.side_effects or ():
         if not isinstance(effect, dict):
@@ -9414,7 +9432,7 @@ def _unaccounted_source_tree_mutation_block(
 ) -> dict[str, object]:
     pending: list[dict[str, object]] = []
     for result in tool_results:
-        mutation = _source_tree_mutation_from_result(result)
+        mutation = _process_or_source_observation_from_result(result)
         if mutation:
             if not _result_self_accounts_for_source_tree_mutation(result, finish_arguments=finish_arguments):
                 pending.append(mutation)
@@ -9434,12 +9452,17 @@ def _unaccounted_source_tree_mutation_block(
     changed_paths = [str(item.get("path") or "") for item in changes if isinstance(item, dict) and item.get("path")]
     command_run_ids = [str(item.get("command_run_id") or "") for item in pending if item.get("command_run_id")]
     provider_call_ids = [str(item.get("provider_call_id") or "") for item in pending if item.get("provider_call_id")]
+    blocker_code = (
+        "unaccounted_process_source_observation"
+        if all(str(item.get("observation_kind") or "") == "process_source_observation" for item in pending)
+        else "unaccounted_source_tree_mutation"
+    )
     return {
         "decision": "block_continue",
         "reason": "run_command mutated source tree without later write or verifier evidence",
         "blockers": [
             {
-                "code": "unaccounted_source_tree_mutation",
+                "code": blocker_code,
                 "changed_count": changed_count,
                 "changed_paths": changed_paths[:8],
                 "command_run_id": command_run_ids[0] if command_run_ids else "",
@@ -9456,6 +9479,33 @@ def _unaccounted_source_tree_mutation_block(
             "cite that evidence."
         ),
     }
+
+
+def _process_or_source_observation_from_result(result: ToolResultEnvelope) -> dict[str, object]:
+    observation = _process_source_observation_from_result(result)
+    if observation:
+        observation["observation_kind"] = "process_source_observation"
+        return observation
+    mutation = _source_tree_mutation_from_result(result)
+    if mutation:
+        mutation["observation_kind"] = "source_tree_mutation"
+        return mutation
+    return {}
+
+
+def _process_source_observation_from_result(result: ToolResultEnvelope) -> dict[str, object]:
+    for effect in result.side_effects or ():
+        if isinstance(effect, dict) and effect.get("kind") == "process_source_observation":
+            record = effect.get("record")
+            if isinstance(record, dict) and int(record.get("changed_count") or 0) > 0:
+                return dict(record)
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    observations = payload.get("process_source_observations") if isinstance(payload, dict) else None
+    if isinstance(observations, list):
+        for record in observations:
+            if isinstance(record, dict) and int(record.get("changed_count") or 0) > 0:
+                return dict(record)
+    return {}
 
 
 def _source_tree_mutation_from_result(result: ToolResultEnvelope) -> dict[str, object]:

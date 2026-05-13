@@ -1,7 +1,7 @@
 # Design 2026-05-13 - M6.24 Command/Edit Boundary Redesign
 
-Status: implementation in progress. Phase 0-3 are implemented and reviewed;
-Phase 4-7 remain open.
+Status: implementation in progress. Phase 0-4 are implemented and reviewed;
+Phase 5-7 remain open.
 
 Scope: `implement_v2` native tool loop command/edit boundary. This document
 does not authorize code changes by itself. It intentionally does not preserve
@@ -766,6 +766,22 @@ Close gate:
   diffs while tracked source-like files still produce observer records.
 - Fastcheck consumes terminal observed source side effects from native
   transcript plus sidecars.
+
+Phase 4 implementation note (2026-05-13):
+
+- Execute-route observer metadata now covers effective `run_command` and
+  `run_tests`.
+- Process-observed source changes are emitted as `process_source_observation`
+  records, not `source_tree_mutation` side effects or typed evidence refs.
+- Finish gating blocks unaccounted process source observations explicitly.
+- Poll, cancel, and finalize closeout paths preserve pre-snapshot metadata and
+  compute terminal post-snapshot/diff observer records.
+- Focused tests cover edit-shaped arg rejection, tracked-source observation,
+  ignored `build`/`dist` output roots, truncation, `run_tests`, WorkFrame
+  projection, and yielded lifecycle paths.
+- codex-ultra reviewer session `019e1f65-25f6-77f3-a3f0-c14fd7e79bed`
+  returned `STATUS: APPROVED`; full suite passed with `3704 passed, 1 warning,
+  112 subtests passed`.
 
 ### Phase 5: Narrow Legacy Shell-Edit Bridge
 

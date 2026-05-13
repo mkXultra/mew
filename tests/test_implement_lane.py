@@ -679,8 +679,9 @@ def test_implement_v2_live_json_blocks_unaccounted_run_command_source_mutation(t
     side_effect_kinds = {effect["kind"] for effect in tool_result["side_effects"]}
 
     assert result.status == "blocked"
-    assert "source_tree_mutation" in side_effect_kinds
-    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_source_tree_mutation"
+    assert "process_source_observation" in side_effect_kinds
+    assert "source_tree_mutation" not in side_effect_kinds
+    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_process_source_observation"
     assert target.read_text(encoding="utf-8") == "after\n"
 
 
@@ -762,6 +763,7 @@ def test_implement_v2_live_json_verifier_accounts_for_run_command_source_mutatio
     }
     assert result.status == "blocked"
     assert "unaccounted_source_tree_mutation" not in blocker_codes
+    assert "unaccounted_process_source_observation" not in blocker_codes
     assert target.read_text(encoding="utf-8") == "after\n"
 
 
@@ -826,7 +828,7 @@ def test_implement_v2_live_json_unrelated_write_does_not_account_for_shell_sourc
     )
 
     assert result.status == "blocked"
-    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_source_tree_mutation"
+    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_process_source_observation"
     assert target.read_text(encoding="utf-8") == "after\n"
     assert (tmp_path / "other.txt").read_text(encoding="utf-8") == "ok\n"
 
@@ -912,7 +914,7 @@ def test_implement_v2_live_json_keeps_earlier_unaccounted_shell_source_mutation(
 
     blocker = result.metrics["finish_gate_decision"]["blockers"][0]
     assert result.status == "blocked"
-    assert blocker["code"] == "unaccounted_source_tree_mutation"
+    assert blocker["code"] == "unaccounted_process_source_observation"
     assert blocker["changed_count"] == 1
     assert any(str(path).endswith("first.py") for path in blocker["changed_paths"])
     assert first.read_text(encoding="utf-8") == "after\n"
@@ -1001,7 +1003,7 @@ def test_implement_v2_live_json_superficial_check_text_does_not_account_for_shel
     )
 
     assert result.status == "blocked"
-    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_source_tree_mutation"
+    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_process_source_observation"
     assert target.read_text(encoding="utf-8") == "after\n"
 
 
@@ -1078,7 +1080,7 @@ def test_implement_v2_live_json_structured_label_without_verifier_evidence_does_
     )
 
     assert result.status == "blocked"
-    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_source_tree_mutation"
+    assert result.metrics["finish_gate_decision"]["blockers"][0]["code"] == "unaccounted_process_source_observation"
     assert target.read_text(encoding="utf-8") == "after\n"
 
 
@@ -3475,7 +3477,11 @@ def test_implement_v2_counts_shell_source_mutation_as_first_write(tmp_path) -> N
     assert readiness["first_write_tool"] == "run_command"
     assert readiness["first_write_latency_turns"] == 1
     assert readiness["write_attempt_count"] == 1
-    assert result.metrics["write_evidence_count"] == 1
+    assert result.metrics["write_evidence_count"] == 0
+    tool_results = result.updated_lane_state["proof_manifest"]["tool_results"]
+    shell_write = next(item for item in tool_results if item["provider_call_id"] == "shell-write-sample")
+    assert any(effect["kind"] == "process_source_observation" for effect in shell_write["side_effects"])
+    assert not any(effect["kind"] == "source_tree_mutation" for effect in shell_write["side_effects"])
 
 
 def test_implement_v2_counts_polled_shell_source_mutation_as_first_write() -> None:
@@ -12471,6 +12477,51 @@ def test_implement_v2_workframe_keeps_progress_build_mutation_as_run_command() -
     assert events[0]["summary"] == "generated runtime source"
 
 
+def test_implement_v2_workframe_surfaces_process_source_observation_paths() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="process-build",
+        mew_tool_call_id="tool-process-build",
+        tool_name="run_command",
+        status="completed",
+        is_error=False,
+        content=(
+            {
+                "command": "python generate.py",
+                "status": "completed",
+                "summary": "generated runtime source",
+                "process_source_observations": [
+                    {
+                        "kind": "process_source_observation",
+                        "changed_count": 1,
+                        "changes": [{"path": "vm.js"}],
+                        "source_diff_ref": "implement-v2-source-observer://attempt-1/command/source-diff",
+                    }
+                ],
+            },
+        ),
+        side_effects=(
+            {
+                "kind": "process_source_observation",
+                "record": {
+                    "kind": "process_source_observation",
+                    "changed_count": 1,
+                    "changes": [{"path": "vm.js"}],
+                    "source_diff_ref": "implement-v2-source-observer://attempt-1/command/source-diff",
+                },
+            },
+        ),
+        evidence_refs=("ev:process-build",),
+    )
+
+    events = _workframe_sidecar_events_from_tool_results((result,))
+
+    assert events[0]["kind"] == "run_command"
+    assert events[0]["target_paths"] == ["vm.js"]
+    assert events[0]["process_source_observation"]["changed_count"] == 1
+    assert events[0]["process_source_observation"]["changed_paths"] == ["vm.js"]
+
+
 def test_implement_v2_workframe_requires_failure_tied_artifact_missing_inspection_before_patch() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
@@ -17276,7 +17327,17 @@ def test_implement_v2_exec_cancel_yielded_command_is_interrupted(tmp_path) -> No
 
     adapter = FakeProviderAdapter()
     runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path), max_active=1)
-    command = shlex.join([sys.executable, "-c", "import time; print('start', flush=True); time.sleep(5)"])
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import time; from pathlib import Path; "
+                "Path('vm.js').write_text('cancelled', encoding='utf-8'); "
+                "print('start', flush=True); time.sleep(5)"
+            ),
+        ]
+    )
     start_call = adapter.normalize_tool_calls(
         lane_attempt_id="lane-v2-exec",
         turn_index=1,
@@ -17289,6 +17350,7 @@ def test_implement_v2_exec_cancel_yielded_command_is_interrupted(tmp_path) -> No
         ),
     )[0]
     start_result = runtime.execute(start_call)
+    time.sleep(0.1)
     run_id = start_result.content[0]["command_run_id"]
     cancel_call = adapter.normalize_tool_calls(
         lane_attempt_id="lane-v2-exec",
@@ -17301,6 +17363,111 @@ def test_implement_v2_exec_cancel_yielded_command_is_interrupted(tmp_path) -> No
     assert start_result.status == "yielded"
     assert cancel_result.status == "interrupted"
     assert cancel_result.is_error is True
+    assert cancel_result.content[0]["source_observer"]["post_snapshot_id"].startswith("snapshot:source:")
+    assert cancel_result.content[0]["source_observer"]["observed_source_side_effect"] is True
+    assert cancel_result.content[0]["process_source_observations"][0]["changes"][0]["path"].endswith("/vm.js")
+    assert not any(effect["kind"] == "source_tree_mutation" for effect in cancel_result.side_effects)
+
+
+def test_implement_v2_exec_yielded_command_preserves_pre_snapshot_until_poll(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path), max_active=1)
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; from pathlib import Path; Path('vm.js').write_text('ok', encoding='utf-8'); time.sleep(0.2)",
+        ]
+    )
+    start_call = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 0.01},
+            },
+        ),
+    )[0]
+    start_result = runtime.execute(start_call)
+    run_id = start_result.content[0]["command_run_id"]
+    read_call, poll_call = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=2,
+        calls=(
+            {"provider_call_id": "call-2", "tool_name": "read_command_output", "arguments": {"command_run_id": run_id}},
+            {
+                "provider_call_id": "call-3",
+                "tool_name": "poll_command",
+                "arguments": {"command_run_id": run_id, "wait_seconds": 1},
+            },
+        ),
+    )
+
+    read_result = runtime.execute(read_call)
+    poll_result = runtime.execute(poll_call)
+    start_observer = start_result.content[0]["source_observer"]
+    read_observer = read_result.content[0]["source_observer"]
+    poll_payload = poll_result.content[0]
+
+    assert start_result.status == "yielded"
+    assert start_observer["pre_snapshot_id"].startswith("snapshot:source:")
+    assert start_observer["post_snapshot_id"] == ""
+    assert "pre_run_source_tree_snapshot" not in start_result.content[0]
+    assert read_observer["pre_snapshot_id"] == start_observer["pre_snapshot_id"]
+    assert "source_tree_mutations" not in read_result.content[0]
+    assert "process_source_observations" not in read_result.content[0]
+    assert poll_result.status == "completed"
+    assert "pre_run_source_tree_snapshot" not in poll_payload
+    assert poll_payload["source_observer"]["post_snapshot_id"].startswith("snapshot:source:")
+    assert poll_payload["source_observer"]["observed_source_side_effect"] is True
+    assert poll_payload["process_source_observations"][0]["changes"][0]["path"].endswith("/vm.js")
+    assert any(effect["kind"] == "process_source_observation" for effect in poll_result.side_effects)
+    assert not any(effect["kind"] == "source_tree_mutation" for effect in poll_result.side_effects)
+
+
+def test_implement_v2_exec_finalize_closeout_projects_process_source_observer(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path), max_active=1)
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; from pathlib import Path; Path('vm.js').write_text('done', encoding='utf-8'); time.sleep(0.1)",
+        ]
+    )
+    start_call = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 0.01},
+            },
+        ),
+    )[0]
+    start_result = runtime.execute(start_call)
+
+    closeout_payloads = runtime.finalize_active_commands(timeout_seconds=1)
+    projected_result = runtime.project_result_payload(start_result, closeout_payloads[0])
+    payload = projected_result.content[0]
+
+    assert start_result.status == "yielded"
+    assert projected_result.status == "completed"
+    assert payload["source_observer"]["post_snapshot_id"].startswith("snapshot:source:")
+    assert payload["source_observer"]["diff_status"] == "changed"
+    assert payload["process_source_observations"][0]["changes"][0]["path"].endswith("/vm.js")
+    assert any(effect["kind"] == "process_source_observation" for effect in projected_result.side_effects)
+    assert not any(effect["kind"] == "source_tree_mutation" for effect in projected_result.side_effects)
+    assert not any("/source_tree_mutation/" in str(ref) for ref in projected_result.evidence_refs)
 
 
 def test_implement_v2_exec_cancel_unknown_command_is_concise(tmp_path) -> None:
@@ -17686,8 +17853,52 @@ def test_implement_v2_run_command_allows_bounded_source_writer_without_verifier_
     payload = tool_result["content"][0]
 
     assert tool_result["status"] == "completed"
-    assert payload["source_tree_mutations"][0]["changed_count"] == 1
+    assert "source_tree_mutations" not in payload
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert payload["source_observer"]["observed_source_side_effect"] is True
+    assert payload["source_diff_ref"] == payload["source_observer"]["source_diff_refs"][0]
+    assert payload["process_source_observations"][0]["diff_ref"] == payload["source_diff_ref"]
+    assert payload["source_observer"]["pre_snapshot_id"].startswith("snapshot:source:")
+    assert payload["source_observer"]["post_snapshot_id"].startswith("snapshot:source:")
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log(1)\n"
+    assert not any("source-mutation" in str(ref) for ref in tool_result.get("evidence_refs", []))
+    assert not any("/source_tree_mutation/" in str(ref) for ref in tool_result.get("evidence_refs", []))
+    assert any(effect["kind"] == "process_source_observation" for effect in tool_result["side_effects"])
+    assert not any(effect["kind"] == "source_tree_mutation" for effect in tool_result["side_effects"])
+
+
+@pytest.mark.parametrize("tool_name", ("run_command", "run_tests"))
+def test_implement_v2_execute_route_rejects_edit_shaped_args(tmp_path, tool_name: str) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True, "allow_verify": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": tool_name,
+                "arguments": {
+                    "command": "true",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "patch": "*** Begin Patch\n*** End Patch\n",
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "edit shaped args rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["failure_subclass"] == "explicit_edit_shaped_execute_args"
+    assert not (tmp_path / "true").exists()
 
 
 def test_implement_v2_source_mutation_roots_default_to_workspace_not_all_write_roots(tmp_path) -> None:
@@ -17735,8 +17946,120 @@ def test_implement_v2_source_mutation_roots_default_to_workspace_not_all_write_r
 
     assert tool_result["status"] == "completed"
     assert (scratch / "diag.txt").read_text(encoding="utf-8") == "diag"
-    assert payload["source_tree_mutations"] == []
+    assert payload["process_source_observations"] == []
+    assert payload["source_observer"]["observed_source_side_effect"] is False
+    assert payload["source_observer"]["diff_status"] == "unchanged"
     assert not any(effect["kind"] == "source_tree_mutation" for effect in tool_result["side_effects"])
+
+
+def test_implement_v2_process_source_observer_ignores_build_output_roots(tmp_path) -> None:
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; "
+                "Path('build').mkdir(exist_ok=True); Path('dist').mkdir(exist_ok=True); "
+                "[Path('build', f'generated_{i}.py').write_text('pass\\n', encoding='utf-8') for i in range(25)]; "
+                "[Path('dist', f'packed_{i}.py').write_text('pass\\n', encoding='utf-8') for i in range(25)]; "
+                "Path('vm.py').write_text('tracked\\n', encoding='utf-8')"
+            ),
+        ]
+    )
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": command,
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "tracked source observed"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    changed_paths = payload["process_source_observations"][0]["changes"]
+    assert changed_paths[0]["path"].endswith("/vm.py")
+    assert not any("/build/" in item["path"] or "/dist/" in item["path"] for item in changed_paths)
+
+
+def test_implement_v2_process_source_observer_reports_truncated_snapshot(tmp_path) -> None:
+    for index in range(505):
+        (tmp_path / f"source_{index}.py").write_text("pass\n", encoding="utf-8")
+
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {
+                    "command": "true",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "snapshot truncation observed"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["source_observer"]["snapshot_status"] == "truncated"
+    assert payload["source_observer"]["diff_status"] == "unchanged"
+    assert payload["process_source_observations"] == []
+
+
+def test_implement_v2_run_tests_process_observer_records_unchanged_snapshot(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_verify": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "true",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "run_tests observed"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["effective_tool_name"] == "run_tests"
+    assert payload["source_observer"]["pre_snapshot_id"].startswith("snapshot:source:")
+    assert payload["source_observer"]["post_snapshot_id"].startswith("snapshot:source:")
+    assert payload["source_observer"]["diff_status"] == "unchanged"
+    assert payload["process_source_observations"] == []
 
 
 def test_implement_v2_write_tool_scratch_side_effect_is_not_source_mutation(tmp_path) -> None:
@@ -18000,8 +18323,8 @@ def test_implement_v2_explicit_source_mutation_roots_track_non_workspace_source(
     payload = tool_result["content"][0]
 
     assert tool_result["status"] == "completed"
-    assert payload["source_tree_mutations"][0]["changed_count"] == 1
-    assert payload["source_tree_mutations"][0]["changes"][0]["path"].endswith("/vm.js")
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert payload["process_source_observations"][0]["changes"][0]["path"].endswith("/vm.js")
 
 
 def test_implement_v2_run_command_rejects_same_path_source_patch_shell_surface(tmp_path) -> None:
@@ -18737,9 +19060,10 @@ def test_implement_v2_routed_run_tests_tracks_effective_run_command_source_mutat
 
     assert tool_result["status"] == "completed"
     assert payload["effective_tool_name"] == "run_command"
-    assert payload["source_tree_mutations"][0]["changed_count"] == 1
-    assert payload["source_tree_mutations"][0]["changes"][0]["path"].endswith("/vm.js")
-    assert any(effect["kind"] == "source_tree_mutation" for effect in tool_result["side_effects"])
+    assert payload["process_source_observations"][0]["changed_count"] == 1
+    assert payload["process_source_observations"][0]["changes"][0]["path"].endswith("/vm.js")
+    assert any(effect["kind"] == "process_source_observation" for effect in tool_result["side_effects"])
+    assert not any(effect["kind"] == "source_tree_mutation" for effect in tool_result["side_effects"])
 
 
 def test_implement_v2_routed_run_tests_shell_failure_preserves_terminal_failure(tmp_path) -> None:

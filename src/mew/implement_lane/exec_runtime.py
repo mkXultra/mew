@@ -159,7 +159,11 @@ SOURCE_MUTATION_IGNORED_DIRS = frozenset(
 SOURCE_MUTATION_SNAPSHOT_MAX_FILES = 500
 SOURCE_MUTATION_HASH_MAX_BYTES = 1024 * 1024
 SOURCE_MUTATION_CHANGED_PATH_LIMIT = 40
+SOURCE_OBSERVER_SCHEMA_VERSION = 1
 SHELL_REDIRECTION_TOKENS = frozenset({"<", "<<", "<<<", ">", ">>", ">|"})
+EXECUTE_ROUTE_EDIT_SHAPED_KEYS = frozenset(
+    {"content", "content_lines", "patch", "patch_lines", "edits", "old_string", "new_string"}
+)
 
 
 class ExecToolContractMisuse(ValueError):
@@ -249,7 +253,7 @@ class ImplementV2ManagedExecRuntime:
         cancelled = []
         while self.runner.active is not None:
             payload = self.runner.cancel(reason=reason)
-            payload.update(self.command_metadata.get(str(payload.get("command_run_id") or ""), {}))
+            payload.update(_command_metadata_for_payload(self.command_metadata.get(str(payload.get("command_run_id") or ""), {})))
             cancelled.append(payload)
         return tuple(cancelled)
 
@@ -263,7 +267,7 @@ class ImplementV2ManagedExecRuntime:
             else:
                 effective_timeout = min(max(0.0, float(timeout_seconds)), command_remaining)
             payload = self.runner.finalize(timeout=effective_timeout)
-            payload.update(self.command_metadata.get(str(payload.get("command_run_id") or ""), {}))
+            payload.update(_command_metadata_for_payload(self.command_metadata.get(str(payload.get("command_run_id") or ""), {})))
             finalized.append(payload)
         return tuple(finalized)
 
@@ -286,11 +290,14 @@ class ImplementV2ManagedExecRuntime:
         payload = self.runner.poll(wait_seconds=wait, command_run_id=handle.command_run_id)
         if payload.get("status") == "running":
             payload["status"] = "yielded"
-        payload.update(self.command_metadata.get(str(payload.get("command_run_id") or ""), {}))
+        payload.update(_command_metadata_for_payload(self.command_metadata.get(str(payload.get("command_run_id") or ""), {})))
         return (payload,)
 
     def _run_command(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
+        edit_misuse = _execute_route_edit_shaped_args_misuse(args, tool_name=call.tool_name)
+        if edit_misuse is not None:
+            raise ExecToolContractMisuse(edit_misuse)
         command, command_source = _normalize_command_argument(args)
         if not command:
             raise ValueError(f"{call.tool_name} command is empty")
@@ -389,10 +396,17 @@ class ImplementV2ManagedExecRuntime:
                 allowed_roots=self.artifact_check_roots,
             )
         pre_run_source_tree_snapshot = {}
-        if effective_tool_name == "run_command":
+        source_observer = {}
+        if effective_tool_name in {"run_command", "run_tests"}:
             pre_run_source_tree_snapshot = _capture_source_tree_snapshot(
                 self.source_mutation_roots,
                 workspace=self.workspace,
+            )
+            source_observer = _source_observer_started(
+                lane_attempt_id=call.lane_attempt_id,
+                command_run_id=command_run_id,
+                snapshot=pre_run_source_tree_snapshot,
+                roots=self.source_mutation_roots,
             )
         started_epoch = time.time()
         self.runner.start(
@@ -415,6 +429,7 @@ class ImplementV2ManagedExecRuntime:
             "execution_contract_normalized": normalized_contract.as_dict(),
             "pre_run_artifact_stats": pre_run_artifact_stats,
             "pre_run_source_tree_snapshot": pre_run_source_tree_snapshot,
+            "source_observer": source_observer,
             "started_epoch": started_epoch,
             "tool_run_record_ids": [],
             **({"unchecked_expected_artifacts": list(unchecked_expected_artifacts)} if unchecked_expected_artifacts else {}),
@@ -433,6 +448,8 @@ class ImplementV2ManagedExecRuntime:
         payload["command_source"] = command_source
         payload["command_classification"] = command_classification
         payload["command_intent"] = command_intent
+        if source_observer:
+            payload["source_observer"] = source_observer
         if unchecked_expected_artifacts:
             payload["unchecked_expected_artifacts"] = list(unchecked_expected_artifacts)
         if raw_contract_preserved:
@@ -450,7 +467,7 @@ class ImplementV2ManagedExecRuntime:
             wait_seconds=_bounded_float(args.get("wait_seconds"), default=0.0, minimum=0.0, maximum=30.0),
             command_run_id=command_run_id,
         )
-        payload.update(self.command_metadata.get(command_run_id, {}))
+        payload.update(_command_metadata_for_payload(self.command_metadata.get(command_run_id, {})))
         if payload.get("status") == "running":
             payload["status"] = "yielded"
         payload["command_run_id"] = command_run_id
@@ -465,7 +482,7 @@ class ImplementV2ManagedExecRuntime:
             reason=str(args.get("reason") or "cancelled"),
             command_run_id=command_run_id,
         )
-        payload.update(self.command_metadata.get(command_run_id, {}))
+        payload.update(_command_metadata_for_payload(self.command_metadata.get(command_run_id, {})))
         payload["command_run_id"] = command_run_id
         return payload
 
@@ -483,6 +500,8 @@ class ImplementV2ManagedExecRuntime:
             offset = max(0, len(text) - len(content))
         else:
             content = text[offset : offset + max_chars]
+        metadata = self.command_metadata.get(command_run_id, {})
+        source_observer = metadata.get("source_observer") if isinstance(metadata, dict) else {}
         return {
             "command_run_id": command_run_id,
             "output_path": str(output_path),
@@ -491,6 +510,9 @@ class ImplementV2ManagedExecRuntime:
             "chars": len(text),
             "truncated": len(content) < len(text),
             "status": "completed",
+            **({"source_observer": dict(source_observer)} if isinstance(source_observer, dict) and source_observer else {}),
+            **({"command_classification": dict(metadata["command_classification"])} if isinstance(metadata.get("command_classification"), dict) else {}),
+            **({"command_source": str(metadata.get("command_source") or "")} if metadata.get("command_source") else {}),
         }
 
     def _result_from_payload(self, call: ToolCallEnvelope, payload: dict[str, object]) -> ToolResultEnvelope:
@@ -672,16 +694,31 @@ class ImplementV2ManagedExecRuntime:
                 previous_evidence=(),
                 stream_outputs=_stream_outputs_from_payload(payload, tool_run_record_id=record.record_id),
             )
-        source_tree_mutations = ()
+        process_source_observations = ()
+        source_observer = metadata.get("source_observer") if isinstance(metadata.get("source_observer"), dict) else {}
         if _is_terminal_record(record) and str(
             payload.get("effective_tool_name") or payload.get("tool_name") or tool_name
-        ) == "run_command":
-            source_tree_mutations = _source_tree_mutation_records(
+        ) in {"run_command", "run_tests"}:
+            post_snapshot = _capture_source_tree_snapshot(self.source_mutation_roots, workspace=self.workspace)
+            source_diff_ref = _source_diff_ref(lane_attempt_id=lane_attempt_id, command_run_id=command_run_id)
+            process_source_observations = _process_source_observation_records(
                 metadata.get("pre_run_source_tree_snapshot"),
-                _capture_source_tree_snapshot(self.source_mutation_roots, workspace=self.workspace),
+                post_snapshot,
                 command_run_id=command_run_id,
                 provider_call_id=provider_call_id,
+                source_diff_ref=source_diff_ref,
+                pre_snapshot_id=str((source_observer or {}).get("pre_snapshot_id") or ""),
+                post_snapshot_id=_source_snapshot_id(command_run_id=command_run_id, phase="post"),
             )
+            source_observer = _source_observer_terminal(
+                source_observer,
+                lane_attempt_id=lane_attempt_id,
+                command_run_id=command_run_id,
+                post_snapshot=post_snapshot,
+                process_source_observations=process_source_observations,
+                source_diff_ref=source_diff_ref,
+            )
+            metadata["source_observer"] = source_observer
         verifier = derive_verifier_evidence(contract, (record,), artifact_evidence)
         classification = classify_execution_failure(record, artifact_evidence, verifier, contract)
         finish_gate = apply_finish_gate(contract, verifier, (classification,))
@@ -689,7 +726,14 @@ class ImplementV2ManagedExecRuntime:
         payload["command_run"] = command_run.as_dict()
         payload["tool_run_record"] = record.as_dict()
         payload["artifact_evidence"] = [item.as_dict() for item in artifact_evidence]
-        payload["source_tree_mutations"] = [dict(item) for item in source_tree_mutations]
+        payload["process_source_observations"] = [dict(item) for item in process_source_observations]
+        if source_observer:
+            payload["source_observer"] = dict(source_observer)
+            payload["observed_source_side_effect"] = bool(process_source_observations)
+            source_diff_refs = tuple(str(ref) for ref in source_observer.get("source_diff_refs") or () if str(ref))
+            if source_diff_refs:
+                payload["source_diff_refs"] = list(source_diff_refs)
+                payload["source_diff_ref"] = source_diff_refs[0]
         payload["verifier_evidence"] = verifier.as_dict()
         payload["failure_classification"] = classification.as_dict()
         payload["structured_finish_gate"] = finish_gate.as_dict()
@@ -697,7 +741,7 @@ class ImplementV2ManagedExecRuntime:
             {"kind": "command_run", "record": command_run.as_dict()},
             {"kind": "tool_run_record", "record": record.as_dict()},
             *({"kind": "artifact_evidence", "record": item.as_dict()} for item in artifact_evidence),
-            *({"kind": "source_tree_mutation", "record": dict(item)} for item in source_tree_mutations),
+            *({"kind": "process_source_observation", "record": dict(item)} for item in process_source_observations),
             {"kind": "verifier_evidence", "record": verifier.as_dict()},
             {"kind": "failure_classification", "record": classification.as_dict()},
             {"kind": "structured_finish_gate", "record": finish_gate.as_dict()},
@@ -879,11 +923,13 @@ def _capture_source_tree_snapshot(
 ) -> dict[str, object]:
     files: dict[str, dict[str, object]] = {}
     truncated = False
+    normalized_roots: list[str] = []
     for root in roots or (str(workspace),):
         root_path = Path(str(root or workspace)).expanduser()
         if not root_path.is_absolute():
             root_path = workspace / root_path
         root_path = root_path.resolve(strict=False)
+        normalized_roots.append(str(root_path))
         candidates = (root_path,) if root_path.is_file() else _iter_source_tree_candidates(root_path)
         for path in candidates:
             if len(files) >= SOURCE_MUTATION_SNAPSHOT_MAX_FILES:
@@ -897,6 +943,8 @@ def _capture_source_tree_snapshot(
             break
     return {
         "schema_version": 1,
+        "snapshot_status": "truncated" if truncated else "ok",
+        "roots": normalized_roots,
         "file_count": len(files),
         "truncated": truncated,
         "files": files,
@@ -961,12 +1009,15 @@ def _should_track_source_mutation_path(path: Path) -> bool:
     return path.suffix.casefold() in SOURCE_MUTATION_TRACKED_SUFFIXES
 
 
-def _source_tree_mutation_records(
+def _process_source_observation_records(
     before_snapshot: object,
     after_snapshot: object,
     *,
     command_run_id: str,
     provider_call_id: str,
+    source_diff_ref: str = "",
+    pre_snapshot_id: str = "",
+    post_snapshot_id: str = "",
 ) -> tuple[dict[str, object], ...]:
     if not isinstance(before_snapshot, dict) or not isinstance(after_snapshot, dict):
         return ()
@@ -989,15 +1040,146 @@ def _source_tree_mutation_records(
     return (
         {
             "schema_version": 1,
+            "kind": "process_source_observation",
             "command_run_id": command_run_id,
             "provider_call_id": provider_call_id,
             "source": "bounded_source_tree_snapshot",
+            "pre_snapshot_id": pre_snapshot_id,
+            "post_snapshot_id": post_snapshot_id,
+            "diff_ref": source_diff_ref,
+            "source_diff_ref": source_diff_ref,
             "changed_count": len(changes),
             "changes": changes[:SOURCE_MUTATION_CHANGED_PATH_LIMIT],
             "truncated": bool(before_snapshot.get("truncated") or after_snapshot.get("truncated"))
             or len(changes) > SOURCE_MUTATION_CHANGED_PATH_LIMIT,
         },
     )
+
+
+def _source_observer_started(
+    *,
+    lane_attempt_id: str,
+    command_run_id: str,
+    snapshot: dict[str, object],
+    roots: tuple[str, ...] | list[str],
+) -> dict[str, object]:
+    pre_snapshot_id = _source_snapshot_id(command_run_id=command_run_id, phase="pre")
+    snapshot_status = str(snapshot.get("snapshot_status") or ("truncated" if snapshot.get("truncated") else "ok"))
+    return {
+        "schema_version": SOURCE_OBSERVER_SCHEMA_VERSION,
+        "kind": "process_source_observer",
+        "command_run_id": command_run_id,
+        "pre_snapshot_id": pre_snapshot_id,
+        "pre_snapshot_ref": _source_snapshot_ref(
+            lane_attempt_id=lane_attempt_id,
+            command_run_id=command_run_id,
+            phase="pre",
+        ),
+        "post_snapshot_id": "",
+        "post_snapshot_ref": "",
+        "snapshot_status": snapshot_status,
+        "diff_status": "pending",
+        "source_roots": list(snapshot.get("roots") if isinstance(snapshot.get("roots"), list) else roots),
+        "file_count": int(snapshot.get("file_count") or 0),
+        "observed_source_side_effect": False,
+        "source_diff_refs": [],
+        "changed_count": 0,
+    }
+
+
+def _command_metadata_for_payload(metadata: object) -> dict[str, object]:
+    if not isinstance(metadata, dict):
+        return {}
+    allowed_keys = (
+        "tool_name",
+        "effective_tool_name",
+        "command_source",
+        "command_classification",
+        "command_intent",
+        "execution_contract",
+        "execution_contract_normalized",
+        "execution_contract_downgraded",
+        "pre_run_artifact_stats",
+        "tool_contract_recovery",
+        "unchecked_expected_artifacts",
+        "source_observer",
+        "started_epoch",
+    )
+    payload: dict[str, object] = {}
+    for key in allowed_keys:
+        if key not in metadata:
+            continue
+        value = metadata[key]
+        if isinstance(value, dict):
+            payload[key] = dict(value)
+        elif isinstance(value, list):
+            payload[key] = list(value)
+        else:
+            payload[key] = value
+    return payload
+
+
+def _source_observer_terminal(
+    source_observer: object,
+    *,
+    lane_attempt_id: str,
+    command_run_id: str,
+    post_snapshot: dict[str, object],
+    process_source_observations: tuple[dict[str, object], ...],
+    source_diff_ref: str,
+) -> dict[str, object]:
+    observer = dict(source_observer) if isinstance(source_observer, dict) else {}
+    if not observer:
+        observer = _source_observer_started(
+            lane_attempt_id=lane_attempt_id,
+            command_run_id=command_run_id,
+            snapshot={"snapshot_status": "unavailable", "file_count": 0, "roots": []},
+            roots=(),
+        )
+    post_snapshot_id = _source_snapshot_id(command_run_id=command_run_id, phase="post")
+    changed_count = sum(int(item.get("changed_count") or 0) for item in process_source_observations)
+    observed_changes: list[object] = []
+    for item in process_source_observations:
+        changes = item.get("changes")
+        if isinstance(changes, list):
+            observed_changes.extend(changes)
+    changed_paths = [
+        str(item.get("path") or "")
+        for item in observed_changes
+        if isinstance(item, dict) and str(item.get("path") or "").strip()
+    ]
+    source_diff_refs = [source_diff_ref] if changed_count else []
+    observer.update(
+        {
+            "post_snapshot_id": post_snapshot_id,
+            "post_snapshot_ref": _source_snapshot_ref(
+                lane_attempt_id=lane_attempt_id,
+                command_run_id=command_run_id,
+                phase="post",
+            ),
+            "snapshot_status": str(post_snapshot.get("snapshot_status") or observer.get("snapshot_status") or "ok"),
+            "diff_status": "changed" if changed_count else "unchanged",
+            "observed_source_side_effect": bool(changed_count),
+            "source_diff_refs": source_diff_refs,
+            "changed_count": changed_count,
+            "changed_paths": changed_paths[:SOURCE_MUTATION_CHANGED_PATH_LIMIT],
+            "observed_changes": observed_changes[:SOURCE_MUTATION_CHANGED_PATH_LIMIT],
+            "post_file_count": int(post_snapshot.get("file_count") or 0),
+        }
+    )
+    return observer
+
+
+def _source_snapshot_id(*, command_run_id: str, phase: str) -> str:
+    return f"snapshot:source:{_safe_id_part(command_run_id, 'command')}:{phase}"
+
+
+def _source_snapshot_ref(*, lane_attempt_id: str, command_run_id: str, phase: str) -> str:
+    return f"implement-v2-source-observer://{lane_attempt_id}/{_safe_id_part(command_run_id, 'command')}/{phase}-snapshot"
+
+
+def _source_diff_ref(*, lane_attempt_id: str, command_run_id: str) -> str:
+    return f"implement-v2-source-observer://{lane_attempt_id}/{_safe_id_part(command_run_id, 'command')}/source-diff"
 
 
 def _source_tree_fingerprint_changed(before: dict[str, object], after: dict[str, object]) -> bool:
@@ -1510,6 +1692,30 @@ def _run_tests_shell_surface_misuse(command: object, *, use_shell: bool) -> dict
         "preserved_command": str(command or ""),
         "suggested_tool": "run_command",
         "suggested_use_shell": True,
+    }
+
+
+def _execute_route_edit_shaped_args_misuse(args: dict[str, object], *, tool_name: str) -> dict[str, object] | None:
+    if tool_name not in {"run_command", "run_tests"}:
+        return None
+    present = tuple(sorted(key for key in EXECUTE_ROUTE_EDIT_SHAPED_KEYS if args.get(key) not in (None, "", [], {})))
+    if not present:
+        return None
+    return {
+        "tool_route": "invalid_tool_contract",
+        "declared_tool": tool_name,
+        "effective_tool": "none",
+        "failure_class": "tool_contract_misuse",
+        "failure_subclass": "explicit_edit_shaped_execute_args",
+        "reason": "execute-route tools are process runners; source edits must use write_file/edit_file/apply_patch",
+        "recoverable": True,
+        "recoverable_tool_contract_misuse": True,
+        "tool_contract_recovery_eligible": False,
+        "terminal_failure_reaction_eligible": False,
+        "features": ["edit_shaped_execute_args"],
+        "edit_shaped_argument_keys": list(present),
+        "suggested_tool": "apply_patch|edit_file|write_file",
+        "suggested_use_shell": False,
     }
 
 
