@@ -2065,9 +2065,12 @@ def _tool_specs_from_request_descriptor(
         for name in (request_descriptor.get("provider_tool_names") or ())
         if str(name or "").strip()
     }
-    specs = _native_tool_specs_for_request(lane_input, ())
+    specs = list_v2_tool_specs_for_task(
+        lane_input.lane_config.get("mode") or "full",
+        task_contract=lane_input.task_contract,
+    )
     if not names:
-        return specs
+        return _native_tool_specs_for_request(lane_input, ())
     return tuple(spec for spec in specs if spec.name in names)
 
 

@@ -348,6 +348,66 @@ def test_native_provider_exposes_read_command_output_after_completed_command(tmp
     assert "cancel_command" not in provider.requests[1]["provider_tool_names"]
 
 
+def test_live_native_descriptor_preserves_requested_lifecycle_tools(tmp_path: Path) -> None:
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "description": "Build and run the artifact.",
+            "acceptance_constraints": ["Verifier output must pass."],
+        },
+    )
+    provider = NativeCodexResponsesProvider(
+        lane_input=lane_input,
+        auth={"access_token": "token"},
+        base_url="https://example.invalid",
+        timeout=10,
+        model="gpt-5.5",
+    )
+    completed = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+        ),
+        response_id="resp-1",
+        status="completed",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
+        return_value=completed,
+    ):
+        provider.next_response(
+            {
+                "lane_attempt_id": "ws-native:task-native:implement_v2:native",
+                "turn_index": 2,
+                "input_items": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "{}"}],
+                    }
+                ],
+                "instructions": "test",
+                "transcript_window": [],
+                "provider_tool_names": [
+                    "apply_patch",
+                    "edit_file",
+                    "run_command",
+                    "run_tests",
+                    "read_command_output",
+                    "read_file",
+                    "finish",
+                ],
+            }
+        )
+
+    tool_names = {
+        tool.get("name") or dict(tool.get("function") or {}).get("name")
+        for tool in provider.requests[0]["request_body"]["tools"]  # type: ignore[index]
+    }
+    assert "read_command_output" in tool_names
+
+
 def test_native_provider_hides_poll_cancel_after_terminal_poll_supersedes_yield(tmp_path: Path) -> None:
     command_id = _command_run_id("run-1")
     provider = NativeFakeProvider.from_item_batches(
