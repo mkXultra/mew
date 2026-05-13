@@ -765,12 +765,22 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
         digest = _native_request_compact_digest(request)
         inventory = _safe_mapping(request.get("provider_request_inventory"))
         projection = _safe_mapping(digest.get("workframe_projection"))
-        if inventory.get("model_visible_sections") != ["native_transcript_window", "compact_sidecar_digest"]:
+        suppressed_refresh_count = _nonnegative_int(
+            request.get("previous_response_suppressed_context_refresh_item_count")
+            or inventory.get("previous_response_suppressed_context_refresh_item_count")
+        )
+        expected_sections = (
+            ["native_transcript_window"]
+            if suppressed_refresh_count
+            else ["native_transcript_window", "compact_sidecar_digest"]
+        )
+        if inventory.get("model_visible_sections") != expected_sections:
             violations.append(
                 {
                     "request": index,
                     "reason": "unexpected_model_visible_sections",
                     "model_visible_sections": inventory.get("model_visible_sections"),
+                    "expected_model_visible_sections": expected_sections,
                 }
             )
         if digest.get("provider_input_authority") != "transcript_window_plus_compact_sidecar_digest":
@@ -787,12 +797,14 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
             violations.append(
                 {"request": index, "reason": "workframe_projection_key_cap", "key_count": len(projection)}
             )
+        visible_task_payload = _native_request_wire_task_payload(request)
+        visible_digest = visible_task_payload.get("compact_sidecar_digest")
         forbidden_violations = scan_forbidden_provider_visible(
             {
                 "input_items": _native_request_input_items(request),
                 "instructions": _native_request_instructions(request),
-                "task_contract": _native_request_task_contract(request),
-                "compact_sidecar_digest": digest,
+                "task_contract": visible_task_payload.get("task_contract") if isinstance(visible_task_payload, Mapping) else {},
+                "compact_sidecar_digest": visible_digest if isinstance(visible_digest, Mapping) else {},
                 "transcript_window": request.get("transcript_window") if isinstance(request.get("transcript_window"), list) else [],
             },
             surface="native_provider_request",
@@ -1166,7 +1178,17 @@ def _native_request_task_contract(request: Mapping[str, object]) -> dict[str, ob
 
 
 def _native_request_task_payload(request: Mapping[str, object]) -> dict[str, object]:
-    input_items = _native_request_input_items(request)
+    payload = _native_task_payload_from_input_items(_native_request_logical_input_items(request))
+    if payload:
+        return payload
+    return _native_request_wire_task_payload(request)
+
+
+def _native_request_wire_task_payload(request: Mapping[str, object]) -> dict[str, object]:
+    return _native_task_payload_from_input_items(_native_request_input_items(request))
+
+
+def _native_task_payload_from_input_items(input_items: object) -> dict[str, object]:
     if not isinstance(input_items, list):
         return {}
     for item in input_items:
@@ -1190,6 +1212,13 @@ def _native_request_task_payload(request: Mapping[str, object]) -> dict[str, obj
             if isinstance(decoded, dict):
                 return dict(decoded)
     return {}
+
+
+def _native_request_logical_input_items(request: Mapping[str, object]) -> list[dict[str, object]]:
+    logical_input_items = request.get("logical_input_items")
+    if isinstance(logical_input_items, list):
+        return [dict(item) for item in logical_input_items if isinstance(item, Mapping)]
+    return _native_request_input_items(request)
 
 
 def _native_request_transcript(

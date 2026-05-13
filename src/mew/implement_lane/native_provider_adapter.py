@@ -262,9 +262,20 @@ def apply_previous_response_delta(
     )
     logical_input_hash = stable_json_hash(full_input)
 
+    context_refresh_items = (
+        ()
+        if match.mode == "delta_context_refresh_local_only"
+        else match.leading_refresh_items
+    )
+    suppressed_context_refresh_items = tuple(
+        item
+        for item in match.leading_refresh_items
+        if item not in context_refresh_items
+    )
+
     if match.matched:
         request_body["previous_response_id"] = previous_response_id
-        request_body["input"] = list(match.leading_refresh_items) + list(
+        request_body["input"] = list(context_refresh_items) + list(
             full_input[match.prefix_item_count :]
         )
         mode = match.mode
@@ -276,15 +287,20 @@ def apply_previous_response_delta(
     updated["request_body"] = request_body
     updated["request_hash"] = stable_json_hash(request_body)
     updated["logical_input_hash"] = logical_input_hash
+    updated["logical_input_items"] = list(full_input)
     updated["logical_input_item_count"] = len(full_input)
     updated["wire_input_item_count"] = len(_mapping_sequence(request_body.get("input")))
+    updated["suppressed_context_refresh_items"] = list(suppressed_context_refresh_items)
     updated["previous_response_id"] = previous_response_id if match.matched else None
     updated["previous_response_id_in_request_body"] = "previous_response_id" in request_body
     updated["previous_response_delta_mode"] = mode
     updated["previous_response_prefix_item_count"] = (
         match.prefix_item_count if match.matched else 0
     )
-    updated["previous_response_leading_refresh_item_count"] = len(match.leading_refresh_items)
+    updated["previous_response_leading_refresh_item_count"] = len(context_refresh_items)
+    updated["previous_response_suppressed_context_refresh_item_count"] = (
+        len(suppressed_context_refresh_items)
+    )
     capability_decisions = _jsonish_mapping(updated.get("capability_decisions"))
     capability_decisions["request_previous_response_id"] = (
         previous_response_id if match.matched else None
@@ -294,7 +310,10 @@ def apply_previous_response_delta(
         match.prefix_item_count if match.matched else 0
     )
     capability_decisions["previous_response_leading_refresh_item_count"] = len(
-        match.leading_refresh_items
+        context_refresh_items
+    )
+    capability_decisions["previous_response_suppressed_context_refresh_item_count"] = (
+        len(suppressed_context_refresh_items)
     )
     updated["capability_decisions"] = capability_decisions
     updated["descriptor_hash"] = stable_json_hash(
@@ -339,7 +358,7 @@ def _previous_response_prefix_match(
         if _input_prefix_matches(full_input[1:], refreshed_prefix):
             return _PreviousResponsePrefixMatch(
                 matched=True,
-                mode="delta_with_context_refresh",
+                mode="delta_context_refresh_local_only",
                 prefix_item_count=1 + len(refreshed_prefix),
                 leading_refresh_items=(dict(full_input[0]),),
             )

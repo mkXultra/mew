@@ -716,8 +716,24 @@ def test_hot_path_fastcheck_accepts_previous_response_id_for_multi_turn_live_pro
     second_request["turn_index"] = 2
     second_request["previous_response_id"] = "resp-prev"
     second_request["previous_response_id_in_request_body"] = True
-    second_request["previous_response_delta_mode"] = "delta_with_context_refresh"
+    second_request["previous_response_delta_mode"] = "delta_context_refresh_local_only"
+    second_request["previous_response_suppressed_context_refresh_item_count"] = 1
+    second_request["previous_response_leading_refresh_item_count"] = 0
     second_request["request_body"]["previous_response_id"] = "resp-prev"
+    output_item = {
+        "type": "function_call_output",
+        "call_id": "call-read",
+        "output": "read_file result: completed",
+    }
+    second_request["logical_input_items"] = list(first_request["request_body"]["input"]) + [output_item]
+    second_request["suppressed_context_refresh_items"] = list(first_request["request_body"]["input"])
+    second_request["request_body"]["input"] = [output_item]
+    inventory = dict(second_request["provider_request_inventory"])
+    inventory["model_visible_sections"] = ["native_transcript_window"]
+    inventory["compact_sidecar_digest_wire_visible"] = False
+    inventory["previous_response_delta_mode"] = "delta_context_refresh_local_only"
+    inventory["previous_response_suppressed_context_refresh_item_count"] = 1
+    second_request["provider_request_inventory"] = inventory
     payload["request_count"] = 2
     payload["requests"] = [first_request, second_request]
     request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")

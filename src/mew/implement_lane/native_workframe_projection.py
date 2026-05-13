@@ -247,11 +247,14 @@ def build_native_prompt_input_inventory(
     provider_visible_forbidden_fields: Mapping[str, object] | None = None,
     diagnostic_only_fields: Iterable[object] = (),
     diagnostic_loop_signals: Mapping[str, object] | None = None,
+    previous_response_delta_mode: str = "none",
+    previous_response_suppressed_context_refresh_item_count: int = 0,
 ) -> dict[str, object]:
     """Describe the native provider input inventory for Phase 4 tests."""
 
     diagnostic_fields = sorted(str(item) for item in diagnostic_only_fields if str(item).strip())
     diagnostic_signals = dict(diagnostic_loop_signals or {})
+    suppressed_refresh_count = max(0, int(previous_response_suppressed_context_refresh_item_count or 0))
     return {
         "schema_version": NATIVE_PROMPT_INPUT_INVENTORY_SCHEMA_VERSION,
         "input_contract": "native_transcript_window_plus_compact_sidecar_digest",
@@ -284,6 +287,9 @@ def build_native_prompt_input_inventory(
             }
         ),
         "compact_sidecar_digest_hash": compact_sidecar_digest.get("digest_hash") or "",
+        "compact_sidecar_digest_wire_visible": suppressed_refresh_count == 0,
+        "previous_response_delta_mode": previous_response_delta_mode or "none",
+        "previous_response_suppressed_context_refresh_item_count": suppressed_refresh_count,
         "source_prompt_inventory": [dict(item) for item in source_prompt_inventory if isinstance(item, Mapping)],
     }
 

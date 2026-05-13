@@ -173,7 +173,7 @@ def test_previous_response_delta_uses_suffix_when_logical_prefix_matches() -> No
     assert updated["capability_decisions"]["request_previous_response_id"] == "resp-prev"  # type: ignore[index]
 
 
-def test_previous_response_delta_allows_context_refresh_before_previous_prefix() -> None:
+def test_previous_response_delta_keeps_context_refresh_local_only() -> None:
     previous_context = {
         "role": "user",
         "content": [
@@ -230,12 +230,15 @@ def test_previous_response_delta_allows_context_refresh_before_previous_prefix()
     request = updated["request_body"]
 
     assert request["previous_response_id"] == "resp-prev"  # type: ignore[index]
-    assert request["input"] == [refreshed_context, output_item]  # type: ignore[index]
-    assert updated["previous_response_delta_mode"] == "delta_with_context_refresh"
+    assert request["input"] == [output_item]  # type: ignore[index]
+    assert updated["logical_input_items"] == [refreshed_context, call_item, output_item]
+    assert updated["suppressed_context_refresh_items"] == [refreshed_context]
+    assert updated["previous_response_delta_mode"] == "delta_context_refresh_local_only"
     assert updated["previous_response_prefix_item_count"] == 2
-    assert updated["previous_response_leading_refresh_item_count"] == 1
+    assert updated["previous_response_leading_refresh_item_count"] == 0
+    assert updated["previous_response_suppressed_context_refresh_item_count"] == 1
     assert updated["logical_input_item_count"] == 3
-    assert updated["wire_input_item_count"] == 2
+    assert updated["wire_input_item_count"] == 1
 
 
 def test_previous_response_delta_falls_back_to_full_input_on_prefix_miss() -> None:

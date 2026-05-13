@@ -217,9 +217,32 @@ class NativeCodexResponsesProvider:
                 previous_logical_input_items=self.previous_logical_input_items,
                 previous_response_output_items=self.previous_response_output_items,
             )
-        descriptor["provider_request_inventory"] = dict(
-            request_descriptor.get("provider_request_inventory") or {}
+        inventory = dict(request_descriptor.get("provider_request_inventory") or {})
+        suppressed_refresh_count = int(
+            descriptor.get("previous_response_suppressed_context_refresh_item_count")
+            or 0
         )
+        inventory["previous_response_delta_mode"] = descriptor.get(
+            "previous_response_delta_mode"
+        ) or "none"
+        inventory["previous_response_suppressed_context_refresh_item_count"] = (
+            suppressed_refresh_count
+        )
+        inventory["previous_response_leading_refresh_item_count"] = int(
+            descriptor.get("previous_response_leading_refresh_item_count") or 0
+        )
+        if suppressed_refresh_count:
+            sections = inventory.get("model_visible_sections")
+            if isinstance(sections, list):
+                inventory["model_visible_sections"] = [
+                    section
+                    for section in sections
+                    if section != "compact_sidecar_digest"
+                ]
+            inventory["compact_sidecar_digest_wire_visible"] = False
+        else:
+            inventory["compact_sidecar_digest_wire_visible"] = True
+        descriptor["provider_request_inventory"] = inventory
         descriptor["input_item_count"] = request_descriptor.get("input_item_count")
         descriptor["turn_index"] = request_descriptor.get("turn_index")
         self.requests.append(dict(descriptor))
