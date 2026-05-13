@@ -35,6 +35,7 @@ class ToolKernelConfig:
     task_contract: dict[str, object] = field(default_factory=dict)
     frontier_state: dict[str, object] = field(default_factory=dict)
     source_mutation_roots: tuple[str, ...] = ()
+    artifact_dir: object | None = None
     max_active: int = 1
     read_result_max_chars: int | None = None
     surface_label: str = "tool"
@@ -87,6 +88,7 @@ class ToolKernel:
             allowed_write_roots=self.allowed_write_roots,
             approved_write_calls=config.approved_write_calls,
             allow_governance_writes=config.allow_governance_writes,
+            artifact_dir=config.artifact_dir,
         )
 
     def execute(self, call: ToolCallEnvelope) -> ToolResultEnvelope:

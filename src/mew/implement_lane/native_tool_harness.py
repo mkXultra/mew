@@ -301,6 +301,7 @@ def run_native_implement_v2(
         allowed_write_roots=allowed_write_roots,
         approved_write_calls=_approved_write_calls(lane_config),
         allow_governance_writes=bool(lane_config.get("allow_governance_writes")),
+        artifact_dir=lane_config.get("artifact_dir"),
     )
 
     items: list[NativeTranscriptItem] = []
@@ -760,6 +761,7 @@ def _execute_native_call(
                     {"status": "approved", "provider_call_id": call.call_id, "source": "phase3-auto"},
                 ),
                 allow_governance_writes=bool(lane_config.get("allow_governance_writes")),
+                artifact_dir=lane_config.get("artifact_dir"),
             )
         return with_tool_route_decision(envelope, write_runtime.execute(envelope))
     return with_tool_route_decision(envelope, _invalid_result(call, reason=f"unknown native tool: {call.tool_name}"))
@@ -1090,6 +1092,7 @@ def _native_final_verifier_closeout(
             allowed_write_roots=allowed_write_roots,
             approved_write_calls=(),
             allow_governance_writes=bool(lane_config.get("allow_governance_writes")),
+            artifact_dir=lane_config.get("artifact_dir"),
         ),
     )
     if result.status == "yielded":

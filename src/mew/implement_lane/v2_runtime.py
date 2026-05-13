@@ -1089,6 +1089,7 @@ def run_live_json_implement_v2(
                 allowed_write_roots=_allowed_write_roots(lane_input),
                 approved_write_calls=approved_write_calls,
                 allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
+                artifact_dir=lane_input.lane_config.get("artifact_dir"),
             )
             executed_calls = []
             current_results_list = []
@@ -2061,6 +2062,7 @@ def run_fake_write_implement_v2(
             allowed_write_roots=_allowed_write_roots(lane_input),
             approved_write_calls=_approved_write_calls(lane_input),
             allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
+            artifact_dir=lane_input.lane_config.get("artifact_dir"),
         )
         try:
             tool_results = tuple(

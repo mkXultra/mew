@@ -96,6 +96,43 @@ def _text_diff_line_counts(before, after):
     return {"added": added, "removed": removed}
 
 
+def _text_snapshot(existed, text):
+    return {
+        "existed": bool(existed),
+        "sha256": _sha256_text(text),
+        "size": len(text),
+    }
+
+
+def _source_diff_payload(diff, *, include_source_artifacts=False):
+    clipped = clip_output(diff, DEFAULT_DIFF_MAX_CHARS)
+    payload = {
+        "diff": clipped,
+        "diff_sha256": _sha256_text(diff),
+    }
+    if include_source_artifacts:
+        payload.update(
+            {
+                "source_diff_text": diff,
+                "source_diff_sha256": _sha256_text(diff),
+                "source_diff_size": len(diff),
+                "source_diff_line_count": len(diff.splitlines()),
+                "source_diff_inline_exact": clipped == diff,
+                "source_diff_clipped": clipped != diff,
+            }
+        )
+    return payload
+
+
+def _source_snapshot_payload(before_existed, before, after_existed, after, *, include_source_artifacts=False):
+    if not include_source_artifacts:
+        return {}
+    return {
+        "source_snapshot_pre": _text_snapshot(before_existed, before),
+        "source_snapshot_post": _text_snapshot(after_existed, after),
+    }
+
+
 def _unified_diff_text(path, before, after):
     display_path = str(path).lstrip("/")
     lines = difflib.unified_diff(
@@ -379,7 +416,16 @@ def restore_write_snapshot(snapshot):
     }
 
 
-def write_file(path, content, allowed_roots, create=False, dry_run=False, max_chars=DEFAULT_WRITE_MAX_CHARS):
+def write_file(
+    path,
+    content,
+    allowed_roots,
+    create=False,
+    dry_run=False,
+    max_chars=DEFAULT_WRITE_MAX_CHARS,
+    *,
+    include_source_artifacts=False,
+):
     if not isinstance(content, str):
         raise ValueError("content must be a string")
     if len(content) > max_chars:
@@ -405,7 +451,14 @@ def write_file(path, content, allowed_roots, create=False, dry_run=False, max_ch
         "dry_run": bool(dry_run),
         "written": bool(changed and not dry_run),
         "size": len(after),
-        "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
+        "before_existed": existed,
+        "before_sha256": _sha256_text(before),
+        "before_size": len(before),
+        "after_existed": True,
+        "after_sha256": _sha256_text(after),
+        "after_size": len(after),
+        **_source_snapshot_payload(existed, before, True, after, include_source_artifacts=include_source_artifacts),
+        **_source_diff_payload(diff, include_source_artifacts=include_source_artifacts),
         "diff_stats": _text_diff_line_counts(before, after),
         "started_at": started_at,
         "finished_at": now_iso(),
@@ -420,6 +473,8 @@ def edit_file(
     replace_all=False,
     dry_run=False,
     max_chars=DEFAULT_WRITE_MAX_CHARS,
+    *,
+    include_source_artifacts=False,
 ):
     if not isinstance(old, str) or old == "":
         raise ValueError("old text must be a non-empty string")
@@ -499,7 +554,14 @@ def edit_file(
         "no_op": not changed,
         "dry_run": bool(dry_run),
         "written": bool(changed and not dry_run),
-        "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
+        "before_existed": True,
+        "before_sha256": _sha256_text(before),
+        "before_size": len(before),
+        "after_existed": True,
+        "after_sha256": _sha256_text(after),
+        "after_size": len(after),
+        **_source_snapshot_payload(True, before, True, after, include_source_artifacts=include_source_artifacts),
+        **_source_diff_payload(diff, include_source_artifacts=include_source_artifacts),
         "diff_stats": _text_diff_line_counts(before, after),
         "started_at": started_at,
         "finished_at": now_iso(),
@@ -509,7 +571,15 @@ def edit_file(
     return result
 
 
-def edit_file_hunks(path, edits, allowed_roots, dry_run=False, max_chars=DEFAULT_WRITE_MAX_CHARS):
+def edit_file_hunks(
+    path,
+    edits,
+    allowed_roots,
+    dry_run=False,
+    max_chars=DEFAULT_WRITE_MAX_CHARS,
+    *,
+    include_source_artifacts=False,
+):
     try:
         resolved = resolve_allowed_write_path(path, allowed_roots, create=False)
     except ValueError as exc:
@@ -543,7 +613,14 @@ def edit_file_hunks(path, edits, allowed_roots, dry_run=False, max_chars=DEFAULT
         "no_op": not changed,
         "dry_run": bool(dry_run),
         "written": bool(changed and not dry_run),
-        "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
+        "before_existed": True,
+        "before_sha256": _sha256_text(before),
+        "before_size": len(before),
+        "after_existed": True,
+        "after_sha256": _sha256_text(after),
+        "after_size": len(after),
+        **_source_snapshot_payload(True, before, True, after, include_source_artifacts=include_source_artifacts),
+        **_source_diff_payload(diff, include_source_artifacts=include_source_artifacts),
         "diff_stats": _text_diff_line_counts(before, after),
         "started_at": started_at,
         "finished_at": now_iso(),
@@ -553,7 +630,7 @@ def edit_file_hunks(path, edits, allowed_roots, dry_run=False, max_chars=DEFAULT
     return result
 
 
-def delete_file(path, allowed_roots, dry_run=False):
+def delete_file(path, allowed_roots, dry_run=False, *, include_source_artifacts=False):
     requested = Path(path or "").expanduser()
     if not requested.is_absolute():
         requested = Path.cwd() / requested
@@ -574,7 +651,14 @@ def delete_file(path, allowed_roots, dry_run=False):
         "dry_run": bool(dry_run),
         "written": bool(not dry_run),
         "size": 0,
-        "diff": clip_output(diff, DEFAULT_DIFF_MAX_CHARS),
+        "before_existed": True,
+        "before_sha256": _sha256_text(before),
+        "before_size": len(before),
+        "after_existed": False,
+        "after_sha256": _sha256_text(""),
+        "after_size": 0,
+        **_source_snapshot_payload(True, before, False, "", include_source_artifacts=include_source_artifacts),
+        **_source_diff_payload(diff, include_source_artifacts=include_source_artifacts),
         "diff_stats": _text_diff_line_counts(before, ""),
         "started_at": started_at,
         "finished_at": now_iso(),

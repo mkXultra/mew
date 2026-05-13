@@ -21273,6 +21273,7 @@ def test_implement_v2_write_file_approved_apply_records_mutation_evidence(tmp_pa
             approved_write_calls=(
                 {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
             ),
+            artifact_dir=tmp_path / "artifacts",
         ),
         provider_calls=(
             {
@@ -21298,6 +21299,19 @@ def test_implement_v2_write_file_approved_apply_records_mutation_evidence(tmp_pa
     assert tool_result["content"][0]["dry_run"] is False
     assert tool_result["content"][0]["written"] is True
     assert tool_result["evidence_refs"]
+    assert tool_result["content_refs"]
+    mutation = tool_result["content"][0]["typed_source_mutation"]
+    assert mutation["kind"] == "typed_source_mutation"
+    assert mutation["tool_route"] == "typed_source_mutation"
+    assert mutation["diff_ref"] == tool_result["content"][0]["source_diff_ref"]
+    assert mutation["snapshots"]["pre"]["existed"] is False
+    assert mutation["snapshots"]["post"]["sha256"]
+    assert tool_result["evidence_refs"] == [mutation["mutation_ref"]]
+    assert "out.txt" in Path(mutation["diff_ref"]).read_text(encoding="utf-8")
+    assert tool_result["content"][0]["source_snapshot_refs"]["pre"] in tool_result["content_refs"]
+    assert tool_result["content"][0]["source_snapshot_refs"]["post"] in tool_result["content_refs"]
+    assert tool_result["side_effects"][0]["record"]["mutation_ref"] == mutation["mutation_ref"]
+    assert tool_result["side_effects"][0]["diff_ref"] == mutation["diff_ref"]
     assert tool_result["content"][0]["approval_id"] == "approval-1"
     assert tool_result["side_effects"][0]["approval_status"] == "approved"
     assert tool_result["side_effects"][0]["approval_id"] == "approval-1"
@@ -21523,6 +21537,7 @@ def test_implement_v2_edit_file_allows_unchanged_large_line_context(tmp_path) ->
             approved_write_calls=(
                 {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
             ),
+            artifact_dir=tmp_path / "artifacts",
         ),
         provider_calls=(
             {
@@ -21543,6 +21558,12 @@ def test_implement_v2_edit_file_allows_unchanged_large_line_context(tmp_path) ->
     assert result.status == "analysis_ready"
     assert tool_result["status"] == "completed"
     assert target.read_text(encoding="utf-8") == new_text
+    mutation = tool_result["content"][0]["typed_source_mutation"]
+    assert mutation["operation"] == "edit_file"
+    assert mutation["snapshots"]["pre"]["sha256"] != mutation["snapshots"]["post"]["sha256"]
+    assert mutation["diff_ref"] in tool_result["content_refs"]
+    assert tool_result["evidence_refs"] == [mutation["mutation_ref"]]
+    assert "vm.js" in Path(mutation["diff_ref"]).read_text(encoding="utf-8")
 
 
 def test_implement_v2_apply_patch_rejects_new_large_single_line_source(tmp_path) -> None:
@@ -21733,6 +21754,7 @@ def test_implement_v2_write_rejects_paths_outside_allowed_write_roots(tmp_path) 
                     "content": "bad\n",
                     "create": True,
                     "apply": True,
+                    "expected_pre_sha256": hashlib.sha256(b"irrelevant").hexdigest(),
                 },
             },
         ),
@@ -21742,8 +21764,50 @@ def test_implement_v2_write_rejects_paths_outside_allowed_write_roots(tmp_path) 
 
     assert result.status == "blocked"
     assert tool_result["status"] == "failed"
+    assert tool_result["content"][0]["failure_class"] == "path_policy_failure"
+    assert tool_result["content"][0]["failure_subclass"] == "write_path_policy_rejected"
+    assert tool_result["content"][0]["recoverable"] is True
     assert "outside allowed write roots" in tool_result["content"][0]["reason"]
     assert not outside.exists()
+
+
+def test_implement_v2_write_rejects_stale_precondition_without_mutation_evidence(tmp_path) -> None:
+    target = tmp_path / "README.md"
+    target.write_text("old\n", encoding="utf-8")
+    stale_sha = hashlib.sha256("old\n".encode()).hexdigest()
+    target.write_text("changed elsewhere\n", encoding="utf-8")
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(
+            tmp_path,
+            approved_write_calls=(
+                {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
+            ),
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "write_file",
+                "arguments": {
+                    "path": "README.md",
+                    "content": "new\n",
+                    "apply": True,
+                    "expected_pre_sha256": stale_sha,
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "stale write rejected"},
+    )
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert result.status == "blocked"
+    assert tool_result["status"] == "failed"
+    assert not tool_result["evidence_refs"]
+    assert payload["failure_class"] == "stale_source_precondition"
+    assert payload["failure_subclass"] == "pre_snapshot_sha_mismatch"
+    assert payload["expected_pre_sha256"] == stale_sha
+    assert target.read_text(encoding="utf-8") == "changed elsewhere\n"
 
 
 def test_implement_v2_edit_file_exact_old_dry_run_and_no_match_failure(tmp_path) -> None:
@@ -22038,6 +22102,7 @@ def test_implement_v2_apply_patch_dry_run_and_approved_apply(tmp_path) -> None:
             approved_write_calls=(
                 {"provider_call_id": "call-1", "status": "approved", "approval_id": "approval-1"},
             ),
+            artifact_dir=tmp_path / "artifacts",
         ),
         provider_calls=(
             {
@@ -22055,7 +22120,14 @@ def test_implement_v2_apply_patch_dry_run_and_approved_apply(tmp_path) -> None:
     assert dry_payload["patch_transport"]["transport"] == "legacy_patch_string"
     assert apply.status == "analysis_ready"
     assert target.read_text(encoding="utf-8") == "new\n"
-    assert apply.updated_lane_state["proof_manifest"]["tool_results"][0]["evidence_refs"]
+    apply_result = apply.updated_lane_state["proof_manifest"]["tool_results"][0]
+    mutation = apply_result["content"][0]["typed_source_mutation"]
+    assert apply_result["evidence_refs"] == [mutation["mutation_ref"]]
+    assert mutation["operation"] == "apply_patch"
+    assert mutation["diff_ref"] in apply_result["content_refs"]
+    assert "README.md" in Path(mutation["diff_ref"]).read_text(encoding="utf-8")
+    assert apply_result["content"][0]["source_snapshot_refs"]["pre"] in apply_result["content_refs"]
+    assert apply_result["content"][0]["source_snapshot_refs"]["post"] in apply_result["content_refs"]
 
 
 def test_implement_v2_apply_patch_lines_dry_run_and_approved_apply(tmp_path) -> None:
@@ -22565,17 +22637,21 @@ def _write_lane_input(
     *,
     approved_write_calls=(),
     task_contract: dict[str, object] | None = None,
+    artifact_dir=None,
 ) -> ImplementLaneInput:
+    lane_config = {
+        "mode": "write",
+        "allowed_write_roots": ["."],
+        "approved_write_calls": list(approved_write_calls),
+    }
+    if artifact_dir is not None:
+        lane_config["artifact_dir"] = str(artifact_dir)
     return ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-1",
         workspace=str(tmp_path),
         lane=IMPLEMENT_V2_LANE,
-        lane_config={
-            "mode": "write",
-            "allowed_write_roots": ["."],
-            "approved_write_calls": list(approved_write_calls),
-        },
+        lane_config=lane_config,
         task_contract=task_contract or {},
     )
 

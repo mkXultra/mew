@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import re
 from pathlib import Path
 
-from ..write_tools import delete_file, edit_file, edit_file_hunks, write_file
+from ..write_tools import delete_file, edit_file, edit_file_hunks, resolve_allowed_write_path, write_file
 from .replay import build_invalid_tool_result
 from .types import ToolCallEnvelope, ToolResultEnvelope
 
@@ -59,6 +60,7 @@ class ImplementV2WriteRuntime:
         allowed_write_roots: tuple[str, ...] | list[str] | None = None,
         approved_write_calls: tuple[object, ...] | list[object] | None = None,
         allow_governance_writes: bool = False,
+        artifact_dir: object | None = None,
     ):
         self.workspace = Path(str(workspace or ".")).expanduser().resolve(strict=False)
         self.allowed_write_roots = tuple(
@@ -66,6 +68,7 @@ class ImplementV2WriteRuntime:
         )
         self.approved_write_calls = tuple(approved_write_calls or ())
         self.allow_governance_writes = bool(allow_governance_writes)
+        self.artifact_dir = Path(str(artifact_dir)).expanduser().resolve(strict=False) if artifact_dir else None
 
     def execute(self, call: ToolCallEnvelope) -> ToolResultEnvelope:
         if call.tool_name not in WRITE_TOOL_NAMES:
@@ -79,6 +82,7 @@ class ImplementV2WriteRuntime:
                 payload = self._apply_patch(call)
         except (OSError, RuntimeError, ValueError) as exc:
             content = {"reason": str(exc)}
+            content.update(_write_failure_recovery_payload(call, reason=str(exc)))
             if call.tool_name == "edit_file":
                 content.update(self._edit_file_recovery_payload(call, reason=str(exc)))
             elif call.tool_name == "apply_patch":
@@ -99,6 +103,14 @@ class ImplementV2WriteRuntime:
         apply = _apply_requested(args)
         path = str(_workspace_path(args.get("path") or "", self.workspace))
         self._raise_for_governance_path(path)
+        stale = _stale_precondition_failure_payload(
+            path,
+            args,
+            allowed_write_roots=self.allowed_write_roots,
+            create=bool(args.get("create")),
+        )
+        if stale is not None:
+            return stale
         approval = self._approval_for_call(call) if apply else None
         denied = _denied_payload(call, approval=approval) if apply and not _approval_granted(approval) else None
         if denied is not None:
@@ -119,14 +131,18 @@ class ImplementV2WriteRuntime:
             self.allowed_write_roots,
             create=bool(args.get("create")),
             dry_run=not apply,
+            include_source_artifacts=True,
         )
-        return _write_payload(call, result, apply=apply, approval=approval)
+        return _write_payload(call, result, apply=apply, approval=approval, artifact_dir=self.artifact_dir)
 
     def _edit_file(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
         apply = _apply_requested(args)
         path = str(_workspace_path(args.get("path") or "", self.workspace))
         self._raise_for_governance_path(path)
+        stale = _stale_precondition_failure_payload(path, args, allowed_write_roots=self.allowed_write_roots)
+        if stale is not None:
+            return stale
         approval = self._approval_for_call(call) if apply else None
         denied = _denied_payload(call, approval=approval) if apply and not _approval_granted(approval) else None
         if denied is not None:
@@ -149,8 +165,9 @@ class ImplementV2WriteRuntime:
             self.allowed_write_roots,
             replace_all=bool(args.get("replace_all")),
             dry_run=not apply,
+            include_source_artifacts=True,
         )
-        return _write_payload(call, result, apply=apply, approval=approval)
+        return _write_payload(call, result, apply=apply, approval=approval, artifact_dir=self.artifact_dir)
 
     def _edit_file_recovery_payload(self, call: ToolCallEnvelope, *, reason: str) -> dict[str, object]:
         if "old text was not found" not in reason:
@@ -253,6 +270,14 @@ class ImplementV2WriteRuntime:
         patch_path = str(_workspace_path(patch_args["path"], self.workspace))
         patch_lexical_path = str(_workspace_lexical_path(patch_args["path"], self.workspace))
         patch_operation = str(patch_args.get("operation") or "update_file")
+        stale = _stale_precondition_failure_payload(
+            patch_path,
+            args,
+            allowed_write_roots=self.allowed_write_roots,
+            create=patch_operation == "add_file",
+        )
+        if stale is not None:
+            return stale
         quality_failure = _patch_source_mutation_quality_failure_payload(
             patch_path,
             patch_args,
@@ -271,12 +296,14 @@ class ImplementV2WriteRuntime:
                 self.allowed_write_roots,
                 create=True,
                 dry_run=not apply,
+                include_source_artifacts=True,
             )
         elif patch_operation == "delete_file":
             result = delete_file(
                 patch_lexical_path,
                 self.allowed_write_roots,
                 dry_run=not apply,
+                include_source_artifacts=True,
             )
         else:
             result = edit_file_hunks(
@@ -284,12 +311,13 @@ class ImplementV2WriteRuntime:
                 patch_args["edits"],
                 self.allowed_write_roots,
                 dry_run=not apply,
+                include_source_artifacts=True,
             )
         result["operation"] = "apply_patch"
         result["patch_operation"] = patch_operation
         result["patch_format"] = patch_args["format"]
         result["patch_transport"] = _patch_transport_metadata(args, patch_args=patch_args)
-        return _write_payload(call, result, apply=apply, approval=approval)
+        return _write_payload(call, result, apply=apply, approval=approval, artifact_dir=self.artifact_dir)
 
     def _approval_for_call(self, call: ToolCallEnvelope) -> dict[str, object]:
         for raw_approval in self.approved_write_calls:
@@ -321,18 +349,32 @@ class ImplementV2WriteRuntime:
     def _result_from_payload(self, call: ToolCallEnvelope, payload: dict[str, object]) -> ToolResultEnvelope:
         status = str(payload.get("mew_status") or "completed")
         is_error = status in {"failed", "denied", "invalid", "interrupted"}
-        content_refs = ()
-        if payload.get("diff"):
-            content_refs = (f"implement-v2-write://{call.lane_attempt_id}/{call.provider_call_id}/diff",)
-        evidence_refs = ()
+        content_refs_list: list[str] = []
+        source_diff_ref = str(payload.get("source_diff_ref") or "")
+        if source_diff_ref:
+            content_refs_list.append(source_diff_ref)
+        elif payload.get("diff"):
+            content_refs_list.append(f"implement-v2-write://{call.lane_attempt_id}/{call.provider_call_id}/diff")
+        snapshot_refs = payload.get("source_snapshot_refs") if isinstance(payload.get("source_snapshot_refs"), dict) else {}
+        for key in ("pre", "post"):
+            ref = str(snapshot_refs.get(key) or "")
+            if ref:
+                content_refs_list.append(ref)
+        content_refs = tuple(dict.fromkeys(content_refs_list))
+        typed_mutation = payload.get("typed_source_mutation") if isinstance(payload.get("typed_source_mutation"), dict) else {}
+        mutation_ref = str(typed_mutation.get("mutation_ref") or "")
+        evidence_refs = (mutation_ref,) if payload.get("written") and payload.get("dry_run") is False and mutation_ref else ()
         side_effects = ()
         if payload.get("written") and payload.get("dry_run") is False:
-            evidence_refs = (f"implement-v2-write://{call.lane_attempt_id}/{call.provider_call_id}/mutation",)
             side_effects = (
                 {
                     "kind": "file_write",
                     "operation": payload.get("operation") or call.tool_name,
                     "path": payload.get("path") or "",
+                    "mutation_ref": mutation_ref,
+                    "diff_ref": source_diff_ref,
+                    "snapshot_refs": dict(snapshot_refs),
+                    "record": dict(typed_mutation),
                     "approval_status": payload.get("approval_status") or "",
                     "approval_source": payload.get("approval_source") or "",
                     "approval_id": payload.get("approval_id") or "",
@@ -705,15 +747,223 @@ def _write_payload(
     *,
     apply: bool,
     approval: dict[str, object] | None,
+    artifact_dir: Path | None = None,
 ) -> dict[str, object]:
     payload = dict(result)
     payload.setdefault("operation", call.tool_name)
+    _attach_typed_source_mutation_payload(call, payload, artifact_dir=artifact_dir)
     payload["mew_status"] = "completed"
     payload["approval_status"] = str((approval or {}).get("status") or ("approved" if apply else "not_required_for_dry_run"))
     payload["approval_source"] = str((approval or {}).get("source") or ("external_write_approval" if apply else ""))
     payload["approval_id"] = str((approval or {}).get("approval_id") or "")
     payload["apply_requested"] = bool(apply)
     return payload
+
+
+def _stale_precondition_failure_payload(
+    path: str,
+    args: dict[str, object],
+    *,
+    allowed_write_roots: tuple[str, ...],
+    create: bool = False,
+) -> dict[str, object] | None:
+    expected_sha = _first_present(
+        args,
+        "expected_pre_sha256",
+        "expected_before_sha256",
+        "pre_sha256",
+        "before_sha256",
+        "source_snapshot_pre_sha256",
+    )
+    if expected_sha is None:
+        return None
+    expected = _normalize_sha256(expected_sha)
+    if not expected:
+        return None
+    resolved = resolve_allowed_write_path(path, allowed_write_roots, create=create)
+    path = str(resolved)
+    current_exists = Path(path).exists()
+    current_sha = _sha256_file(path) if current_exists else _sha256_text("")
+    if current_sha == expected:
+        return None
+    return {
+        "mew_status": "failed",
+        "failure_class": "stale_source_precondition",
+        "failure_subclass": "pre_snapshot_sha_mismatch",
+        "recoverable": True,
+        "path": path,
+        "current_exists": current_exists,
+        "expected_pre_sha256": expected,
+        "current_pre_sha256": current_sha,
+        "suggested_tool": "read_file",
+        "suggested_next_action": "refresh the target source snapshot, then retry the typed source mutation with a fresh precondition",
+    }
+
+
+def _normalize_sha256(value: object) -> str:
+    text = str(value or "").strip()
+    if text.startswith("sha256:"):
+        text = text.removeprefix("sha256:")
+    return text
+
+
+def _sha256_file(path: str) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _write_failure_recovery_payload(call: ToolCallEnvelope, *, reason: str) -> dict[str, object]:
+    text = str(reason or "")
+    if (
+        "outside allowed write roots" not in text
+        and "write is disabled" not in text
+        and "write path is empty" not in text
+        and "governance write path is protected" not in text
+        and "path is a directory" not in text
+        and "refuses symlink paths" not in text
+    ):
+        return {}
+    args = dict(call.arguments)
+    return {
+        "failure_class": "path_policy_failure",
+        "failure_subclass": "write_path_policy_rejected",
+        "recoverable": True,
+        "path": str(args.get("path") or ""),
+        "suggested_tool": call.tool_name,
+        "suggested_next_action": (
+            "retry with a target path inside the approved write roots, or request an explicit write root/governance "
+            "approval if this path is intentional"
+        ),
+    }
+
+
+def _attach_typed_source_mutation_payload(
+    call: ToolCallEnvelope,
+    payload: dict[str, object],
+    *,
+    artifact_dir: Path | None = None,
+) -> None:
+    path = str(payload.get("path") or "")
+    operation = str(payload.get("operation") or call.tool_name)
+    route_ref_base = f"implement-v2-write://{call.lane_attempt_id}/{call.provider_call_id}"
+    exact_diff_text = str(payload.pop("source_diff_text", "") or "")
+    display_diff = str(payload.get("diff") or "")
+    diff_text = exact_diff_text or display_diff
+    diff_ref = f"{route_ref_base}/source-diff" if diff_text else ""
+    pre_ref = f"{route_ref_base}/source-snapshot/pre"
+    post_ref = f"{route_ref_base}/source-snapshot/post"
+    mutation_ref = f"{route_ref_base}/mutation"
+    pre_snapshot = _snapshot_with_ref(payload.pop("source_snapshot_pre", None), ref=pre_ref, path=path)
+    post_snapshot = _snapshot_with_ref(payload.pop("source_snapshot_post", None), ref=post_ref, path=path)
+    artifact_refs = _write_source_mutation_artifacts(
+        call,
+        payload=payload,
+        exact_diff_text=exact_diff_text,
+        pre_snapshot=pre_snapshot,
+        post_snapshot=post_snapshot,
+        artifact_dir=artifact_dir,
+    )
+    if artifact_refs:
+        diff_ref = str(artifact_refs.get("source_diff_ref") or diff_ref)
+        pre_ref = str(artifact_refs.get("pre_snapshot_ref") or pre_ref)
+        post_ref = str(artifact_refs.get("post_snapshot_ref") or post_ref)
+        mutation_ref = str(artifact_refs.get("mutation_ref") or mutation_ref)
+        pre_snapshot["ref"] = pre_ref
+        post_snapshot["ref"] = post_ref
+    if diff_ref:
+        payload["source_diff_ref"] = diff_ref
+    payload["source_snapshot_refs"] = {"pre": pre_ref, "post": post_ref}
+    payload["typed_source_mutation"] = {
+        "schema_version": 1,
+        "kind": "typed_source_mutation",
+        "mutation_ref": mutation_ref,
+        "tool_route": "typed_source_mutation",
+        "tool_name": call.tool_name,
+        "operation": operation,
+        "path": path,
+        "changed": bool(payload.get("changed")),
+        "written": bool(payload.get("written")),
+        "dry_run": bool(payload.get("dry_run")),
+        "diff_ref": diff_ref,
+        "diff_sha256": str(payload.get("source_diff_sha256") or payload.get("diff_sha256") or ""),
+        "diff_size": int(payload.get("source_diff_size") or 0),
+        "diff_line_count": int(payload.get("source_diff_line_count") or 0),
+        "diff_inline_exact": bool(payload.get("source_diff_inline_exact")),
+        "diff_artifact_written": bool(artifact_refs.get("source_diff_ref") if artifact_refs else False),
+        "snapshots": {"pre": pre_snapshot, "post": post_snapshot},
+    }
+    if artifact_refs:
+        payload["source_mutation_artifacts"] = artifact_refs
+    _drop_internal_source_diff_fields(payload)
+
+
+def _snapshot_with_ref(value: object, *, ref: str, path: str) -> dict[str, object]:
+    snapshot = dict(value) if isinstance(value, dict) else {}
+    snapshot["ref"] = ref
+    snapshot["path"] = path
+    return snapshot
+
+
+def _drop_internal_source_diff_fields(payload: dict[str, object]) -> None:
+    for key in (
+        "source_diff_sha256",
+        "source_diff_size",
+        "source_diff_line_count",
+        "source_diff_inline_exact",
+        "source_diff_clipped",
+    ):
+        payload.pop(key, None)
+
+
+def _write_source_mutation_artifacts(
+    call: ToolCallEnvelope,
+    *,
+    payload: dict[str, object],
+    exact_diff_text: str,
+    pre_snapshot: dict[str, object],
+    post_snapshot: dict[str, object],
+    artifact_dir: Path | None,
+) -> dict[str, str]:
+    if artifact_dir is None:
+        return {}
+    safe_lane = _safe_artifact_part(call.lane_attempt_id)
+    safe_call = _safe_artifact_part(call.provider_call_id or call.mew_tool_call_id or "call")
+    root = artifact_dir / "implement_v2" / "source-mutations" / safe_lane / safe_call
+    root.mkdir(parents=True, exist_ok=True)
+    refs: dict[str, str] = {}
+    if exact_diff_text:
+        diff_path = root / "source-diff.patch"
+        diff_path.write_text(exact_diff_text, encoding="utf-8")
+        refs["source_diff_ref"] = str(diff_path)
+    pre_path = root / "pre-snapshot.json"
+    post_path = root / "post-snapshot.json"
+    pre_path.write_text(json.dumps(pre_snapshot, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    post_path.write_text(json.dumps(post_snapshot, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    refs["pre_snapshot_ref"] = str(pre_path)
+    refs["post_snapshot_ref"] = str(post_path)
+    mutation_path = root / "mutation.json"
+    mutation_stub = {
+        "schema_version": 1,
+        "kind": "typed_source_mutation",
+        "tool_name": call.tool_name,
+        "operation": str(payload.get("operation") or call.tool_name),
+        "path": str(payload.get("path") or ""),
+        "changed": bool(payload.get("changed")),
+        "written": bool(payload.get("written")),
+        "dry_run": bool(payload.get("dry_run")),
+        "source_diff_sha256": str(payload.get("source_diff_sha256") or payload.get("diff_sha256") or ""),
+    }
+    mutation_path.write_text(json.dumps(mutation_stub, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    refs["mutation_ref"] = str(mutation_path)
+    return refs
+
+
+def _safe_artifact_part(value: object) -> str:
+    text = str(value or "").strip() or "unknown"
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", text)[:120]
 
 
 def _patch_edit_arguments(args: dict[str, object]) -> dict[str, object]:
