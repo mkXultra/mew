@@ -7,8 +7,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import time
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from .completion_resolver import (
     CompletionResolver,
@@ -105,6 +106,12 @@ _SOURCE_MUTATION_COMMAND_INTENTS = frozenset(
 )
 _COMMAND_RUN_ID_RE = re.compile(r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)")
 _COMMAND_OUTPUT_REF_RE = re.compile(r"implement-v2-exec://[^/\s]+/(?P<id>[^/\s]+)/output")
+_TASK_PATH_TOKEN_RE = re.compile(
+    r"(?<![\w./\\:-])(?P<path>(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\."
+    r"(?:js|mjs|cjs|ts|tsx|jsx|py|pyx|c|h|cc|cpp|hpp|rs|go|java|sh|rb|php|pl|lua|json|yaml|yml|toml|md|txt|html|css|"
+    r"wasm|bin|out|so|dylib|exe|png|ppm|bmp|jpg|jpeg|gif|svg))"
+    r"(?![\w.-])"
+)
 _SEMANTIC_VERIFIER_FAILURE_PATTERNS = (
     re.compile(r"\bvm\s+(?:finished|stopped)\s+exit=(?!0\b)\d+\b", re.IGNORECASE),
     re.compile(r"\bmissing\s+expected\s+(?:artifact|frame|output)\b", re.IGNORECASE),
@@ -2150,6 +2157,7 @@ def _responses_input_items(
 ) -> list[dict[str, object]]:
     task_payload = {
         "task_contract": dict(lane_input.task_contract),
+        "task_facts": _provider_visible_task_facts(lane_input),
         "compact_sidecar_digest": dict(compact_sidecar_digest),
         "workspace": lane_input.workspace,
         "lane": lane_input.lane,
@@ -2172,6 +2180,95 @@ def _responses_input_items(
         if converted:
             items.append(converted)
     return items
+
+
+def _provider_visible_task_facts(lane_input: ImplementLaneInput) -> dict[str, object]:
+    """Return factual task/path context without prescribing the next action."""
+
+    contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
+    verify_command = str(contract.get("verify_command") or "").strip()
+    text_sources = [
+        verify_command,
+        str(contract.get("description") or ""),
+        str(contract.get("title") or ""),
+        str(contract.get("guidance") or ""),
+    ]
+    constraints = contract.get("acceptance_constraints")
+    if isinstance(constraints, list):
+        text_sources.extend(str(item or "") for item in constraints)
+
+    verify_paths = _task_paths_from_text(verify_command)
+    mentioned_paths = _dedupe_task_paths(path for source in text_sources for path in _task_paths_from_text(source))
+    missing_paths = [
+        path
+        for path in mentioned_paths
+        if _task_path_is_safe_relative(path) and not (Path(lane_input.workspace) / path).exists()
+    ]
+    facts = {
+        "verify_command_paths": verify_paths,
+        "mentioned_workspace_paths": mentioned_paths,
+        "missing_workspace_paths": missing_paths,
+    }
+    return {key: value for key, value in facts.items() if value}
+
+
+def _task_paths_from_text(text: object) -> list[str]:
+    raw = str(text or "")
+    if not raw.strip():
+        return []
+    paths: list[str] = []
+    try:
+        tokens = shlex.split(raw, posix=False)
+    except ValueError:
+        tokens = []
+    for token in tokens:
+        candidate = _normalize_task_path_token(token)
+        if candidate:
+            paths.append(candidate)
+    paths.extend(_normalize_task_path_token(match.group("path")) for match in _TASK_PATH_TOKEN_RE.finditer(raw))
+    return _dedupe_task_paths(path for path in paths if path)
+
+
+def _normalize_task_path_token(token: object) -> str:
+    text = str(token or "").strip().strip("`'\"()[]{}<>").rstrip(".,:;")
+    if not text:
+        return ""
+    if "\\" in text or re.match(r"^[A-Za-z]:", text):
+        return ""
+    if text.startswith("-"):
+        return ""
+    if "://" in text:
+        return ""
+    if text.startswith(("/", "../", "/tmp/", "/var/tmp/")):
+        return ""
+    while text.startswith("./"):
+        text = text[2:]
+    if not _task_path_is_safe_relative(text):
+        return ""
+    return text
+
+
+def _task_path_is_safe_relative(path: object) -> bool:
+    text = str(path or "").strip()
+    if not text or "\\" in text or re.match(r"^[A-Za-z]:", text):
+        return False
+    if text.startswith(("/", "../")) or "/../" in text:
+        return False
+    parts = text.split("/")
+    if any(part in {"", ".", ".."} or part.startswith("..") for part in parts):
+        return False
+    return bool(_TASK_PATH_TOKEN_RE.fullmatch(text))
+
+
+def _dedupe_task_paths(paths: Iterable[object]) -> list[str]:
+    result: list[str] = []
+    for path in paths:
+        text = str(path or "").strip()
+        if text and text not in result:
+            result.append(text)
+        if len(result) >= 12:
+            break
+    return result
 
 
 def _compact_sidecar_digest_for_request(

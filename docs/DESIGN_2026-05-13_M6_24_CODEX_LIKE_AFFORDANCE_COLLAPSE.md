@@ -157,6 +157,9 @@ The model must not see:
 Allowed provider-visible facts:
 
 - tool names, status, exit code, command id, cwd, and bounded stdout/stderr;
+- factual task-file context such as `verify_command_paths`,
+  `mentioned_workspace_paths`, and `missing_workspace_paths` when derived from
+  the task contract and current workspace state;
 - changed paths, diffstat, source diff refs, typed evidence refs;
 - path:line anchors and bounded code excerpts from read/search;
 - verifier freshness stated as a fact, for example "no verifier result after
@@ -173,6 +176,27 @@ Forbidden provider-visible pressure:
 - "controller selected edit";
 - "prewrite probe plateau";
 - any JSON field whose purpose is to prescribe the next ordinary repair action.
+
+### Factual task-file context
+
+The provider-visible task payload may include a small `task_facts` object. It is
+not a planner or WorkFrame replacement. Its purpose is to make existing task
+facts visible in the same compact way Codex gets them from a normal transcript:
+
+```json
+{
+  "verify_command_paths": ["vm.js"],
+  "mentioned_workspace_paths": ["vm.js"],
+  "missing_workspace_paths": ["vm.js"]
+}
+```
+
+Allowed values are workspace-relative paths parsed from the task contract,
+acceptance constraints, and verifier command, plus a factual existence check in
+the current workspace. This object must not include `next_action`,
+`required_next`, first-write pressure, probe thresholds, or controller phase
+fields. It may say that `vm.js` is mentioned and missing; it must not say
+"create vm.js now".
 
 ### Canonical forbidden provider-visible fields
 

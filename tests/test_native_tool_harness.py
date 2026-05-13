@@ -408,6 +408,83 @@ def test_live_native_descriptor_preserves_requested_lifecycle_tools(tmp_path: Pa
     assert "read_command_output" in tool_names
 
 
+def test_native_provider_input_surfaces_missing_verify_path_as_factual_task_fact(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "description": "Implement a runtime called vm.js.",
+            "verify_command": "node vm.js",
+            "acceptance_constraints": ["Running node vm.js should save a frame."],
+        },
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    payload = _task_payload(provider.requests[0])
+    task_facts = payload["task_facts"]
+    assert task_facts["verify_command_paths"] == ["vm.js"]
+    assert task_facts["mentioned_workspace_paths"] == ["vm.js"]
+    assert task_facts["missing_workspace_paths"] == ["vm.js"]
+    rendered = json.dumps(task_facts, sort_keys=True)
+    assert "next_action" not in rendered
+    assert "required_next" not in rendered
+    assert "first_write" not in rendered
+
+
+def test_native_provider_input_does_not_mark_existing_verify_path_missing(tmp_path: Path) -> None:
+    (tmp_path / "vm.js").write_text("console.log('ok')\n", encoding="utf-8")
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    lane_input = _lane_input(tmp_path, task_contract={"verify_command": "node vm.js"})
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    task_facts = _task_payload(provider.requests[0])["task_facts"]
+    assert task_facts["verify_command_paths"] == ["vm.js"]
+    assert task_facts["mentioned_workspace_paths"] == ["vm.js"]
+    assert "missing_workspace_paths" not in task_facts
+
+
+def test_native_provider_input_task_facts_normalize_dot_slash_and_reject_unsafe_paths(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "description": "Ignore ../secret.py, ..\\secret.py, and C:\\tmp\\foo.py; implement ./vm.js.",
+            "verify_command": "node ./vm.js",
+        },
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    task_facts = _task_payload(provider.requests[0])["task_facts"]
+    assert task_facts["verify_command_paths"] == ["vm.js"]
+    assert task_facts["mentioned_workspace_paths"] == ["vm.js"]
+    assert task_facts["missing_workspace_paths"] == ["vm.js"]
+    rendered = json.dumps(task_facts, sort_keys=True)
+    assert "secret.py" not in rendered
+    assert "foo.py" not in rendered
+
+
+@pytest.mark.parametrize("verify_command", ["node src\\vm.js", "node .\\vm.js", "python pkg\\module.py"])
+def test_native_provider_input_task_facts_reject_backslash_paths(tmp_path: Path, verify_command: str) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    lane_input = _lane_input(tmp_path, task_contract={"verify_command": verify_command})
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    payload = _task_payload(provider.requests[0])
+    assert "task_facts" not in payload or not payload["task_facts"]
+
+
 def test_native_provider_hides_poll_cancel_after_terminal_poll_supersedes_yield(tmp_path: Path) -> None:
     command_id = _command_run_id("run-1")
     provider = NativeFakeProvider.from_item_batches(
