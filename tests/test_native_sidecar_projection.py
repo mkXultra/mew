@@ -170,7 +170,8 @@ def test_compact_sidecar_digest_is_provider_request_context_not_state_object() -
     assert len(digest) <= 16
     assert len(serialized.encode("utf-8")) <= 6144
     assert "workframe_projection" not in digest
-    assert "workframe" in digest["sidecar_hashes"]
+    assert "debug_bundle" in digest["sidecar_hashes"]
+    assert "workframe" not in digest["sidecar_hashes"]
     assert "model_turn_index" in digest["sidecar_hashes"]
     assert "required_next_kind" not in serialized
     assert "frontier_state_update" not in serialized

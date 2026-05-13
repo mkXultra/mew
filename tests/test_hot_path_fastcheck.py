@@ -667,6 +667,7 @@ def test_hot_path_fastcheck_replays_native_provider_request_compact_digest(tmp_p
 
     assert result["status"] == "pass"
     checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_affordance_visibility_caps"]["status"] == "pass"
     assert checks["native_compact_digest_replay"]["status"] == "pass"
     assert checks["native_provider_visible_state"]["status"] == "pass"
 

@@ -12,6 +12,10 @@ import hashlib
 import json
 from typing import Iterable, Mapping
 
+from .affordance_visibility import (
+    CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS,
+    MODEL_AUTHORED_PROVIDER_VISIBLE_FIELDS,
+)
 from .native_transcript import (
     CALL_ITEM_KINDS,
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
@@ -31,40 +35,8 @@ NATIVE_UPDATED_LANE_STATE_SCHEMA_VERSION = 1
 NATIVE_TRANSCRIPT_SOURCE_OF_TRUTH = "response_transcript.json"
 NATIVE_RESPONSE_ITEMS_SOURCE_OF_TRUTH = "response_items.jsonl"
 NATIVE_SIDECAR_TRANSPORT_CHANGE = "sidecar-only"
-PROVIDER_VISIBLE_STEERING_KEYS = frozenset(
-    {
-        "first_write_due",
-        "first_write_due_entry_turn",
-        "first_write_due_overrun",
-        "first_write_grace_probe_calls",
-        "first_write_probe_threshold",
-        "first_write_turn_threshold",
-        "max_additional_probe_turns",
-        "next_action",
-        "next_action_policy",
-        "prewrite_probe_plateau",
-        "required_next",
-        "required_next_action",
-        "required_next_evidence_refs",
-        "required_next_kind",
-    }
-)
-MODEL_AUTHORED_STATE_KEYS = frozenset(
-    {
-        "active_work_todo",
-        "frontier",
-        "frontier_state",
-        "frontier_state_update",
-        "hard_runtime_frontier",
-        "model_authored_frontier",
-        "model_authored_proof",
-        "model_authored_todo",
-        "proof",
-        "proof_state",
-        "repair_history",
-        "todo",
-    }
-)
+PROVIDER_VISIBLE_STEERING_KEYS = frozenset(CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS)
+MODEL_AUTHORED_STATE_KEYS = frozenset(MODEL_AUTHORED_PROVIDER_VISIBLE_FIELDS)
 
 _ITEM_HASH_KEYS = frozenset(
     {
@@ -426,7 +398,7 @@ def build_compact_native_sidecar_digest(
             "evidence_sidecar": evidence.get("sidecar_hash") or "",
             "evidence_ref_index": evidence_index.get("index_hash") or "",
             "model_turn_index": turn_index.get("index_hash") or "",
-            "workframe": _text(workframe.get("output_hash")),
+            "debug_bundle": _text(workframe.get("output_hash")),
         },
         "counts": {
             "tool_results": len(ordered_refs),
@@ -868,7 +840,7 @@ def _digest_text(payload: Mapping[str, object]) -> str:
         f"evidence_events={counts.get('evidence_events', 0)}",
         f"evidence_sidecar_hash={sidecar_hashes.get('evidence_sidecar') or ''}",
         f"model_turn_index_hash={sidecar_hashes.get('model_turn_index') or ''}",
-        f"workframe_debug_hash={sidecar_hashes.get('workframe') or ''}",
+        f"debug_bundle_hash={sidecar_hashes.get('debug_bundle') or sidecar_hashes.get('workframe') or ''}",
     ]
     return "; ".join(part for part in parts if str(part).strip())
 

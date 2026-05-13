@@ -8,9 +8,9 @@ state channel.
 
 from __future__ import annotations
 
-import json
 from typing import Iterable, Mapping
 
+from .affordance_visibility import fields_from_forbidden_violations, scan_forbidden_provider_visible
 from .native_sidecar_projection import (
     NATIVE_RESPONSE_ITEMS_SOURCE_OF_TRUTH,
     NATIVE_SIDECAR_TRANSPORT_CHANGE,
@@ -301,14 +301,15 @@ def build_provider_visible_forbidden_fields_report(
         "instructions": instructions,
         "compact_sidecar_digest": dict(compact_sidecar_digest),
     }
-    serialized = json.dumps(provider_visible_payload, ensure_ascii=False, sort_keys=True, default=str)
-    detected = sorted(token for token in PROVIDER_VISIBLE_STEERING_KEYS if token in serialized)
+    violations = scan_forbidden_provider_visible(provider_visible_payload, surface="provider_request")
+    detected = fields_from_forbidden_violations(violations)
     return {
         "schema_version": NATIVE_PROVIDER_VISIBLE_FORBIDDEN_FIELDS_SCHEMA_VERSION,
         "report_kind": "provider_visible_forbidden_fields",
         "ok": not detected,
         "detected": detected,
         "checked": sorted(PROVIDER_VISIBLE_STEERING_KEYS),
+        "violations": violations,
         "payload_sha256": stable_json_hash(provider_visible_payload),
     }
 

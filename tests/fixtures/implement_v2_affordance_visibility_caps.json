@@ -1,0 +1,47 @@
+{
+  "compact_sidecar_digest": {
+    "hard_red_bytes": 6144,
+    "latest_evidence_refs": 12,
+    "latest_tool_cards": 6,
+    "target_bytes": 4096,
+    "top_level_keys": 16
+  },
+  "compact_sidecar_digest_latest_tool_summary": {
+    "evidence_refs": 2,
+    "hard_red_chars": 240,
+    "output_refs": 2,
+    "target_chars": 160
+  },
+  "mutation_visible_card": {
+    "changed_paths": 12,
+    "hard_red_bytes": 4096,
+    "hunk_diffstat_chars": 1000,
+    "target_bytes": 2048
+  },
+  "provider_visible_tool_output_card": {
+    "hard_red_bytes": 6144,
+    "refs": 12,
+    "status_line_chars": 240,
+    "target_bytes": 4096
+  },
+  "read_file_visible_card": {
+    "excerpt_lines": 160,
+    "hard_red_bytes": 6144,
+    "line_chars": 220,
+    "target_bytes": 4096
+  },
+  "run_command_visible_card": {
+    "hard_red_bytes": 6144,
+    "latest_failure_chars": 1200,
+    "stderr_tail_chars": 1200,
+    "stdout_tail_chars": 1200,
+    "target_bytes": 4096
+  },
+  "schema_version": 1,
+  "search_text_visible_card": {
+    "excerpt_chars": 180,
+    "hard_red_bytes": 6144,
+    "matches": 8,
+    "target_bytes": 4096
+  }
+}

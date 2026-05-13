@@ -27,6 +27,14 @@ from ..model_backends import (
     model_backend_default_base_url,
     model_backend_default_model,
 )
+from .affordance_visibility import (
+    DEFAULT_AFFORDANCE_VISIBILITY_CAPS,
+    caps_fixture_matches_default,
+    fields_from_forbidden_violations,
+    json_size_bytes,
+    load_affordance_visibility_caps_fixture,
+    scan_forbidden_provider_visible,
+)
 from .native_tool_harness import _native_call_is_verifier, _native_loop_control_state
 from .completion_resolver import COMPLETION_RESOLVER_DECISIONS_FILE
 from .native_sidecar_projection import build_compact_native_sidecar_digest
@@ -261,6 +269,7 @@ def _run_native_hot_path_fastcheck(
         transcript_error = str(exc)
 
     checks: list[HotPathCheck] = [
+        _check_affordance_visibility_caps_fixture(),
         _check_native_transcript_read(transcript_path, transcript=transcript, error=transcript_error),
     ]
     if transcript is not None:
@@ -680,19 +689,8 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
     for index, request in enumerate(provider_requests, start=1):
         checked += 1
         digest = _native_request_compact_digest(request)
-        task_payload = _native_request_task_payload(request)
         inventory = _safe_mapping(request.get("provider_request_inventory"))
         projection = _safe_mapping(digest.get("workframe_projection"))
-        serialized_digest = json.dumps(digest, ensure_ascii=False, sort_keys=True)
-        provider_visible = json.dumps(
-            {
-                "input_items": _native_request_input_items(request),
-                "instructions": _native_request_instructions(request),
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-        transition_contract = _native_request_allows_transition_contract(task_payload, digest)
         if inventory.get("model_visible_sections") != ["native_transcript_window", "compact_sidecar_digest"]:
             violations.append(
                 {
@@ -709,49 +707,37 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
                     "provider_input_authority": digest.get("provider_input_authority"),
                 }
             )
-        if len(digest) > 16:
-            violations.append({"request": index, "reason": "digest_top_level_key_cap", "key_count": len(digest)})
-        digest_bytes = len(serialized_digest.encode("utf-8"))
-        if digest_bytes > 6144:
-            violations.append({"request": index, "reason": "digest_byte_cap", "bytes": digest_bytes})
+        digest_cap_violations = _native_compact_digest_cap_violations(index, digest)
+        violations.extend(digest_cap_violations)
         if len(projection) > 8:
             violations.append(
                 {"request": index, "reason": "workframe_projection_key_cap", "key_count": len(projection)}
             )
-        if not transition_contract:
-            required_next_tokens = [
-                token
-                for token in ("required_next_kind", "required_next_evidence_refs", "needs_")
-                if token in serialized_digest
-            ]
-            if required_next_tokens:
-                violations.append(
-                    {"request": index, "reason": "default_required_next_leak", "tokens": required_next_tokens}
-                )
-        forbidden_tokens = [
-            token
-            for token in (
-                "persisted_lane_state",
-                "frontier_state_update",
-                "hard_runtime_frontier",
-                "proof_manifest",
-                "model_authored_todo",
-                "model_authored_proof",
-                "next_action_policy",
-                "next_action",
-                "required_next_action",
-                "first_write_due",
-                "first_write_due_overrun",
-                "first_write_probe_threshold",
-                "first_write_turn_threshold",
-                "first_write_grace_probe_calls",
-                "prewrite_probe_plateau",
-                "max_additional_probe_turns",
+        forbidden_violations = scan_forbidden_provider_visible(
+            {
+                "input_items": _native_request_input_items(request),
+                "instructions": _native_request_instructions(request),
+                "task_contract": _native_request_task_contract(request),
+                "compact_sidecar_digest": digest,
+                "transcript_window": request.get("transcript_window") if isinstance(request.get("transcript_window"), list) else [],
+            },
+            surface="native_provider_request",
+        )
+        if forbidden_violations:
+            forbidden_tokens = fields_from_forbidden_violations(forbidden_violations)
+            reason = (
+                "default_required_next_leak"
+                if any(token.startswith("required_next") for token in forbidden_tokens)
+                else "legacy_state_leak"
             )
-            if token in provider_visible or token in serialized_digest
-        ]
-        if forbidden_tokens:
-            violations.append({"request": index, "reason": "legacy_state_leak", "tokens": forbidden_tokens})
+            violations.append(
+                {
+                    "request": index,
+                    "reason": reason,
+                    "tokens": forbidden_tokens,
+                    "violations": forbidden_violations[:20],
+                }
+            )
         imperative_hints = _native_imperative_hint_leaks(projection)
         if imperative_hints:
             violations.append({"request": index, "reason": "imperative_instruction_hint", "hints": imperative_hints})
@@ -763,6 +749,102 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
         else "provider-visible native request state drifted beyond native transcript window + compact digest",
         {"checked_requests": checked, "violations": violations[:10]},
     )
+
+
+def _check_affordance_visibility_caps_fixture() -> HotPathCheck:
+    try:
+        fixture = load_affordance_visibility_caps_fixture(repo_root=Path(__file__).resolve().parents[3])
+    except Exception as exc:
+        return _check(
+            "native_affordance_visibility_caps",
+            False,
+            "affordance visibility caps fixture is unreadable",
+            {"error": str(exc)},
+        )
+    ok = caps_fixture_matches_default(fixture)
+    return _check(
+        "native_affordance_visibility_caps",
+        ok,
+        "affordance visibility caps fixture matches live config"
+        if ok
+        else "affordance visibility caps fixture diverges from live config",
+        {
+            "fixture": "tests/fixtures/implement_v2_affordance_visibility_caps.json",
+            "matches_default": ok,
+        },
+    )
+
+
+def _native_compact_digest_cap_violations(request_index: int, digest: Mapping[str, object]) -> list[dict[str, object]]:
+    caps = DEFAULT_AFFORDANCE_VISIBILITY_CAPS["compact_sidecar_digest"]
+    summary_caps = DEFAULT_AFFORDANCE_VISIBILITY_CAPS["compact_sidecar_digest_latest_tool_summary"]
+    if not isinstance(caps, Mapping) or not isinstance(summary_caps, Mapping):
+        return [{"request": request_index, "reason": "visibility_caps_config_invalid"}]
+    violations: list[dict[str, object]] = []
+    digest_bytes = json_size_bytes(digest)
+    hard_red_bytes = _nonnegative_int(caps.get("hard_red_bytes"))
+    if hard_red_bytes and digest_bytes > hard_red_bytes:
+        violations.append({"request": request_index, "reason": "digest_byte_cap", "bytes": digest_bytes})
+    top_level_keys = _nonnegative_int(caps.get("top_level_keys"))
+    if top_level_keys and len(digest) > top_level_keys:
+        violations.append({"request": request_index, "reason": "digest_top_level_key_cap", "key_count": len(digest)})
+    latest_tool_cards = _nonnegative_int(caps.get("latest_tool_cards"))
+    latest_tool_results = digest.get("latest_tool_results") if isinstance(digest.get("latest_tool_results"), list) else []
+    if latest_tool_cards and len(latest_tool_results) > latest_tool_cards:
+        violations.append(
+            {
+                "request": request_index,
+                "reason": "digest_latest_tool_card_cap",
+                "count": len(latest_tool_results),
+            }
+        )
+    latest_evidence_refs_cap = _nonnegative_int(caps.get("latest_evidence_refs"))
+    latest_evidence_refs = digest.get("latest_evidence_refs") if isinstance(digest.get("latest_evidence_refs"), list) else []
+    if latest_evidence_refs_cap and len(latest_evidence_refs) > latest_evidence_refs_cap:
+        violations.append(
+            {
+                "request": request_index,
+                "reason": "digest_latest_evidence_ref_cap",
+                "count": len(latest_evidence_refs),
+            }
+        )
+    summary_hard_red_chars = _nonnegative_int(summary_caps.get("hard_red_chars"))
+    output_ref_cap = _nonnegative_int(summary_caps.get("output_refs"))
+    evidence_ref_cap = _nonnegative_int(summary_caps.get("evidence_refs"))
+    for item_index, item in enumerate(latest_tool_results, start=1):
+        if not isinstance(item, Mapping):
+            continue
+        summary = str(item.get("summary") or "")
+        if summary_hard_red_chars and len(summary) > summary_hard_red_chars:
+            violations.append(
+                {
+                    "request": request_index,
+                    "reason": "digest_latest_tool_summary_char_cap",
+                    "item": item_index,
+                    "chars": len(summary),
+                }
+            )
+        output_refs = item.get("output_refs") if isinstance(item.get("output_refs"), list) else []
+        if output_ref_cap and len(output_refs) > output_ref_cap:
+            violations.append(
+                {
+                    "request": request_index,
+                    "reason": "digest_latest_tool_output_ref_cap",
+                    "item": item_index,
+                    "count": len(output_refs),
+                }
+            )
+        evidence_refs = item.get("evidence_refs") if isinstance(item.get("evidence_refs"), list) else []
+        if evidence_ref_cap and len(evidence_refs) > evidence_ref_cap:
+            violations.append(
+                {
+                    "request": request_index,
+                    "reason": "digest_latest_tool_evidence_ref_cap",
+                    "item": item_index,
+                    "count": len(evidence_refs),
+                }
+            )
+    return violations
 
 
 def _check_native_previous_response_id(provider_requests: tuple[dict[str, object], ...]) -> HotPathCheck:
