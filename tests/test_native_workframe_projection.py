@@ -113,6 +113,10 @@ def test_native_workframe_debug_bundle_replays_from_transcript_with_stable_hashe
     assert first["invariant_report"]["status"] == "pass"
     assert first["workframe_cursor"]["input_hash"] == workframe["trace"]["input_hash"]
     assert first["workframe_cursor"]["output_hash"] == workframe["trace"]["output_hash"]
+    prompt_visible = first["prompt_visible_workframe"]
+    assert prompt_visible["provider_visible"] is False
+    assert "required_next" not in prompt_visible["workframe"]
+    assert prompt_visible["workframe"]["trace"]["output_hash"] == workframe["trace"]["output_hash"]
 
 
 def test_native_prompt_inventory_exposes_only_window_and_compact_sidecar_digest() -> None:
@@ -129,6 +133,7 @@ def test_native_prompt_inventory_exposes_only_window_and_compact_sidecar_digest(
         "evidence_object": False,
     }
     assert inventory["compact_sidecar_digest_hash"] == "sha256:digest"
+    assert inventory["debug_only_sections"] == ["workframe_debug_bundle", "model_turn_index", "native_loop_signals"]
 
 
 def test_native_workframe_projection_ignores_model_authored_state_fields() -> None:

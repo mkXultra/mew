@@ -7,20 +7,20 @@ def test_native_boundary_audit_passes_current_repo() -> None:
     report = run_native_boundary_audit(Path(__file__).resolve().parents[1])
 
     assert report.ok, report.as_dict()
-    assert any(check.name == "design_tracks_finish_state_machine" for check in report.checks)
+    assert any(check.name == "design_tracks_codex_like_live_hot_path" for check in report.checks)
     assert any(check.name == "source_inventory_native_loop_control_policy_state" for check in report.checks)
 
 
 def test_native_boundary_audit_reports_missing_required_design_marker(tmp_path: Path) -> None:
     _write_complete_fixture(tmp_path)
-    design = tmp_path / "docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md"
+    design = tmp_path / "docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md"
     design.write_text("incomplete design\n", encoding="utf-8")
 
     report = run_native_boundary_audit(tmp_path)
 
     assert not report.ok
     failed = {check.name for check in report.checks if not check.passed}
-    assert "design_tracks_finish_state_machine" in failed
+    assert "design_tracks_codex_like_live_hot_path" in failed
     assert "source_inventory_native_loop_control_policy_state" not in failed
 
 
@@ -51,19 +51,14 @@ def test_native_boundary_audit_reports_missing_source_file(tmp_path: Path) -> No
 
 
 def _write_complete_fixture(root: Path) -> None:
-    design = root / "docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md"
+    design = root / "docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md"
     design.parent.mkdir(parents=True)
     design.write_text(
-        "compact_sidecar_digest <= 6144 workframe_projection top-level keys\n"
-        "Finish State Machine blocked_continue blocked_return resolver_decision\n"
-        "CompletionResolver tool を実行すること pre-extracted typed evidence refs\n"
-        "Required Next Migration ordinary repair attention_hints transition_contract\n"
-        "first_write_due verifier_repair_due next_action_policy bounded booleans\n"
-        "Non-finish / max-turn closeout migration "
-        "no lane may become `completed` without a valid `finish_call`\n"
-        "current_phase Allowed values observational label action prescription ではない\n"
-        "persisted_lane_state provider-visible compact_sidecar_digest\n"
-        "Owner phase 残す場合の compatibility 理由 Phase 1-2 Phase 3\n",
+        "Codex-like live hot path native transcript window compact factual tool-result digest mew-specific durable sidecar proof\n"
+        "Provider-Visible Forbidden next_action first_write_due prewrite_probe_plateau WorkFrame\n"
+        "Internal Sidecar Contract response_transcript.json provider request inventory typed evidence sidecars\n"
+        "Tool Surface Contract apply_patch edit_file write_file\n"
+        "Phase 1A: Transcript/Input Collapse Phase 1B: Tool Surface And Mutation Path Main Codex responsibilities\n",
         encoding="utf-8",
     )
     impl = root / "src/mew/implement_lane"
@@ -102,10 +97,11 @@ def _write_complete_fixture(root: Path) -> None:
         encoding="utf-8",
     )
     (impl / "native_sidecar_projection.py").write_text(
-        "def _workframe_projection_digest(workframe):\n"
-        '    "current_phase"\n'
-        '    "attention_hints"\n'
-        '    "loop_signals"\n'
+        "def build_compact_native_sidecar_digest(transcript):\n"
+        '    "provider_input_authority": "transcript_window_plus_compact_sidecar_digest"\n'
+        '    "latest_tool_results"\n'
+        '    "latest_evidence_refs"\n'
+        '    "sidecar_hashes"\n'
         "def _workframe_digest(workframe_bundle):\n"
         "    required_next = {}\n"
         '    "required_next_kind"\n'
@@ -120,9 +116,14 @@ def _write_complete_fixture(root: Path) -> None:
         '"prompt_visible_workframe": _prompt_visible_workframe(workframe.as_dict()),\n'
         '"reducer_output": workframe.as_dict(),\n'
         '"prompt_render_inventory"\n'
+        "def build_native_prompt_input_inventory(compact_sidecar_digest):\n"
+        '    "diagnostic_only_fields_report"\n'
+        '    "provider_visible": False\n'
+        '    "provider_visible_forbidden_fields"\n'
+        '    "native_loop_signals"\n'
         "def _prompt_visible_workframe(workframe):\n"
-        '    "required_next"\n'
-        '    "target_paths"\n'
-        '    "evidence_refs"\n',
+        '    "provider_visible": False\n'
+        '    "native_workframe_sidecar_debug_ref"\n'
+        '    "missing_evidence_refs"\n',
         encoding="utf-8",
     )

@@ -211,6 +211,70 @@ def test_evidence_sidecar_indexes_plain_read_and_write_mutation_refs() -> None:
     assert index["unresolved_evidence_refs"] == []
 
 
+def test_tool_result_index_carries_concise_mutation_card_refs() -> None:
+    mutation_ref = "implement-v2-write://attempt-1/call-patch/mutation"
+    diff_ref = "implement-v2-write://attempt-1/call-patch/source-diff"
+    pre_ref = "implement-v2-write://attempt-1/call-patch/source-snapshot/pre"
+    post_ref = "implement-v2-write://attempt-1/call-patch/source-snapshot/post"
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-patch",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="apply_patch",
+        status="completed",
+        content=(
+            {
+                "path": "src/app.py",
+                "changed": True,
+                "written": True,
+                "dry_run": False,
+                "source_diff_ref": diff_ref,
+                "source_snapshot_refs": {"pre": pre_ref, "post": post_ref},
+                "typed_source_mutation": {
+                    "mutation_ref": mutation_ref,
+                    "diff_ref": diff_ref,
+                    "path": "src/app.py",
+                },
+                "mutation_output_card": {
+                    "kind": "mutation_output_card",
+                    "operation": "apply_patch",
+                    "status": "applied",
+                    "path": "src/app.py",
+                    "changed": True,
+                    "written": True,
+                    "dry_run": False,
+                    "diff_ref": diff_ref,
+                    "mutation_ref": mutation_ref,
+                    "snapshot_refs": {"pre": pre_ref, "post": post_ref},
+                    "artifact_refs": [diff_ref, pre_ref, post_ref, mutation_ref],
+                },
+            },
+        ),
+        content_refs=(diff_ref, pre_ref, post_ref),
+        evidence_refs=(mutation_ref,),
+        side_effects=(
+            {
+                "kind": "file_write",
+                "operation": "apply_patch",
+                "path": "src/app.py",
+                "mutation_ref": mutation_ref,
+                "diff_ref": diff_ref,
+                "written": True,
+                "dry_run": False,
+            },
+        ),
+    )
+
+    index = build_tool_result_index_artifact((result,))
+    card = index["by_provider_call_id"]["call-patch"]["compact_result_card"]
+
+    assert index["by_provider_call_id"]["call-patch"]["changed_paths"] == ["src/app.py"]
+    assert index["by_provider_call_id"]["call-patch"]["mutation_refs"] == [mutation_ref]
+    assert mutation_ref in index["by_provider_call_id"]["call-patch"]["artifact_refs"]
+    assert card["mutation_output_card"]["mutation_ref"] == mutation_ref
+    assert "source-diff" in card["artifact_refs"][0]
+
+
 def test_evidence_sidecar_does_not_treat_non_file_side_effects_as_mutations() -> None:
     result = ToolResultEnvelope(
         lane_attempt_id="attempt-1",

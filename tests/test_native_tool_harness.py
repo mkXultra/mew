@@ -80,11 +80,6 @@ def _loop_signals(request: dict[str, object]) -> dict[str, object]:
     return signals
 
 
-def _verifier_state(request: dict[str, object]) -> dict[str, object]:
-    digest = _compact_sidecar_digest(request)
-    return digest["workframe_projection"]["verifier_state"]
-
-
 def test_unavailable_native_runtime_keeps_native_identity(tmp_path: Path) -> None:
     result = run_unavailable_native_implement_v2(_lane_input(tmp_path))
 
@@ -239,7 +234,7 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
     assert forbidden["detected"] == []
 
 
-def test_live_native_request_surfaces_write_file_for_hard_runtime_artifact_task(tmp_path: Path) -> None:
+def test_live_native_request_constrains_write_file_for_hard_runtime_artifact_task(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifacts"
     live_turn = NativeResponsesStreamParseResult(
         transcript=NativeTranscript(
@@ -292,12 +287,14 @@ def test_live_native_request_surfaces_write_file_for_hard_runtime_artifact_task(
 
     descriptor = call.call_args.kwargs["descriptor"]
     tool_names = {str(tool.get("name") or "") for tool in descriptor["request_body"]["tools"]}
-    assert "write_file" in tool_names
+    assert "write_file" not in tool_names
     assert {"edit_file", "apply_patch"} <= tool_names
-    assert "write_file/edit_file/apply_patch" in str(descriptor["request_body"]["instructions"])
+    instructions = str(descriptor["request_body"]["instructions"])
+    assert "edit_file/apply_patch" in instructions
+    assert "write_file/edit_file/apply_patch" not in instructions
 
 
-def test_native_hard_runtime_accepts_write_file_source_creation(tmp_path: Path) -> None:
+def test_native_hard_runtime_rejects_unavailable_write_file_source_creation(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -326,10 +323,11 @@ def test_native_hard_runtime_accepts_write_file_source_creation(tmp_path: Path) 
     )
 
     output = next(item for item in result.transcript.items if item.call_id == "write-1" and item.kind.endswith("_output"))
-    assert output.status == "completed"
-    assert output.is_error is False
-    assert "write_file" in output.output_text_or_ref
-    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "bad\n"
+    assert output.status == "invalid"
+    assert output.is_error is True
+    assert "write_file" not in output.output_text_or_ref
+    assert "write tool is not available" in output.output_text_or_ref
+    assert not (tmp_path / "vm.js").exists()
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
@@ -365,11 +363,12 @@ def test_native_hard_runtime_sanitizes_missing_target_edit_guidance(tmp_path: Pa
     assert output.status == "failed"
     assert output.is_error is True
     assert "create=True" in output.output_text_or_ref
-    assert "write_file" in output.output_text_or_ref
+    assert "write_file" not in output.output_text_or_ref
+    assert "write tool" in output.output_text_or_ref
     assert not (tmp_path / "vm.js").exists()
 
 
-def test_native_hard_runtime_carry_forward_preserves_write_file_call(tmp_path: Path) -> None:
+def test_native_hard_runtime_carry_forward_redacts_unavailable_write_file_call(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -401,9 +400,9 @@ def test_native_hard_runtime_carry_forward_preserves_write_file_call(tmp_path: P
     assert result.status == "blocked"
     assert len(provider.requests) == 2
     second_request = json.dumps(provider.requests[1], ensure_ascii=False, sort_keys=True)
-    assert "unavailable_write_tool" not in second_request
-    assert "write_file" in second_request
-    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "bad\n"
+    assert "unavailable_write_tool" in second_request
+    assert "write_file" not in second_request
+    assert not (tmp_path / "vm.js").exists()
 
 
 def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_path: Path) -> None:
@@ -1221,9 +1220,14 @@ def test_native_harness_adds_first_write_control_after_probe_budget(tmp_path: Pa
     assert second_request["provider_request_inventory"]["provider_visible_forbidden_fields"]["ok"] is True
     assert "first_write_due" not in json.dumps(_compact_sidecar_digest(second_request), sort_keys=True)
     assert "prewrite_probe_plateau" not in json.dumps(_compact_sidecar_digest(second_request), sort_keys=True)
+    assert "workframe_projection" not in _compact_sidecar_digest(second_request)
     signals = _loop_signals(second_request)
     assert signals["first_write_due"] is True
     assert signals["probe_count_without_write"] == 10
+    diagnostic_report = second_request["provider_request_inventory"]["diagnostic_only_fields_report"]
+    assert diagnostic_report["ok"] is True
+    assert diagnostic_report["provider_visible"] is False
+    assert "first_write_due" in diagnostic_report["fields"]
     assert "next_action_policy" not in json.dumps(_compact_sidecar_digest(second_request), sort_keys=True)
 
 

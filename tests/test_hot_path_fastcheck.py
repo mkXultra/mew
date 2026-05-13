@@ -778,7 +778,7 @@ def test_hot_path_fastcheck_rejects_default_native_required_next_leak(tmp_path):
     artifact = _write_native_artifact(tmp_path)
     _write_native_provider_request(artifact, _read_native_transcript(artifact))
     task_payload = _native_request_payload(artifact)
-    task_payload["compact_sidecar_digest"]["workframe_projection"]["required_next_kind"] = "patch"  # type: ignore[index]
+    task_payload["compact_sidecar_digest"]["required_next_kind"] = "patch"  # type: ignore[index]
     _replace_native_request_payload(artifact, task_payload)
 
     result = run_hot_path_fastcheck(artifact)

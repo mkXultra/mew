@@ -895,9 +895,88 @@ def _attach_typed_source_mutation_payload(
         "diff_artifact_written": bool(artifact_refs.get("source_diff_ref") if artifact_refs else False),
         "snapshots": {"pre": pre_snapshot, "post": post_snapshot},
     }
+    payload["mutation_output_card"] = _mutation_output_card(
+        call,
+        payload=payload,
+        operation=operation,
+        path=path,
+        mutation_ref=mutation_ref,
+        diff_ref=diff_ref,
+        snapshot_refs={"pre": pre_ref, "post": post_ref},
+        artifact_refs=artifact_refs,
+    )
+    payload.setdefault("summary", _mutation_output_summary(payload["mutation_output_card"]))
     if artifact_refs:
         payload["source_mutation_artifacts"] = artifact_refs
     _drop_internal_source_diff_fields(payload)
+
+
+def _mutation_output_card(
+    call: ToolCallEnvelope,
+    *,
+    payload: dict[str, object],
+    operation: str,
+    path: str,
+    mutation_ref: str,
+    diff_ref: str,
+    snapshot_refs: dict[str, str],
+    artifact_refs: dict[str, str],
+) -> dict[str, object]:
+    refs: list[str] = []
+    _append_ref(refs, diff_ref)
+    _append_ref(refs, snapshot_refs.get("pre"))
+    _append_ref(refs, snapshot_refs.get("post"))
+    _append_ref(refs, mutation_ref)
+    for ref in artifact_refs.values():
+        _append_ref(refs, ref)
+    return {
+        "schema_version": 1,
+        "kind": "mutation_output_card",
+        "tool_name": call.tool_name,
+        "operation": operation,
+        "status": _mutation_card_status(payload),
+        "path": path,
+        "changed": bool(payload.get("changed")),
+        "written": bool(payload.get("written")),
+        "dry_run": bool(payload.get("dry_run")),
+        "diff_ref": diff_ref,
+        "mutation_ref": mutation_ref,
+        "snapshot_refs": dict(snapshot_refs),
+        "artifact_refs": refs,
+        "diff_stats": dict(payload.get("diff_stats")) if isinstance(payload.get("diff_stats"), dict) else {},
+    }
+
+
+def _mutation_card_status(payload: dict[str, object]) -> str:
+    if payload.get("written"):
+        return "applied"
+    if payload.get("dry_run"):
+        return "dry_run"
+    if payload.get("changed"):
+        return "pending"
+    return "no_change"
+
+
+def _mutation_output_summary(card: object) -> str:
+    if not isinstance(card, dict):
+        return ""
+    operation = str(card.get("operation") or "source mutation")
+    status = str(card.get("status") or "completed")
+    path = str(card.get("path") or "")
+    stats = card.get("diff_stats") if isinstance(card.get("diff_stats"), dict) else {}
+    added = stats.get("added")
+    removed = stats.get("removed")
+    stats_text = f" (+{added}/-{removed})" if added is not None and removed is not None else ""
+    refs = [str(ref) for ref in card.get("artifact_refs") or () if str(ref)]
+    ref_text = f"; refs={','.join(refs[:3])}" if refs else ""
+    target = f" {path}" if path else ""
+    return f"{operation} {status}{target}{stats_text}{ref_text}"
+
+
+def _append_ref(refs: list[str], ref: object) -> None:
+    text = str(ref or "").strip()
+    if text and text not in refs:
+        refs.append(text)
 
 
 def _snapshot_with_ref(value: object, *, ref: str, path: str) -> dict[str, object]:

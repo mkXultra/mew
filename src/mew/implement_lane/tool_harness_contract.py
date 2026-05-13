@@ -139,6 +139,11 @@ def build_tool_result_index_artifact(
         provider_call_id = result.provider_call_id or f"result-{index}"
         result_ref = f"tool-result:{provider_call_id}"
         tool_ref = tool_ref_for_name(result.tool_name)
+        compact_card = _compact_tool_result_card(
+            result,
+            tool_result_ref=result_ref,
+            tool_ref=tool_ref,
+        )
         ordered_refs.append(result_ref)
         by_provider_call_id[provider_call_id] = {
             "ref": result_ref,
@@ -150,8 +155,12 @@ def build_tool_result_index_artifact(
             "content_refs": list(result.content_refs),
             "output_refs": list(result.content_refs),
             "evidence_refs": list(result.evidence_refs),
+            "changed_paths": compact_card["changed_paths"],
+            "artifact_refs": compact_card["artifact_refs"],
+            "mutation_refs": compact_card["mutation_refs"],
             "side_effect_count": len(result.side_effects),
             "natural_result_text": result.natural_result_text(),
+            "compact_result_card": compact_card,
         }
     return {
         "schema_version": TOOL_RESULT_INDEX_SCHEMA_VERSION,
@@ -482,6 +491,37 @@ def _generic_tool_result_event(
     }
 
 
+def _compact_tool_result_card(
+    result: ToolResultEnvelope,
+    *,
+    tool_result_ref: str,
+    tool_ref: str,
+) -> dict[str, object]:
+    """Return the concise factual result card used by replay/provider indexes."""
+
+    artifact_refs = _artifact_refs_from_result(result)
+    mutation_refs = _mutation_refs_from_result(result)
+    return {
+        "schema_version": TOOL_RESULT_INDEX_SCHEMA_VERSION,
+        "ref": tool_result_ref,
+        "tool_ref": tool_ref,
+        "provider_call_id": result.provider_call_id,
+        "mew_tool_call_id": result.mew_tool_call_id,
+        "tool_name": result.tool_name,
+        "status": result.status,
+        "is_error": result.is_error,
+        "content_refs": list(result.content_refs),
+        "output_refs": list(result.content_refs),
+        "evidence_refs": list(result.evidence_refs),
+        "changed_paths": _changed_paths_from_result(result),
+        "artifact_refs": artifact_refs,
+        "mutation_refs": mutation_refs,
+        "side_effect_count": len(result.side_effects),
+        "natural_result_text": result.natural_result_text(),
+        "mutation_output_card": _payload_mutation_output_card(result),
+    }
+
+
 def _source_mutation_events_from_result(
     result: ToolResultEnvelope,
     *,
@@ -551,6 +591,116 @@ def _is_source_mutation_effect(effect: object) -> bool:
         changed_count = record.get("changed_count")
         return bool(changed_count)
     return False
+
+
+def _changed_paths_from_result(result: ToolResultEnvelope) -> list[str]:
+    paths: list[str] = []
+    payload = _first_mapping(result.content)
+    card = payload.get("mutation_output_card") if isinstance(payload.get("mutation_output_card"), dict) else {}
+    if payload.get("written") or payload.get("changed"):
+        _append_unique(paths, str(payload.get("path") or ""))
+    if isinstance(card, dict) and (card.get("written") or card.get("changed")):
+        _append_unique(paths, str(card.get("path") or ""))
+    for effect in result.side_effects:
+        if not _is_source_mutation_effect(effect):
+            continue
+        _append_unique(paths, str(effect.get("path") or ""))
+        record = effect.get("record") if isinstance(effect.get("record"), dict) else {}
+        changes = record.get("changes") if isinstance(record.get("changes"), list) else []
+        for change in changes:
+            if isinstance(change, dict):
+                _append_unique(paths, str(change.get("path") or ""))
+    return paths
+
+
+def _artifact_refs_from_result(result: ToolResultEnvelope) -> list[str]:
+    refs: list[str] = []
+    for ref in (*result.content_refs, *result.evidence_refs):
+        _append_unique(refs, str(ref))
+    payload = _first_mapping(result.content)
+    for ref in _payload_artifact_refs(payload):
+        _append_unique(refs, ref)
+    return refs
+
+
+def _mutation_refs_from_result(result: ToolResultEnvelope) -> list[str]:
+    refs: list[str] = []
+    payload = _first_mapping(result.content)
+    typed = payload.get("typed_source_mutation") if isinstance(payload.get("typed_source_mutation"), dict) else {}
+    card = payload.get("mutation_output_card") if isinstance(payload.get("mutation_output_card"), dict) else {}
+    for ref in result.evidence_refs:
+        text = str(ref)
+        if "mutation" in text:
+            _append_unique(refs, text)
+    if isinstance(typed, dict):
+        _append_unique(refs, str(typed.get("mutation_ref") or ""))
+    if isinstance(card, dict):
+        _append_unique(refs, str(card.get("mutation_ref") or ""))
+    for effect in result.side_effects:
+        if isinstance(effect, dict):
+            _append_unique(refs, str(effect.get("mutation_ref") or ""))
+    return refs
+
+
+def _payload_artifact_refs(payload: dict[str, object]) -> list[str]:
+    refs: list[str] = []
+    for key in ("output_ref", "source_diff_ref", "mutation_ref"):
+        _append_unique(refs, str(payload.get(key) or ""))
+    snapshot_refs = payload.get("source_snapshot_refs") if isinstance(payload.get("source_snapshot_refs"), dict) else {}
+    for ref in snapshot_refs.values():
+        _append_unique(refs, str(ref))
+    artifacts = (
+        payload.get("source_mutation_artifacts")
+        if isinstance(payload.get("source_mutation_artifacts"), dict)
+        else {}
+    )
+    for ref in artifacts.values():
+        _append_unique(refs, str(ref))
+    typed = payload.get("typed_source_mutation") if isinstance(payload.get("typed_source_mutation"), dict) else {}
+    if isinstance(typed, dict):
+        for key in ("mutation_ref", "diff_ref"):
+            _append_unique(refs, str(typed.get(key) or ""))
+        snapshots = typed.get("snapshots") if isinstance(typed.get("snapshots"), dict) else {}
+        for snapshot in snapshots.values():
+            if isinstance(snapshot, dict):
+                _append_unique(refs, str(snapshot.get("ref") or ""))
+    card = payload.get("mutation_output_card") if isinstance(payload.get("mutation_output_card"), dict) else {}
+    if isinstance(card, dict):
+        for key in ("mutation_ref", "diff_ref"):
+            _append_unique(refs, str(card.get(key) or ""))
+        for ref in card.get("artifact_refs") if isinstance(card.get("artifact_refs"), list) else []:
+            _append_unique(refs, str(ref))
+        card_snapshots = card.get("snapshot_refs") if isinstance(card.get("snapshot_refs"), dict) else {}
+        for ref in card_snapshots.values():
+            _append_unique(refs, str(ref))
+    return refs
+
+
+def _payload_mutation_output_card(result: ToolResultEnvelope) -> dict[str, object]:
+    payload = _first_mapping(result.content)
+    card = payload.get("mutation_output_card") if isinstance(payload.get("mutation_output_card"), dict) else {}
+    if not isinstance(card, dict):
+        return {}
+    return {
+        key: card.get(key)
+        for key in (
+            "schema_version",
+            "kind",
+            "tool_name",
+            "operation",
+            "status",
+            "path",
+            "changed",
+            "written",
+            "dry_run",
+            "diff_ref",
+            "mutation_ref",
+            "snapshot_refs",
+            "artifact_refs",
+            "diff_stats",
+        )
+        if card.get(key) not in (None, "", [], {})
+    }
 
 
 def _source_mutation_ref_for_effect(

@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 
-DESIGN_DOC = Path("docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md")
+DESIGN_DOC = Path("docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md")
 
 @dataclass(frozen=True)
 class SourceControlSpec:
@@ -81,12 +81,17 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
         window_after=36,
     ),
     SourceControlSpec(
-        name="sidecar_required_next_digest",
+        name="compact_digest_factual_only",
         relative_path="src/mew/implement_lane/native_sidecar_projection.py",
-        anchor="def _workframe_projection_digest",
-        markers=('"current_phase"', '"attention_hints"', '"loop_signals"'),
-        forbidden_markers=('"required_next_kind"', '"required_next_evidence_refs"'),
-        window_after=34,
+        anchor="def build_compact_native_sidecar_digest",
+        markers=(
+            '"provider_input_authority": "transcript_window_plus_compact_sidecar_digest"',
+            '"latest_tool_results"',
+            '"latest_evidence_refs"',
+            '"sidecar_hashes"',
+        ),
+        forbidden_markers=('"workframe_projection"', '"attention_hints"', '"loop_signals"', '"required_next_kind"'),
+        window_after=64,
     ),
     SourceControlSpec(
         name="sidecar_todo_required_next_projection",
@@ -96,11 +101,24 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
         window_after=42,
     ),
     SourceControlSpec(
-        name="workframe_prompt_visible_required_next",
+        name="workframe_prompt_visible_sidecar_debug_ref",
         relative_path="src/mew/implement_lane/native_workframe_projection.py",
         anchor="def _prompt_visible_workframe",
-        markers=('"required_next"', '"target_paths"', '"evidence_refs"'),
+        markers=('"provider_visible": False', '"native_workframe_sidecar_debug_ref"', '"missing_evidence_refs"'),
+        forbidden_markers=('"required_next"', '"target_paths"', '"attention_hints"'),
         window_after=28,
+    ),
+    SourceControlSpec(
+        name="provider_inventory_keeps_diagnostics_sidecar_only",
+        relative_path="src/mew/implement_lane/native_workframe_projection.py",
+        anchor="def build_native_prompt_input_inventory",
+        markers=(
+            '"diagnostic_only_fields_report"',
+            '"provider_visible": False',
+            '"provider_visible_forbidden_fields"',
+            '"native_loop_signals"',
+        ),
+        window_after=48,
     ),
     SourceControlSpec(
         name="workframe_debug_bundle_prompt_visible_projection",
@@ -113,55 +131,35 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
 )
 
 DESIGN_TRACKING_MARKERS: dict[str, tuple[str, ...]] = {
-    "compact_sidecar_digest_bounds": (
-        "compact_sidecar_digest",
-        "<= 6144",
-        "workframe_projection",
-        "top-level keys",
+    "codex_like_live_hot_path": (
+        "Codex-like live hot path",
+        "native transcript window",
+        "compact factual tool-result digest",
+        "mew-specific durable sidecar proof",
     ),
-    "finish_state_machine": (
-        "Finish State Machine",
-        "blocked_continue",
-        "blocked_return",
-        "resolver_decision",
-    ),
-    "completion_resolver_boundary": (
-        "CompletionResolver",
-        "tool を実行すること",
-        "pre-extracted typed evidence refs",
-    ),
-    "required_next_migration": (
-        "Required Next Migration",
-        "ordinary repair",
-        "attention_hints",
-        "transition_contract",
-    ),
-    "native_loop_control_signal_migration": (
+    "provider_visible_forbidden_fields": (
+        "Provider-Visible Forbidden",
+        "next_action",
         "first_write_due",
-        "verifier_repair_due",
-        "next_action_policy",
-        "bounded booleans",
+        "prewrite_probe_plateau",
+        "WorkFrame",
     ),
-    "non_finish_closeout_migration": (
-        "Non-finish / max-turn closeout migration",
-        "no lane may become `completed` without a valid `finish_call`",
+    "internal_sidecar_contract": (
+        "Internal Sidecar Contract",
+        "response_transcript.json",
+        "provider request inventory",
+        "typed evidence sidecars",
     ),
-    "current_phase_observational_only": (
-        "current_phase",
-        "Allowed values",
-        "observational label",
-        "action prescription ではない",
+    "tool_surface_contract": (
+        "Tool Surface Contract",
+        "apply_patch",
+        "edit_file",
+        "write_file",
     ),
-    "persisted_lane_state_treatment": (
-        "persisted_lane_state",
-        "provider-visible",
-        "compact_sidecar_digest",
-    ),
-    "migration_table_phase_tracking": (
-        "Owner phase",
-        "残す場合の compatibility 理由",
-        "Phase 1-2",
-        "Phase 3",
+    "parallel_phase_ownership": (
+        "Phase 1A: Transcript/Input Collapse",
+        "Phase 1B: Tool Surface And Mutation Path",
+        "Main Codex responsibilities",
     ),
 }
 

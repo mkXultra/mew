@@ -2013,7 +2013,6 @@ def _compact_sidecar_digest_for_request(
     )
     return build_compact_native_sidecar_digest(
         transcript,
-        loop_signals=loop_signals,
     )
 
 

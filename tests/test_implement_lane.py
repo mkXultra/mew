@@ -2060,13 +2060,16 @@ def test_implement_v2_surfaces_patch_tools_from_hard_runtime_prompt_before_probe
     )
     response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
 
-    assert {"write_file", "edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
-    assert "write_file/edit_file/apply_patch" in prompt
+    spec_names = {spec.name for spec in specs}
+    assert {"edit_file", "apply_patch"}.issubset(spec_names)
+    assert "write_file" not in spec_names
+    assert "edit_file/apply_patch" in prompt
+    assert "write_file/edit_file/apply_patch" not in prompt
     assert "write tools are temporarily hidden for this turn" not in response_contract
     assert "write tools are available" in response_contract
     assert "first source mutation is execution-gated" in response_contract
     assert "source/output contract" in response_contract
-    assert "write_file" in response_contract
+    assert "write_file" not in response_contract
     assert "edit_file" in response_contract
     assert "apply_patch" in response_contract
     response_shape = json.loads(response_contract)
@@ -2077,17 +2080,14 @@ def test_implement_v2_surfaces_patch_tools_from_hard_runtime_prompt_before_probe
     assert "run_command" in response_contract
 
 
-def test_implement_v2_hard_runtime_tool_surface_keeps_write_file_for_generic_artifact_task(tmp_path) -> None:
+def test_implement_v2_tool_surface_keeps_write_file_for_generic_artifact_task(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-generic-runtime",
         workspace=str(tmp_path),
         lane=IMPLEMENT_V2_LANE,
         task_contract={
-            "goal": (
-                "Build the provided emulator runtime from source and render a screenshot image "
-                "artifact to /tmp/output.png."
-            )
+            "goal": "Create a small JSON report artifact at /tmp/output.json from the provided task summary."
         },
         lane_config={"mode": "full"},
     )
@@ -2152,7 +2152,9 @@ def test_implement_v2_keeps_patch_tools_visible_after_many_shallow_source_probes
         requires_deep_runtime_coverage=True,
     )
 
-    assert {"write_file", "edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
+    spec_names = {spec.name for spec in specs}
+    assert {"edit_file", "apply_patch"}.issubset(spec_names)
+    assert "write_file" not in spec_names
     assert readiness["probe_count_before_first_write"] == 8
     assert readiness["first_write_due"] is False
     assert "runtime_binary_layout" in readiness["prewrite_probe_missing_categories"]
@@ -3353,7 +3355,9 @@ def test_implement_v2_reveals_patch_tools_after_hard_runtime_probe_budget(tmp_pa
         prior_tool_results=results,
     )
 
-    assert {"write_file", "edit_file", "apply_patch"} <= {spec.name for spec in specs}
+    spec_names = {spec.name for spec in specs}
+    assert {"edit_file", "apply_patch"} <= spec_names
+    assert "write_file" not in spec_names
 
 
 def test_implement_v2_allows_normal_task_write_without_deep_prewrite_probe_budget(tmp_path) -> None:
@@ -6089,7 +6093,7 @@ def test_implement_v2_live_json_prompt_surfaces_prewrite_required_next_probe(tmp
     assert "read_file doomgeneric/doomgeneric/doomgeneric_img.c" in prompt
 
 
-def test_implement_v2_hard_runtime_live_json_prompt_keeps_write_file_guidance(tmp_path) -> None:
+def test_implement_v2_hard_runtime_live_json_prompt_hides_write_file_guidance(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-hard-runtime",
@@ -6123,7 +6127,8 @@ def test_implement_v2_hard_runtime_live_json_prompt_keeps_write_file_guidance(tm
         history=(),
     )
 
-    assert "write_file/edit_file/apply_patch" in prompt
+    assert "edit_file/apply_patch" in prompt
+    assert "write_file/edit_file/apply_patch" not in prompt
 
 
 def test_implement_v2_finish_gate_history_projects_compact_recovery_card() -> None:
@@ -22226,7 +22231,7 @@ def test_implement_v2_write_file_approved_apply_records_mutation_evidence(tmp_pa
     assert tool_result["side_effects"][0]["approval_id"] == "approval-1"
 
 
-def test_implement_v2_hard_runtime_write_file_is_available_and_records_mutation(tmp_path) -> None:
+def test_implement_v2_hard_runtime_write_file_is_unavailable_for_source_mutation(tmp_path) -> None:
     target = tmp_path / "vm.js"
 
     result = run_fake_write_implement_v2(
@@ -22254,14 +22259,17 @@ def test_implement_v2_hard_runtime_write_file_is_available_and_records_mutation(
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "hard runtime write applied"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "hard runtime write rejected"},
     )
     tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
 
-    assert result.status == "analysis_ready"
-    assert tool_result["status"] == "completed"
-    assert target.read_text(encoding="utf-8") == "console.log('bad');\n"
-    assert result.metrics["write_evidence_count"] == 1
+    assert result.status == "blocked"
+    assert tool_result["status"] == "invalid"
+    assert tool_result["is_error"] is True
+    assert "write_file is not available" in payload["reason"]
+    assert not target.exists()
+    assert result.metrics.get("write_evidence_count", 0) == 0
 
 
 def test_implement_v2_write_file_rejects_large_single_line_source(tmp_path) -> None:

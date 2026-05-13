@@ -107,32 +107,12 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         description="Read a bounded slice of managed command spool output.",
     ),
     ImplementLaneToolSpec(
-        name="write_file",
-        access="write",
-        description=(
-            "Write a file through the existing write substrate. Accepts content string or content_lines "
-            "array joined with newlines for small and medium writes. Do not emit a single huge "
-            "provider-native write_file JSON payload for large generated or replacement source; prefer "
-            "a custom apply_patch/freeform patch for concrete edits. Do not create or patch source-like "
-            "files through run_command when write_file/edit_file/apply_patch are available. Never "
-            "minify generated source into one long line just to fit JSON."
-        ),
-        approval_required=True,
-        dry_run_supported=True,
-    ),
-    ImplementLaneToolSpec(
-        name="edit_file",
-        access="write",
-        description="Edit a file through the existing edit substrate. Accepts old/new or old_string/new_string.",
-        approval_required=True,
-        dry_run_supported=True,
-    ),
-    ImplementLaneToolSpec(
         name="apply_patch",
         access="write",
         description=(
-            "Apply a patch through the existing patch approval path. Prefer patch_lines, an array with one "
-            "apply_patch line per item and no embedded newline characters. Legacy patch/input strings remain accepted."
+            "Primary source mutation tool for multi-line source changes. Apply a patch through the existing "
+            "patch approval path. Prefer patch_lines, an array with one apply_patch line per item and no "
+            "embedded newline characters. Legacy patch/input strings remain accepted."
         ),
         approval_required=True,
         dry_run_supported=True,
@@ -140,6 +120,31 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         preferred_bulk_argument="patch_lines",
         fallback_bulk_arguments=("patch", "input"),
         provider_native_input_kind="freeform_apply_patch",
+    ),
+    ImplementLaneToolSpec(
+        name="edit_file",
+        access="write",
+        description=(
+            "Precise source mutation tool for exact replacements. Edit a file through the existing edit "
+            "substrate. Accepts old/new or old_string/new_string."
+        ),
+        approval_required=True,
+        dry_run_supported=True,
+    ),
+    ImplementLaneToolSpec(
+        name="write_file",
+        access="write",
+        description=(
+            "Write a small generated file through the existing write substrate. Accepts content string or "
+            "content_lines array joined with newlines for small and medium writes, especially non-source "
+            "writes or complete file creation. Do not emit a single huge provider-native write_file JSON "
+            "payload for large generated or replacement source; prefer apply_patch or edit_file for source "
+            "mutations. Do not create or patch source-like files through run_command when "
+            "write_file/edit_file/apply_patch are available. Never minify generated source into one long "
+            "line just to fit JSON."
+        ),
+        approval_required=True,
+        dry_run_supported=True,
     ),
     ImplementLaneToolSpec(
         name="finish",
@@ -177,7 +182,10 @@ def list_v2_tool_specs_for_task(
 ) -> tuple[ImplementLaneToolSpec, ...]:
     """Return the provider-visible v2 tool surface for a task shape."""
 
-    return list_v2_tool_specs_for_mode(mode)
+    specs = list_v2_tool_specs_for_mode(mode)
+    if not is_hard_runtime_artifact_task(task_contract):
+        return specs
+    return tuple(spec for spec in specs if spec.name != "write_file")
 
 
 def is_hard_runtime_artifact_task(task_contract: object) -> bool:

@@ -250,6 +250,8 @@ def build_native_prompt_input_inventory(
 ) -> dict[str, object]:
     """Describe the native provider input inventory for Phase 4 tests."""
 
+    diagnostic_fields = sorted(str(item) for item in diagnostic_only_fields if str(item).strip())
+    diagnostic_signals = dict(diagnostic_loop_signals or {})
     return {
         "schema_version": NATIVE_PROMPT_INPUT_INVENTORY_SCHEMA_VERSION,
         "input_contract": "native_transcript_window_plus_compact_sidecar_digest",
@@ -260,9 +262,17 @@ def build_native_prompt_input_inventory(
             "proof": False,
             "evidence_object": False,
         },
-        "debug_only_sections": ["workframe_projection", "model_turn_index", "native_loop_signals"],
-        "diagnostic_only_fields": sorted(str(item) for item in diagnostic_only_fields if str(item).strip()),
-        "diagnostic_loop_signals": dict(diagnostic_loop_signals or {}),
+        "debug_only_sections": ["workframe_debug_bundle", "model_turn_index", "native_loop_signals"],
+        "diagnostic_only_fields": diagnostic_fields,
+        "diagnostic_loop_signals": diagnostic_signals,
+        "diagnostic_only_fields_report": {
+            "schema_version": 1,
+            "report_kind": "diagnostic_only_fields",
+            "ok": True,
+            "provider_visible": False,
+            "fields": diagnostic_fields,
+            "source_sections": ["provider_request_inventory", "observer_detail"],
+        },
         "provider_visible_forbidden_fields": dict(
             provider_visible_forbidden_fields
             or {
@@ -406,29 +416,16 @@ def _workframe_event_from_evidence_event(event: Mapping[str, object], *, transcr
 
 
 def _prompt_visible_workframe(workframe: Mapping[str, object]) -> dict[str, object]:
-    required_next = workframe.get("required_next") if isinstance(workframe.get("required_next"), Mapping) else {}
     finish_readiness = workframe.get("finish_readiness") if isinstance(workframe.get("finish_readiness"), Mapping) else {}
     trace = workframe.get("trace") if isinstance(workframe.get("trace"), Mapping) else {}
     return {
         "schema_version": 1,
+        "projection_kind": "native_workframe_sidecar_debug_ref",
+        "provider_visible": False,
+        "source_of_truth": NATIVE_TRANSCRIPT_SOURCE_OF_TRUTH,
         "workframe": {
-            "current_phase": workframe.get("current_phase") or "",
-            "required_next": {
-                "kind": required_next.get("kind") or "",
-                "reason": required_next.get("reason") or "",
-                "target_paths": list(required_next.get("target_paths") or [])
-                if isinstance(required_next.get("target_paths"), list)
-                else [],
-                "evidence_refs": list(required_next.get("evidence_refs") or [])
-                if isinstance(required_next.get("evidence_refs"), list)
-                else [],
-            },
             "finish_readiness": {
-                "state": finish_readiness.get("state") or "",
-                "blockers": list(finish_readiness.get("blockers") or [])
-                if isinstance(finish_readiness.get("blockers"), list)
-                else [],
-                "required_evidence_refs": list(finish_readiness.get("required_evidence_refs") or [])
+                "missing_evidence_refs": list(finish_readiness.get("required_evidence_refs") or [])
                 if isinstance(finish_readiness.get("required_evidence_refs"), list)
                 else [],
             },

@@ -169,9 +169,9 @@ def test_compact_sidecar_digest_is_provider_request_context_not_state_object() -
     assert "native_sidecar_digest=" in digest["digest_text"]
     assert len(digest) <= 16
     assert len(serialized.encode("utf-8")) <= 6144
-    assert "workframe_projection" in digest
-    assert len(digest["workframe_projection"]) <= 8
-    assert digest["workframe_projection"]["current_phase"] == "orient"
+    assert "workframe_projection" not in digest
+    assert "workframe" in digest["sidecar_hashes"]
+    assert "model_turn_index" in digest["sidecar_hashes"]
     assert "required_next_kind" not in serialized
     assert "frontier_state_update" not in serialized
     assert '"active_work_todo"' not in serialized
@@ -193,18 +193,17 @@ def test_compact_sidecar_digest_omits_loop_signals_by_default() -> None:
         },
     )
     serialized = json.dumps(digest, sort_keys=True)
-    projection = digest["workframe_projection"]
 
-    assert "loop_signals" not in projection
-    assert "attention_hints" not in projection
-    assert projection["current_phase"] == "orient"
+    assert "workframe_projection" not in digest
+    assert "loop_signals" not in serialized
+    assert "attention_hints" not in serialized
     assert "first_write_due" not in serialized
     assert "probe_count_without_write" not in serialized
     assert "must-not-leak" not in serialized
     assert "next_action_policy" not in serialized
 
 
-def test_compact_sidecar_digest_can_emit_diagnostic_loop_signals_when_requested() -> None:
+def test_compact_sidecar_digest_keeps_requested_diagnostic_loop_signals_sidecar_only() -> None:
     digest = build_compact_native_sidecar_digest(
         _native_transcript_dict(),
         loop_signals={
@@ -216,13 +215,13 @@ def test_compact_sidecar_digest_can_emit_diagnostic_loop_signals_when_requested(
         },
         include_diagnostic_loop_signals=True,
     )
-    projection = digest["workframe_projection"]
-    signals = projection["loop_signals"]
+    serialized = json.dumps(digest, sort_keys=True)
 
-    assert projection["current_phase"] == "prewrite_blocked"
-    assert signals["prewrite_probe_plateau"] is True
-    assert signals["max_additional_probe_turns"] == 0
-    assert "Probe plateau reached" in " ".join(projection["attention_hints"])
+    assert "workframe_projection" not in digest
+    assert "first_write_due" not in serialized
+    assert "prewrite_probe_plateau" not in serialized
+    assert "max_additional_probe_turns" not in serialized
+    assert "Probe plateau reached" not in serialized
 
 
 def test_compact_sidecar_digest_bounds_long_refs() -> None:
