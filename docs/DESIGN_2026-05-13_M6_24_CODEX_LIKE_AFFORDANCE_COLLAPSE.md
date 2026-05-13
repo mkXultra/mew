@@ -257,6 +257,9 @@ Inspect enough context to understand the smallest coherent change.
 Make source changes with apply_patch for multi-line edits, or edit_file for
 precise replacements.
 Use run_command/run_tests to build, run, and verify.
+If the task or verifier names a missing source/artifact path, treat it as the
+target path and create the smallest runnable file before extended reverse
+engineering.
 Repair from the latest concrete failure shown in the transcript.
 Finish only with fresh evidence from the tools.
 ```

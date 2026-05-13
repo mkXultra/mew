@@ -6041,6 +6041,7 @@ def test_implement_v2_prompt_sections_include_compact_coding_contract() -> None:
     assert "Make source changes with apply_patch or edit_file" in section.content
     assert "Use run_command or run_tests to build, run, and verify" in section.content
     assert "create the smallest runnable version early" in section.content
+    assert "verify command names a missing source or artifact path" in section.content
     assert "cheap probe" not in section.content
     assert "first_write" not in section.content
     assert "required_next" not in section.content

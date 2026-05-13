@@ -119,6 +119,8 @@ def build_implement_v2_prompt_sections(
                 f"{verify_sentence}"
                 "When the task asks for a new file or artifact and the target path is known, "
                 "create the smallest runnable version early, then run it and repair from concrete failures. "
+                "If the task or verify command names a missing source or artifact path, "
+                "treat that as the target path and create the smallest runnable file before extended reverse engineering. "
                 "Repair from the latest concrete failure shown in the transcript. "
                 "Finish only with fresh evidence from the tools."
             ),
