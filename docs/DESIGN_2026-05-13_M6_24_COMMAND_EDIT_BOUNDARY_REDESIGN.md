@@ -1,6 +1,7 @@
 # Design 2026-05-13 - M6.24 Command/Edit Boundary Redesign
 
-Status: design only.
+Status: implementation in progress. Phase 0-2 are implemented and reviewed;
+Phase 3-7 remain open.
 
 Scope: `implement_v2` native tool loop command/edit boundary. This document
 does not authorize code changes by itself. It intentionally does not preserve
