@@ -22426,9 +22426,13 @@ def test_implement_v2_write_file_approved_apply_records_mutation_evidence(tmp_pa
     mutation = tool_result["content"][0]["typed_source_mutation"]
     assert mutation["kind"] == "typed_source_mutation"
     assert mutation["tool_route"] == "typed_source_mutation"
+    assert mutation["changed_paths"] == ["out.txt"]
     assert mutation["diff_ref"] == tool_result["content"][0]["source_diff_ref"]
     assert mutation["snapshots"]["pre"]["existed"] is False
     assert mutation["snapshots"]["post"]["sha256"]
+    assert tool_result["content"][0]["changed_paths"] == ["out.txt"]
+    assert tool_result["content"][0]["mutation_output_card"]["changed_paths"] == ["out.txt"]
+    assert json.loads(Path(mutation["mutation_ref"]).read_text(encoding="utf-8"))["changed_paths"] == ["out.txt"]
     assert tool_result["evidence_refs"] == [mutation["mutation_ref"]]
     assert "out.txt" in Path(mutation["diff_ref"]).read_text(encoding="utf-8")
     assert tool_result["content"][0]["source_snapshot_refs"]["pre"] in tool_result["content_refs"]
@@ -23250,6 +23254,10 @@ def test_implement_v2_apply_patch_dry_run_and_approved_apply(tmp_path) -> None:
     mutation = apply_result["content"][0]["typed_source_mutation"]
     assert apply_result["evidence_refs"] == [mutation["mutation_ref"]]
     assert mutation["operation"] == "apply_patch"
+    assert mutation["changed_paths"] == ["README.md"]
+    assert apply_result["content"][0]["changed_paths"] == ["README.md"]
+    assert apply_result["content"][0]["mutation_output_card"]["changed_paths"] == ["README.md"]
+    assert json.loads(Path(mutation["mutation_ref"]).read_text(encoding="utf-8"))["changed_paths"] == ["README.md"]
     assert mutation["diff_ref"] in apply_result["content_refs"]
     assert "README.md" in Path(mutation["diff_ref"]).read_text(encoding="utf-8")
     assert apply_result["content"][0]["source_snapshot_refs"]["pre"] in apply_result["content_refs"]

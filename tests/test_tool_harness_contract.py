@@ -301,7 +301,7 @@ def test_tool_result_index_carries_concise_mutation_card_refs() -> None:
         status="completed",
         content=(
             {
-                "path": "src/app.py",
+                "path": "/workspace/src/app.py",
                 "changed": True,
                 "written": True,
                 "dry_run": False,
@@ -310,13 +310,15 @@ def test_tool_result_index_carries_concise_mutation_card_refs() -> None:
                 "typed_source_mutation": {
                     "mutation_ref": mutation_ref,
                     "diff_ref": diff_ref,
-                    "path": "src/app.py",
+                    "path": "/workspace/src/app.py",
+                    "changed_paths": ["src/app.py"],
                 },
                 "mutation_output_card": {
                     "kind": "mutation_output_card",
                     "operation": "apply_patch",
                     "status": "applied",
-                    "path": "src/app.py",
+                    "path": "/workspace/src/app.py",
+                    "changed_paths": ["src/app.py"],
                     "changed": True,
                     "written": True,
                     "dry_run": False,
@@ -333,7 +335,7 @@ def test_tool_result_index_carries_concise_mutation_card_refs() -> None:
             {
                 "kind": "file_write",
                 "operation": "apply_patch",
-                "path": "src/app.py",
+                "path": "/workspace/src/app.py",
                 "mutation_ref": mutation_ref,
                 "diff_ref": diff_ref,
                 "written": True,
@@ -348,6 +350,7 @@ def test_tool_result_index_carries_concise_mutation_card_refs() -> None:
     assert index["by_provider_call_id"]["call-patch"]["changed_paths"] == ["src/app.py"]
     assert index["by_provider_call_id"]["call-patch"]["mutation_refs"] == [mutation_ref]
     assert mutation_ref in index["by_provider_call_id"]["call-patch"]["artifact_refs"]
+    assert card["mutation_output_card"]["changed_paths"] == ["src/app.py"]
     assert card["mutation_output_card"]["mutation_ref"] == mutation_ref
     assert "source-diff" in card["artifact_refs"][0]
 

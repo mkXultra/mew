@@ -1047,6 +1047,12 @@ def _apply_patch_transport(lowered_tools: Iterable[object]) -> str:
             isinstance(provider_tool, Mapping)
             and provider_tool.get("name") == "apply_patch"
         ):
+            if (
+                provider_tool.get("type") == "function"
+                and getattr(lowered, "strict_false_reason", "")
+                == "custom_freeform_apply_patch_not_supported"
+            ):
+                return "json_fallback"
             return _text(provider_tool.get("type"))
     return "unavailable"
 

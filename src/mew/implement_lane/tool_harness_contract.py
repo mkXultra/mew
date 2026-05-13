@@ -597,15 +597,24 @@ def _changed_paths_from_result(result: ToolResultEnvelope) -> list[str]:
     paths: list[str] = []
     payload = _first_mapping(result.content)
     card = payload.get("mutation_output_card") if isinstance(payload.get("mutation_output_card"), dict) else {}
-    if payload.get("written") or payload.get("changed"):
+    _append_path_list(paths, payload.get("changed_paths"))
+    typed = payload.get("typed_source_mutation") if isinstance(payload.get("typed_source_mutation"), dict) else {}
+    if isinstance(typed, dict):
+        _append_path_list(paths, typed.get("changed_paths"))
+    if isinstance(card, dict):
+        _append_path_list(paths, card.get("changed_paths"))
+    has_explicit_changed_paths = bool(paths)
+    if not has_explicit_changed_paths and (payload.get("written") or payload.get("changed")):
         _append_unique(paths, str(payload.get("path") or ""))
-    if isinstance(card, dict) and (card.get("written") or card.get("changed")):
+    if not has_explicit_changed_paths and isinstance(card, dict) and (card.get("written") or card.get("changed")):
         _append_unique(paths, str(card.get("path") or ""))
     for effect in result.side_effects:
         if not _is_source_mutation_effect(effect):
             continue
-        _append_unique(paths, str(effect.get("path") or ""))
+        if not has_explicit_changed_paths:
+            _append_unique(paths, str(effect.get("path") or ""))
         record = effect.get("record") if isinstance(effect.get("record"), dict) else {}
+        _append_path_list(paths, record.get("changed_paths"))
         changes = record.get("changes") if isinstance(record.get("changes"), list) else []
         for change in changes:
             if isinstance(change, dict):
@@ -690,6 +699,7 @@ def _payload_mutation_output_card(result: ToolResultEnvelope) -> dict[str, objec
             "operation",
             "status",
             "path",
+            "changed_paths",
             "changed",
             "written",
             "dry_run",
@@ -807,6 +817,13 @@ def _unresolved_evidence_refs(
 def _append_unique(items: list[str], value: str) -> None:
     if value and value not in items:
         items.append(value)
+
+
+def _append_path_list(items: list[str], value: object) -> None:
+    if not isinstance(value, (list, tuple)):
+        return
+    for path in value:
+        _append_unique(items, str(path or ""))
 
 
 def _safe_int(value: object, *, default: int) -> int:

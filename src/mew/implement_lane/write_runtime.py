@@ -133,7 +133,14 @@ class ImplementV2WriteRuntime:
             dry_run=not apply,
             include_source_artifacts=True,
         )
-        return _write_payload(call, result, apply=apply, approval=approval, artifact_dir=self.artifact_dir)
+        return _write_payload(
+            call,
+            result,
+            apply=apply,
+            approval=approval,
+            artifact_dir=self.artifact_dir,
+            workspace=self.workspace,
+        )
 
     def _edit_file(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
@@ -167,7 +174,14 @@ class ImplementV2WriteRuntime:
             dry_run=not apply,
             include_source_artifacts=True,
         )
-        return _write_payload(call, result, apply=apply, approval=approval, artifact_dir=self.artifact_dir)
+        return _write_payload(
+            call,
+            result,
+            apply=apply,
+            approval=approval,
+            artifact_dir=self.artifact_dir,
+            workspace=self.workspace,
+        )
 
     def _edit_file_recovery_payload(self, call: ToolCallEnvelope, *, reason: str) -> dict[str, object]:
         if "old text was not found" not in reason:
@@ -317,7 +331,14 @@ class ImplementV2WriteRuntime:
         result["patch_operation"] = patch_operation
         result["patch_format"] = patch_args["format"]
         result["patch_transport"] = _patch_transport_metadata(args, patch_args=patch_args)
-        return _write_payload(call, result, apply=apply, approval=approval, artifact_dir=self.artifact_dir)
+        return _write_payload(
+            call,
+            result,
+            apply=apply,
+            approval=approval,
+            artifact_dir=self.artifact_dir,
+            workspace=self.workspace,
+        )
 
     def _approval_for_call(self, call: ToolCallEnvelope) -> dict[str, object]:
         for raw_approval in self.approved_write_calls:
@@ -748,10 +769,11 @@ def _write_payload(
     apply: bool,
     approval: dict[str, object] | None,
     artifact_dir: Path | None = None,
+    workspace: Path | None = None,
 ) -> dict[str, object]:
     payload = dict(result)
     payload.setdefault("operation", call.tool_name)
-    _attach_typed_source_mutation_payload(call, payload, artifact_dir=artifact_dir)
+    _attach_typed_source_mutation_payload(call, payload, artifact_dir=artifact_dir, workspace=workspace)
     payload["mew_status"] = "completed"
     payload["approval_status"] = str((approval or {}).get("status") or ("approved" if apply else "not_required_for_dry_run"))
     payload["approval_source"] = str((approval or {}).get("source") or ("external_write_approval" if apply else ""))
@@ -845,9 +867,13 @@ def _attach_typed_source_mutation_payload(
     payload: dict[str, object],
     *,
     artifact_dir: Path | None = None,
+    workspace: Path | None = None,
 ) -> None:
     path = str(payload.get("path") or "")
     operation = str(payload.get("operation") or call.tool_name)
+    changed_path = _source_mutation_display_path(path, workspace=workspace)
+    changed_paths = [changed_path] if changed_path and bool(payload.get("changed")) else []
+    payload["changed_paths"] = list(changed_paths)
     route_ref_base = f"implement-v2-write://{call.lane_attempt_id}/{call.provider_call_id}"
     exact_diff_text = str(payload.pop("source_diff_text", "") or "")
     display_diff = str(payload.get("diff") or "")
@@ -884,6 +910,7 @@ def _attach_typed_source_mutation_payload(
         "tool_name": call.tool_name,
         "operation": operation,
         "path": path,
+        "changed_paths": list(changed_paths),
         "changed": bool(payload.get("changed")),
         "written": bool(payload.get("written")),
         "dry_run": bool(payload.get("dry_run")),
@@ -936,6 +963,7 @@ def _mutation_output_card(
         "operation": operation,
         "status": _mutation_card_status(payload),
         "path": path,
+        "changed_paths": list(payload.get("changed_paths") or ()),
         "changed": bool(payload.get("changed")),
         "written": bool(payload.get("written")),
         "dry_run": bool(payload.get("dry_run")),
@@ -971,6 +999,18 @@ def _mutation_output_summary(card: object) -> str:
     ref_text = f"; refs={','.join(refs[:3])}" if refs else ""
     target = f" {path}" if path else ""
     return f"{operation} {status}{target}{stats_text}{ref_text}"
+
+
+def _source_mutation_display_path(path: str, *, workspace: Path | None = None) -> str:
+    if not path:
+        return ""
+    if workspace is None:
+        return path
+    resolved = Path(path).expanduser().resolve(strict=False)
+    try:
+        return resolved.relative_to(workspace).as_posix()
+    except ValueError:
+        return path
 
 
 def _append_ref(refs: list[str], ref: object) -> None:
@@ -1030,6 +1070,7 @@ def _write_source_mutation_artifacts(
         "tool_name": call.tool_name,
         "operation": str(payload.get("operation") or call.tool_name),
         "path": str(payload.get("path") or ""),
+        "changed_paths": list(payload.get("changed_paths") or ()),
         "changed": bool(payload.get("changed")),
         "written": bool(payload.get("written")),
         "dry_run": bool(payload.get("dry_run")),
