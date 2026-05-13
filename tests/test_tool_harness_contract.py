@@ -286,37 +286,41 @@ def test_run_command_natural_text_includes_stderr_and_stdout_previews() -> None:
     assert "runtime result marker" in text
 
 
-def test_run_command_natural_text_caps_model_requested_output_budget() -> None:
+def test_command_family_natural_text_honors_medium_requested_output_budget() -> None:
+    marker_after_tiny_cap = "VISIBLE_AFTER_2400_CHARS"
     noisy_stdout = (
         "first useful line\n"
-        + ("large disassembly output that belongs in the command artifact\n" * 1200)
+        + ("a" * 2600)
+        + f"\n{marker_after_tiny_cap}\n"
+        + ("large bounded probe output\n" * 120)
         + "final useful line\n"
     )
-    result = ToolResultEnvelope(
-        lane_attempt_id="attempt-1",
-        provider_call_id="call-1",
-        mew_tool_call_id="attempt-1:tool:1:1",
-        tool_name="run_command",
-        status="completed",
-        content=(
-            {
-                "exit_code": 0,
-                "stdout": noisy_stdout,
-                "stdout_tail": "final useful line\n",
-                "provider_visible_output_chars": 50000,
-                "output_ref": "exec://attempt-1/cmd/output",
-            },
-        ),
-        content_refs=("exec://attempt-1/cmd/output",),
-    )
+    for tool_name in ("run_command", "run_tests", "poll_command", "cancel_command"):
+        result = ToolResultEnvelope(
+            lane_attempt_id="attempt-1",
+            provider_call_id=f"call-{tool_name}",
+            mew_tool_call_id=f"attempt-1:tool:{tool_name}:1",
+            tool_name=tool_name,
+            status="completed",
+            content=(
+                {
+                    "exit_code": 0,
+                    "stdout": noisy_stdout,
+                    "stdout_tail": "final useful line\n",
+                    "provider_visible_output_chars": 50_000,
+                    "output_ref": f"exec://attempt-1/{tool_name}/output",
+                },
+            ),
+            content_refs=(f"exec://attempt-1/{tool_name}/output",),
+        )
 
-    text = result.natural_result_text()
+        text = result.natural_result_text()
 
-    assert len(text) <= 2400
-    assert "first useful line" in text
-    assert "final useful line" in text
-    assert "large disassembly output that belongs in the command artifact" not in text
-    assert "exec://attempt-1/cmd/output" in text
+        assert len(text) <= 12_000
+        assert "first useful line" in text
+        assert marker_after_tiny_cap in text
+        assert "final useful line" in text
+        assert f"exec://attempt-1/{tool_name}/output" in text
 
 
 def test_tool_registry_and_result_index_artifacts_are_stable() -> None:

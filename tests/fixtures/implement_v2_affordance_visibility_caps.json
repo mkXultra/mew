@@ -33,7 +33,7 @@
   "run_command_visible_card": {
     "hard_red_bytes": 6144,
     "latest_failure_chars": 1200,
-    "live_transcript_text_chars": 2400,
+    "live_transcript_text_chars": 12000,
     "stderr_tail_chars": 1200,
     "stdout_tail_chars": 1200,
     "target_bytes": 4096

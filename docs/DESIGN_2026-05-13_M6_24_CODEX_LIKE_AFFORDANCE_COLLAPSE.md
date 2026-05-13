@@ -470,7 +470,7 @@ Required caps:
 | provider-visible tool-output card | 4096 bytes | 6144 bytes | status line <= 240 chars; refs block <= 12 refs |
 | `search_text` visible card | 4096 bytes | 6144 bytes | matches <= 8; excerpt <= 180 chars per match |
 | `read_file` visible card | 4096 bytes | 6144 bytes | excerpt <= 160 lines; line text clipped to 220 chars |
-| `run_command` / `run_tests` visible card | 4096 bytes default | 6144 bytes hard gate | latest_failure <= 1200 chars; stdout/stderr default tail <= 1200 chars; requested output budget controls capture/storage but live transcript text is clamped to 2400 chars |
+| command-family visible card (`run_command` / `run_tests` / `poll_command` / `cancel_command`) | 4096 bytes default | 6144 bytes default; 12000 chars with explicit bounded output budget | latest_failure <= 1200 chars; stdout/stderr default tail <= 1200 chars; requested output budget controls capture/storage and may expand live transcript text up to 12000 chars |
 | mutation visible card | 2048 bytes | 4096 bytes | changed paths <= 12; hunk/diffstat summary <= 1000 chars |
 
 Any truncation must include a ref to the full sidecar content. A cap failure is
@@ -508,9 +508,11 @@ tool-specific override.
 For a failed runtime or test, the visible output should make the failure
 readable without opening a sidecar first. Sidecars still carry the full output.
 The model may request a larger `max_output_chars` to preserve command capture
-and artifact refs, but that requested budget must not inflate the next
-provider-visible transcript item. Large command output is a sidecar/readback
-surface, not a normal hot-path prompt surface.
+and artifact refs, and that requested budget may expand the next
+provider-visible transcript item up to the medium live cap. This keeps
+intentional source/ELF/build probes useful without letting huge logs become the
+normal hot-path prompt surface. Output beyond the live cap remains available
+through refs/readback.
 
 ### Mutation output
 
