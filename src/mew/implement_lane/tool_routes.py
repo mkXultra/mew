@@ -133,9 +133,15 @@ def build_tool_route_decision(
     """Build route metadata for one call/result pair."""
 
     declared_tool = str(call.tool_name or result.tool_name or "")
-    resolved_effective_tool = str(effective_tool or result.tool_name or declared_tool)
-    route, reason = _route_for_result(declared_tool, result)
     payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    resolved_effective_tool = str(
+        effective_tool
+        or (payload.get("effective_tool") if isinstance(payload, dict) else "")
+        or (payload.get("effective_tool_name") if isinstance(payload, dict) else "")
+        or result.tool_name
+        or declared_tool
+    )
+    route, reason = _route_for_result(declared_tool, result)
     classification = None
     if route in {"process_runner", "process_lifecycle", "invalid_tool_contract"}:
         classification = _command_classification_from_payload(payload) or CommandClassificationResult(
@@ -304,6 +310,8 @@ def _bridge_registry_id(result: ToolResultEnvelope) -> str:
 
 
 def _bridge_classification_allows_route(payload: object) -> bool:
+    if not isinstance(payload, dict) or str(payload.get("bridge_status") or "") != "applied":
+        return False
     classification = _command_classification_from_payload(payload)
     return classification is not None and classification.result == "simple" and classification.as_dict().get(
         "shortcut_consumers_enabled"

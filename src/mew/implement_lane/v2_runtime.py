@@ -379,6 +379,11 @@ def run_live_json_implement_v2(
         task_contract=lane_input.task_contract,
         frontier_state=hard_runtime_frontier_state,
         source_mutation_roots=_source_mutation_roots(lane_input),
+        allowed_write_roots=_allowed_write_roots(lane_input),
+        approved_write_calls=_approved_write_calls(lane_input),
+        auto_approve_writes=bool(lane_input.lane_config.get("auto_approve_writes")),
+        allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
+        artifact_dir=lane_input.lane_config.get("artifact_dir"),
     )
     transcript: list[ImplementLaneTranscriptEvent] = []
     tool_calls: list[object] = []
@@ -1927,6 +1932,11 @@ def run_fake_exec_implement_v2(
             task_contract=lane_input.task_contract,
             frontier_state=_initial_hard_runtime_frontier_state(lane_input),
             source_mutation_roots=_source_mutation_roots(lane_input),
+            allowed_write_roots=_allowed_write_roots(lane_input),
+            approved_write_calls=_approved_write_calls(lane_input),
+            auto_approve_writes=bool(lane_input.lane_config.get("auto_approve_writes")),
+            allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
+            artifact_dir=lane_input.lane_config.get("artifact_dir"),
         )
         try:
             tool_results = tuple(
@@ -2056,6 +2066,11 @@ def run_fake_write_implement_v2(
             task_contract=lane_input.task_contract,
             frontier_state=_initial_hard_runtime_frontier_state(lane_input),
             source_mutation_roots=_source_mutation_roots(lane_input),
+            allowed_write_roots=_allowed_write_roots(lane_input),
+            approved_write_calls=_approved_write_calls(lane_input),
+            auto_approve_writes=bool(lane_input.lane_config.get("auto_approve_writes")),
+            allow_governance_writes=bool(lane_input.lane_config.get("allow_governance_writes")),
+            artifact_dir=lane_input.lane_config.get("artifact_dir"),
         )
         write_runtime = ImplementV2WriteRuntime(
             workspace=lane_input.workspace,

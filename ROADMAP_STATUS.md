@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Command/edit boundary redesign Phase 0-4 is committed/reviewed locally; next work is Phase 5 narrow legacy shell-edit bridge. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Command/edit boundary redesign Phase 0-5 is implemented/reviewed locally; next work is Phase 6 migration/deletion. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,13 +70,13 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_command_edit_boundary_redesign_phase_5_ready`.
+`m6_24_command_edit_boundary_redesign_phase_6_ready`.
 
 Current diagnostic mode:
-`phase_5_after_process_source_observer`.
+`phase_6_after_legacy_shell_edit_bridge`.
 
-Latest phase status: Phase 0-4 of
-`docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md` is committed.
+Latest phase status: Phase 0-5 of
+`docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md` is implemented.
 Phase 0-1 landed as `90b42c9` / `38c9600`: deletion/quarantine map,
 canonical route decision schema, route artifacts, native/live route wiring, and
 route status. Phase 2 landed as `653e193`: typed source mutation artifacts,
@@ -101,7 +101,18 @@ arg rejection, explicit finish-gate blocking for unaccounted process source
 observations, WorkFrame projection of observed paths, and tool-lab/native audit
 projection updates. codex-ultra approved Phase 4 in reviewer session
 `019e1f65-25f6-77f3-a3f0-c14fd7e79bed`; full `uv run pytest --no-testmon -q`
-passed with `3704 passed, 1 warning, 112 subtests passed`.
+passed with `3704 passed, 1 warning, 112 subtests passed`. Phase 5 is
+implemented locally: a one-entry `shell_invoked_apply_patch` bridge registry,
+exact quoted-heredoc/structured apply_patch bridge success through typed
+mutation runtime, original `run_command` pairing preservation, typed evidence
+refs/source diff refs on success, and fail-closed invalid-tool results for
+invalid patch, ambiguous multi-file patch, complex/nested/env/path-qualified
+apply_patch command segments, parser unavailable, policy rejection, and heredoc
+body false positives. codex-ultra reviewer session
+`019e1fba-53d6-70b0-a598-5c8e21b1ffbc` approved after adversarial bridge
+candidate fixes; `uv run pytest --no-testmon -q tests/test_implement_lane.py`
+passed with `521 passed`, and full `uv run pytest --no-testmon -q` passed with
+`3721 passed, 1 warning, 112 subtests passed`.
 
 Current implementation rule:
 
@@ -114,21 +125,23 @@ Current implementation rule:
   and fails closed for bridge and shortcut consumers.
 - Phase 4: `done`; process-runner observer snapshots/diffs and yielded
   lifecycle metadata are implemented and reviewed.
-- Phase 5: next; serial or high-review only because the legacy shell-edit bridge is
-  the highest-risk classifier regrowth point.
+- Phase 5: `implemented/reviewed`; the legacy shell-edit bridge registry has only
+  `shell_invoked_apply_patch` and fail-closes non-exact apply_patch shell
+  command segments without executing the shell edit.
 - Phase 6-7: serial integration and validation: delete/quarantine old
   classifiers, then run UT, replay, dogfood/emulator, fastcheck, 10 minute
   step-shape, and speed proof in that order.
 
-Next action: start Phase 5 from
+Next action: start Phase 6 from
 `docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md`.
 
-- Phase 5 owns the narrow legacy shell-edit bridge. It must not regrow a broad
-  shell mutation classifier.
+- Phase 6 owns migration/deletion. Delete or quarantine old live shell mutation
+  classifier paths according to the Phase 0 deletion map, while preserving
+  explicit historical replay readers only where needed.
 
 Do not resume regex/shlex command-classifier polish, 10 minute step-shape,
-`speed_1`, `proof_5`, or broad measurement before Phase 5 has its focused
-bridge contracts.
+`speed_1`, `proof_5`, or broad measurement before Phase 6 removes/quarantines
+the old live classifier paths and passes focused validation.
 
 Phase 1 of
 `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is

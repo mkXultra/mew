@@ -295,6 +295,11 @@ def run_native_implement_v2(
         source_write_tools_available=_native_tool_available("write_file", lane_input=lane_input, lane_config=lane_config),
         task_contract=dict(lane_input.task_contract),
         source_mutation_roots=tuple(str(root) for root in lane_config.get("source_mutation_roots") or (str(workspace),)),
+        allowed_write_roots=allowed_write_roots,
+        approved_write_calls=_approved_write_calls(lane_config),
+        auto_approve_writes=bool(lane_config.get("auto_approve_writes")),
+        allow_governance_writes=bool(lane_config.get("allow_governance_writes")),
+        artifact_dir=lane_config.get("artifact_dir"),
     )
     write_runtime = ImplementV2WriteRuntime(
         workspace=workspace,

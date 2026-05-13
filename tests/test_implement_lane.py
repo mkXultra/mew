@@ -42,6 +42,7 @@ from mew.implement_lane import (
 )
 from mew.implement_lane.tool_policy import list_v2_tool_specs_for_task
 from mew.implement_lane.provider import FakeProviderAdapter, FakeProviderToolCall
+from mew.implement_lane.legacy_shell_edit_bridge import bridge_registry_manifest
 from mew.implement_lane.v2_runtime import (
     ModelTurnInput,
     _auto_finish_from_structured_final_verifier,
@@ -13624,6 +13625,321 @@ def test_implement_v2_route_bridge_fails_closed_for_malformed_shell_metadata(
     decision = build_tool_route_decision(call, result)
 
     assert decision.tool_route == "invalid_tool_contract"
+
+
+def _run_shell_apply_patch_bridge(tmp_path, command: str, *, patch_args: dict[str, object] | None = None):
+    args = {
+        "command": command,
+        "cwd": ".",
+        "timeout": 5,
+        "foreground_budget_seconds": 1,
+    }
+    args.update(patch_args or {})
+    return run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={
+                "mode": "exec",
+                "allow_shell": True,
+                "allowed_write_roots": [str(tmp_path)],
+                "auto_approve_writes": True,
+            },
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-bridge",
+                "tool_name": "run_command",
+                "arguments": args,
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "bridge checked"},
+    )
+
+
+def test_implement_v2_shell_apply_patch_bridge_success_routes_typed_mutation(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "*** End Patch\n"
+    )
+    command = f"apply_patch <<'PATCH'\n{patch}PATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+    route_decision = payload["tool_route_decision"]
+
+    assert tool_result["tool_name"] == "run_command"
+    assert tool_result["status"] == "completed"
+    assert payload["tool_route"] == "legacy_shell_edit_bridge"
+    assert payload["bridge_registry_id"] == "shell_invoked_apply_patch"
+    assert payload["bridge_status"] == "applied"
+    assert route_decision["declared_tool"] == "run_command"
+    assert route_decision["effective_tool"] == "apply_patch"
+    assert payload["source_diff_ref"]
+    assert payload["typed_evidence_refs"] == tool_result["evidence_refs"]
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('new')\n"
+
+
+def test_implement_v2_shell_apply_patch_bridge_manifest_has_only_bootstrap_entry() -> None:
+    manifest = bridge_registry_manifest()
+    bridges = manifest["bridges"]
+
+    assert [bridge["id"] for bridge in bridges] == ["shell_invoked_apply_patch"]
+
+
+def test_implement_v2_shell_apply_patch_bridge_invalid_patch_fails_closed(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    command = "apply_patch <<'PATCH'\n*** End Patch\nPATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "failed"
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_registry_id"] == "shell_invoked_apply_patch"
+    assert payload["bridge_status"] == "rejected"
+    assert payload["suggested_tool"] == "apply_patch|edit_file|write_file"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('old')\n"
+
+
+def test_implement_v2_shell_apply_patch_bridge_ambiguous_multi_file_patch_fails_closed(tmp_path) -> None:
+    (tmp_path / "a.py").write_text("a = 1\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text("b = 1\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: a.py\n"
+        "@@\n"
+        "-a = 1\n"
+        "+a = 2\n"
+        "*** Update File: b.py\n"
+        "@@\n"
+        "-b = 1\n"
+        "+b = 2\n"
+        "*** End Patch\n"
+    )
+    command = f"apply_patch <<'PATCH'\n{patch}PATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert (tmp_path / "a.py").read_text(encoding="utf-8") == "a = 1\n"
+    assert (tmp_path / "b.py").read_text(encoding="utf-8") == "b = 1\n"
+
+
+def test_implement_v2_shell_apply_patch_bridge_complex_command_fails_closed_without_shell_execution(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "*** End Patch\n"
+    )
+    command = f"apply_patch <<'PATCH'\n{patch}PATCH\n&& touch should-not-exist"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('old')\n"
+    assert not (tmp_path / "should-not-exist").exists()
+
+
+def test_implement_v2_shell_apply_patch_bridge_nested_complex_segment_fails_closed(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "*** End Patch\n"
+    )
+    command = f"cd . && apply_patch <<'PATCH'\n{patch}PATCH\n&& touch should-not-exist"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('old')\n"
+    assert not (tmp_path / "should-not-exist").exists()
+
+
+def test_implement_v2_shell_apply_patch_bridge_env_prefixed_segment_fails_closed(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "*** End Patch\n"
+    )
+    command = f"env FOO=1 apply_patch <<'PATCH'\n{patch}PATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('old')\n"
+
+
+def test_implement_v2_shell_apply_patch_bridge_env_unset_segment_fails_closed(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "*** End Patch\n"
+    )
+    command = f"env -u FOO apply_patch <<'PATCH'\n{patch}PATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('old')\n"
+
+
+def test_implement_v2_shell_apply_patch_bridge_path_qualified_segment_fails_closed(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "*** End Patch\n"
+    )
+    command = f"./apply_patch <<'PATCH'\n{patch}PATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('old')\n"
+
+
+@pytest.mark.parametrize("tool_word", ("apply_patch", "./apply_patch"))
+def test_implement_v2_shell_apply_patch_bridge_assignment_prefixed_segment_fails_closed(
+    tmp_path, tool_word: str
+) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "*** End Patch\n"
+    )
+    command = f"FOO=1 {tool_word} <<'PATCH'\n{patch}PATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('old')\n"
+
+
+@pytest.mark.parametrize(
+    "command_template",
+        (
+            "( apply_patch <<'PATCH'\n{patch}PATCH )",
+            "{{ apply_patch <<'PATCH'\n{patch}PATCH; }}",
+            "if true; then apply_patch <<'PATCH'\n{patch}PATCH\nfi",
+        ),
+)
+def test_implement_v2_shell_apply_patch_bridge_grouped_or_control_segment_fails_closed(
+    tmp_path, command_template: str
+) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "*** End Patch\n"
+    )
+    command = command_template.format(patch=patch)
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('old')\n"
+
+
+def test_implement_v2_shell_apply_patch_bridge_ignores_heredoc_body_mentions(tmp_path) -> None:
+    result = _run_shell_apply_patch_bridge(tmp_path, "cat <<'EOF'\napply_patch\nEOF")
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert payload["tool_route"] == "process_runner"
+    assert "apply_patch" in payload["stdout"]
+
+
+def test_implement_v2_shell_apply_patch_bridge_parser_unavailable_fails_closed(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("print('old')\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        "-print('old')\n"
+        "+print('new')\n"
+        "*** End Patch\n"
+    )
+    command = f"apply_patch <<'PATCH'\n{patch}PATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command, patch_args={"bridge_parser_available": False})
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert payload["command_classification"]["result"] == "unavailable"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('old')\n"
+
+
+def test_implement_v2_shell_apply_patch_bridge_policy_rejection_fails_closed(tmp_path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    patch = (
+        "*** Begin Patch\n"
+        f"*** Add File: ../{outside.name}\n"
+        "+print('outside')\n"
+        "*** End Patch\n"
+    )
+    command = f"apply_patch <<'PATCH'\n{patch}PATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["tool_route"] == "invalid_tool_contract"
+    assert payload["bridge_status"] == "rejected"
+    assert "outside allowed write roots" in payload["reason"]
+    assert not outside.exists()
 
 
 def test_implement_v2_shell_metadata_unavailable_is_not_read_or_edit_safe() -> None:

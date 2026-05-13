@@ -25,6 +25,7 @@ from .execution_evidence import (
     normalize_execution_contract,
     semantic_exit_from_run,
 )
+from .legacy_shell_edit_bridge import maybe_execute_legacy_shell_edit_bridge
 from .read_runtime import DEFAULT_V2_READ_RESULT_MAX_CHARS
 from .replay import build_invalid_tool_result
 from .shell_metadata import classify_shell_command_metadata
@@ -200,6 +201,11 @@ class ImplementV2ManagedExecRuntime:
         task_contract: dict[str, object] | None = None,
         frontier_state: dict[str, object] | None = None,
         source_mutation_roots: tuple[str, ...] | list[str] | None = None,
+        allowed_write_roots: tuple[str, ...] | list[str] | None = None,
+        approved_write_calls: tuple[object, ...] | list[object] | None = None,
+        auto_approve_writes: bool = False,
+        allow_governance_writes: bool = False,
+        artifact_dir: object | None = None,
     ):
         self.workspace = Path(str(workspace or ".")).expanduser().resolve(strict=False)
         self.allowed_roots = tuple(str(root) for root in (allowed_roots or (str(self.workspace),)))
@@ -211,6 +217,11 @@ class ImplementV2ManagedExecRuntime:
         self.source_write_tools_available = bool(source_write_tools_available)
         self.task_contract = dict(task_contract or {})
         self.frontier_state = dict(frontier_state or {})
+        self.allowed_write_roots = tuple(str(root) for root in (allowed_write_roots or ()))
+        self.approved_write_calls = tuple(approved_write_calls or ())
+        self.auto_approve_writes = bool(auto_approve_writes)
+        self.allow_governance_writes = bool(allow_governance_writes)
+        self.artifact_dir = artifact_dir
         self.runner = ManagedCommandRunner(max_active=max_active)
         self.output_paths: dict[str, str] = {}
         self.command_metadata: dict[str, dict[str, object]] = {}
@@ -220,7 +231,10 @@ class ImplementV2ManagedExecRuntime:
             return build_invalid_tool_result(call, reason=f"unknown exec tool: {call.tool_name}")
         try:
             if call.tool_name in {"run_command", "run_tests"}:
-                payload = self._run_command(call)
+                payload_or_result = self._run_command(call)
+                if isinstance(payload_or_result, ToolResultEnvelope):
+                    return payload_or_result
+                payload = payload_or_result
             elif call.tool_name == "poll_command":
                 payload = self._poll_command(call)
             elif call.tool_name == "cancel_command":
@@ -293,8 +307,20 @@ class ImplementV2ManagedExecRuntime:
         payload.update(_command_metadata_for_payload(self.command_metadata.get(str(payload.get("command_run_id") or ""), {})))
         return (payload,)
 
-    def _run_command(self, call: ToolCallEnvelope) -> dict[str, object]:
+    def _run_command(self, call: ToolCallEnvelope) -> dict[str, object] | ToolResultEnvelope:
         args = dict(call.arguments)
+        bridge_result = maybe_execute_legacy_shell_edit_bridge(
+            call,
+            workspace=self.workspace,
+            allowed_write_roots=self.allowed_write_roots,
+            approved_write_calls=self.approved_write_calls,
+            auto_approve_writes=self.auto_approve_writes,
+            allow_governance_writes=self.allow_governance_writes,
+            artifact_dir=self.artifact_dir,
+            parser_available=bool(args.get("bridge_parser_available", True)),
+        )
+        if bridge_result is not None:
+            return bridge_result
         edit_misuse = _execute_route_edit_shaped_args_misuse(args, tool_name=call.tool_name)
         if edit_misuse is not None:
             raise ExecToolContractMisuse(edit_misuse)
@@ -332,6 +358,7 @@ class ImplementV2ManagedExecRuntime:
             command,
             command_source=command_source,
             use_shell=use_shell,
+            parser_available=bool(args.get("bridge_parser_available", True)),
         )
         timeout = _bounded_float(args.get("timeout"), default=300.0, minimum=1.0, maximum=3600.0)
         foreground_budget = _bounded_float(

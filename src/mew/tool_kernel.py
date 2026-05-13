@@ -82,6 +82,11 @@ class ToolKernel:
             task_contract=config.task_contract,
             frontier_state=config.frontier_state,
             source_mutation_roots=self.source_mutation_roots,
+            allowed_write_roots=self.allowed_write_roots,
+            approved_write_calls=config.approved_write_calls,
+            auto_approve_writes=False,
+            allow_governance_writes=config.allow_governance_writes,
+            artifact_dir=config.artifact_dir,
         )
         self.write_runtime = write_runtime or ImplementV2WriteRuntime(
             workspace=str(workspace),

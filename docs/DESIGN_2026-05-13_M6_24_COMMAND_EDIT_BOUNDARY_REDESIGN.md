@@ -812,6 +812,28 @@ Close gate:
 - Reviewer confirms the bridge registry did not grow beyond the documented
   bootstrap entry without trace evidence and design approval.
 
+Phase 5 implementation note (2026-05-13):
+
+- The bridge registry is implemented with exactly one bootstrap entry:
+  `shell_invoked_apply_patch`.
+- Exact quoted-heredoc and structured legacy `run_command` apply_patch inputs
+  are routed through `ImplementV2WriteRuntime`; the original provider
+  `run_command` call/result pairing is preserved.
+- Successful bridge results record `declared_tool=run_command`,
+  `effective_tool=apply_patch`, `tool_route=legacy_shell_edit_bridge`,
+  `bridge_registry_id`, source diff refs, and typed evidence refs.
+- Bridge misses and typed mutation failures return `invalid_tool_contract`;
+  the original shell edit is not executed.
+- Focused tests cover success, invalid patch, ambiguous multi-file patch,
+  complex/nested/env/path-qualified apply_patch command segments, parser
+  unavailable, policy rejection, and heredoc body mentions that must remain
+  ordinary process output.
+- codex-ultra reviewer session `019e1fba-53d6-70b0-a598-5c8e21b1ffbc`
+  returned `STATUS: APPROVED` after adversarial fail-closed fixes.
+- `uv run pytest --no-testmon -q tests/test_implement_lane.py` passed with
+  `521 passed`; full `uv run pytest --no-testmon -q` passed with `3721 passed,
+  1 warning, 112 subtests passed`.
+
 ### Phase 6: Migration and Deletion
 
 Intent: remove old live contracts without preserving backward compatibility.
