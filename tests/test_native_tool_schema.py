@@ -25,7 +25,7 @@ def test_base_tool_specs_lower_to_responses_tools_with_strict_read_file_schema()
     assert read_file == {
         "type": "function",
         "name": "read_file",
-        "description": "Read a workspace file through the existing read substrate.",
+        "description": "Read a bounded workspace file excerpt with line anchors.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -51,7 +51,54 @@ def test_base_tool_specs_lower_to_responses_tools_with_strict_read_file_schema()
     assert strict_false_reasons(lowered) == {}
 
 
-def test_write_file_tool_contract_discourages_huge_native_payloads() -> None:
+def test_base_tool_specs_order_prefers_mutation_then_execution_then_context() -> None:
+    names = [spec.name for spec in list_v2_base_tool_specs()]
+
+    assert names == [
+        "apply_patch",
+        "edit_file",
+        "write_file",
+        "run_command",
+        "run_tests",
+        "poll_command",
+        "cancel_command",
+        "read_command_output",
+        "read_file",
+        "search_text",
+        "glob",
+        "inspect_dir",
+        "git_status",
+        "git_diff",
+        "finish",
+    ]
+
+
+def test_base_tool_specs_descriptions_remove_probe_frontier_salience() -> None:
+    descriptions = "\n".join(spec.description for spec in list_v2_base_tool_specs())
+
+    assert "cheap probe" not in descriptions
+    assert "fallback-probe" not in descriptions
+    assert "fallback probe" not in descriptions
+    assert "frontier" not in descriptions
+    assert "broad recursive source exploration" not in descriptions
+    assert "apply_patch" in descriptions
+    assert "bounded path:line anchors" in descriptions
+
+
+def test_lowered_provider_tool_descriptions_remove_probe_frontier_salience() -> None:
+    lowered = lower_implement_lane_tool_specs(list_v2_base_tool_specs())
+    descriptions = "\n".join(str(tool.provider_tool.get("description") or "") for tool in lowered)
+
+    assert "cheap probe" not in descriptions
+    assert "fallback-probe" not in descriptions
+    assert "fallback probe" not in descriptions
+    assert "frontier" not in descriptions
+    assert "broad recursive source exploration" not in descriptions
+    assert "Apply a raw patch to source files" in descriptions
+    assert "custom/freeform patch input" in descriptions
+
+
+def test_write_file_tool_contract_discourages_large_source_payloads() -> None:
     lowered = lower_implement_lane_tool_specs(list_v2_base_tool_specs())
     write_file = {tool.name: tool for tool in lowered}["write_file"].provider_tool
 
@@ -60,8 +107,8 @@ def test_write_file_tool_contract_discourages_huge_native_payloads() -> None:
         write_file["parameters"]["properties"]["content_lines"]["description"]  # type: ignore[index]
     )
 
-    assert "Do not emit a single huge provider-native write_file JSON payload" in description
-    assert "small and medium writes" in description
+    assert "small complete file" in description
+    assert "Prefer apply_patch or edit_file" in description
     assert "avoid large generated source payloads in one provider-native call" in content_lines_description
 
 
@@ -72,6 +119,8 @@ def test_apply_patch_lowers_to_custom_grammar_tool_when_supported() -> None:
     assert apply_patch.strict is None
     assert apply_patch.provider_tool["type"] == "custom"
     assert apply_patch.provider_tool["name"] == "apply_patch"
+    assert "Apply a raw patch to source files" in apply_patch.provider_tool["description"]
+    assert "custom/freeform patch input" in apply_patch.provider_tool["description"]
     assert apply_patch.provider_tool["format"]["type"] == "grammar"  # type: ignore[index]
     assert apply_patch.provider_tool["format"]["syntax"] == "lark"  # type: ignore[index]
     assert (

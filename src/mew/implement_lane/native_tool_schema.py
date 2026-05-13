@@ -135,8 +135,8 @@ def lower_implement_lane_tool_spec(
                     "type": "custom",
                     "name": "apply_patch",
                     "description": (
-                        "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, "
-                        "so do not wrap the patch in JSON."
+                        "Apply a raw patch to source files. Use this for multi-line edits, new files, "
+                        "deletions, and renames. Do not wrap custom/freeform patch input in JSON."
                     ),
                     "format": {
                         "type": "grammar",

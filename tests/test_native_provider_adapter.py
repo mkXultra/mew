@@ -91,6 +91,27 @@ def test_request_descriptor_records_native_transport_hashes_headers_and_reasonin
     )
 
 
+def test_request_descriptor_preserves_codex_like_tool_order_and_collapsed_descriptions() -> None:
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[_input_item()],
+        transcript_window=[{"sequence": 1, "kind": "input_message"}],
+        tool_specs=list_v2_base_tool_specs(),
+        provider_request_id="req-tool-order",
+    )
+    tools = descriptor["request_body"]["tools"]  # type: ignore[index]
+    names = [str(tool.get("name") or "") for tool in tools]  # type: ignore[union-attr]
+    descriptions = "\n".join(str(tool.get("description") or "") for tool in tools)  # type: ignore[union-attr]
+
+    assert names[:5] == ["apply_patch", "edit_file", "write_file", "run_command", "run_tests"]
+    assert names[-1] == "finish"
+    assert "Apply a raw patch to source files" in descriptions
+    assert "cheap probe" not in descriptions
+    assert "fallback-probe" not in descriptions
+    assert "frontier" not in descriptions
+
+
 def test_previous_response_delta_uses_suffix_when_logical_prefix_matches() -> None:
     call_item = {
         "type": "function_call",

@@ -10512,8 +10512,8 @@ def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:
     assert specs["cancel_command"].approval_required is False
     assert specs["read_command_output"].access == "execute"
     assert specs["write_file"].approval_required is True
-    assert "Do not emit a single huge provider-native write_file JSON payload" in specs["write_file"].description
-    assert "small and medium writes" in specs["write_file"].description
+    assert "small complete file" in specs["write_file"].description
+    assert "Prefer apply_patch or edit_file" in specs["write_file"].description
     assert specs["edit_file"].dry_run_supported is True
     assert specs["apply_patch"].dry_run_supported is True
     assert specs["apply_patch"].input_transport == "json_line_array"

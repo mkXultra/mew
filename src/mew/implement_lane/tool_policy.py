@@ -42,43 +42,45 @@ class ImplementLaneToolSpec:
 
 V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
     ImplementLaneToolSpec(
-        name="inspect_dir",
-        access="read",
-        description="List a workspace directory through the existing read substrate.",
+        name="apply_patch",
+        access="write",
+        description=(
+            "Apply a raw patch to source files. Use this for multi-line edits, new files, "
+            "deletions, and renames. Do not wrap custom/freeform patch input in JSON."
+        ),
+        approval_required=True,
+        dry_run_supported=True,
+        input_transport="json_line_array",
+        preferred_bulk_argument="patch_lines",
+        fallback_bulk_arguments=("patch", "input"),
+        provider_native_input_kind="freeform_apply_patch",
     ),
     ImplementLaneToolSpec(
-        name="read_file",
-        access="read",
-        description="Read a workspace file through the existing read substrate.",
+        name="edit_file",
+        access="write",
+        description=(
+            "Edit a file with exact replacements or structured hunks. Use when anchors "
+            "are precise; ambiguous matches fail closed."
+        ),
+        approval_required=True,
+        dry_run_supported=True,
     ),
     ImplementLaneToolSpec(
-        name="search_text",
-        access="read",
-        description="Search the workspace through rg-backed discovery.",
-    ),
-    ImplementLaneToolSpec(
-        name="glob",
-        access="read",
-        description="Glob workspace paths through the existing read substrate.",
-    ),
-    ImplementLaneToolSpec(
-        name="git_status",
-        access="read",
-        description="Inspect git status for an allowed workspace root.",
-    ),
-    ImplementLaneToolSpec(
-        name="git_diff",
-        access="read",
-        description="Inspect bounded git diff or diffstat for an allowed workspace root.",
+        name="write_file",
+        access="write",
+        description=(
+            "Write a small complete file, especially generated non-source output. Prefer "
+            "apply_patch or edit_file for source changes and large replacements."
+        ),
+        approval_required=True,
+        dry_run_supported=True,
     ),
     ImplementLaneToolSpec(
         name="run_command",
         access="execute",
         description=(
-            "Run a command through managed exec with nonterminal state. Accepts command/cmd strings or argv arrays; "
-            "compound shell strings are run as shell scripts. Optional command_intent=probe|diagnostic marks cheap "
-            "non-acceptance commands. Do not use run_command for broad recursive source exploration; use "
-            "glob/search_text/read_file for source discovery and reserve shell probes for bounded commands."
+            "Run a bounded command, build, runtime, or diagnostic through managed exec. "
+            "Use source mutation tools for edits. Output returns compact terminal text with refs."
         ),
         approval_required=True,
     ),
@@ -86,8 +88,8 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="run_tests",
         access="execute",
         description=(
-            "Run a verifier command through managed exec with nonterminal state. Accepts command/cmd strings "
-            "or argv arrays. Optional command_intent=probe|diagnostic marks cheap non-acceptance commands."
+            "Run a bounded verifier or test command through managed exec. Output returns compact "
+            "terminal text with refs."
         ),
         approval_required=True,
     ),
@@ -107,44 +109,34 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         description="Read a bounded slice of managed command spool output.",
     ),
     ImplementLaneToolSpec(
-        name="apply_patch",
-        access="write",
-        description=(
-            "Primary source mutation tool for multi-line source changes. Apply a patch through the existing "
-            "patch approval path. Prefer patch_lines, an array with one apply_patch line per item and no "
-            "embedded newline characters. Legacy patch/input strings remain accepted."
-        ),
-        approval_required=True,
-        dry_run_supported=True,
-        input_transport="json_line_array",
-        preferred_bulk_argument="patch_lines",
-        fallback_bulk_arguments=("patch", "input"),
-        provider_native_input_kind="freeform_apply_patch",
+        name="read_file",
+        access="read",
+        description="Read a bounded workspace file excerpt with line anchors.",
     ),
     ImplementLaneToolSpec(
-        name="edit_file",
-        access="write",
-        description=(
-            "Precise source mutation tool for exact replacements. Edit a file through the existing edit "
-            "substrate. Accepts old/new or old_string/new_string."
-        ),
-        approval_required=True,
-        dry_run_supported=True,
+        name="search_text",
+        access="read",
+        description="Search workspace text and return bounded path:line anchors.",
     ),
     ImplementLaneToolSpec(
-        name="write_file",
-        access="write",
-        description=(
-            "Write a small generated file through the existing write substrate. Accepts content string or "
-            "content_lines array joined with newlines for small and medium writes, especially non-source "
-            "writes or complete file creation. Do not emit a single huge provider-native write_file JSON "
-            "payload for large generated or replacement source; prefer apply_patch or edit_file for source "
-            "mutations. Do not create or patch source-like files through run_command when "
-            "write_file/edit_file/apply_patch are available. Never minify generated source into one long "
-            "line just to fit JSON."
-        ),
-        approval_required=True,
-        dry_run_supported=True,
+        name="glob",
+        access="read",
+        description="List workspace paths matching a glob.",
+    ),
+    ImplementLaneToolSpec(
+        name="inspect_dir",
+        access="read",
+        description="List a workspace directory.",
+    ),
+    ImplementLaneToolSpec(
+        name="git_status",
+        access="read",
+        description="Inspect git status for an allowed workspace root.",
+    ),
+    ImplementLaneToolSpec(
+        name="git_diff",
+        access="read",
+        description="Inspect bounded git diff or diffstat for an allowed workspace root.",
     ),
     ImplementLaneToolSpec(
         name="finish",
