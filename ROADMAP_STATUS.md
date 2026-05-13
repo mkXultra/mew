@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Command/edit boundary Phase 0-6 is implemented/reviewed/validated; current next work is Codex-like native hot-path Phase 0 contract/static gates from `docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md`. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Codex-like native hot-path Phase 0 and Phase 1A/1B are implemented/reviewed/committed; current next work is Phase 2/3 validation from `docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md` before any speed proof. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,20 +70,36 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_codex_like_native_hot_path_phase_0_contract`.
+`m6_24_codex_like_native_hot_path_phase_2_validation`.
 
 Current diagnostic mode:
-`no_live_speed_until_hot_path_contract_gate`.
+`no_live_speed_until_phase_2_3_hot_path_validation_gate`.
 
 Current reentry decision:
 `docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md` is the active
-M6.24 design. Do not resume command/edit Phase 7 validation, 10 minute
-step-shape, `speed_1`, `proof_5`, or hard-runtime threshold polish until
-Codex-like native hot-path Phase 0 contract/static gates are implemented and
-committed. The target is Codex-like live path plus mew sidecar proof: native
-transcript window + compact factual tool-result digest as provider-visible
-input; WorkFrame/proof/replay/typed evidence/loop signals remain internal
-sidecars or diagnostics, not live `next_action` steering.
+M6.24 design. Phase 0 landed as `eee130d`; Phase 1A/1B landed as `76f05ab`.
+Do not resume command/edit Phase 7 validation, `speed_1`, `proof_5`, or
+hard-runtime threshold polish until Phase 2/3 validation is green. The target
+is Codex-like live path plus mew sidecar proof: native transcript window +
+compact factual tool-result digest as provider-visible input;
+WorkFrame/proof/replay/typed evidence/loop signals remain internal sidecars
+or diagnostics, not live `next_action` steering.
+
+Latest Codex-like hot-path validation:
+
+- Phase 0 contract/static gates: committed as `eee130d`, codex-ultra approved.
+- Phase 1A transcript/input collapse and Phase 1B tool surface/mutation path:
+  committed as `76f05ab`, codex-ultra approved.
+- Focused validation before commit: `750 passed` across native/tool/implement
+  and terminal-bench replay focused suites; ruff passed.
+- Fresh Phase 2 smoke artifact:
+  `proof-artifacts/m6_24_codex_like_hot_path/phase2-native-smoke-76f05ab/`.
+- Fresh fastcheck:
+  `uv run python scripts/check_implement_v2_hot_path.py --artifact proof-artifacts/m6_24_codex_like_hot_path/phase2-native-smoke-76f05ab --no-baseline`
+  returned `status=pass`.
+- Old proof artifacts may fail the new compact-digest replay because their
+  saved provider request shape predates `76f05ab`; treat that as historical
+  drift, not a current live-path failure.
 
 Latest phase status: Phase 0-6 of
 `docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md` is implemented.
@@ -499,12 +515,14 @@ Done when:
 
 ### M6.24 Native Boundary Status
 
-Status as of 2026-05-12: **in progress**. The native transcript rebuild design
+Status as of 2026-05-13: **superseded by Codex-like native hot path**. The native transcript rebuild design
 `docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md` gave
-mew a provider-native runtime. The active design is now
-`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`,
-which prevents WorkFrame/todo/evidence sidecars from becoming a second
-model-visible control plane.
+mew a provider-native runtime. The responsibility-boundary design
+`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`
+has been superseded by
+`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md`, which keeps the
+Codex-like live path minimal while preserving mew sidecar proof/debug
+artifacts.
 
 Phase 0 boundary inventory/static audit is complete and committed as
 `3059cca`. It audits the current semantic-ish controls across
@@ -512,12 +530,9 @@ Phase 0 boundary inventory/static audit is complete and committed as
 `native_workframe_projection.py`, `exec_runtime.py`, and
 `execution_evidence.py`.
 
-Phase 1 compact sidecar digest boundary is complete and reviewed. Phase 2
-`CompletionResolver` skeleton is complete and reviewed: resolver import is
-boundary-clean, resolver input rejects raw transcript/tool payloads, decisions
-are sidecar/proof artifacts rather than native ResponseItems, and focused tests
-cover allow, `blocked_continue`, `blocked_return`, import boundary, artifact
-schema, and raw-input rejection.
+The newer Codex-like hot-path work keeps the same safety boundary but removes
+provider-visible WorkFrame/required-next steering from the live path. See the
+active reentry decision above for current validation state.
 
 Native-loop gate evidence:
 
