@@ -473,10 +473,20 @@ def _check_native_trace_summary(
     verifier_count = _nonnegative_int(summary.get("verifier_count"))
     has_hot_path_shape = edit_count > 0 and verifier_count > 0
     ok = parse_error_count == 0 and has_hot_path_shape
+    if ok:
+        message = "native trace summary is available, parse-clean, and contains edit plus verifier"
+    elif parse_error_count:
+        message = "native trace summary has parse errors"
+    elif edit_count <= 0 and verifier_count <= 0:
+        message = "native trace summary has no source mutation or verifier calls"
+    elif edit_count <= 0:
+        message = "native trace summary has no source mutation calls"
+    else:
+        message = "native trace summary has no verifier calls"
     return _check(
         "native_trace_summary",
         ok,
-        "native trace summary is available and parse-clean" if ok else "native trace summary is missing or has parse errors",
+        message,
         summary,
     )
 

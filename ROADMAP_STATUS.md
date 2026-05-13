@@ -100,6 +100,19 @@ Latest Codex-like hot-path validation:
 - Old proof artifacts may fail the new compact-digest replay because their
   saved provider request shape predates `76f05ab`; treat that as historical
   drift, not a current live-path failure.
+- Same-shape Phase 3 diagnostic
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-codex-like-hotpath-step-check-10min-20260513-1023/.../make-mips-interpreter__whSmZaL/`
+  did not pass the live step-shape gate: provider pairing was valid, forbidden
+  steering fields were absent, and transcript/digest were present, but the loop
+  timed out after 54 read/probe calls with no write/edit/apply_patch or
+  verifier. Classification:
+  `missing_mutation_affordance / first_write_latency`, not provider-visible
+  steering regression.
+- Current next action: repair the mutation affordance while preserving the
+  Codex-like hot path. Do not restore live `next_action`, `required_next`,
+  `first_write_due`, probe thresholds, or WorkFrame steering; do not run
+  `speed_1` / `proof_5` until Phase 3 revalidation passes or is explicitly
+  yellow for a non-hot-path reason.
 
 Latest phase status: Phase 0-6 of
 `docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md` is implemented.

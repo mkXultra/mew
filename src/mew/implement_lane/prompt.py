@@ -128,7 +128,8 @@ def build_implement_v2_prompt_sections(
                 "Keep the normal coding hot path small and transcript-driven: cheap probe -> coherent "
                 "patch/edit -> verifier -> latest-failure repair. Use read/search/inspect/run_command "
                 "for cheap source, environment, ABI, or verifier probes; then move to "
-                f"{mutation_tools_phrase} once the compatibility surface is known. After a concrete "
+                f"{mutation_tools_phrase} once the minimal compatibility surface is known. Do not wait for "
+                "exhaustive source or disassembly coverage when a coherent patch can be tested. After a concrete "
                 "runtime, verifier, or artifact failure yields an actionable hypothesis, spend at most "
                 "one focused diagnostic/read turn before a patch/edit plus verifier, or finish blocked "
                 "with the exact missing information. Do not keep re-reading generated source or full "
@@ -229,7 +230,8 @@ def build_implement_v2_prompt_sections(
                     "do not compile/run the provided source tree, a demo program, or a host-native fallback "
                     "as a substitute for executing or interpreting that supplied artifact unless the task "
                     "explicitly allows substitution. "
-                    "Probe ABI/symbol/syscall/output before first write. Patch once, run one verifier, "
+                    "Before first write, probe only enough ABI/symbol/syscall/output evidence to make "
+                    "one coherent runtime patch. Patch once, run one verifier, "
                     "finish with fresh runtime/verifier evidence. Generated runtimes/interpreters must fail fast on "
                     "unsupported opcode/syscall/ABI with explicit PC/code; only ignore/noop when source proves harmless.",
                     _HARD_RUNTIME_PROFILE_BYTE_CAP,

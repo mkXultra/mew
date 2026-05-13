@@ -5971,6 +5971,8 @@ def test_implement_v2_prompt_sections_include_active_coding_rhythm() -> None:
     assert section.cache_policy == "cacheable"
     assert section.stability == "static"
     assert "cheap probe -> coherent patch/edit -> verifier -> latest-failure repair" in section.content
+    assert "minimal compatibility surface" in section.content
+    assert "Do not wait for exhaustive source or disassembly coverage" in section.content
     assert "at most one focused diagnostic/read turn" in section.content
     assert "write_file/edit_file/apply_patch paths by default for scoped edits" in section.content
     assert "keep source-like file creation and patches in write_file/edit_file/apply_patch" in section.content
@@ -11648,6 +11650,8 @@ def test_implement_v2_prompt_adds_hard_runtime_profile_for_vm_artifact_task() ->
     assert "execution authority" in by_id["implement_v2_hard_runtime_profile"].content
     assert "do not compile/run the provided source tree" in by_id["implement_v2_hard_runtime_profile"].content
     assert "substitute for executing or interpreting" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "probe only enough ABI/symbol/syscall/output evidence" in by_id["implement_v2_hard_runtime_profile"].content
+    assert "one coherent runtime patch" in by_id["implement_v2_hard_runtime_profile"].content
     assert "run one verifier" in by_id["implement_v2_hard_runtime_profile"].content
     assert "fresh runtime/verifier evidence" in by_id["implement_v2_hard_runtime_profile"].content
     assert "implement_v2_hard_runtime_frontier_state" not in by_id

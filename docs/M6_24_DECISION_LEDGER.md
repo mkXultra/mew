@@ -18,6 +18,24 @@ Companion controller and data files:
 
 ## Current Native-Loop Repair
 
+2026-05-13 Codex-like hot-path Phase 3 diagnostic:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-codex-like-hotpath-step-check-10min-20260513-1023/2026-05-13__19-23-11/make-mips-interpreter__whSmZaL/agent/terminal-bench-harbor-smoke/unknown-task`
+keeps the Phase 0/1 contract intact but does not pass the live step-shape
+gate. Local preflight was green first: `750 passed`, fresh native fastcheck
+passed, and replay/dogfood/emulator checks passed. The live 10 minute
+diagnostic then stopped with `request timed out`, valid native pairing
+(`54` calls / `54` outputs), no provider-visible forbidden steering fields,
+and no write/edit/apply_patch or verifier calls. The compact digest and native
+transcript were present, so this is not a WorkFrame/required-next leak or lost
+transcript-evidence regression. Classify it as
+`missing_mutation_affordance / first_write_latency`: the model kept probing and
+never used the available `apply_patch` / `edit_file` mutation path. Broad
+`speed_1`, `proof_5`, and out-of-scope measurement remain blocked. The next
+repair must preserve the Codex-like hot path: provider-visible input remains
+native transcript window plus compact factual digest, and any repair must not
+reintroduce live `next_action`, `required_next`, `first_write_due`, probe
+thresholds, or WorkFrame steering.
+
 2026-05-13 checkpoint: keep M6.24 measurement paused after the
 `mew-make-mips-interpreter-step-check-10min-20260513-005024` diagnostic. The
 native evidence resolver is observable and not the current blocker. The current
