@@ -18,6 +18,7 @@ from ..acceptance import (
 )
 from ..errors import ModelBackendError
 from ..work_lanes import IMPLEMENT_V2_LANE
+from .affordance_visibility import CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS
 from .execution_evidence import (
     build_oracle_bundle,
     evidence_events_from_tool_payload,
@@ -146,6 +147,22 @@ _PROVIDER_HISTORY_TERMINAL_DIAGNOSTIC_KEYS = (
     "component_warnings",
     "validation_error",
     "blocked_reason",
+)
+_PROVIDER_HISTORY_FORBIDDEN_PRESSURE_KEYS = frozenset(CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS)
+_PROVIDER_HISTORY_FORBIDDEN_PRESSURE_TEXT_MARKERS = (
+    "prewrite hard-runtime probe gate",
+    "Required next probe",
+    "Required next action",
+    "first source write",
+    "probes/full rewrites",
+    "before more reads, probes",
+    "before another probe or full rewrite",
+    "post-failure target reads used",
+    "Apply a same-path write_file/edit_file/apply_patch repair",
+    "post_first_write_verifier_required",
+    "verifier-shaped terminal command",
+    "same-target incremental edit",
+    "Hard-runtime frontier continuation gate",
 )
 _FINAL_VERIFIER_CLOSEOUT_TRIGGER_SECONDS = 12.0
 _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
@@ -8188,55 +8205,9 @@ def _live_json_prompt(
             "oracle_refs": ["oracle:..."],
         },
     }
-    tool_surface_notes: list[str] = []
-    if (
-        prewrite_probe_readiness
-        and not bool(prewrite_probe_readiness.get("ready"))
-        and is_deep_probe_hard_runtime_task(lane_input.task_contract)
-        and any(spec.access == "write" for spec in specs)
-    ):
-        missing = _prewrite_missing_category_labels(prewrite_probe_readiness)
-        missing_text = ", ".join(missing) if missing else "required hard-runtime probe coverage"
-        required_probe = _frontier_clip_text(
-            (prewrite_missing_probe or {}).get("required_next_probe"),
-            limit=320,
-        )
-        tool_surface_notes.append(
-            "write tools are available, but the first source mutation is execution-gated until cheap "
-            f"hard-runtime probes cover: {missing_text}. Probe missing coverage before drafting a large write."
-            + (f" Required next probe: {required_probe}." if required_probe else "")
-        )
-    if write_repair_lock_state and bool(write_repair_lock_state.get("locked")):
-        target_path = _frontier_clip_text(write_repair_lock_state.get("path") or "the failed write target", limit=160)
-        read_count = int(write_repair_lock_state.get("target_read_count_after_failure") or 0)
-        preferred = _frontier_clip_text(write_repair_lock_state.get("preferred_tool") or "write tool", limit=80)
-        required_next_action = _frontier_clip_text(write_repair_lock_state.get("required_next_action"), limit=260)
-        tool_surface_notes.append(
-            "write repair lock is active; repair "
-            f"{target_path} with {preferred}/edit_file/apply_patch before broad probes or verifiers. "
-            f"Same-target post-failure reads used {read_count}/1."
-            + (f" Required next action: {required_next_action}." if required_next_action else "")
-        )
-    if post_first_write_verifier_state and bool(post_first_write_verifier_state.get("active")):
-        first_write = _frontier_clip_text(
-            post_first_write_verifier_state.get("first_write_path") or "the first source write",
-            limit=160,
-        )
-        tool_surface_notes.append(
-            f"{first_write} was written successfully. Run one terminal verifier command now, "
-            "before another read/probe/full-rewrite turn; same-target incremental edits remain allowed."
-        )
-    if tool_surface_notes:
-        response_contract["tool_surface_note"] = " ".join(tool_surface_notes)
     recovery_instruction_section = ""
     if tool_contract_recovery_instruction:
         recovery_instruction_section = f"tool_contract_recovery_instruction:\n{tool_contract_recovery_instruction}"
-    terminal_reaction_guidance = ""
-    if terminal_failure_reaction_turns_used > 0 and not tool_contract_recovery_instruction:
-        terminal_reaction_guidance = _terminal_failure_reaction_guidance(
-            hard_runtime_frontier_state=hard_runtime_frontier_state,
-            write_file_visible=write_file_visible,
-        )
     prompt = (
         f"{sections}\n\n"
         "[section:implement_v2_live_json_transport version=v0 stability=dynamic cache_policy=dynamic]\n"
@@ -8255,7 +8226,6 @@ def _live_json_prompt(
         "Apply_patch transport: for multi-line patches, prefer tool_calls[].arguments.patch_lines as an array "
         "with one apply_patch line per item and no embedded newline characters. Legacy arguments.patch/input "
         "strings remain accepted. A future provider-native freeform input can map to the same patch parser.\n"
-        f"{terminal_reaction_guidance}"
         f"lane_attempt_id: {lane_attempt_id}\n"
         f"turn: {turn_index}/{max_turns}\n"
         f"base_max_turns: {base_max_turns if base_max_turns is not None else max_turns}\n"
@@ -8271,60 +8241,6 @@ def _live_json_prompt(
     if not write_file_visible:
         return hide_unavailable_write_file_guidance(prompt)
     return prompt
-
-
-def _terminal_failure_reaction_guidance(
-    *,
-    hard_runtime_frontier_state: dict[str, object] | None,
-    write_file_visible: bool = True,
-) -> str:
-    guidance = (
-        "If this is a terminal-failure reaction turn, do not broaden the task: make the smallest "
-        "repair/check that directly responds to the latest failed terminal result, or finish blocked "
-        "with the exact blocker.\n"
-    )
-    if not hard_runtime_frontier_state:
-        return guidance
-    first_write_stall = hard_runtime_frontier_state.get("first_write_frontier_stall")
-    if isinstance(first_write_stall, dict) and first_write_stall:
-        target = _frontier_clip_text(first_write_stall.get("target_path") or "the missing target file", limit=180)
-        required = _frontier_clip_text(first_write_stall.get("required_next_action") or "", limit=360)
-        required_hint = f" required_next_action={required}" if required else ""
-        return (
-            guidance
-            + "First-write frontier stall: prior source/probe evidence is already available, but no "
-            "source mutation happened before the model failure. Do not rediscover the same missing target "
-            f"or run an external verifier first. Create or update {target} with "
-            f"{_source_mutation_tool_phrase(write_file_visible=write_file_visible)} by default for scoped edits. "
-            f"{_large_source_mutation_phrase(write_file_visible=write_file_visible)}"
-            "Keep run_command for build, runtime, verifier commands, and non-source artifacts; "
-            "then run one verifier-shaped command."
-            f"{required_hint}\n"
-        )
-    latest_failure = hard_runtime_frontier_state.get("latest_runtime_failure")
-    if not isinstance(latest_failure, dict):
-        latest_failure = hard_runtime_frontier_state.get("latest_build_failure")
-    if not isinstance(latest_failure, dict):
-        latest_failure = {}
-    required_next_probe = _frontier_clip_text(latest_failure.get("required_next_probe"), limit=360)
-    failure_class = _frontier_clip_text(latest_failure.get("failure_class"), limit=120)
-    verifier = hard_runtime_frontier_state.get("next_verifier_shaped_command")
-    verifier_hint = ""
-    if isinstance(verifier, dict):
-        verifier_hint = f" latest_verifier_shaped_command={json.dumps(verifier, ensure_ascii=True, sort_keys=True)[:500]}"
-    next_probe_hint = f" required_next_probe={required_next_probe}" if required_next_probe else ""
-    class_hint = f" latest_failure_class={failure_class}" if failure_class else ""
-    return (
-        guidance
-        + "Hard-runtime frontier continuation gate: continue from lane_hard_runtime_frontier instead of "
-        "rediscovering the whole task. Inspect the producing substep/artifact path, make the smallest "
-        "source/runtime repair, then run one verifier-shaped command tied to the expected runtime artifact. "
-        "If mutating source/config, use "
-        f"{_source_mutation_tool_phrase(write_file_visible=write_file_visible)} by default for scoped edits; "
-        f"{_large_source_mutation_phrase(write_file_visible=write_file_visible)}"
-        "Keep run_command for build, runtime, verifier commands, and non-source artifacts."
-        f"{class_hint}{next_probe_hint}{verifier_hint}\n"
-    )
 
 
 def _source_mutation_tool_phrase(*, write_file_visible: bool) -> str:
@@ -8699,7 +8615,7 @@ def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dic
     visible = result.provider_visible_content()
     if result.tool_name in _PROVIDER_HISTORY_TERMINAL_TOOL_NAMES:
         visible = _project_terminal_result_for_provider_history(visible)
-    content = _compact_provider_visible_content_for_history(visible)
+    content = _compact_provider_visible_content_for_history(_strip_provider_history_pressure_fields(visible))
     projected = {
         "provider_call_id": result.provider_call_id,
         "tool_name": result.tool_name,
@@ -8710,7 +8626,32 @@ def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dic
     typed_digest = _typed_evidence_digest_for_result(result)
     if typed_digest:
         projected["typed_evidence"] = typed_digest
-    return projected
+    return _strip_provider_history_pressure_fields(projected)
+
+
+def _strip_provider_history_pressure_fields(value: object) -> object:
+    """Remove controller-pressure fields from provider-visible legacy history."""
+
+    if isinstance(value, dict):
+        return {
+            str(key): _strip_provider_history_pressure_fields(item)
+            for key, item in value.items()
+            if str(key) not in _PROVIDER_HISTORY_FORBIDDEN_PRESSURE_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_provider_history_pressure_fields(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_strip_provider_history_pressure_fields(item) for item in value)
+    if isinstance(value, str):
+        return _strip_provider_history_pressure_text(value)
+    return value
+
+
+def _strip_provider_history_pressure_text(value: str) -> str:
+    lowered = value.lower()
+    if any(marker.lower() in lowered for marker in _PROVIDER_HISTORY_FORBIDDEN_PRESSURE_TEXT_MARKERS):
+        return "[controller-side diagnostic redacted from provider-visible history]"
+    return value
 
 
 def _typed_evidence_digest_for_result(result: ToolResultEnvelope) -> list[dict[str, object]]:
@@ -11007,7 +10948,8 @@ def _project_prompt_history_for_next_turn(prompt_history: list[dict[str, object]
         }
         result["content"]["content"][item_index] = _drop_empty_frontier_values(replacement)
     projected = _compact_older_prompt_history_for_next_turn(projected)
-    return projected
+    stripped = _strip_provider_history_pressure_fields(projected)
+    return stripped if isinstance(stripped, list) else []
 
 
 def _compact_older_prompt_history_for_next_turn(prompt_history: list[dict[str, object]]) -> list[dict[str, object]]:

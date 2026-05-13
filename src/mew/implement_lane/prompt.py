@@ -7,7 +7,6 @@ import re
 
 from ..prompt_sections import (
     CACHE_POLICY_CACHEABLE,
-    CACHE_POLICY_DYNAMIC,
     CACHE_POLICY_SESSION,
     STABILITY_DYNAMIC,
     STABILITY_SEMI_STATIC,
@@ -22,6 +21,7 @@ from .tool_policy import (
     list_v2_tool_specs_for_task,
 )
 from .types import ImplementLaneInput
+from .affordance_visibility import CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS
 from .workframe import WorkFrameInputs
 from .workframe_variants import (
     DEFAULT_WORKFRAME_VARIANT,
@@ -40,20 +40,13 @@ _HOT_PATH_SECTION_IDS = frozenset(
     {
         "implement_v2_lane_base",
         "implement_v2_tool_contract",
-        "implement_v2_active_coding_rhythm",
-        "implement_v2_tool_surface",
+        "implement_v2_coding_contract",
         "implement_v2_task_contract",
-        "implement_v2_lane_state",
-        "implement_v2_workframe",
     }
 )
-_ORDINARY_RESIDENT_SUMMARY_SECTION_IDS = frozenset(
-    {
-        "implement_v2_hard_runtime_profile",
-    }
-)
+_ORDINARY_RESIDENT_SUMMARY_SECTION_IDS = frozenset()
 _RESIDENT_SIDECAR_SECTION_IDS = frozenset()
-_FINISH_RECOVERY_SECTION_IDS = frozenset({"implement_v2_execution_artifact_contract"})
+_FINISH_RECOVERY_SECTION_IDS = frozenset()
 _ORDINARY_RESIDENT_SUMMARY_BYTE_CAP = 1536
 _ACTIVE_WORK_CARD_BYTE_CAP = 640
 _REPAIR_HISTORY_CARD_BYTE_CAP = 256
@@ -76,31 +69,27 @@ def build_implement_v2_prompt_sections(
         else list_v2_tool_specs_for_task(mode, task_contract=lane_input.task_contract)
     )
     tool_names = {spec.name for spec in specs}
-    if "write_file" in tool_names:
-        mutation_tools_phrase = "write_file, edit_file, or apply_patch"
-        mutation_paths_phrase = "write_file/edit_file/apply_patch"
-        large_source_guidance = (
-            "For large generated or replacement source, avoid one huge provider-native "
-            "write_file/content_lines JSON payload: prefer a custom apply_patch/freeform patch "
-            "for concrete edits; keep source-like file creation and patches in write_file/edit_file/apply_patch. "
+    if {"apply_patch", "edit_file"} & tool_names and "write_file" in tool_names:
+        mutation_sentence = (
+            "Make source changes with apply_patch or edit_file; use write_file only for small complete files. "
         )
+    elif {"apply_patch", "edit_file"} & tool_names:
+        mutation_sentence = "Make source changes with apply_patch or edit_file. "
     else:
-        mutation_tools_phrase = "edit_file or apply_patch"
-        mutation_paths_phrase = "edit_file/apply_patch"
-        large_source_guidance = (
-            "For large generated or replacement source, prefer a custom apply_patch/freeform patch "
-            "for concrete edits; keep source-like file creation and patches in edit_file/apply_patch. "
-        )
+        mutation_sentence = "Use the available read-only tools to inspect repository state. "
+    if {"run_command", "run_tests"} & tool_names:
+        verify_sentence = "Use run_command or run_tests to build, run, and verify. "
+    else:
+        verify_sentence = "Use available observations as fresh evidence. "
     sections = [
         PromptSection(
             id="implement_v2_lane_base",
             version="v0",
             title="Implement V2 Lane Base",
             content=(
-                "You are running inside the default-off implement_v2 lane. "
-                "Use provider-shaped tool calls through the selected v2 transport, "
-                "preserve paired tool results, "
-                "and finish only through deterministic mew acceptance evidence."
+                "You are implementing in a repository through native tool calls. "
+                "Use the provider-native transcript as the live history, preserve "
+                "paired tool results, and finish only with fresh tool evidence."
             ),
             stability=STABILITY_STATIC,
             cache_policy=CACHE_POLICY_CACHEABLE,
@@ -121,171 +110,28 @@ def build_implement_v2_prompt_sections(
             profile="implement_v2",
         ),
         PromptSection(
-            id="implement_v2_active_coding_rhythm",
-            version="v1",
-            title="Implement V2 Active Coding Rhythm",
-            content=(
-                "Keep the normal coding hot path small and transcript-driven: cheap probe -> coherent "
-                "patch/edit -> verifier -> latest-failure repair. Use read/search/inspect/run_command "
-                "for cheap source, environment, ABI, or verifier probes; then move to "
-                f"{mutation_tools_phrase} once the minimal compatibility surface is known. Do not wait for "
-                "exhaustive source or disassembly coverage when a coherent patch can be tested. After a concrete "
-                "runtime, verifier, or artifact failure yields an actionable hypothesis, spend at most "
-                "one focused diagnostic/read turn before a patch/edit plus verifier, or finish blocked "
-                "with the exact missing information. Do not keep re-reading generated source or full "
-                "proof objects when the latest command exit, bounded stdout/stderr tail, artifact miss, "
-                f"and blocker class are enough to act. Keep source mutation on {mutation_paths_phrase} "
-                f"paths by default for scoped edits. {large_source_guidance}"
-                "Split very large mutations into smaller source-producing "
-                "steps rather than spending a model turn on one huge tool call. Never minify generated source "
-                "into one long line just to fit JSON. Keep run_command for probes, builds, runtime execution, and "
-                "verification. "
-                "When a cheap probe depends on an optional CLI such as rg, fd, ag, readelf, objdump, "
-                "file, or nm, either preflight it with command -v or include an available fallback in "
-                "the same cheap turn. If output says command not found or executable not found, treat "
-                "the source frontier as incomplete and retry with glob/search_text, grep -R, find, "
-                "or another available fallback before the first edit. Use Python fallback only for "
-                "bounded non-recursive probes over explicit files or small artifacts; do not use "
-                "run_command to generate broad recursive source scanners such as os.walk/rglob/open "
-                "loops. Do not mask a missing probe with `|| true` unless the same command also runs "
-                "a fallback that produces the needed evidence."
-            ),
-            stability=STABILITY_STATIC,
-            cache_policy=CACHE_POLICY_CACHEABLE,
-            profile="implement_v2",
-        ),
-        PromptSection(
-            id="implement_v2_execution_artifact_contract",
+            id="implement_v2_coding_contract",
             version="v0",
-            title="Implement V2 Execution Artifact Contract",
+            title="Implement V2 Coding Contract",
             content=(
-                "For run_command and run_tests, attach an execution_contract when the command is intended to build, "
-                "run, verify, or prove an artifact. poll_command inherits the original command's contract by "
-                "command_run_id; do not introduce new artifact obligations only on a later poll. Declare role, "
-                "stage, purpose, proof_role, "
-                "acceptance_kind, expected_exit, and expected_artifacts. Expected artifacts should name path or "
-                "stream targets plus cheap checks such as exists, non_empty, kind, size_between, text_contains, "
-                "or regex. Use execution role values only: setup, source, dependency, build, test, runtime, "
-                "artifact_probe, verify, cleanup, diagnostic, compound, unknown. Do not reuse source/frontier "
-                "roles like generated_artifact as execution_contract.role; a verifier command that should create "
-                "or validate a runtime artifact should normally use role=runtime, proof_role=verifier, and "
-                "acceptance_kind=external_verifier. Mew owns artifact checking at runtime; do not treat stdout/stderr text markers as proof "
-                "when an artifact contract exists. A finish claim should cite structured evidence ids, artifact "
-                "evidence ids, verifier evidence, or blocker classes from the latest tool result instead of only "
-                "describing terminal output. If task or frontier state already declares a final artifact, a "
-                "verifier-shaped command may rely on mew to runtime-infer that artifact, but explicit "
-                "expected_artifacts are preferred when the artifact is inside the allowed roots. If a task or "
-                "source declares an absolute output path outside the allowed roots, do not rely on mew's internal "
-                "expected_artifacts checker for that path; run a shell-level verifier assertion in the command "
-                "(for example, execute the producer and test the required output) or write/check an artifact inside "
-                "an allowed root. For cheap probes or diagnostics that are not acceptance proof, "
-                "omit execution_contract or set command_intent=probe|diagnostic; mew will keep those commands as "
-                "non-acceptance sidecar evidence even if a detailed artifact contract is accidentally supplied."
-            ),
-            stability=STABILITY_STATIC,
-            cache_policy=CACHE_POLICY_CACHEABLE,
-            profile="implement_v2",
-        ),
-        PromptSection(
-            id="implement_v2_tool_surface",
-            version="v0",
-            title="Implement V2 Tool Surface",
-            content=_tool_surface_json(specs),
-            stability=STABILITY_SEMI_STATIC,
-            cache_policy=CACHE_POLICY_CACHEABLE,
-            profile="implement_v2",
-        ),
-        PromptSection(
-            id="implement_v2_compatibility_frontier",
-            version="v0",
-            title="Implement V2 Compatibility Frontier",
-            content=(
-                "When a runtime/build failure points to dependency, language-version, or ABI compatibility, "
-                "broaden the edit frontier before finishing. Search sibling source surfaces that can carry the "
-                "same compatibility bug instead of patching only the first traceback file. For Python native, "
-                "compiled, or Cython extension tasks, include Python and compiled-source surfaces such as "
-                "`*.py`, `*.pyx`, `*.pxd`, `setup.py`, `pyproject.toml`, extension modules, and focused tests. "
-                "An import-only smoke proves loadability, not behavior; run a small behavior smoke or focused "
-                "test that exercises the repaired extension path before claiming completion."
+                "Inspect enough context to understand the smallest coherent change. "
+                f"{mutation_sentence}"
+                f"{verify_sentence}"
+                "Repair from the latest concrete failure shown in the transcript. "
+                "Finish only with fresh evidence from the tools."
             ),
             stability=STABILITY_STATIC,
             cache_policy=CACHE_POLICY_CACHEABLE,
             profile="implement_v2",
         ),
     ]
-    hard_runtime_profile_active = is_hard_runtime_artifact_task(lane_input.task_contract)
-    active_work_todo = _active_work_todo_state(lane_input.persisted_lane_state)
-    hard_runtime_frontier = _hard_runtime_frontier_state(lane_input.persisted_lane_state)
-    repair_history = _repair_history_state(lane_input.persisted_lane_state)
-    if hard_runtime_profile_active:
-        sections.append(
-            PromptSection(
-                id="implement_v2_hard_runtime_profile",
-                version="v0",
-                title="Implement V2 Hard Runtime Profile",
-                content=_clip_text(
-                    "Hard-runtime: no handcrafted stub. The supplied runtime artifact "
-                    "(binary/executable/ELF/VM input) is the execution authority. "
-                    "Read provided source only to infer interfaces, ABI, syscalls, and output contracts; "
-                    "do not compile/run the provided source tree, a demo program, or a host-native fallback "
-                    "as a substitute for executing or interpreting that supplied artifact unless the task "
-                    "explicitly allows substitution. "
-                    "Before first write, probe only enough ABI/symbol/syscall/output evidence to make "
-                    "one coherent runtime patch. Patch once, run one verifier, "
-                    "finish with fresh runtime/verifier evidence. Generated runtimes/interpreters must fail fast on "
-                    "unsupported opcode/syscall/ABI with explicit PC/code; only ignore/noop when source proves harmless.",
-                    _HARD_RUNTIME_PROFILE_BYTE_CAP,
-                ),
-                stability=STABILITY_STATIC,
-                cache_policy=CACHE_POLICY_CACHEABLE,
-                profile="implement_v2",
-            )
-        )
-    sections.append(
-        PromptSection(
-            id="implement_v2_workframe",
-            version="v0",
-            title="Implement V2 WorkFrame",
-            content=_workframe_section_content(
-                lane_input,
-                active_work_todo=active_work_todo,
-                hard_runtime_frontier=hard_runtime_frontier,
-                repair_history=repair_history,
-                sidecar_events=workframe_sidecar_events,
-                provider_tool_names=tuple(spec.name for spec in specs),
-            ),
-            stability=STABILITY_DYNAMIC,
-            cache_policy=CACHE_POLICY_DYNAMIC,
-            profile="implement_v2",
-        )
-    )
     sections.extend(
         [
             PromptSection(
                 id="implement_v2_task_contract",
                 version="v0",
                 title="Implement V2 Task Contract",
-                content=_stable_json(lane_input.task_contract),
-                stability=STABILITY_SEMI_STATIC,
-                cache_policy=CACHE_POLICY_SESSION,
-                profile="implement_v2",
-            ),
-            PromptSection(
-                id="implement_v2_lane_state",
-                version="v0",
-                title="Implement V2 Lane State",
-                content=_stable_json(
-                    {
-                        "work_session_id": lane_input.work_session_id,
-                        "task_id": lane_input.task_id,
-                        "lane": lane_input.lane,
-                        "model_backend": lane_input.model_backend,
-                        "model": lane_input.model,
-                        "effort": lane_input.effort,
-                        "lane_config": _model_visible_lane_config(lane_input.lane_config),
-                        "lane_local_state": _lane_local_state(lane_input.persisted_lane_state),
-                    }
-                ),
+                content=_stable_json(_model_visible_task_contract(lane_input.task_contract)),
                 stability=STABILITY_SEMI_STATIC,
                 cache_policy=CACHE_POLICY_SESSION,
                 profile="implement_v2",
@@ -410,6 +256,25 @@ def _model_visible_lane_config(lane_config: dict[str, object]) -> dict[str, obje
     return visible
 
 
+def _model_visible_task_contract(task_contract: dict[str, object]) -> dict[str, object]:
+    return _strip_task_contract_internal_fields(task_contract)
+
+
+def _strip_task_contract_internal_fields(value: object) -> object:
+    internal_fields = set(CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS) | {"workframe_variant", "work_frame_variant"}
+    if isinstance(value, dict):
+        return {
+            str(key): _strip_task_contract_internal_fields(item)
+            for key, item in value.items()
+            if str(key) not in internal_fields
+        }
+    if isinstance(value, list):
+        return [_strip_task_contract_internal_fields(item) for item in value]
+    if isinstance(value, tuple):
+        return [_strip_task_contract_internal_fields(item) for item in value]
+    return value
+
+
 def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, object]:
     sections = metrics.get("sections") if isinstance(metrics.get("sections"), list) else []
     inventory: list[dict[str, object]] = []
@@ -467,7 +332,7 @@ def _hot_path_collapse_prompt_metrics(metrics: dict[str, object]) -> dict[str, o
         "resident_model_visible_bytes": resident_model_visible_bytes,
         "finish_replay_recovery_bytes": finish_replay_recovery_bytes,
         "provider_visible_tool_result_bytes": 0,
-        "phase": "m6_24_workframe_redesign_phase_1",
+        "phase": "m6_24_affordance_collapse_phase_1",
     }
 
 

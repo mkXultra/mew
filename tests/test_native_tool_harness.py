@@ -291,7 +291,7 @@ def test_live_native_request_constrains_write_file_for_hard_runtime_artifact_tas
     assert {"edit_file", "apply_patch"} <= tool_names
     assert {"poll_command", "cancel_command", "read_command_output"}.isdisjoint(tool_names)
     instructions = str(descriptor["request_body"]["instructions"])
-    assert "edit_file/apply_patch" in instructions
+    assert "apply_patch or edit_file" in instructions
     assert "write_file/edit_file/apply_patch" not in instructions
 
 

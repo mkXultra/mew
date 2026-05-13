@@ -18157,9 +18157,9 @@ def run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(worksp
         "m6_24_implement_v2_hard_runtime_reaction_budget_emulator_prompts_counter",
         len(prompts) >= 10
         and "terminal_failure_reaction_turns_used: 2/" in prompts[9]
-        and "Hard-runtime frontier continuation gate" in prompts[9],
+        and "Hard-runtime frontier continuation gate" not in prompts[9],
         {"prompt_count": len(prompts), "tenth_prompt_excerpt": (prompts[9] if len(prompts) >= 10 else "")[:300]},
-        "second reaction prompt carries the expanded reaction counter and frontier continuation gate",
+        "second reaction prompt carries the expanded reaction counter without provider-visible frontier steering",
     )
     _scenario_check(
         checks,
@@ -18336,9 +18336,9 @@ def run_m6_24_implement_v2_hard_runtime_progress_continuation_emulator_scenario(
         "m6_24_implement_v2_hard_runtime_progress_continuation_emulator_prompts_counter",
         len(prompts) >= 3
         and "terminal_failure_reaction_turns_used: 2/2" in prompts[2]
-        and "Hard-runtime frontier continuation gate" in prompts[2],
+        and "Hard-runtime frontier continuation gate" not in prompts[2],
         {"prompt_count": len(prompts), "third_prompt_excerpt": (prompts[2] if len(prompts) >= 3 else "")[:300]},
-        "progress continuation prompt carries the expanded reaction counter and frontier gate",
+        "progress continuation prompt carries the expanded reaction counter without provider-visible frontier steering",
     )
     _scenario_check(
         checks,
