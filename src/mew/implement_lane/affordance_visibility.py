@@ -112,6 +112,7 @@ DEFAULT_AFFORDANCE_VISIBILITY_CAPS: dict[str, object] = {
         "latest_failure_chars": 1200,
         "stdout_tail_chars": 1200,
         "stderr_tail_chars": 1200,
+        "live_transcript_text_chars": 2400,
     },
     "mutation_visible_card": {
         "target_bytes": 2048,

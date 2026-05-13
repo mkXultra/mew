@@ -22,6 +22,7 @@ _VISIBLE_TOOL_OUTPUT_CARD_MAX_BYTES = 60_000
 _MUTATION_VISIBLE_CARD_HARD_BYTES = 4096
 _NATURAL_RESULT_TEXT_LIMIT = 1200
 _NATURAL_RESULT_TEXT_MAX_LIMIT = 50_000
+_COMMAND_NATURAL_RESULT_TEXT_MAX_LIMIT = 2400
 _VISIBLE_PATH_CHARS = 260
 _VISIBLE_REF_CHARS = 160
 _FORBIDDEN_VISIBLE_FIELD_SET = frozenset(CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS)
@@ -234,18 +235,22 @@ def _visible_output_budget(
 ) -> int:
     if tool_name not in {"run_command", "run_tests", "poll_command", "cancel_command"}:
         return int(default)
+    # `max_output_chars` controls command capture/storage, not the live model
+    # transcript budget. Keep command results compact and let full output remain
+    # available through output refs/read_command_output.
+    command_default = min(int(default), _COMMAND_NATURAL_RESULT_TEXT_MAX_LIMIT)
     for key in ("provider_visible_output_chars", "max_output_chars"):
         value = payload.get(key)
         if value in (None, ""):
             continue
         try:
             return max(
-                int(default),
-                min(_NATURAL_RESULT_TEXT_MAX_LIMIT, int(value)),
+                command_default,
+                min(_COMMAND_NATURAL_RESULT_TEXT_MAX_LIMIT, int(value)),
             )
         except (TypeError, ValueError):
             continue
-    return int(default)
+    return command_default
 
 
 def _visible_card_hard_bytes(output_limit: int) -> int:

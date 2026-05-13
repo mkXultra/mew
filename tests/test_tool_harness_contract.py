@@ -286,6 +286,39 @@ def test_run_command_natural_text_includes_stderr_and_stdout_previews() -> None:
     assert "runtime result marker" in text
 
 
+def test_run_command_natural_text_caps_model_requested_output_budget() -> None:
+    noisy_stdout = (
+        "first useful line\n"
+        + ("large disassembly output that belongs in the command artifact\n" * 1200)
+        + "final useful line\n"
+    )
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout": noisy_stdout,
+                "stdout_tail": "final useful line\n",
+                "provider_visible_output_chars": 50000,
+                "output_ref": "exec://attempt-1/cmd/output",
+            },
+        ),
+        content_refs=("exec://attempt-1/cmd/output",),
+    )
+
+    text = result.natural_result_text()
+
+    assert len(text) <= 2400
+    assert "first useful line" in text
+    assert "final useful line" in text
+    assert "large disassembly output that belongs in the command artifact" not in text
+    assert "exec://attempt-1/cmd/output" in text
+
+
 def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
     registry = build_tool_registry_artifact(
         provider="model_json",

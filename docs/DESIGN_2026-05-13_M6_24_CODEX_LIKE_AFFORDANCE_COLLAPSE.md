@@ -1,6 +1,8 @@
 # Design 2026-05-13 - M6.24 Codex-Like Affordance Collapse
 
-Status: design only.
+Status: active implementation. Phases 1-3 have landed. Phase 4 is in
+progress, with the current slice focused on keeping command/verifier output
+compact in the live native transcript while preserving full refs/sidecars.
 
 Scope: the next `implement_v2` M6.24 repair after native transcript and
 `previous_response_id` support. This design changes only the provider-visible
@@ -441,7 +443,7 @@ Required caps:
 | provider-visible tool-output card | 4096 bytes | 6144 bytes | status line <= 240 chars; refs block <= 12 refs |
 | `search_text` visible card | 4096 bytes | 6144 bytes | matches <= 8; excerpt <= 180 chars per match |
 | `read_file` visible card | 4096 bytes | 6144 bytes | excerpt <= 160 lines; line text clipped to 220 chars |
-| `run_command` / `run_tests` visible card | 4096 bytes default | 6144 bytes default; 60000 bytes with explicit per-call output budget | latest_failure <= 1200 chars; stdout/stderr default tail <= 1200 chars; requested output budget is clamped to 50000 chars |
+| `run_command` / `run_tests` visible card | 4096 bytes default | 6144 bytes hard gate | latest_failure <= 1200 chars; stdout/stderr default tail <= 1200 chars; requested output budget controls capture/storage but live transcript text is clamped to 2400 chars |
 | mutation visible card | 2048 bytes | 4096 bytes | changed paths <= 12; hunk/diffstat summary <= 1000 chars |
 
 Any truncation must include a ref to the full sidecar content. A cap failure is
@@ -478,6 +480,10 @@ tool-specific override.
 
 For a failed runtime or test, the visible output should make the failure
 readable without opening a sidecar first. Sidecars still carry the full output.
+The model may request a larger `max_output_chars` to preserve command capture
+and artifact refs, but that requested budget must not inflate the next
+provider-visible transcript item. Large command output is a sidecar/readback
+surface, not a normal hot-path prompt surface.
 
 ### Mutation output
 
