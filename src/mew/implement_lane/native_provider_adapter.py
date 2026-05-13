@@ -135,8 +135,9 @@ def build_responses_request_descriptor(
     """Build an auditable offline Responses request descriptor.
 
     The returned ``request_body`` is the provider-native request shape for this
-    phase.  It always uses local state (`store=false`) and deliberately omits
-    ``previous_response_id`` from the request body.
+    phase.  It uses local transcript state (`store=false`) by default and omits
+    ``previous_response_id`` until the live transport can prove a Codex-style
+    prefix delta.
     """
 
     caps = capabilities or NativeProviderCapabilities()
@@ -232,6 +233,163 @@ def build_responses_request_descriptor(
     return descriptor
 
 
+def apply_previous_response_delta(
+    descriptor: Mapping[str, object],
+    *,
+    previous_response_id: str,
+    previous_logical_input_items: Sequence[Mapping[str, object]],
+    previous_response_output_items: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Return a descriptor whose wire input uses a previous-response delta.
+
+    mew keeps the full logical transcript locally for replay.  The live wire
+    request can still follow Codex's optimization: if the current logical input
+    starts with ``previous_input + previous_response_output``, send only the
+    suffix plus ``previous_response_id``.  Prefix misses fall back to the full
+    request and are recorded for diagnostics.
+    """
+
+    updated = _jsonish_mapping(descriptor)
+    request_body = _jsonish_mapping(updated.get("request_body"))
+    full_input = _mapping_sequence(request_body.get("input"))
+    previous_input = tuple(dict(item) for item in previous_logical_input_items)
+    previous_output = tuple(dict(item) for item in previous_response_output_items)
+    match = _previous_response_prefix_match(
+        full_input=full_input,
+        previous_input=previous_input,
+        previous_output=previous_output,
+        previous_response_id=previous_response_id,
+    )
+    logical_input_hash = stable_json_hash(full_input)
+
+    if match.matched:
+        request_body["previous_response_id"] = previous_response_id
+        request_body["input"] = list(match.leading_refresh_items) + list(
+            full_input[match.prefix_item_count :]
+        )
+        mode = match.mode
+    else:
+        request_body.pop("previous_response_id", None)
+        request_body["input"] = list(full_input)
+        mode = "prefix_miss" if previous_response_id else "none"
+
+    updated["request_body"] = request_body
+    updated["request_hash"] = stable_json_hash(request_body)
+    updated["logical_input_hash"] = logical_input_hash
+    updated["logical_input_item_count"] = len(full_input)
+    updated["wire_input_item_count"] = len(_mapping_sequence(request_body.get("input")))
+    updated["previous_response_id"] = previous_response_id if match.matched else None
+    updated["previous_response_id_in_request_body"] = "previous_response_id" in request_body
+    updated["previous_response_delta_mode"] = mode
+    updated["previous_response_prefix_item_count"] = (
+        match.prefix_item_count if match.matched else 0
+    )
+    updated["previous_response_leading_refresh_item_count"] = len(match.leading_refresh_items)
+    capability_decisions = _jsonish_mapping(updated.get("capability_decisions"))
+    capability_decisions["request_previous_response_id"] = (
+        previous_response_id if match.matched else None
+    )
+    capability_decisions["previous_response_delta_mode"] = mode
+    capability_decisions["previous_response_prefix_item_count"] = (
+        match.prefix_item_count if match.matched else 0
+    )
+    capability_decisions["previous_response_leading_refresh_item_count"] = len(
+        match.leading_refresh_items
+    )
+    updated["capability_decisions"] = capability_decisions
+    updated["descriptor_hash"] = stable_json_hash(
+        {key: value for key, value in updated.items() if key != "descriptor_hash"}
+    )
+    return updated
+
+
+@dataclass(frozen=True)
+class _PreviousResponsePrefixMatch:
+    matched: bool
+    mode: str
+    prefix_item_count: int = 0
+    leading_refresh_items: tuple[dict[str, object], ...] = ()
+
+
+def _previous_response_prefix_match(
+    *,
+    full_input: Sequence[Mapping[str, object]],
+    previous_input: Sequence[Mapping[str, object]],
+    previous_output: Sequence[Mapping[str, object]],
+    previous_response_id: str,
+) -> _PreviousResponsePrefixMatch:
+    if not previous_response_id:
+        return _PreviousResponsePrefixMatch(matched=False, mode="none")
+
+    expected_prefix = (*previous_input, *previous_output)
+    if _input_prefix_matches(full_input, expected_prefix):
+        return _PreviousResponsePrefixMatch(
+            matched=True,
+            mode="delta",
+            prefix_item_count=len(expected_prefix),
+        )
+
+    if (
+        full_input
+        and previous_input
+        and _is_provider_context_refresh_item(full_input[0])
+        and _is_provider_context_refresh_item(previous_input[0])
+    ):
+        refreshed_prefix = (*previous_input[1:], *previous_output)
+        if _input_prefix_matches(full_input[1:], refreshed_prefix):
+            return _PreviousResponsePrefixMatch(
+                matched=True,
+                mode="delta_with_context_refresh",
+                prefix_item_count=1 + len(refreshed_prefix),
+                leading_refresh_items=(dict(full_input[0]),),
+            )
+
+    return _PreviousResponsePrefixMatch(matched=False, mode="prefix_miss")
+
+
+def _is_provider_context_refresh_item(item: Mapping[str, object]) -> bool:
+    if item.get("role") != "user":
+        return False
+    content = item.get("content")
+    if not isinstance(content, Sequence) or isinstance(content, (str, bytes, bytearray)):
+        return False
+    text_chunks: list[str] = []
+    for part in content:
+        if not isinstance(part, Mapping):
+            continue
+        if str(part.get("type") or "") != "input_text":
+            continue
+        text_chunks.append(str(part.get("text") or ""))
+    if not text_chunks:
+        return False
+    text = "\n".join(text_chunks)
+    return "compact_sidecar_digest" in text and "task_contract" in text
+
+
+def _jsonish_mapping(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+    return json.loads(json.dumps(dict(value), ensure_ascii=False))
+
+
+def _mapping_sequence(value: object) -> tuple[dict[str, object], ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return ()
+    return tuple(dict(item) for item in value if isinstance(item, Mapping))
+
+
+def _input_prefix_matches(
+    full_input: Sequence[Mapping[str, object]],
+    expected_prefix: Sequence[Mapping[str, object]],
+) -> bool:
+    if len(expected_prefix) > len(full_input):
+        return False
+    return all(
+        stable_json_hash(full_item) == stable_json_hash(prefix_item)
+        for full_item, prefix_item in zip(full_input, expected_prefix, strict=False)
+    )
+
+
 def write_request_descriptor(
     path: Path | str, descriptor: Mapping[str, object]
 ) -> Path:
@@ -304,6 +462,52 @@ def call_codex_native_responses(
         on_text_delta=on_text_delta,
     )
     events = responses_events_from_raw(raw, content_type=content_type)
+    return parse_responses_stream_events(
+        events,
+        lane_attempt_id=lane_attempt_id,
+        provider=_text(descriptor.get("provider") or "openai"),
+        model=_text(descriptor.get("model") or request_body.get("model")),
+        turn_id=turn_id,
+    )
+
+
+def call_codex_native_responses_websocket(
+    *,
+    auth: Mapping[str, object],
+    descriptor: Mapping[str, object],
+    base_url: str,
+    timeout: float,
+    lane_attempt_id: str,
+    turn_id: str,
+    websocket_session: object | None = None,
+    on_text_delta=None,
+) -> NativeResponsesStreamParseResult:
+    """Send a provider-native Codex Responses request over WebSocket.
+
+    The ChatGPT Codex HTTP endpoint currently rejects ``previous_response_id``.
+    Codex CLI sends it through the Responses WebSocket ``response.create``
+    transport, so the live implement_v2 path uses this adapter when it wants
+    Codex-style incremental turns.
+    """
+
+    request_body = descriptor.get("request_body")
+    if not isinstance(request_body, Mapping):
+        raise ValueError("native Responses descriptor missing request_body")
+    session = websocket_session
+    if session is None:
+        session = _codex_api.CodexResponsesWebSocketSession(
+            auth=auth,
+            base_url=base_url,
+            timeout=timeout,
+            conversation_id=lane_attempt_id,
+        )
+    if not hasattr(session, "request"):
+        raise ValueError("websocket_session must expose request(body, ...)")
+    events = session.request(
+        dict(request_body),
+        timeout=timeout,
+        on_text_delta=on_text_delta,
+    )
     return parse_responses_stream_events(
         events,
         lane_attempt_id=lane_attempt_id,
@@ -980,6 +1184,8 @@ __all__ = [
     "build_reasoning_sidecar_entry",
     "build_responses_request_descriptor",
     "call_codex_native_responses",
+    "call_codex_native_responses_websocket",
+    "apply_previous_response_delta",
     "parse_responses_stream_events",
     "read_reasoning_sidecar",
     "reasoning_carry_forward_refs",

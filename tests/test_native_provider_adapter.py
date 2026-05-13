@@ -9,7 +9,9 @@ from mew.implement_lane.native_provider_adapter import (
     build_reasoning_sidecar,
     build_reasoning_sidecar_entry,
     build_responses_request_descriptor,
+    apply_previous_response_delta,
     call_codex_native_responses,
+    call_codex_native_responses_websocket,
     parse_responses_stream_events,
     read_reasoning_sidecar,
     reasoning_carry_forward_refs,
@@ -87,6 +89,133 @@ def test_request_descriptor_records_native_transport_hashes_headers_and_reasonin
     assert descriptor["tool_spec_hash"] == provider_tool_spec_hash(
         lower_implement_lane_tool_specs(list_v2_base_tool_specs())
     )
+
+
+def test_previous_response_delta_uses_suffix_when_logical_prefix_matches() -> None:
+    call_item = {
+        "type": "function_call",
+        "id": "item-read",
+        "call_id": "call-read",
+        "name": "read_file",
+        "arguments": '{"path":"README.md"}',
+    }
+    output_item = {
+        "type": "function_call_output",
+        "call_id": "call-read",
+        "output": "read_file result: completed",
+    }
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[_input_item(), call_item, output_item],
+        provider_request_id="req-delta",
+    )
+
+    updated = apply_previous_response_delta(
+        descriptor,
+        previous_response_id="resp-prev",
+        previous_logical_input_items=[_input_item()],
+        previous_response_output_items=[call_item],
+    )
+    request = updated["request_body"]
+
+    assert request["previous_response_id"] == "resp-prev"  # type: ignore[index]
+    assert request["input"] == [output_item]  # type: ignore[index]
+    assert updated["previous_response_id"] == "resp-prev"
+    assert updated["previous_response_id_in_request_body"] is True
+    assert updated["previous_response_delta_mode"] == "delta"
+    assert updated["previous_response_prefix_item_count"] == 2
+    assert updated["logical_input_item_count"] == 3
+    assert updated["wire_input_item_count"] == 1
+    assert updated["capability_decisions"]["request_previous_response_id"] == "resp-prev"  # type: ignore[index]
+
+
+def test_previous_response_delta_allows_context_refresh_before_previous_prefix() -> None:
+    previous_context = {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": json.dumps(
+                    {
+                        "task_contract": {"title": "Task"},
+                        "compact_sidecar_digest": {"digest_hash": "old"},
+                    }
+                ),
+            }
+        ],
+    }
+    refreshed_context = {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": json.dumps(
+                    {
+                        "task_contract": {"title": "Task"},
+                        "compact_sidecar_digest": {"digest_hash": "new"},
+                    }
+                ),
+            }
+        ],
+    }
+    call_item = {
+        "type": "function_call",
+        "id": "item-read",
+        "call_id": "call-read",
+        "name": "read_file",
+        "arguments": '{"path":"README.md"}',
+    }
+    output_item = {
+        "type": "function_call_output",
+        "call_id": "call-read",
+        "output": "read_file result: completed",
+    }
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[refreshed_context, call_item, output_item],
+        provider_request_id="req-refresh-delta",
+    )
+
+    updated = apply_previous_response_delta(
+        descriptor,
+        previous_response_id="resp-prev",
+        previous_logical_input_items=[previous_context],
+        previous_response_output_items=[call_item],
+    )
+    request = updated["request_body"]
+
+    assert request["previous_response_id"] == "resp-prev"  # type: ignore[index]
+    assert request["input"] == [refreshed_context, output_item]  # type: ignore[index]
+    assert updated["previous_response_delta_mode"] == "delta_with_context_refresh"
+    assert updated["previous_response_prefix_item_count"] == 2
+    assert updated["previous_response_leading_refresh_item_count"] == 1
+    assert updated["logical_input_item_count"] == 3
+    assert updated["wire_input_item_count"] == 2
+
+
+def test_previous_response_delta_falls_back_to_full_input_on_prefix_miss() -> None:
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[_input_item()],
+        provider_request_id="req-full",
+    )
+
+    updated = apply_previous_response_delta(
+        descriptor,
+        previous_response_id="resp-prev",
+        previous_logical_input_items=[{"role": "user", "content": []}],
+        previous_response_output_items=[],
+    )
+    request = updated["request_body"]
+
+    assert "previous_response_id" not in request
+    assert request["input"] == [_input_item()]  # type: ignore[index]
+    assert updated["previous_response_id"] is None
+    assert updated["previous_response_id_in_request_body"] is False
+    assert updated["previous_response_delta_mode"] == "prefix_miss"
 
 
 def test_request_descriptor_omits_encrypted_reasoning_include_when_not_reasoning() -> (
@@ -351,6 +480,57 @@ def test_call_codex_native_responses_sends_descriptor_body_and_parses_items() ->
     item = result.transcript.items[0]
     assert item.kind == "finish_call"
     assert item.call_id == "call-finish"
+
+
+def test_call_codex_native_responses_websocket_uses_session_events() -> None:
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[_input_item()],
+        provider_request_id="req-native-ws",
+    )
+
+    class FakeWebSocketSession:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        def request(self, body, *, timeout=None, on_text_delta=None):
+            self.requests.append(dict(body))
+            if on_text_delta:
+                on_text_delta("done")
+            return (
+                {"type": "response.created", "response": {"id": "resp-ws"}},
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {
+                        "id": "msg-1",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "done"}],
+                    },
+                },
+                {"type": "response.completed", "response": {"id": "resp-ws"}},
+            )
+
+    deltas: list[str] = []
+    session = FakeWebSocketSession()
+    result = call_codex_native_responses_websocket(
+        auth={"access_token": "x"},
+        descriptor=descriptor,
+        base_url="https://example.invalid/api",
+        timeout=10,
+        lane_attempt_id="attempt-live",
+        turn_id="turn-live-1",
+        websocket_session=session,
+        on_text_delta=deltas.append,
+    )
+
+    assert session.requests == [descriptor["request_body"]]
+    assert deltas == ["done"]
+    assert result.status == "completed"
+    assert result.response_id == "resp-ws"
+    assert result.transcript.items[0].kind == "assistant_message"
 
 
 def test_stream_parser_accumulates_custom_tool_input_deltas() -> None:

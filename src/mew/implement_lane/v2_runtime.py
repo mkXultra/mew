@@ -8772,6 +8772,10 @@ def _project_terminal_result_for_provider_history(content: dict[str, object]) ->
         projected_items.append(_project_terminal_payload_for_provider_history(item))
     if projected_items:
         projected["content"] = projected_items
+        projected["natural_result_text"] = _project_terminal_natural_result_for_provider_history(
+            projected_items,
+            content_refs=projected.get("content_refs"),
+        )
         projected["history_projected"] = True
         projected["history_projection_note"] = (
             "terminal stdout/stderr body omitted from next-turn history; "
@@ -8808,6 +8812,37 @@ def _project_terminal_side_effects_for_provider_history(side_effects: list[objec
             }
         )
     return projected
+
+
+def _project_terminal_natural_result_for_provider_history(
+    projected_items: list[object],
+    *,
+    content_refs: object,
+) -> str:
+    item = next((entry for entry in projected_items if isinstance(entry, dict)), {})
+    status = _provider_scalar_text(item.get("status"), limit=80) or "completed"
+    tool_name = _provider_scalar_text(item.get("tool_name"), limit=80) or "run_command"
+    parts = [f"{tool_name} result: {status}"]
+    for key in (
+        "command_run_id",
+        "exit_code",
+        "timed_out",
+        "output_ref",
+        "stdout_tail",
+        "stderr_tail",
+    ):
+        value = item.get(key)
+        if value in (None, "", [], {}):
+            continue
+        parts.append(f"{key}={_provider_scalar_text(value, limit=220)}")
+    refs = content_refs if isinstance(content_refs, list) else []
+    if refs:
+        parts.append(
+            "output_refs="
+            + ",".join(_provider_scalar_text(ref, limit=160) for ref in refs[:3])
+        )
+    parts.append("full_output_available_via_ref=true")
+    return "; ".join(parts)
 
 
 def _project_terminal_side_effect_record_for_provider_history(

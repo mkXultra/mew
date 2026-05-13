@@ -193,7 +193,7 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
     lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
 
     with patch(
-        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
         return_value=live_turn,
     ) as call:
         result = run_live_native_implement_v2(
@@ -274,7 +274,7 @@ def test_live_native_request_constrains_write_file_for_hard_runtime_artifact_tas
     )
 
     with patch(
-        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
         return_value=live_turn,
     ) as call:
         run_live_native_implement_v2(
@@ -289,9 +289,37 @@ def test_live_native_request_constrains_write_file_for_hard_runtime_artifact_tas
     tool_names = {str(tool.get("name") or "") for tool in descriptor["request_body"]["tools"]}
     assert "write_file" not in tool_names
     assert {"edit_file", "apply_patch"} <= tool_names
+    assert {"poll_command", "cancel_command", "read_command_output"}.isdisjoint(tool_names)
     instructions = str(descriptor["request_body"]["instructions"])
     assert "edit_file/apply_patch" in instructions
     assert "write_file/edit_file/apply_patch" not in instructions
+
+
+def test_native_provider_hides_process_lifecycle_tools_until_command_is_open(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "run-1",
+                    "run_command",
+                    {
+                        "command": "sleep 0.2; echo done",
+                        "cwd": ".",
+                        "timeout_ms": 2000,
+                        "foreground_budget_seconds": 0.001,
+                        "command_intent": "probe",
+                    },
+                    output_index=0,
+                )
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    assert {"poll_command", "cancel_command", "read_command_output"}.isdisjoint(provider.requests[0]["provider_tool_names"])
+    assert {"poll_command", "cancel_command", "read_command_output"} <= set(provider.requests[1]["provider_tool_names"])
 
 
 def test_native_hard_runtime_rejects_unavailable_write_file_source_creation(tmp_path: Path) -> None:
@@ -410,7 +438,7 @@ def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_pat
     lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
 
     with patch(
-        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
         side_effect=RuntimeError("request timed out"),
     ):
         result = run_live_native_implement_v2(
@@ -445,7 +473,7 @@ def test_live_native_first_turn_value_error_writes_failure_artifacts(tmp_path: P
     lane_input = _lane_input(tmp_path, artifact_dir=str(artifact_root))
 
     with patch(
-        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
         side_effect=ValueError("malformed provider payload"),
     ):
         result = run_live_native_implement_v2(
@@ -496,7 +524,7 @@ def test_live_native_provider_failure_preserves_partial_transcript_artifacts(tmp
     )
 
     with patch(
-        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
         side_effect=[first_turn, RuntimeError("request timed out")],
     ):
         result = run_live_native_implement_v2(
@@ -556,7 +584,7 @@ def test_live_native_provider_requires_completed_terminal_event_before_tool_exec
     )
 
     with patch(
-        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
         return_value=incomplete_turn,
     ):
         result = run_live_native_implement_v2(
@@ -614,7 +642,7 @@ def test_live_native_provider_failure_rejects_invalid_partial_transcript(tmp_pat
     )
 
     with patch(
-        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
         side_effect=[invalid_first_turn, RuntimeError("request timed out")],
     ):
         with pytest.raises(ValueError, match="invalid native transcript"):
@@ -707,7 +735,7 @@ def test_live_native_input_carry_forward_omits_reasoning_refs_without_sidecar_by
     )
 
     with patch(
-        "mew.implement_lane.native_tool_harness.call_codex_native_responses",
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
         return_value=NativeResponsesStreamParseResult(
             transcript=NativeTranscript(
                 lane_attempt_id="ws-native:task-native:implement_v2:native",
@@ -721,6 +749,98 @@ def test_live_native_input_carry_forward_omits_reasoning_refs_without_sidecar_by
 
     sent_input = provider.requests[0]["request_body"]["input"]
     assert all(item.get("type") != "reasoning" for item in sent_input)
+
+
+def test_live_native_provider_uses_previous_response_id_delta_after_prefix_match(tmp_path: Path) -> None:
+    lane_input = _lane_input(tmp_path)
+    provider = NativeCodexResponsesProvider(
+        lane_input=lane_input,
+        auth={"access_token": "x"},
+        base_url="https://example.invalid",
+        timeout=3,
+    )
+    first_input = {
+        "role": "user",
+        "content": [{"type": "input_text", "text": "task"}],
+    }
+    call_item = {
+        "type": "function_call",
+        "id": "item-read",
+        "call_id": "call-read",
+        "name": "read_file",
+        "arguments": '{"path":"README.md"}',
+    }
+    output_item = {
+        "type": "function_call_output",
+        "call_id": "call-read",
+        "output": "read_file result: completed",
+    }
+    first_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+            items=(
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id="ws-native:task-native:implement_v2:native",
+                    provider="openai",
+                    model="gpt-5.5",
+                    response_id="resp-1",
+                    provider_item_id="item-read",
+                    output_index=0,
+                    kind="function_call",
+                    call_id="call-read",
+                    tool_name="read_file",
+                    arguments_json_text='{"path":"README.md"}',
+                ),
+            ),
+        ),
+        response_id="resp-1",
+        status="completed",
+    )
+    second_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+        ),
+        response_id="resp-2",
+        status="completed",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
+        side_effect=[first_turn, second_turn],
+    ):
+        provider.next_response(
+            {
+                "lane_attempt_id": "ws-native:task-native:implement_v2:native",
+                "turn_index": 1,
+                "input_items": [first_input],
+                "instructions": "test",
+                "transcript_window": [],
+            }
+        )
+        provider.next_response(
+            {
+                "lane_attempt_id": "ws-native:task-native:implement_v2:native",
+                "turn_index": 2,
+                "input_items": [first_input, call_item, output_item],
+                "instructions": "test",
+                "transcript_window": [],
+            }
+        )
+
+    first_request = provider.requests[0]["request_body"]
+    second_request = provider.requests[1]["request_body"]
+    assert "previous_response_id" not in first_request
+    assert second_request["previous_response_id"] == "resp-1"
+    assert second_request["input"] == [output_item]
+    assert provider.requests[1]["previous_response_delta_mode"] == "delta"
+    assert provider.requests[1]["logical_input_item_count"] == 3
+    assert provider.requests[1]["wire_input_item_count"] == 1
 
 
 def test_native_harness_write_apply_patch_exec_poll_cancel_and_read_output(tmp_path: Path) -> None:

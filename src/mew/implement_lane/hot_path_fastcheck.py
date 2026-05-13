@@ -275,6 +275,7 @@ def _run_native_hot_path_fastcheck(
         provider_requests = _native_provider_requests(artifact_path=artifact_path, manifest_path=manifest_path)
         checks.append(_check_native_compact_digest_replay(provider_requests, fallback_transcript=transcript))
         checks.append(_check_native_provider_visible_state(provider_requests))
+        checks.append(_check_native_previous_response_id(provider_requests))
         checks.append(
             _check_native_resolver_decisions(
                 manifest_path=manifest_path,
@@ -296,6 +297,7 @@ def _run_native_hot_path_fastcheck(
                 _check("native_search_text_anchor_projection", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_compact_digest_replay", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_provider_visible_state", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_previous_response_id", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_resolver_decisions", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_evidence_observation", False, "native transcript is unreadable", {"skipped": True}),
             ]
@@ -760,6 +762,48 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
         if not violations and checked > 0
         else "provider-visible native request state drifted beyond native transcript window + compact digest",
         {"checked_requests": checked, "violations": violations[:10]},
+    )
+
+
+def _check_native_previous_response_id(provider_requests: tuple[dict[str, object], ...]) -> HotPathCheck:
+    if len(provider_requests) <= 1:
+        return _check(
+            "native_previous_response_id",
+            True,
+            "single-turn provider request artifact; previous_response_id gate skipped",
+            {"skipped": True, "request_count": len(provider_requests)},
+        )
+
+    missing: list[dict[str, object]] = []
+    observed = 0
+    for index, request in enumerate(provider_requests, start=1):
+        if index == 1:
+            continue
+        body = _safe_mapping(request.get("request_body"))
+        previous_response_id = str(request.get("previous_response_id") or body.get("previous_response_id") or "")
+        if previous_response_id:
+            observed += 1
+            continue
+        missing.append(
+            {
+                "request": index,
+                "turn_index": request.get("turn_index"),
+                "transport_kind": request.get("transport_kind"),
+                "native_transport_kind": request.get("native_transport_kind"),
+                "delta_mode": request.get("previous_response_delta_mode"),
+                "input_item_count": request.get("input_item_count"),
+                "wire_input_item_count": request.get("wire_input_item_count"),
+                "logical_input_item_count": request.get("logical_input_item_count"),
+            }
+        )
+    ok = not missing and observed > 0
+    return _check(
+        "native_previous_response_id",
+        ok,
+        "multi-turn native provider requests use previous_response_id"
+        if ok
+        else "multi-turn native provider requests did not use previous_response_id",
+        {"observed": observed, "missing": missing[:10], "request_count": len(provider_requests)},
     )
 
 

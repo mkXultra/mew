@@ -11,10 +11,13 @@ import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 
+from mew import codex_api
 from mew.codex_api import (
+    CODEX_RESPONSES_WEBSOCKET_BETA,
     call_codex_json,
     call_codex_responses_raw,
     call_codex_web_api,
+    codex_websocket_headers,
     decode_sse_data_line,
     extract_json_object,
     extract_response_refusal,
@@ -91,6 +94,28 @@ class _FakeResponseStream:
 
 
 class CodexApiTests(unittest.TestCase):
+    def test_codex_websocket_url_matches_responses_endpoint(self):
+        self.assertEqual(
+            codex_api._responses_websocket_url(
+                "https://chatgpt.com/backend-api/codex"
+            ),
+            "wss://chatgpt.com/backend-api/codex/responses",
+        )
+
+    def test_codex_websocket_headers_include_beta_and_identity(self):
+        headers = codex_websocket_headers(
+            {
+                "access_token": "tok",
+                "account_id": "acct_123",
+            },
+            conversation_id="thread-1",
+        )
+
+        self.assertEqual(headers["Authorization"], "Bearer tok")
+        self.assertEqual(headers["OpenAI-Beta"], CODEX_RESPONSES_WEBSOCKET_BETA)
+        self.assertEqual(headers["x-client-request-id"], "thread-1")
+        self.assertEqual(headers["chatgpt-account-id"], "acct_123")
+
     def test_sse_text_delta_helpers_extract_streaming_text(self):
         raw = "\n".join(
             [

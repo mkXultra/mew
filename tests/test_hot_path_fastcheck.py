@@ -684,6 +684,50 @@ def test_hot_path_fastcheck_replays_live_provider_request_body_shape(tmp_path):
     assert checks["native_provider_visible_state"]["status"] == "pass"
 
 
+def test_hot_path_fastcheck_requires_previous_response_id_for_multi_turn_live_provider_requests(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2, live_shape=True)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    first_request = dict(payload["requests"][0])
+    second_request = json.loads(json.dumps(first_request))
+    second_request["turn_index"] = 2
+    payload["request_count"] = 2
+    payload["requests"] = [first_request, second_request]
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_previous_response_id"]["status"] == "fail"
+    assert checks["native_previous_response_id"]["details"]["missing"][0]["request"] == 2
+
+
+def test_hot_path_fastcheck_accepts_previous_response_id_for_multi_turn_live_provider_requests(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2, live_shape=True)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    first_request = dict(payload["requests"][0])
+    second_request = json.loads(json.dumps(first_request))
+    second_request["turn_index"] = 2
+    second_request["previous_response_id"] = "resp-prev"
+    second_request["previous_response_id_in_request_body"] = True
+    second_request["previous_response_delta_mode"] = "delta_with_context_refresh"
+    second_request["request_body"]["previous_response_id"] = "resp-prev"
+    payload["request_count"] = 2
+    payload["requests"] = [first_request, second_request]
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_previous_response_id"]["status"] == "pass"
+    assert checks["native_previous_response_id"]["details"]["observed"] == 1
+
+
 def test_hot_path_fastcheck_replays_live_openai_request_against_codex_digest_identity(tmp_path):
     artifact = _write_native_artifact(tmp_path)
     transcript = _read_native_transcript(artifact)

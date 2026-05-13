@@ -50,6 +50,37 @@ Codex-like stdout/stderr head+tail preview while keeping full command output in
 the sidecar/ref. This is generic tool-result shaping, not task-specific MIPS or
 VM logic, and it does not authorize live controller steering.
 
+Follow-up diagnostic after commit `19ab31c`,
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-command-preview-step-check-10min-20260513-202331/2026-05-13__20-23-41/make-mips-interpreter__Xsnit7v/agent/terminal-bench-harbor-smoke/unknown-task`,
+showed command previews were present and bounded, but the model still spent
+the whole window on probe/read loops: valid native pairing (`60` calls / `60`
+outputs), `read_command_output=9`, `run_command=16`, `edit_count=0`, and
+`verifier_count=0`. The repair narrowed the issue but did not move the step
+shape toward Codex. Classify the next blocker as
+`tool_surface_affordance -> completed_command_full_output_reread`: completed
+command output is already summarized in the transcript, but the provider tool
+surface still advertises `read_command_output` as an ordinary hot-path tool,
+inviting large full-output rereads. The next bounded repair is to hide
+process-lifecycle tools (`poll_command`, `cancel_command`,
+`read_command_output`) from provider-visible requests until an active/yielded
+managed command exists. This keeps long-command control available when needed,
+but makes completed command reread an internal sidecar/debug operation rather
+than the default live model action. It does not add `next_action`,
+`required_next`, thresholds, or WorkFrame steering.
+
+Native previous-response delta decision 2026-05-13 JST:
+
+Codex keeps a full logical history locally, but its WebSocket transport can
+send `previous_response_id + delta input` when the current logical input has
+the previous request plus previous response output as a prefix. mew should
+mirror that shape without moving product-level history authority to the
+provider. The authoritative state remains `NativeTranscript` and proof
+artifacts. The live request descriptor may use `previous_response_id` only when
+a deterministic prefix check succeeds; otherwise it falls back to full input
+and records the prefix miss. This is a transport optimization and API-shape
+alignment, not a new planner signal. It must not reintroduce WorkFrame
+steering or hidden `next_action` hints into the provider-visible hot path.
+
 2026-05-13 checkpoint: keep M6.24 measurement paused after the
 `mew-make-mips-interpreter-step-check-10min-20260513-005024` diagnostic. The
 native evidence resolver is observable and not the current blocker. The current
@@ -1705,3 +1736,21 @@ not add task-specific frame/MIPS/Doom rules. After focused acceptance/native
 tests, codex-ultra review, and commit, run exactly one same-shape
 `make-mips-interpreter --mode step-check-10min` diagnostic. Do not run
 `speed_1`, `proof_5`, or broad measurement first.
+
+Native previous-response WebSocket decision 2026-05-13 JST:
+
+HTTP `/backend-api/codex/responses` rejects `previous_response_id` with
+`HTTP 400: Unsupported parameter: previous_response_id`. Do not add an HTTP
+fallback as the primary path. Codex CLI uses the Responses WebSocket transport
+with `OpenAI-Beta: responses_websockets=2026-02-06`, `response.create` frames,
+and a local prefix check that sends only the current input suffix with
+`previous_response_id`.
+
+Decision: implement the same WebSocket transport in mew's native implement_v2
+provider. mew keeps the full local transcript as the source of truth for
+replay/proof, but live wire turns use `previous_response_id` only when the
+deterministic prefix check succeeds. A live smoke using `~/.codex/auth.json`
+confirmed turn 1 completed, turn 2 sent `previous_response_delta_mode=delta`
+with `previous_response_id_in_request_body=True`, `wire_input_item_count=1`,
+and the WebSocket server accepted the turn. Fallback behavior can be designed
+later in a Codex-like way; do not dilute this path back into HTTP fallback.

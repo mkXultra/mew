@@ -21,10 +21,12 @@ from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .native_fake_provider import PHASE3_TRANSPORT_CHANGE, NativeFakeProvider
 from .native_provider_adapter import (
     NativeResponsesStreamParseResult,
+    apply_previous_response_delta,
     build_custom_tool_call_output_input_item,
     build_function_call_output_input_item,
     build_responses_request_descriptor,
     call_codex_native_responses,
+    call_codex_native_responses_websocket,
 )
 from .native_sidecar_projection import build_compact_native_sidecar_digest
 from .native_transcript import (
@@ -47,6 +49,7 @@ from .native_workframe_projection import (
 from .prompt import build_implement_v2_prompt_sections
 from .read_runtime import READ_ONLY_TOOL_NAMES, execute_read_only_tool_call
 from .tool_policy import (
+    ImplementLaneToolSpec,
     hide_unavailable_write_file_guidance,
     is_hard_runtime_artifact_task,
     list_v2_tool_specs_for_mode,
@@ -58,6 +61,7 @@ from .v2_runtime import (
     _acceptance_session_from_tool_results,
     _finish_acceptance_action,
 )
+from .. import codex_api as _codex_api
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
 from ..acceptance import acceptance_done_gate_decision
 from ..config import DEFAULT_CODEX_REASONING_EFFORT
@@ -78,6 +82,7 @@ PHASE3_NATIVE_SURFACE = {
 _FIRST_WRITE_DUE_PROBE_THRESHOLD = 10
 _FIRST_WRITE_DUE_TURN_THRESHOLD = 6
 _FIRST_WRITE_DUE_GRACE_PROBE_CALLS = 1
+_PROCESS_LIFECYCLE_TOOL_NAMES = frozenset({"poll_command", "cancel_command", "read_command_output"})
 _PREWRITE_PROBE_PLATEAU_THRESHOLD = 30
 _FIRST_WRITE_DUE_HARD_RUNTIME_PROBE_THRESHOLD = 18
 # Hard-runtime tasks often need a long source/binary probe pass before a coherent patch.
@@ -169,6 +174,11 @@ class NativeCodexResponsesProvider:
     requests: list[dict[str, object]] = None  # type: ignore[assignment]
     responses: list[dict[str, object]] = None  # type: ignore[assignment]
     rejected_responses: list[dict[str, object]] = None  # type: ignore[assignment]
+    previous_response_id: str = ""
+    previous_logical_input_items: list[dict[str, object]] = None  # type: ignore[assignment]
+    previous_response_output_items: list[dict[str, object]] = None  # type: ignore[assignment]
+    use_websocket: bool = True
+    websocket_session: object | None = None
 
     def __post_init__(self) -> None:
         if self.requests is None:
@@ -177,6 +187,10 @@ class NativeCodexResponsesProvider:
             self.responses = []
         if self.rejected_responses is None:
             self.rejected_responses = []
+        if self.previous_logical_input_items is None:
+            self.previous_logical_input_items = []
+        if self.previous_response_output_items is None:
+            self.previous_response_output_items = []
         if not self.model:
             self.model = str(self.lane_input.model or "gpt-5.5")
 
@@ -187,6 +201,14 @@ class NativeCodexResponsesProvider:
             model=self.model,
             request_descriptor=request_descriptor,
         )
+        logical_input_items = _mapping_list(dict(descriptor.get("request_body") or {}).get("input"))
+        if self.previous_response_id:
+            descriptor = apply_previous_response_delta(
+                descriptor,
+                previous_response_id=self.previous_response_id,
+                previous_logical_input_items=self.previous_logical_input_items,
+                previous_response_output_items=self.previous_response_output_items,
+            )
         descriptor["provider_request_inventory"] = dict(
             request_descriptor.get("provider_request_inventory") or {}
         )
@@ -201,14 +223,36 @@ class NativeCodexResponsesProvider:
             ),
         )
         try:
-            result = call_codex_native_responses(
-                auth=self.auth,
-                descriptor=descriptor,
-                base_url=self.base_url,
-                timeout=self.timeout,
-                lane_attempt_id=str(request_descriptor.get("lane_attempt_id") or ""),
-                turn_id=f"turn-{request_descriptor.get('turn_index')}",
-            )
+            lane_attempt_id = str(request_descriptor.get("lane_attempt_id") or "")
+            turn_id = f"turn-{request_descriptor.get('turn_index')}"
+            if self.use_websocket:
+                if self.websocket_session is None:
+                    self.websocket_session = _codex_api.CodexResponsesWebSocketSession(
+                        auth=self.auth,
+                        base_url=self.base_url,
+                        timeout=self.timeout,
+                        conversation_id=lane_attempt_id,
+                    )
+                descriptor["transport_kind"] = "provider_native_websocket"
+                descriptor["native_transport_kind"] = "provider_native_websocket"
+                result = call_codex_native_responses_websocket(
+                    auth=self.auth,
+                    descriptor=descriptor,
+                    base_url=self.base_url,
+                    timeout=self.timeout,
+                    lane_attempt_id=lane_attempt_id,
+                    turn_id=turn_id,
+                    websocket_session=self.websocket_session,
+                )
+            else:
+                result = call_codex_native_responses(
+                    auth=self.auth,
+                    descriptor=descriptor,
+                    base_url=self.base_url,
+                    timeout=self.timeout,
+                    lane_attempt_id=lane_attempt_id,
+                    turn_id=turn_id,
+                )
         except Exception:
             _emit_progress(self.progress, "native_response failed")
             raise
@@ -223,6 +267,12 @@ class NativeCodexResponsesProvider:
             )
         if result.errors and not result.transcript.items:
             raise RuntimeError("native provider response failed: " + "; ".join(result.errors or (result.status,)))
+        if result.response_id:
+            self.previous_response_id = result.response_id
+            self.previous_logical_input_items = logical_input_items
+            self.previous_response_output_items = _response_output_input_items(
+                result.transcript.items
+            )
         return result
 
 
@@ -261,7 +311,9 @@ def run_live_native_implement_v2(
     lane_result.metrics.update(
         {
             "transport_kind": "provider_native",
-            "native_transport_kind": "provider_native",
+            "native_transport_kind": "provider_native_websocket"
+            if provider.use_websocket
+            else "provider_native",
             "provider": provider.provider,
             "model": provider.model,
             "provider_native_tool_loop": True,
@@ -1890,12 +1942,13 @@ def _request_descriptor(
         transcript_items=provider_visible_transcript_items,
         loop_signals=loop_signals,
     )
+    tool_specs = _native_tool_specs_for_request(lane_input, provider_visible_transcript_items)
     input_items = _responses_input_items(
         lane_input,
         provider_visible_transcript_items,
         compact_sidecar_digest=compact_sidecar_digest,
     )
-    instructions = _native_instructions(lane_input)
+    instructions = _native_instructions(lane_input, tool_specs=tool_specs)
     forbidden_fields_report = build_provider_visible_forbidden_fields_report(
         input_items=input_items,
         instructions=instructions,
@@ -1916,6 +1969,7 @@ def _request_descriptor(
             diagnostic_only_fields=loop_signals.keys(),
             diagnostic_loop_signals=loop_signals,
         ),
+        "provider_tool_names": [spec.name for spec in tool_specs],
         "instructions": instructions,
         "model_json_main_path_detected": False,
     }
@@ -1928,13 +1982,13 @@ def _live_responses_request_descriptor(
     model: str,
     request_descriptor: Mapping[str, object],
 ) -> dict[str, object]:
-    mode = str(lane_input.lane_config.get("mode") or "full").strip() or "full"
     reasoning = _reasoning_config(lane_input)
+    tool_specs = _tool_specs_from_request_descriptor(lane_input, request_descriptor)
     return build_responses_request_descriptor(
         model=model,
-        instructions=str(request_descriptor.get("instructions") or _native_instructions(lane_input)),
+        instructions=str(request_descriptor.get("instructions") or _native_instructions(lane_input, tool_specs=tool_specs)),
         input_items=_provider_safe_input_items(request_descriptor.get("input_items")),
-        tool_specs=list_v2_tool_specs_for_task(mode, task_contract=lane_input.task_contract),
+        tool_specs=tool_specs,
         transcript_window=request_descriptor.get("transcript_window") or (),
         reasoning=reasoning,
         provider_request_id=f"{request_descriptor.get('lane_attempt_id')}:turn:{request_descriptor.get('turn_index')}",
@@ -1942,11 +1996,13 @@ def _live_responses_request_descriptor(
     )
 
 
-def _native_instructions(lane_input: ImplementLaneInput) -> str:
-    tool_specs = list_v2_tool_specs_for_task(
-        lane_input.lane_config.get("mode") or "full",
-        task_contract=lane_input.task_contract,
-    )
+def _native_instructions(
+    lane_input: ImplementLaneInput,
+    *,
+    tool_specs: tuple[ImplementLaneToolSpec, ...] | None = None,
+) -> str:
+    if tool_specs is None:
+        tool_specs = _native_tool_specs_for_request(lane_input, ())
     sections = [
         section
         for section in build_implement_v2_prompt_sections(
@@ -1964,6 +2020,49 @@ def _native_instructions(lane_input: ImplementLaneInput) -> str:
     if not any(spec.name == "write_file" for spec in tool_specs):
         return hide_unavailable_write_file_guidance(rendered)
     return rendered
+
+
+def _tool_specs_from_request_descriptor(
+    lane_input: ImplementLaneInput,
+    request_descriptor: Mapping[str, object],
+) -> tuple[ImplementLaneToolSpec, ...]:
+    names = {
+        str(name or "").strip()
+        for name in (request_descriptor.get("provider_tool_names") or ())
+        if str(name or "").strip()
+    }
+    specs = _native_tool_specs_for_request(lane_input, ())
+    if not names:
+        return specs
+    return tuple(spec for spec in specs if spec.name in names)
+
+
+def _native_tool_specs_for_request(
+    lane_input: ImplementLaneInput,
+    transcript_items: object,
+) -> tuple[ImplementLaneToolSpec, ...]:
+    specs = list_v2_tool_specs_for_task(
+        lane_input.lane_config.get("mode") or "full",
+        task_contract=lane_input.task_contract,
+    )
+    if _native_has_open_command(transcript_items):
+        return specs
+    return tuple(spec for spec in specs if spec.name not in _PROCESS_LIFECYCLE_TOOL_NAMES)
+
+
+def _native_has_open_command(transcript_items: object) -> bool:
+    if not isinstance(transcript_items, (list, tuple)):
+        return False
+    for item in transcript_items:
+        if not isinstance(item, NativeTranscriptItem):
+            continue
+        if item.kind not in OUTPUT_ITEM_KINDS:
+            continue
+        if item.tool_name not in {"run_command", "run_tests", "poll_command"}:
+            continue
+        if str(item.status or "").strip().casefold() in {"yielded", "running", "pending"}:
+            return True
+    return False
 
 
 def _responses_input_items(
@@ -2362,6 +2461,19 @@ def _responses_input_item_from_transcript_item(item: NativeTranscriptItem) -> di
     if item.kind in {"function_call_output", "finish_output"}:
         return build_function_call_output_input_item(call_id=item.call_id, output=item.output_text_or_ref)
     return {}
+
+
+def _response_output_input_items(
+    transcript_items: tuple[NativeTranscriptItem, ...],
+) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for item in transcript_items:
+        if item.kind not in {"assistant_message", "reasoning", "function_call", "custom_tool_call", "finish_call"}:
+            continue
+        converted = _responses_input_item_from_transcript_item(item)
+        if converted:
+            items.append(converted)
+    return items
 
 
 def _provider_visible_native_item(
