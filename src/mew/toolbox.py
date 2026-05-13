@@ -18,6 +18,7 @@ from .timeutil import now_iso
 _SHELL_WRAPPER_RE = re.compile(r"^(?P<env>(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*)?(?P<shell>\S+)\s+(?P<flag>-[lc]{1,2})\s+(?P<script>.*)\Z", re.DOTALL)
 COMMAND_OUTPUT_SPOOL_MAX_BYTES = 1_000_000
 COMMAND_OUTPUT_TAIL_MAX_CHARS = 65_536
+DEFAULT_CLIPPED_COMMAND_OUTPUT_CHARS = 4_000
 
 
 def resolve_tool_cwd(cwd=None):
@@ -299,6 +300,14 @@ def _subprocess_env(extra_env=None):
     return env
 
 
+def _clip_command_output(text, *, max_output_chars=None):
+    try:
+        limit = int(max_output_chars) if max_output_chars not in (None, "") else DEFAULT_CLIPPED_COMMAND_OUTPUT_CHARS
+    except (TypeError, ValueError):
+        limit = DEFAULT_CLIPPED_COMMAND_OUTPUT_CHARS
+    return clip_output(text, limit=max(1, limit))
+
+
 def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_process_group=False, use_shell=False):
     if use_shell:
         argv = _default_shell_argv(command or "")
@@ -344,8 +353,8 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
                     "finished_at": now_iso(),
                     "exit_code": None,
                     "timed_out": True,
-                    "stdout": clip_output(stdout),
-                    "stderr": clip_output(stderr or f"command timed out after {timeout} second(s)"),
+                    "stdout": _clip_command_output(stdout),
+                    "stderr": _clip_command_output(stderr or f"command timed out after {timeout} second(s)"),
                     "kill_status": kill_status,
                 }
             return {
@@ -356,8 +365,8 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
                 "started_at": started_at,
                 "finished_at": now_iso(),
                 "exit_code": process.returncode,
-                "stdout": clip_output(stdout),
-                "stderr": clip_output(stderr),
+                "stdout": _clip_command_output(stdout),
+                "stderr": _clip_command_output(stderr),
             }
         result = subprocess.run(
             argv,
@@ -379,8 +388,8 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
             "started_at": started_at,
             "finished_at": now_iso(),
             "exit_code": result.returncode,
-            "stdout": clip_output(result.stdout),
-            "stderr": clip_output(result.stderr),
+            "stdout": _clip_command_output(result.stdout),
+            "stderr": _clip_command_output(result.stderr),
         }
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout if isinstance(exc.stdout, str) else ""
@@ -394,8 +403,8 @@ def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_proc
             "finished_at": now_iso(),
             "exit_code": None,
             "timed_out": True,
-            "stdout": clip_output(stdout),
-            "stderr": clip_output(stderr or f"command timed out after {timeout} second(s)"),
+            "stdout": _clip_command_output(stdout),
+            "stderr": _clip_command_output(stderr or f"command timed out after {timeout} second(s)"),
         }
     except OSError as exc:
         stderr = f"executable not found: {argv[0]}" if isinstance(exc, FileNotFoundError) and argv else str(exc)
@@ -520,8 +529,8 @@ def run_command_record_streaming(
         "duration_seconds": round(duration_seconds, 3),
         "exit_code": exit_code,
         "timed_out": timed_out,
-        "stdout": clip_output(stdout),
-        "stderr": clip_output(stderr),
+        "stdout": _clip_command_output(stdout),
+        "stderr": _clip_command_output(stderr),
         "kill_status": kill_status,
         "stdout_tail": stdout_tail,
         "stderr_tail": stderr_tail,
@@ -559,7 +568,7 @@ class ManagedCommandHandle:
     def process_group_id(self):
         return self.process.pid if self.kill_process_group else None
 
-    def snapshot(self, *, status="running"):
+    def snapshot(self, *, status="running", max_output_chars=None):
         stdout = "".join(self.chunks["stdout"])
         stderr = "".join(self.chunks["stderr"])
         duration_seconds = max(0.0, time.monotonic() - self.started_monotonic)
@@ -579,8 +588,8 @@ class ManagedCommandHandle:
             "process_group_id": self.process_group_id,
             "exit_code": None,
             "timed_out": False,
-            "stdout": clip_output(stdout),
-            "stderr": clip_output(stderr),
+            "stdout": _clip_command_output(stdout, max_output_chars=max_output_chars),
+            "stderr": _clip_command_output(stderr, max_output_chars=max_output_chars),
             "stdout_tail": _tail_output(stdout),
             "stderr_tail": _tail_output(stderr),
             "output_bytes": self.output_bytes,
@@ -590,13 +599,21 @@ class ManagedCommandHandle:
     def is_running(self):
         return self.process.poll() is None
 
-    def poll(self, wait_seconds=0):
+    def poll(self, wait_seconds=0, max_output_chars=None):
         if self.finalized and self.final_result is not None:
-            return dict(self.final_result)
+            result = dict(self.final_result)
+            if max_output_chars not in (None, ""):
+                result["stdout"] = _clip_command_output(
+                    "".join(self.chunks["stdout"]), max_output_chars=max_output_chars
+                )
+                result["stderr"] = _clip_command_output(
+                    "".join(self.chunks["stderr"]), max_output_chars=max_output_chars
+                )
+            return result
         wait = max(0.0, float(wait_seconds or 0))
         remaining_timeout = self.timeout - max(0.0, time.monotonic() - self.started_monotonic)
         if remaining_timeout <= 0:
-            return self.finalize(timeout=0)
+            return self.finalize(timeout=0, max_output_chars=max_output_chars)
         wait = min(wait, remaining_timeout)
         if wait:
             try:
@@ -604,14 +621,22 @@ class ManagedCommandHandle:
             except subprocess.TimeoutExpired:
                 pass
         if time.monotonic() - self.started_monotonic >= self.timeout and self.process.poll() is None:
-            return self.finalize(timeout=0)
+            return self.finalize(timeout=0, max_output_chars=max_output_chars)
         if self.process.poll() is None:
-            return self.snapshot(status="running")
-        return self.finalize(timeout=0)
+            return self.snapshot(status="running", max_output_chars=max_output_chars)
+        return self.finalize(timeout=0, max_output_chars=max_output_chars)
 
-    def finalize(self, timeout=None):
+    def finalize(self, timeout=None, max_output_chars=None):
         if self.finalized and self.final_result is not None:
-            return dict(self.final_result)
+            result = dict(self.final_result)
+            if max_output_chars not in (None, ""):
+                result["stdout"] = _clip_command_output(
+                    "".join(self.chunks["stdout"]), max_output_chars=max_output_chars
+                )
+                result["stderr"] = _clip_command_output(
+                    "".join(self.chunks["stderr"]), max_output_chars=max_output_chars
+                )
+            return result
         timed_out = False
         kill_status = ""
         try:
@@ -646,8 +671,8 @@ class ManagedCommandHandle:
             "status": "timed_out" if timed_out else ("completed" if exit_code == 0 else "failed"),
             "exit_code": exit_code,
             "timed_out": timed_out,
-            "stdout": clip_output(stdout),
-            "stderr": clip_output(stderr),
+            "stdout": _clip_command_output(stdout, max_output_chars=max_output_chars),
+            "stderr": _clip_command_output(stderr, max_output_chars=max_output_chars),
             "kill_status": kill_status,
             "stdout_tail": _tail_output(stdout),
             "stderr_tail": _tail_output(stderr),
@@ -809,15 +834,15 @@ class ManagedCommandRunner:
         self.handles[handle.command_run_id] = handle
         return handle
 
-    def poll(self, wait_seconds=0, command_run_id=""):
+    def poll(self, wait_seconds=0, command_run_id="", max_output_chars=None):
         key, handle = self._get_handle(command_run_id)
-        result = handle.poll(wait_seconds=wait_seconds)
+        result = handle.poll(wait_seconds=wait_seconds, max_output_chars=max_output_chars)
         self._drop_finalized(key, handle)
         return result
 
-    def finalize(self, timeout=None, command_run_id=""):
+    def finalize(self, timeout=None, command_run_id="", max_output_chars=None):
         key, handle = self._get_handle(command_run_id)
-        result = handle.finalize(timeout=timeout)
+        result = handle.finalize(timeout=timeout, max_output_chars=max_output_chars)
         self.handles.pop(key, None)
         if self.active is handle:
             self.active = next(iter(self.handles.values()), None)

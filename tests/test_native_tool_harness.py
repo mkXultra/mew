@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from dataclasses import replace
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -320,6 +321,142 @@ def test_native_provider_hides_process_lifecycle_tools_until_command_is_open(tmp
 
     assert {"poll_command", "cancel_command", "read_command_output"}.isdisjoint(provider.requests[0]["provider_tool_names"])
     assert {"poll_command", "cancel_command", "read_command_output"} <= set(provider.requests[1]["provider_tool_names"])
+
+
+def test_native_provider_exposes_read_command_output_after_completed_command(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "run-1",
+                    "run_command",
+                    {"argv": [sys.executable, "-c", "print('done')"], "cwd": "."},
+                    output_index=0,
+                )
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    assert {"poll_command", "cancel_command", "read_command_output"}.isdisjoint(
+        provider.requests[0]["provider_tool_names"]
+    )
+    assert "read_command_output" in provider.requests[1]["provider_tool_names"]
+    assert "poll_command" not in provider.requests[1]["provider_tool_names"]
+    assert "cancel_command" not in provider.requests[1]["provider_tool_names"]
+
+
+def test_native_provider_hides_poll_cancel_after_terminal_poll_supersedes_yield(tmp_path: Path) -> None:
+    command_id = _command_run_id("run-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "run-1",
+                    "run_command",
+                    {
+                        "command": "sleep 0.1; echo done",
+                        "cwd": ".",
+                        "timeout_ms": 2000,
+                        "foreground_budget_seconds": 0.001,
+                    },
+                    output_index=0,
+                )
+            ],
+            [
+                fake_call(
+                    "poll-1",
+                    "poll_command",
+                    {"command_run_id": command_id, "wait_seconds": 1},
+                    output_index=0,
+                )
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    assert {"poll_command", "cancel_command", "read_command_output"} <= set(
+        provider.requests[1]["provider_tool_names"]
+    )
+    assert "read_command_output" in provider.requests[2]["provider_tool_names"]
+    assert "poll_command" not in provider.requests[2]["provider_tool_names"]
+    assert "cancel_command" not in provider.requests[2]["provider_tool_names"]
+
+
+def test_native_provider_hides_poll_cancel_after_cancel_supersedes_yield(tmp_path: Path) -> None:
+    command_id = _command_run_id("run-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "run-1",
+                    "run_command",
+                    {
+                        "command": "sleep 3",
+                        "cwd": ".",
+                        "timeout_ms": 5000,
+                        "foreground_budget_seconds": 0.001,
+                    },
+                    output_index=0,
+                )
+            ],
+            [
+                fake_call(
+                    "cancel-1",
+                    "cancel_command",
+                    {"command_run_id": command_id, "reason": "stop diagnostic"},
+                    output_index=0,
+                )
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    assert {"poll_command", "cancel_command", "read_command_output"} <= set(
+        provider.requests[1]["provider_tool_names"]
+    )
+    assert "read_command_output" in provider.requests[2]["provider_tool_names"]
+    assert "poll_command" not in provider.requests[2]["provider_tool_names"]
+    assert "cancel_command" not in provider.requests[2]["provider_tool_names"]
+
+
+def test_native_run_command_respects_provider_visible_output_budget(tmp_path: Path) -> None:
+    script = "import sys; [print(f'line-{i:03d}') for i in range(350)]"
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "run-wide-output",
+                    "run_command",
+                    {
+                        "argv": [sys.executable, "-c", script],
+                        "cwd": ".",
+                        "max_output_tokens": 3000,
+                    },
+                    output_index=0,
+                ),
+                fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=1)
+
+    output = next(
+        item
+        for item in result.transcript.items
+        if item.kind.endswith("_output") and item.call_id == "run-wide-output"
+    )
+    assert len(output.output_text_or_ref) > 1200
+    assert "line-000" in output.output_text_or_ref
+    assert "line-349" in output.output_text_or_ref
+    assert "command_intent" not in output.output_text_or_ref
 
 
 def test_native_hard_runtime_rejects_unavailable_write_file_source_creation(tmp_path: Path) -> None:

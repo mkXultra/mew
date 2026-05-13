@@ -32,6 +32,9 @@ from .shell_metadata import classify_shell_command_metadata
 from .types import ToolCallEnvelope, ToolResultEnvelope
 
 EXEC_TOOL_NAMES = frozenset({"run_command", "run_tests", "poll_command", "cancel_command", "read_command_output"})
+DEFAULT_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS = 1_200
+MAX_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS = 50_000
+MAX_PROVIDER_VISIBLE_COMMAND_OUTPUT_TOKENS = 12_500
 TERMINAL_SUCCESS_STATUSES = frozenset({"completed"})
 TERMINAL_FAILURE_STATUSES = frozenset({"failed", "timed_out", "killed", "orphaned"})
 NONTERMINAL_STATUSES = frozenset({"running", "yielded"})
@@ -280,7 +283,11 @@ class ImplementV2ManagedExecRuntime:
                 effective_timeout = command_remaining
             else:
                 effective_timeout = min(max(0.0, float(timeout_seconds)), command_remaining)
-            payload = self.runner.finalize(timeout=effective_timeout)
+            metadata = self.command_metadata.get(str(handle.command_run_id or ""), {})
+            payload = self.runner.finalize(
+                timeout=effective_timeout,
+                max_output_chars=_metadata_output_budget_chars(metadata),
+            )
             payload.update(_command_metadata_for_payload(self.command_metadata.get(str(payload.get("command_run_id") or ""), {})))
             finalized.append(payload)
         return tuple(finalized)
@@ -301,7 +308,12 @@ class ImplementV2ManagedExecRuntime:
             wait = max(0.0, float(wait_seconds or 0.0))
         except (TypeError, ValueError):
             wait = 0.0
-        payload = self.runner.poll(wait_seconds=wait, command_run_id=handle.command_run_id)
+        metadata = self.command_metadata.get(str(handle.command_run_id or ""), {})
+        payload = self.runner.poll(
+            wait_seconds=wait,
+            command_run_id=handle.command_run_id,
+            max_output_chars=_metadata_output_budget_chars(metadata),
+        )
         if payload.get("status") == "running":
             payload["status"] = "yielded"
         payload.update(_command_metadata_for_payload(self.command_metadata.get(str(payload.get("command_run_id") or ""), {})))
@@ -357,7 +369,8 @@ class ImplementV2ManagedExecRuntime:
             use_shell=use_shell,
             parser_available=bool(args.get("bridge_parser_available", True)),
         )
-        timeout = _bounded_float(args.get("timeout"), default=300.0, minimum=1.0, maximum=3600.0)
+        timeout = _command_timeout_seconds(args)
+        output_budget_chars = _command_output_budget_chars(args)
         foreground_budget = _bounded_float(
             args.get("foreground_budget_seconds"),
             default=min(15.0, max(0.0, timeout - 1.0)),
@@ -425,13 +438,18 @@ class ImplementV2ManagedExecRuntime:
             "pre_run_source_tree_snapshot": pre_run_source_tree_snapshot,
             "source_observer": source_observer,
             "started_epoch": started_epoch,
+            "provider_visible_output_chars": output_budget_chars,
             "tool_run_record_ids": [],
             **({"unchecked_expected_artifacts": list(unchecked_expected_artifacts)} if unchecked_expected_artifacts else {}),
             **({"execution_contract": dict(raw_contract_preserved)} if raw_contract_preserved else {}),
             **({"execution_contract_downgraded": True} if raw_contract and not raw_contract_preserved else {}),
             **({"tool_contract_recovery": dict(tool_contract_recovery)} if tool_contract_recovery is not None else {}),
         }
-        payload = self.runner.poll(wait_seconds=foreground_budget, command_run_id=command_run_id)
+        payload = self.runner.poll(
+            wait_seconds=foreground_budget,
+            command_run_id=command_run_id,
+            max_output_chars=output_budget_chars,
+        )
         if payload.get("status") == "running":
             payload["status"] = "yielded"
         payload["command_run_id"] = command_run_id
@@ -442,6 +460,7 @@ class ImplementV2ManagedExecRuntime:
         payload["command_source"] = command_source
         payload["command_classification"] = command_classification
         payload["command_intent"] = command_intent
+        payload["provider_visible_output_chars"] = output_budget_chars
         if source_observer:
             payload["source_observer"] = source_observer
         if unchecked_expected_artifacts:
@@ -457,11 +476,18 @@ class ImplementV2ManagedExecRuntime:
     def _poll_command(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
         command_run_id = _required_command_run_id(args)
+        metadata = self.command_metadata.get(command_run_id, {})
+        output_budget_chars = _command_output_budget_chars(
+            args,
+            default=_metadata_output_budget_chars(metadata),
+        )
         payload = self.runner.poll(
             wait_seconds=_bounded_float(args.get("wait_seconds"), default=0.0, minimum=0.0, maximum=30.0),
             command_run_id=command_run_id,
+            max_output_chars=output_budget_chars,
         )
         payload.update(_command_metadata_for_payload(self.command_metadata.get(command_run_id, {})))
+        payload["provider_visible_output_chars"] = output_budget_chars
         if payload.get("status") == "running":
             payload["status"] = "yielded"
         payload["command_run_id"] = command_run_id
@@ -1098,6 +1124,7 @@ def _command_metadata_for_payload(metadata: object) -> dict[str, object]:
         "unchecked_expected_artifacts",
         "source_observer",
         "started_epoch",
+        "provider_visible_output_chars",
     )
     payload: dict[str, object] = {}
     for key in allowed_keys:
@@ -2796,6 +2823,72 @@ def _bounded_float(value: object, *, default: float, minimum: float, maximum: fl
     except (TypeError, ValueError):
         return default
     return max(minimum, min(number, maximum))
+
+
+def _command_timeout_seconds(args: dict[str, object]) -> float:
+    if args.get("timeout") not in (None, ""):
+        return _bounded_float(args.get("timeout"), default=300.0, minimum=1.0, maximum=3600.0)
+    if args.get("timeout_ms") not in (None, ""):
+        return _bounded_float(
+            args.get("timeout_ms"),
+            default=300_000.0,
+            minimum=1_000.0,
+            maximum=3_600_000.0,
+        ) / 1000.0
+    return 300.0
+
+
+def _command_output_budget_chars(
+    args: dict[str, object],
+    *,
+    default: int = DEFAULT_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS,
+) -> int:
+    default = _bounded_int(
+        default,
+        default=DEFAULT_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS,
+        minimum=DEFAULT_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS,
+        maximum=MAX_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS,
+    )
+    if args.get("max_output_chars") not in (None, ""):
+        return _bounded_int(
+            args.get("max_output_chars"),
+            default=default,
+            minimum=DEFAULT_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS,
+            maximum=MAX_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS,
+        )
+    if args.get("max_output_tokens") not in (None, ""):
+        tokens = _bounded_int(
+            args.get("max_output_tokens"),
+            default=max(1, default // 4),
+            minimum=1,
+            maximum=MAX_PROVIDER_VISIBLE_COMMAND_OUTPUT_TOKENS,
+        )
+        return _bounded_int(
+            tokens * 4,
+            default=default,
+            minimum=DEFAULT_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS,
+            maximum=MAX_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS,
+        )
+    return default
+
+
+def _metadata_output_budget_chars(metadata: object) -> int:
+    if not isinstance(metadata, dict):
+        return DEFAULT_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS
+    return _command_output_budget_chars(
+        {"max_output_chars": metadata.get("provider_visible_output_chars")},
+        default=DEFAULT_PROVIDER_VISIBLE_COMMAND_OUTPUT_CHARS,
+    )
+
+
+def _bounded_int(value: object, *, default: int, minimum: int, maximum: int) -> int:
+    if value in (None, ""):
+        return int(default)
+    try:
+        number = int(float(value))
+    except (TypeError, ValueError):
+        return int(default)
+    return max(int(minimum), min(int(number), int(maximum)))
 
 
 def _safe_id_part(value: object, default: str) -> str:

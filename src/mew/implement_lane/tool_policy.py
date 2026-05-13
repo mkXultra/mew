@@ -80,7 +80,8 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         access="execute",
         description=(
             "Run a bounded command, build, or runtime through managed exec. "
-            "Use source mutation tools for edits. Output returns compact terminal text with refs."
+            "Use source mutation tools for edits. Output is compact by default; request a larger "
+            "bounded output budget when terminal text is needed to edit."
         ),
         approval_required=True,
     ),
@@ -88,8 +89,8 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="run_tests",
         access="execute",
         description=(
-            "Run a bounded verifier or test command through managed exec. Output returns compact "
-            "terminal text with refs."
+            "Run a bounded verifier or test command through managed exec. Output is compact by "
+            "default; request a larger bounded output budget when failure text is needed to repair."
         ),
         approval_required=True,
     ),

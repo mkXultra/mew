@@ -355,10 +355,13 @@ not mention broad source exploration first. They should say:
 
 - run bounded commands, builds, runtimes, diagnostics, and verifiers;
 - source edits belong to `apply_patch`, `edit_file`, or `write_file`;
-- command output is returned as compact terminal text with refs.
+- command output is compact by default, but the model may request a bounded
+  per-command output budget when terminal text is needed to edit.
 
 Lifecycle tools keep short descriptions. They should not introduce mutation
-or repair policy.
+or repair policy. `read_command_output` is hidden until there is an active
+command or a completed command with an output ref; `poll_command` and
+`cancel_command` remain active-command-only.
 
 ### Read/search tools
 
@@ -418,7 +421,7 @@ Required caps:
 | provider-visible tool-output card | 4096 bytes | 6144 bytes | status line <= 240 chars; refs block <= 12 refs |
 | `search_text` visible card | 4096 bytes | 6144 bytes | matches <= 8; excerpt <= 180 chars per match |
 | `read_file` visible card | 4096 bytes | 6144 bytes | excerpt <= 160 lines; line text clipped to 220 chars |
-| `run_command` / `run_tests` visible card | 4096 bytes | 6144 bytes | latest_failure <= 1200 chars; stdout tail <= 1200 chars; stderr tail <= 1200 chars |
+| `run_command` / `run_tests` visible card | 4096 bytes default | 6144 bytes default; 60000 bytes with explicit per-call output budget | latest_failure <= 1200 chars; stdout/stderr default tail <= 1200 chars; requested output budget is clamped to 50000 chars |
 | mutation visible card | 2048 bytes | 4096 bytes | changed paths <= 12; hunk/diffstat summary <= 1000 chars |
 
 Any truncation must include a ref to the full sidecar content. A cap failure is
@@ -716,6 +719,11 @@ Close gate:
 - `scripts/check_implement_v2_hot_path.py` or successor native fastcheck passes
   for the artifact under test;
 - provider inventory proves forbidden steering fields are absent;
+- command schema exposes only bounded output-budget affordances
+  (`max_output_chars` / `max_output_tokens`) and no command self-labeling fields;
+- a fresh fake-native run proves either a requested command output budget returns
+  more than the default 1200 visible chars or completed command output is
+  reread through `read_command_output`;
 - sidecar artifacts prove diagnostic loop metrics still exist internally;
 - the 10 minute diagnostic reaches a natural source mutation or fails with a
   classified yellow/non-hot-path reason;

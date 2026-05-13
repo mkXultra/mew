@@ -107,6 +107,8 @@ def test_execute_tool_schemas_do_not_expose_command_self_labeling() -> None:
         serialized = str(provider_tool)
         properties = provider_tool["parameters"]["properties"]  # type: ignore[index]
 
+        assert "max_output_chars" in properties
+        assert "max_output_tokens" in properties
         assert "command_intent" not in properties
         assert "justification" not in properties
         assert "command_intent" not in serialized

@@ -97,6 +97,7 @@ _SOURCE_MUTATION_COMMAND_INTENTS = frozenset(
     {"implement", "implementation", "write", "edit", "mutation", "source_mutation"}
 )
 _COMMAND_RUN_ID_RE = re.compile(r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)")
+_COMMAND_OUTPUT_REF_RE = re.compile(r"implement-v2-exec://[^/\s]+/(?P<id>[^/\s]+)/output")
 _SEMANTIC_VERIFIER_FAILURE_PATTERNS = (
     re.compile(r"\bvm\s+(?:finished|stopped)\s+exit=(?!0\b)\d+\b", re.IGNORECASE),
     re.compile(r"\bmissing\s+expected\s+(?:artifact|frame|output)\b", re.IGNORECASE),
@@ -2047,22 +2048,62 @@ def _native_tool_specs_for_request(
     )
     if _native_has_open_command(transcript_items):
         return specs
+    if _native_has_completed_command_output(transcript_items):
+        return tuple(spec for spec in specs if spec.name not in {"poll_command", "cancel_command"})
     return tuple(spec for spec in specs if spec.name not in _PROCESS_LIFECYCLE_TOOL_NAMES)
 
 
 def _native_has_open_command(transcript_items: object) -> bool:
+    return any(
+        state["is_open"]
+        for state in _native_latest_command_lifecycle_states(transcript_items).values()
+    )
+
+
+def _native_has_completed_command_output(transcript_items: object) -> bool:
+    return any(
+        (not state["is_open"]) and state["has_output_ref"]
+        for state in _native_latest_command_lifecycle_states(transcript_items).values()
+    )
+
+
+def _native_latest_command_lifecycle_states(transcript_items: object) -> dict[str, dict[str, object]]:
     if not isinstance(transcript_items, (list, tuple)):
-        return False
+        return {}
+    states: dict[str, dict[str, object]] = {}
     for item in transcript_items:
         if not isinstance(item, NativeTranscriptItem):
             continue
         if item.kind not in OUTPUT_ITEM_KINDS:
             continue
-        if item.tool_name not in {"run_command", "run_tests", "poll_command"}:
+        if item.tool_name not in {"run_command", "run_tests", "poll_command", "cancel_command"}:
             continue
-        if str(item.status or "").strip().casefold() in {"yielded", "running", "pending"}:
-            return True
-    return False
+        command_run_id = _command_run_id_from_output_item(item)
+        if not command_run_id:
+            continue
+        previous = states.get(command_run_id)
+        if previous and int(previous.get("sequence") or -1) > item.sequence:
+            continue
+        status = str(item.status or "").strip().casefold()
+        states[command_run_id] = {
+            "sequence": item.sequence,
+            "status": status,
+            "is_open": status in {"yielded", "running", "pending"},
+            "has_output_ref": bool(item.content_refs)
+            or bool(_command_run_id_from_output_text(item.output_text_or_ref)),
+        }
+    return states
+
+
+def _command_run_id_from_output_item(item: NativeTranscriptItem) -> str:
+    command_run_id = _command_run_id_from_output_text(item.output_text_or_ref)
+    if command_run_id:
+        return command_run_id
+    for ref in item.content_refs:
+        match = _COMMAND_OUTPUT_REF_RE.search(str(ref or ""))
+        if match:
+            return match.group("id")
+    return ""
 
 
 def _responses_input_items(

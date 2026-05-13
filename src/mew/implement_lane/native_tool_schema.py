@@ -298,6 +298,12 @@ def structured_tool_json_schema(tool_name: str) -> dict[str, object] | None:
         "poll_command": _strict_object(
             {
                 "command_run_id": _string("Managed command run id to poll."),
+                "max_output_chars": _nullable_integer(
+                    "Optional provider-visible terminal output character budget for this poll."
+                ),
+                "max_output_tokens": _nullable_integer(
+                    "Optional Codex-style terminal output token budget alias for this poll."
+                ),
             }
         ),
         "cancel_command": _strict_object(
@@ -406,6 +412,12 @@ def _command_schema() -> dict[str, object]:
             ),
             "cwd": _nullable_string("Workspace-relative working directory."),
             "timeout_ms": _nullable_integer("Maximum command runtime in milliseconds."),
+            "max_output_chars": _nullable_integer(
+                "Optional provider-visible terminal output character budget for this command."
+            ),
+            "max_output_tokens": _nullable_integer(
+                "Optional Codex-style terminal output token budget alias for this command."
+            ),
         }
     )
 

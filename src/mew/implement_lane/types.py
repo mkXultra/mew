@@ -18,8 +18,10 @@ TOOL_CALL_SCHEMA_VERSION = 1
 TOOL_RESULT_SCHEMA_VERSION = 1
 PROOF_MANIFEST_SCHEMA_VERSION = 1
 _VISIBLE_TOOL_OUTPUT_CARD_HARD_BYTES = 6144
+_VISIBLE_TOOL_OUTPUT_CARD_MAX_BYTES = 60_000
 _MUTATION_VISIBLE_CARD_HARD_BYTES = 4096
 _NATURAL_RESULT_TEXT_LIMIT = 1200
+_NATURAL_RESULT_TEXT_MAX_LIMIT = 50_000
 _VISIBLE_PATH_CHARS = 260
 _VISIBLE_REF_CHARS = 160
 _FORBIDDEN_VISIBLE_FIELD_SET = frozenset(CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS)
@@ -151,11 +153,13 @@ class ToolResultEnvelope:
     def provider_visible_content(self) -> dict[str, object]:
         """Return content suitable for provider tool_result payloads."""
 
+        payload = self.content[0] if self.content and isinstance(self.content[0], dict) else {}
+        output_limit = _visible_output_budget(self.tool_name, payload)
         card = self.visible_tool_output_card()
         return {
             "mew_status": self.status,
             "acceptance_evidence": bool(self.evidence_refs) and self.status == "completed",
-            "natural_result_text": self.natural_result_text(),
+            "natural_result_text": self.natural_result_text(limit=output_limit),
             "tool_output_card": card,
             "content": list(self.content),
             "content_refs": list(self.content_refs),
@@ -169,6 +173,7 @@ class ToolResultEnvelope:
         """Return a bounded factual card for model-visible tool output."""
 
         payload = self.content[0] if self.content and isinstance(self.content[0], dict) else {}
+        output_limit = _visible_output_budget(self.tool_name, payload)
         status_parts = [f"{self.tool_name or 'tool'} result: {self.status}"]
         if self.is_error:
             status_parts.append("error=true")
@@ -193,7 +198,7 @@ class ToolResultEnvelope:
         latest_failure = _visible_latest_failure(self.tool_name, payload, is_error=self.is_error, status=self.status)
         if latest_failure:
             card["latest_failure"] = latest_failure
-        output_tail = _visible_output_tail(self.tool_name, payload)
+        output_tail = _visible_output_tail(self.tool_name, payload, limit=output_limit)
         if output_tail:
             card["output_tail"] = output_tail
         excerpt = _visible_read_excerpt(self.tool_name, payload)
@@ -205,15 +210,49 @@ class ToolResultEnvelope:
         mutation = _visible_mutation_card(payload)
         if mutation:
             card["mutation"] = mutation
-        return _fit_visible_tool_output_card(_drop_empty_card_values(card))
+        return _fit_visible_tool_output_card(
+            _drop_empty_card_values(card),
+            hard_bytes=_visible_card_hard_bytes(output_limit),
+        )
 
     def natural_result_text(self, *, limit: int = _NATURAL_RESULT_TEXT_LIMIT) -> str:
         """Return a compact natural-language result for the next model turn."""
 
+        payload = self.content[0] if self.content and isinstance(self.content[0], dict) else {}
+        limit = _visible_output_budget(self.tool_name, payload, default=limit)
         text = _render_visible_tool_output_card(self.visible_tool_output_card())
         if len(text) <= limit:
             return text
         return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _visible_output_budget(
+    tool_name: str,
+    payload: dict[str, object],
+    *,
+    default: int = _NATURAL_RESULT_TEXT_LIMIT,
+) -> int:
+    if tool_name not in {"run_command", "run_tests", "poll_command", "cancel_command"}:
+        return int(default)
+    for key in ("provider_visible_output_chars", "max_output_chars"):
+        value = payload.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            return max(
+                int(default),
+                min(_NATURAL_RESULT_TEXT_MAX_LIMIT, int(value)),
+            )
+        except (TypeError, ValueError):
+            continue
+    return int(default)
+
+
+def _visible_card_hard_bytes(output_limit: int) -> int:
+    return max(
+        _VISIBLE_TOOL_OUTPUT_CARD_HARD_BYTES,
+        min(_VISIBLE_TOOL_OUTPUT_CARD_MAX_BYTES, int(output_limit) + 2048),
+    )
 
 
 def _command_output_preview(tool_name: str, payload: dict[str, object], *, limit: int = 900) -> str:
@@ -380,15 +419,15 @@ def _visible_latest_failure(tool_name: str, payload: dict[str, object], *, is_er
     return _clip_preview("; ".join(facts), limit=1200)
 
 
-def _visible_output_tail(tool_name: str, payload: dict[str, object]) -> str:
-    command_preview = _command_output_preview(tool_name, payload, limit=1200)
+def _visible_output_tail(tool_name: str, payload: dict[str, object], *, limit: int = 1200) -> str:
+    command_preview = _command_output_preview(tool_name, payload, limit=limit)
     if command_preview:
         return command_preview
     for key in ("stderr_tail", "stdout_tail", "text", "content"):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
             tail = "\n".join(value.strip().splitlines()[-20:])
-            return _head_tail_preview(value, tail, limit=1200)
+            return _head_tail_preview(value, tail, limit=limit)
     return ""
 
 
@@ -465,7 +504,7 @@ def _compact_mapping_text(value: dict[str, object], *, limit: int = 1200) -> str
     return _clip_preview("; ".join(parts), limit=limit)
 
 
-def _fit_visible_tool_output_card(card: dict[str, object]) -> dict[str, object]:
+def _fit_visible_tool_output_card(card: dict[str, object], hard_bytes: int = _VISIBLE_TOOL_OUTPUT_CARD_HARD_BYTES) -> dict[str, object]:
     fitted = _redact_forbidden_visible_fields(dict(card))
     if isinstance(fitted.get("paths"), list):
         fitted["paths"] = [_scalar_preview(path, limit=_VISIBLE_PATH_CHARS) for path in fitted["paths"][:12]]
@@ -474,25 +513,25 @@ def _fit_visible_tool_output_card(card: dict[str, object]) -> dict[str, object]:
     mutation = fitted.get("mutation") if isinstance(fitted.get("mutation"), dict) else {}
     if mutation:
         fitted["mutation"] = _fit_mutation_visible_card(mutation)
-    if _json_size_bytes(fitted) <= _VISIBLE_TOOL_OUTPUT_CARD_HARD_BYTES:
+    if _json_size_bytes(fitted) <= hard_bytes:
         return fitted
     for key in ("excerpt", "output_tail", "latest_failure", "anchors", "status_line"):
         if isinstance(fitted.get(key), str):
             fitted[key] = _clip_preview(str(fitted[key]), limit=900 if key != "status_line" else 240)
-        if _json_size_bytes(fitted) <= _VISIBLE_TOOL_OUTPUT_CARD_HARD_BYTES:
+        if _json_size_bytes(fitted) <= hard_bytes:
             return fitted
     if isinstance(fitted.get("paths"), list):
         fitted["paths"] = list(fitted["paths"])[:6]
     if isinstance(fitted.get("refs"), list):
         fitted["refs"] = list(fitted["refs"])[:6]
-    if _json_size_bytes(fitted) <= _VISIBLE_TOOL_OUTPUT_CARD_HARD_BYTES:
+    if _json_size_bytes(fitted) <= hard_bytes:
         return fitted
     for key in ("excerpt", "output_tail", "anchors", "latest_failure", "mutation"):
         fitted.pop(key, None)
-        if _json_size_bytes(fitted) <= _VISIBLE_TOOL_OUTPUT_CARD_HARD_BYTES:
+        if _json_size_bytes(fitted) <= hard_bytes:
             return fitted
     fitted["card_truncated"] = True
-    return _force_fit_mapping(fitted, _VISIBLE_TOOL_OUTPUT_CARD_HARD_BYTES)
+    return _force_fit_mapping(fitted, hard_bytes)
 
 
 def _fit_mutation_visible_card(card: dict[str, object]) -> dict[str, object]:
