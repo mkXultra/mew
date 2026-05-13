@@ -286,6 +286,9 @@ Use run_command/run_tests to build, run, and verify.
 If the task or verifier names a missing source/artifact path, treat it as the
 target path and create the smallest runnable file before extended reverse
 engineering.
+If `task_facts.missing_workspace_paths` is present, use those factual missing
+paths as target-path context and prefer a minimal runnable artifact at the
+named path over extended archaeology.
 Repair from the latest concrete failure shown in the transcript.
 Finish only with fresh evidence from the tools.
 ```

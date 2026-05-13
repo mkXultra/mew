@@ -121,6 +121,8 @@ def build_implement_v2_prompt_sections(
                 "create the smallest runnable version early, then run it and repair from concrete failures. "
                 "If the task or verify command names a missing source or artifact path, "
                 "treat that as the target path and create the smallest runnable file before extended reverse engineering. "
+                "If task_facts.missing_workspace_paths is present, use those factual missing paths as target-path context; "
+                "prefer a minimal runnable artifact at the named path over extended archaeology. "
                 "Repair from the latest concrete failure shown in the transcript. "
                 "Finish only with fresh evidence from the tools."
             ),

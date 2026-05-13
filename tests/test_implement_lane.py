@@ -6042,6 +6042,8 @@ def test_implement_v2_prompt_sections_include_compact_coding_contract() -> None:
     assert "Use run_command or run_tests to build, run, and verify" in section.content
     assert "create the smallest runnable version early" in section.content
     assert "verify command names a missing source or artifact path" in section.content
+    assert "task_facts.missing_workspace_paths" in section.content
+    assert "prefer a minimal runnable artifact" in section.content
     assert "cheap probe" not in section.content
     assert "first_write" not in section.content
     assert "required_next" not in section.content
