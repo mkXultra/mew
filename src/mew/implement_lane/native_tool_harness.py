@@ -76,9 +76,9 @@ _FIRST_WRITE_DUE_PROBE_THRESHOLD = 10
 _FIRST_WRITE_DUE_TURN_THRESHOLD = 6
 _FIRST_WRITE_DUE_GRACE_PROBE_CALLS = 1
 _PREWRITE_PROBE_PLATEAU_THRESHOLD = 30
-_FIRST_WRITE_DUE_HARD_RUNTIME_PROBE_THRESHOLD = _PREWRITE_PROBE_PLATEAU_THRESHOLD
+_FIRST_WRITE_DUE_HARD_RUNTIME_PROBE_THRESHOLD = 18
 # Hard-runtime tasks often need a long source/binary probe pass before a coherent patch.
-# Do not force first write by turn count; let the probe plateau carry the guardrail.
+# Do not force first write by turn count; use probe evidence to carry the guardrail.
 _FIRST_WRITE_DUE_HARD_RUNTIME_TURN_THRESHOLD = 10_000
 _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
 _CONTROL_FAILURE_SUMMARY_LIMIT = 700
