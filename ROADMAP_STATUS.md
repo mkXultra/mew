@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Command/edit boundary redesign Phase 0-2 is committed; next work is Phase 3 parser-backed shell metadata, then Phase 4 process observer. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Command/edit boundary redesign Phase 0-3 is committed; next work is Phase 4 process-runner observer snapshots/diffs and yielded lifecycle metadata. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,12 +70,12 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_command_edit_boundary_redesign_phase_3_4_ready`.
+`m6_24_command_edit_boundary_redesign_phase_4_ready`.
 
 Current diagnostic mode:
-`phase_3_4_after_typed_mutation_route`.
+`phase_4_after_parser_backed_shell_metadata`.
 
-Latest phase status: Phase 0-2 of
+Latest phase status: Phase 0-3 of
 `docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md` is committed.
 Phase 0-1 landed as `90b42c9` / `38c9600`: deletion/quarantine map,
 canonical route decision schema, route artifacts, native/live route wiring, and
@@ -87,7 +87,13 @@ review passes; `uv run ruff check ...`, focused
 `uv run pytest --no-testmon -q tests/test_implement_lane.py
 tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario`,
 and full `uv run pytest --no-testmon -q` passed with `3682 passed, 1 warning,
-112 subtests passed`.
+112 subtests passed`. Phase 3 landed as `cd0c5a8`: parser-backed conservative
+shell metadata, tri-state `simple`/`too_complex`/`unavailable`, fail-closed
+bridge eligibility, strict malformed metadata handling, and metadata-only
+route projection. codex-ultra approved Phase 3 after three fix rounds; `uv run
+ruff check ...`, focused command-classification tests, `uv run pytest
+--no-testmon -q tests/test_implement_lane.py`, and full `uv run pytest
+--no-testmon -q` passed with `3696 passed, 1 warning, 112 subtests passed`.
 
 Current implementation rule:
 
@@ -96,20 +102,19 @@ Current implementation rule:
   route decision artifact, and narrow `invalid_tool_contract`.
 - Phase 2: `done` in `653e193`; typed mutation route diffs/evidence and
   write/edit/apply_patch recovery payloads are closed.
-- Phase 3-4: may be parallelized through separate `orchestrate-build-review`
-  workflows only with disjoint write scopes.
+- Phase 3: `done` in `cd0c5a8`; parser-backed shell metadata is metadata-only
+  and fails closed for bridge and shortcut consumers.
+- Phase 4: next; process-runner observer snapshots/diffs and yielded lifecycle
+  metadata.
 - Phase 5: serial or high-review only because the legacy shell-edit bridge is
   the highest-risk classifier regrowth point.
 - Phase 6-7: serial integration and validation: delete/quarantine old
   classifiers, then run UT, replay, dogfood/emulator, fastcheck, 10 minute
   step-shape, and speed proof in that order.
 
-Next action: start Phase 3 from
-`docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md`, then Phase 4
-or run Phase 4 in parallel only if ownership stays disjoint:
+Next action: start Phase 4 from
+`docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md`.
 
-- Phase 3 owns parser-backed shell metadata only:
-  `simple`, `too_complex`, `unavailable`.
 - Phase 4 owns process-runner observer snapshots/diffs and yielded command
   lifecycle metadata.
 
