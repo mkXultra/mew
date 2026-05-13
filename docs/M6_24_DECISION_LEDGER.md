@@ -36,6 +36,20 @@ native transcript window plus compact factual digest, and any repair must not
 reintroduce live `next_action`, `required_next`, `first_write_due`, probe
 thresholds, or WorkFrame steering.
 
+Follow-up diagnostic after commit `398778e`,
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-codex-like-hotpath-step-check-10min-20260513-1951/2026-05-13__19-51-26/make-mips-interpreter__mTjai2F/agent/terminal-bench-harbor-smoke/unknown-task`,
+confirmed the same high-level blocker with a narrower shape: valid native
+pairing (`47` calls / `47` outputs), forbidden steering fields absent, but
+`edit_count=0` and `verifier_count=0`. The model spent repeated turns on
+`read_command_output` and disassembly/probe reads. Classify this as
+`bad_tool_output_shape -> missing_mutation_affordance`: `run_command` provider
+outputs expose status, refs, and a short tail, but not enough bounded head/tail
+command output for the model to act without a separate output-read loop. The
+next bounded repair is to make command natural-result text include a compact
+Codex-like stdout/stderr head+tail preview while keeping full command output in
+the sidecar/ref. This is generic tool-result shaping, not task-specific MIPS or
+VM logic, and it does not authorize live controller steering.
+
 2026-05-13 checkpoint: keep M6.24 measurement paused after the
 `mew-make-mips-interpreter-step-check-10min-20260513-005024` diagnostic. The
 native evidence resolver is observable and not the current blocker. The current

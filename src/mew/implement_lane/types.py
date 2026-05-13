@@ -176,7 +176,12 @@ class ToolResultEnvelope:
                 value = payload.get(key)
                 if value not in (None, "", [], {}):
                     parts.append(f"{key}={value}")
+            command_preview = _command_output_preview(self.tool_name, payload)
+            if command_preview:
+                parts.append(command_preview)
             for key in ("stderr_tail", "stdout_tail", "text", "content"):
+                if command_preview and key in {"stderr_tail", "stdout_tail"}:
+                    continue
                 value = payload.get(key)
                 if isinstance(value, str) and value.strip():
                     compact = " ".join(value.strip().split())
@@ -194,6 +199,53 @@ class ToolResultEnvelope:
         if len(text) <= limit:
             return text
         return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _command_output_preview(tool_name: str, payload: dict[str, object], *, limit: int = 900) -> str:
+    if tool_name not in {"run_command", "run_tests", "poll_command", "cancel_command"}:
+        return ""
+    stderr = _text_payload(payload.get("stderr"))
+    stderr_tail = _text_payload(payload.get("stderr_tail"))
+    stdout = _text_payload(payload.get("stdout"))
+    stdout_tail = _text_payload(payload.get("stdout_tail"))
+    streams = [
+        ("stderr_preview", stderr, stderr_tail),
+        ("stdout_preview", stdout, stdout_tail),
+    ]
+    present = [(label, text, tail) for label, text, tail in streams if text.strip() or tail.strip()]
+    if present:
+        per_stream_limit = max(220, (limit - max(0, len(present) - 1) * 2) // len(present))
+        rendered = [
+            f"{label}: {_head_tail_preview(text or tail, tail if text else '', limit=per_stream_limit)}"
+            for label, text, tail in present
+        ]
+        return _clip_preview("; ".join(rendered), limit=limit)
+    return ""
+
+
+def _head_tail_preview(text: str, tail: str = "", *, limit: int) -> str:
+    text = " ".join(str(text or "").strip().split())
+    tail = " ".join(str(tail or "").strip().split())
+    if not text and not tail:
+        return ""
+    if not tail:
+        return _clip_preview(text or tail, limit=limit)
+    if len(text) <= limit and tail in text:
+        return text
+    head_limit = max(120, limit // 2)
+    tail_limit = max(120, limit - head_limit - 22)
+    return f"{_clip_preview(text, limit=head_limit)} ... tail: {_clip_preview(tail, limit=tail_limit)}"
+
+
+def _clip_preview(text: str, *, limit: int) -> str:
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _text_payload(value: object) -> str:
+    return value if isinstance(value, str) else ""
 
 
 def _search_text_anchor_preview(payload: dict[str, object], *, limit: int = 850) -> str:

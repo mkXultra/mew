@@ -51,6 +51,83 @@ def test_tool_result_provider_content_includes_natural_text_and_output_refs() ->
     assert "ev:compile-error" in visible["natural_result_text"]
 
 
+def test_run_command_natural_text_includes_bounded_stdout_head_and_tail() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout": "ELF Header: entry 0x400110\n" + ("middle\n" * 80),
+                "stdout_tail": "tail disassembly line\nfinal symbol table line\n",
+                "output_ref": "exec://attempt-1/cmd/output",
+            },
+        ),
+        content_refs=("exec://attempt-1/cmd/output",),
+    )
+
+    text = result.natural_result_text()
+
+    assert "stdout_preview:" in text
+    assert "ELF Header: entry 0x400110" in text
+    assert "tail disassembly line" in text
+    assert "stdout_tail:" not in text
+
+
+def test_run_command_natural_text_preserves_tail_when_tail_is_inside_full_stdout() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout": "first symbol\n" + ("middle\n" * 200) + "important final verifier line\n",
+                "stdout_tail": "important final verifier line\n",
+                "output_ref": "exec://attempt-1/cmd/output",
+            },
+        ),
+        content_refs=("exec://attempt-1/cmd/output",),
+    )
+
+    text = result.natural_result_text()
+
+    assert "stdout_preview:" in text
+    assert "first symbol" in text
+    assert "important final verifier line" in text
+
+
+def test_run_command_natural_text_includes_stderr_and_stdout_previews() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stderr": "warning: fallback path used\n",
+                "stdout": "runtime result marker\n",
+                "output_ref": "exec://attempt-1/cmd/output",
+            },
+        ),
+        content_refs=("exec://attempt-1/cmd/output",),
+    )
+
+    text = result.natural_result_text()
+
+    assert "stderr_preview:" in text
+    assert "warning: fallback path used" in text
+    assert "stdout_preview:" in text
+    assert "runtime result marker" in text
+
+
 def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
     registry = build_tool_registry_artifact(
         provider="model_json",
