@@ -9,6 +9,7 @@ import time
 import mew.implement_lane.read_runtime as read_runtime
 import pytest
 from mew.errors import ModelBackendError
+from mew.implement_lane.exec_runtime import _source_like_mutation_paths
 from mew.implement_lane import (
     DEFAULT_WORKFRAME_VARIANT,
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
@@ -39,6 +40,7 @@ from mew.implement_lane import (
     validate_tool_result_pairing,
     validate_workframe_variant_name,
 )
+from mew.implement_lane.tool_policy import list_v2_tool_specs_for_task
 from mew.implement_lane.provider import FakeProviderAdapter, FakeProviderToolCall
 from mew.implement_lane.v2_runtime import (
     ModelTurnInput,
@@ -1193,7 +1195,7 @@ def test_implement_v2_records_first_write_frontier_stall_after_missing_target_ti
     assert stall["failure_class"] == "first_write_frontier_stall"
     assert stall["target_path"] == "generated.js"
     assert "write_file/edit_file/apply_patch" in stall["required_next_action"]
-    assert "bounded run_command writer for large generated files" in stall["required_next_action"]
+    assert "keep run_command for build, runtime, verifier commands" in stall["required_next_action"]
     manifest = result.updated_lane_state["proof_manifest"]
     synthetic_result = manifest["tool_results"][-1]
     assert synthetic_result["tool_name"] == "model_response_error"
@@ -1309,7 +1311,7 @@ def test_implement_v2_records_active_work_todo_first_write_due_after_probe_thres
     assert readiness["probe_count_before_first_write"] == 3
     assert readiness["target_paths"] == ["sample.py"]
     assert "write_file/edit_file/apply_patch" in readiness["required_next_action"]
-    assert "avoid one huge provider-native write_file payload" in readiness["required_next_action"]
+    assert "rather than shell writers" in readiness["required_next_action"]
     assert result.metrics["first_write_due"] is True
     assert result.metrics["first_write_probe_count"] == 3
 
@@ -2050,14 +2052,13 @@ def test_implement_v2_surfaces_patch_tools_from_hard_runtime_prompt_before_probe
     )
     response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
 
-    assert {"edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
-    assert "write_file" not in {spec.name for spec in specs}
-    assert "write_file" not in prompt
+    assert {"write_file", "edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
+    assert "write_file/edit_file/apply_patch" in prompt
     assert "write tools are temporarily hidden for this turn" not in response_contract
     assert "write tools are available" in response_contract
     assert "first source mutation is execution-gated" in response_contract
     assert "source/output contract" in response_contract
-    assert "write_file" not in response_contract
+    assert "write_file" in response_contract
     assert "edit_file" in response_contract
     assert "apply_patch" in response_contract
     response_shape = json.loads(response_contract)
@@ -2068,7 +2069,7 @@ def test_implement_v2_surfaces_patch_tools_from_hard_runtime_prompt_before_probe
     assert "run_command" in response_contract
 
 
-def test_implement_v2_hard_runtime_tool_filter_is_generic_non_mips_artifact_task(tmp_path) -> None:
+def test_implement_v2_hard_runtime_tool_surface_keeps_write_file_for_generic_artifact_task(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-generic-runtime",
@@ -2090,8 +2091,7 @@ def test_implement_v2_hard_runtime_tool_filter_is_generic_non_mips_artifact_task
         prior_tool_results=(),
     )
 
-    assert "write_file" not in {spec.name for spec in specs}
-    assert {"edit_file", "apply_patch"} <= {spec.name for spec in specs}
+    assert {"write_file", "edit_file", "apply_patch"} <= {spec.name for spec in specs}
 
 
 def test_implement_v2_keeps_patch_tools_visible_after_many_shallow_source_probes(tmp_path) -> None:
@@ -2144,8 +2144,7 @@ def test_implement_v2_keeps_patch_tools_visible_after_many_shallow_source_probes
         requires_deep_runtime_coverage=True,
     )
 
-    assert {"edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
-    assert "write_file" not in {spec.name for spec in specs}
+    assert {"write_file", "edit_file", "apply_patch"}.issubset({spec.name for spec in specs})
     assert readiness["probe_count_before_first_write"] == 8
     assert readiness["first_write_due"] is False
     assert "runtime_binary_layout" in readiness["prewrite_probe_missing_categories"]
@@ -3346,8 +3345,7 @@ def test_implement_v2_reveals_patch_tools_after_hard_runtime_probe_budget(tmp_pa
         prior_tool_results=results,
     )
 
-    assert {"edit_file", "apply_patch"} <= {spec.name for spec in specs}
-    assert "write_file" not in {spec.name for spec in specs}
+    assert {"write_file", "edit_file", "apply_patch"} <= {spec.name for spec in specs}
 
 
 def test_implement_v2_allows_normal_task_write_without_deep_prewrite_probe_budget(tmp_path) -> None:
@@ -5395,7 +5393,7 @@ def test_implement_v2_run_command_source_patch_misuse_detects_reassigned_string_
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "console.log('old')\n"
 
 
-def test_implement_v2_run_command_source_writer_variable_path_does_not_count_as_read(tmp_path) -> None:
+def test_implement_v2_run_command_source_writer_variable_path_rejected_when_write_tools_available(tmp_path) -> None:
     command = (
         f"{shlex.quote(sys.executable)} - <<'PY'\n"
         "p = 'generated.py'\n"
@@ -5448,10 +5446,108 @@ def test_implement_v2_run_command_source_writer_variable_path_does_not_count_as_
     )
     first_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
 
-    assert first_result["status"] == "completed"
-    assert first_result["content"][0]["source_tree_mutations"][0]["changed_count"] == 1
-    assert first_result["content"][0]["source_tree_mutations"][0]["changes"][0]["path"].endswith("/generated.py")
-    assert (tmp_path / "generated.py").read_text(encoding="utf-8") == "print(1)\n"
+    assert first_result["status"] == "failed"
+    assert first_result["content"][0]["failure_subclass"] == "run_command_source_creation_shell_surface"
+    assert first_result["content"][0]["suggested_tool"] == "write_file/edit_file/apply_patch"
+    assert "generated.py" in first_result["content"][0]["mutation_paths"]
+    assert not (tmp_path / "generated.py").exists()
+
+
+def test_implement_v2_run_command_source_mutation_classifier_uses_copy_destinations() -> None:
+    assert _source_like_mutation_paths("cp vm.js /tmp/vm.js") == ()
+    assert _source_like_mutation_paths("install -m 0644 vm.js /tmp/vm.js") == ()
+    assert _source_like_mutation_paths("cp vm.js generated.js") == ("generated.js",)
+    assert _source_like_mutation_paths("install -m 0644 vm.js generated.js") == ("generated.js",)
+    assert _source_like_mutation_paths("mv vm.js /tmp/vm.js") == ("vm.js",)
+    assert _source_like_mutation_paths("cp /tmp/generated.js .") == ("generated.js",)
+    assert _source_like_mutation_paths("cp /tmp/generated.js src/") == ("src/generated.js",)
+    assert _source_like_mutation_paths("cp -t src /tmp/generated.js") == ("src/generated.js",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_uses_existing_directory_targets(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+
+    assert _source_like_mutation_paths("cp /tmp/generated.py src", cwd=tmp_path) == ("src/generated.py",)
+    assert _source_like_mutation_paths("install -m 0644 /tmp/generated.py src", cwd=tmp_path) == (
+        "src/generated.py",
+    )
+
+
+def test_implement_v2_run_command_source_mutation_classifier_ignores_heredoc_assignment_body() -> None:
+    command = "python3 - <<'PY'\ncp = 'generated.py'\nPY"
+
+    assert _source_like_mutation_paths(command) == ()
+
+
+def test_implement_v2_run_command_source_mutation_classifier_unwraps_explicit_shell_interpreter() -> None:
+    command = shlex.join(["bash", "-lc", "printf 'ok\\n' > generated.py"])
+
+    assert _source_like_mutation_paths(command) == ("generated.py",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_unwraps_shell_options_before_c() -> None:
+    command = shlex.join(["bash", "-e", "-c", "printf 'ok\\n' > generated.py"])
+
+    assert _source_like_mutation_paths(command) == ("generated.py",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_unwraps_shell_o_option_before_c() -> None:
+    command = shlex.join(["bash", "-euo", "pipefail", "-c", "printf 'ok\\n' > generated.py"])
+
+    assert _source_like_mutation_paths(command) == ("generated.py",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_unwraps_long_shell_options_before_c() -> None:
+    command = shlex.join(["bash", "--noprofile", "--posix", "-c", "printf 'ok\\n' > generated.py"])
+
+    assert _source_like_mutation_paths(command) == ("generated.py",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_unwraps_shell_long_options_with_args() -> None:
+    command = shlex.join(["bash", "--rcfile", "rc", "-c", "printf 'ok\\n' > generated.py"])
+
+    assert _source_like_mutation_paths(command) == ("generated.py",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_unwraps_multiple_shell_scripts() -> None:
+    command = "bash -c 'echo ok' && bash -c 'printf ok > generated.py'"
+
+    assert _source_like_mutation_paths(command) == ("generated.py",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_handles_background_and_grouped_file_commands() -> None:
+    assert _source_like_mutation_paths("sleep 0 & cp source.tmp generated.py") == ("generated.py",)
+    assert _source_like_mutation_paths("bash -c '( cp source.tmp generated.py )'") == ("generated.py",)
+    assert _source_like_mutation_paths("sleep 0&cp source.tmp generated.py") == ("generated.py",)
+    assert _source_like_mutation_paths("(cp source.tmp generated.py)") == ("generated.py",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_unwraps_env_options() -> None:
+    assert _source_like_mutation_paths("env -i cp /tmp/generated.py generated.py") == ("generated.py",)
+    assert _source_like_mutation_paths("/usr/bin/env -i cp /tmp/generated.py generated.py") == ("generated.py",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_unwraps_env_tee() -> None:
+    assert _source_like_mutation_paths("env -i tee generated.py < source.tmp") == ("generated.py",)
+    assert _source_like_mutation_paths("/usr/bin/env -i tee generated.py < source.tmp") == ("generated.py",)
+    assert _source_like_mutation_paths("tee /tmp/out.log < vm.py") == ()
+    assert _source_like_mutation_paths("tee < source.tmp generated.py") == ("generated.py",)
+    assert _source_like_mutation_paths("sleep 0 & tee generated.py < source.tmp") == ("generated.py",)
+    assert _source_like_mutation_paths("(tee generated.py < source.tmp)") == ("generated.py",)
+    assert _source_like_mutation_paths("tee generated.py<source.tmp") == ("generated.py",)
+
+
+def test_implement_v2_run_command_source_mutation_classifier_ignores_redirection_operands_for_file_commands() -> None:
+    assert _source_like_mutation_paths("cp source.tmp generated.py<input.txt") == ("generated.py",)
+    assert _source_like_mutation_paths("< input.txt cp source.tmp generated.py") == ("generated.py",)
+    assert _source_like_mutation_paths("touch generated.py<input.txt") == ("generated.py",)
+    assert _source_like_mutation_paths("< input.txt touch generated.py") == ("generated.py",)
+    assert _source_like_mutation_paths("cp source.tmp generated.py >> /tmp/out.log") == ("generated.py",)
+    assert _source_like_mutation_paths("2>/tmp/err.log cp source.tmp generated.py") == ("generated.py",)
+    assert _source_like_mutation_paths("2>&1 cp source.tmp generated.py") == ("generated.py",)
+    assert _source_like_mutation_paths("1>/tmp/out 2>&1 cp source.tmp generated.py") == ("generated.py",)
+    assert _source_like_mutation_paths("bash -lc 'printf ok >& generated.py'") == ("generated.py",)
+    assert _source_like_mutation_paths("bash -lc 'printf ok >&1'") == ()
 
 
 def test_implement_v2_run_command_source_patch_misuse_detects_open_default_read_with_keywords(
@@ -5893,11 +5989,10 @@ def test_implement_v2_prompt_sections_include_active_coding_rhythm() -> None:
     assert "cheap probe -> coherent patch/edit -> verifier -> latest-failure repair" in section.content
     assert "at most one focused diagnostic/read turn" in section.content
     assert "write_file/edit_file/apply_patch paths by default for scoped edits" in section.content
-    assert "avoid one huge provider-native write_file/content_lines JSON payload" in section.content
+    assert "keep source-like file creation and patches in write_file/edit_file/apply_patch" in section.content
     assert "custom apply_patch/freeform patch" in section.content
     assert "Never minify generated source into one long line" in section.content
-    assert "bounded run_command writer when the content can be generated compactly" in section.content
-    assert "run_command otherwise for probes, builds, runtime execution, and verification" in section.content
+    assert "Keep run_command for probes, builds, runtime execution, and verification" in section.content
 
 
 def test_implement_v2_prompt_sections_include_single_dynamic_workframe_state() -> None:
@@ -6014,7 +6109,7 @@ def test_implement_v2_live_json_prompt_surfaces_prewrite_required_next_probe(tmp
     assert "read_file doomgeneric/doomgeneric/doomgeneric_img.c" in prompt
 
 
-def test_implement_v2_hard_runtime_live_json_prompt_excludes_hidden_write_file_guidance(tmp_path) -> None:
+def test_implement_v2_hard_runtime_live_json_prompt_keeps_write_file_guidance(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-hard-runtime",
@@ -6025,7 +6120,7 @@ def test_implement_v2_hard_runtime_live_json_prompt_excludes_hidden_write_file_g
         },
         lane_config={"mode": "full"},
     )
-    tool_specs = tuple(spec for spec in list_v2_tool_specs_for_mode("full") if spec.name != "write_file")
+    tool_specs = list_v2_tool_specs_for_task("full", task_contract=lane_input.task_contract)
 
     prompt = _live_json_prompt(
         lane_input,
@@ -6048,8 +6143,7 @@ def test_implement_v2_hard_runtime_live_json_prompt_excludes_hidden_write_file_g
         history=(),
     )
 
-    assert "edit_file/apply_patch" in prompt
-    assert "write_file" not in prompt
+    assert "write_file/edit_file/apply_patch" in prompt
 
 
 def test_implement_v2_finish_gate_history_projects_compact_recovery_card() -> None:
@@ -21209,7 +21303,7 @@ def test_implement_v2_write_file_approved_apply_records_mutation_evidence(tmp_pa
     assert tool_result["side_effects"][0]["approval_id"] == "approval-1"
 
 
-def test_implement_v2_hard_runtime_write_file_is_unavailable_and_does_not_mutate(tmp_path) -> None:
+def test_implement_v2_hard_runtime_write_file_is_available_and_records_mutation(tmp_path) -> None:
     target = tmp_path / "vm.js"
 
     result = run_fake_write_implement_v2(
@@ -21237,14 +21331,14 @@ def test_implement_v2_hard_runtime_write_file_is_unavailable_and_does_not_mutate
                 },
             },
         ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "write should be unavailable"},
+        finish_arguments={"outcome": "analysis_ready", "summary": "hard runtime write applied"},
     )
     tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
 
-    assert result.status in {"blocked", "failed"}
-    assert tool_result["status"] == "invalid"
-    assert "write_file is not available" in tool_result["content"][0]["reason"]
-    assert not target.exists()
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert target.read_text(encoding="utf-8") == "console.log('bad');\n"
+    assert result.metrics["write_evidence_count"] == 1
 
 
 def test_implement_v2_write_file_rejects_large_single_line_source(tmp_path) -> None:

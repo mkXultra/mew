@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-12
+Last updated: 2026-05-13
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is native responsibility-boundary Phase 5. Phase 4 verifier closeout boundary is reviewed; replay/fastcheck must prove resolver/closeout artifacts before live proof resumes. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active controller is command/edit boundary redesign from `docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md`; stop regex/shlex classifier polish and implement Phase 0-1 first. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -69,22 +69,37 @@ not mean every idea in every design note has shipped.
 
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
-Current controller mode: `m6_24_native_responsibility_boundary_phase_5`.
+Current controller mode:
+`m6_24_command_edit_boundary_redesign_phase_0_1`.
 
-Current diagnostic mode: `phase_implementation_before_more_live_proof`.
+Current diagnostic mode:
+`interface_freeze_before_parallel_phase_work`.
 
-Latest phase status: Phase 4 of
-`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is
-implemented and reviewed. Verifier closeout now runs only on the valid
-`finish_call` path before `CompletionResolver`; closeout evidence and no-run
-blockers feed `CompletionResolverInput`; missing verifier command, permission,
-and closeout-budget cases block without tool dispatch; fresh verifier evidence
-suppresses deterministic closeout; and no valid finish can complete via
-non-finish/max-turn closeout. codex-ultra review session
-`019e1c1d-5ab2-7ca0-8f8f-3c24a41e7906` returned `STATUS: APPROVE`.
-Next action: implement Phase 5 replay / fastcheck. Do not spend another
-10min step-shape diagnostic, `speed_1`, `proof_5`, or broad measurement before
-Phase 5 is implemented/reviewed/committed.
+Latest phase status: `docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md`
+was created through `orchestrate-build-review` and reached round 3 with
+codex-ultra, glm5.1, and claude-ultra reporting no remaining `needs_fix`
+findings. This design supersedes the previous immediate Phase 5
+replay/fastcheck action until the command/edit boundary phases close.
+
+Current implementation rule:
+
+- Phase 0-1: main Codex session implements serially and freezes the interface:
+  old classifier deletion map, canonical `tool_route`, `process_lifecycle`,
+  route decision artifact, and narrow `invalid_tool_contract`.
+- Phase 2-4: may be parallelized through separate `orchestrate-build-review`
+  workflows only after Phase 1 closes and only with disjoint write scopes.
+- Phase 5: serial or high-review only because the legacy shell-edit bridge is
+  the highest-risk classifier regrowth point.
+- Phase 6-7: serial integration and validation: delete/quarantine old
+  classifiers, then run UT, replay, dogfood/emulator, fastcheck, 10 minute
+  step-shape, and speed proof in that order.
+
+Next action: implement Phase 0-1 from
+`docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md`. If the main
+Codex session implements it directly, run codex-ultra review before commit. Do
+not resume regex/shlex command-classifier polish, 10 minute step-shape,
+`speed_1`, `proof_5`, or broad measurement before Phase 0-1 is reviewed and
+committed.
 
 Phase 1 of
 `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is

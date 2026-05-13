@@ -9,6 +9,7 @@ from typing import Any, Iterable
 
 from .execution_evidence import build_oracle_bundle, evidence_events_from_tool_payload
 from .tool_policy import ImplementLaneToolSpec, list_v2_base_tool_specs
+from .tool_routes import tool_route_artifact_from_results
 from .types import ImplementLaneTranscriptEvent, ToolResultEnvelope
 
 TOOL_HARNESS_CONTRACT_SCHEMA_VERSION = 1
@@ -160,6 +161,12 @@ def build_tool_result_index_artifact(
         "by_provider_call_id": by_provider_call_id,
         "index_hash": stable_json_hash(by_provider_call_id),
     }
+
+
+def build_tool_route_artifact(tool_results: Iterable[ToolResultEnvelope]) -> dict[str, object]:
+    """Build the Phase 1 route-decision sidecar for tool results."""
+
+    return tool_route_artifact_from_results(tuple(tool_results))
 
 
 def build_evidence_sidecar_artifact(
@@ -684,6 +691,7 @@ __all__ = [
     "build_model_turn_index_artifact",
     "build_tool_registry_artifact",
     "build_tool_result_index_artifact",
+    "build_tool_route_artifact",
     "EVIDENCE_REF_INDEX_SCHEMA_VERSION",
     "EVIDENCE_SIDECAR_SCHEMA_VERSION",
     "MODEL_TURN_INDEX_SCHEMA_VERSION",

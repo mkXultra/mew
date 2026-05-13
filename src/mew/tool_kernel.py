@@ -31,6 +31,7 @@ class ToolKernelConfig:
     allow_governance_writes: bool = False
     run_command_available: bool = True
     route_run_tests_shell_surface: bool = True
+    source_write_tools_available: bool | None = None
     task_contract: dict[str, object] = field(default_factory=dict)
     frontier_state: dict[str, object] = field(default_factory=dict)
     source_mutation_roots: tuple[str, ...] = ()
@@ -76,6 +77,7 @@ class ToolKernel:
             allow_shell=config.allow_shell,
             run_command_available=config.run_command_available,
             route_run_tests_shell_surface=config.route_run_tests_shell_surface,
+            source_write_tools_available=self._source_write_tools_available(),
             task_contract=config.task_contract,
             frontier_state=config.frontier_state,
             source_mutation_roots=self.source_mutation_roots,
@@ -90,30 +92,47 @@ class ToolKernel:
     def execute(self, call: ToolCallEnvelope) -> ToolResultEnvelope:
         """Execute one tool call under the configured policy."""
 
+        from .implement_lane.tool_routes import with_tool_route_decision
+
         if not self._available(call.tool_name):
-            return _build_invalid_tool_result(
+            return with_tool_route_decision(
                 call,
-                reason=f"{call.tool_name} is not available in {self.config.surface_label} {self.config.mode} mode",
+                _build_invalid_tool_result(
+                    call,
+                    reason=f"{call.tool_name} is not available in {self.config.surface_label} {self.config.mode} mode",
+                ),
             )
         if call.tool_name in _write_tool_names():
             if not self.allowed_write_roots:
-                return _build_invalid_tool_result(call, reason="write tools are disabled; pass --allow-write PATH")
-            return self.write_runtime.execute(call)
+                return with_tool_route_decision(
+                    call,
+                    _build_invalid_tool_result(call, reason="write tools are disabled; pass --allow-write PATH"),
+                )
+            return with_tool_route_decision(call, self.write_runtime.execute(call))
         if call.tool_name in _exec_tool_names():
             if call.tool_name == "run_tests" and not self.config.allow_verify:
-                return _build_invalid_tool_result(call, reason="run_tests is disabled; pass --allow-verify")
+                return with_tool_route_decision(
+                    call,
+                    _build_invalid_tool_result(call, reason="run_tests is disabled; pass --allow-verify"),
+                )
             if call.tool_name == "run_command" and not self.config.allow_shell:
-                return _build_invalid_tool_result(call, reason="run_command is disabled; pass --allow-shell")
-            return self.exec_runtime.execute(call)
+                return with_tool_route_decision(
+                    call,
+                    _build_invalid_tool_result(call, reason="run_command is disabled; pass --allow-shell"),
+                )
+            return with_tool_route_decision(call, self.exec_runtime.execute(call))
         from .implement_lane.read_runtime import execute_read_only_tool_call
 
-        return execute_read_only_tool_call(
+        return with_tool_route_decision(
             call,
-            workspace=self.config.workspace,
-            allowed_roots=self.allowed_read_roots,
-            result_max_chars=self.config.read_result_max_chars
-            if self.config.read_result_max_chars is not None
-            else 12_000,
+            execute_read_only_tool_call(
+                call,
+                workspace=self.config.workspace,
+                allowed_roots=self.allowed_read_roots,
+                result_max_chars=self.config.read_result_max_chars
+                if self.config.read_result_max_chars is not None
+                else 12_000,
+            ),
         )
 
     def cancel_active_commands(self, *, reason: str) -> tuple[dict[str, object], ...]:
@@ -135,6 +154,13 @@ class ToolKernel:
                 task_contract=self.config.task_contract,
             )
         }
+
+    def _source_write_tools_available(self) -> bool:
+        if self.config.source_write_tools_available is not None:
+            return bool(self.config.source_write_tools_available)
+        return bool(self.allowed_write_roots) and any(
+            self._available(tool_name) for tool_name in ("write_file", "edit_file", "apply_patch")
+        )
 
 
 def make_tool_call_envelope(

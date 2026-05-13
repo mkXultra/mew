@@ -82,14 +82,14 @@ def build_implement_v2_prompt_sections(
         large_source_guidance = (
             "For large generated or replacement source, avoid one huge provider-native "
             "write_file/content_lines JSON payload: prefer a custom apply_patch/freeform patch "
-            "for concrete edits, or a bounded run_command writer when the content can be generated compactly. "
+            "for concrete edits; keep source-like file creation and patches in write_file/edit_file/apply_patch. "
         )
     else:
         mutation_tools_phrase = "edit_file or apply_patch"
         mutation_paths_phrase = "edit_file/apply_patch"
         large_source_guidance = (
             "For large generated or replacement source, prefer a custom apply_patch/freeform patch "
-            "for concrete edits, or a bounded run_command writer when the content can be generated compactly. "
+            "for concrete edits; keep source-like file creation and patches in edit_file/apply_patch. "
         )
     sections = [
         PromptSection(
@@ -137,8 +137,7 @@ def build_implement_v2_prompt_sections(
                 f"paths by default for scoped edits. {large_source_guidance}"
                 "Split very large mutations into smaller source-producing "
                 "steps rather than spending a model turn on one huge tool call. Never minify generated source "
-                "into one long line just to fit JSON. If you use a bounded writer, immediately run a syntax "
-                "check or verifier. Use run_command otherwise for probes, builds, runtime execution, and "
+                "into one long line just to fit JSON. Keep run_command for probes, builds, runtime execution, and "
                 "verification. "
                 "When a cheap probe depends on an optional CLI such as rg, fd, ag, readelf, objdump, "
                 "file, or nm, either preflight it with command -v or include an available fallback in "

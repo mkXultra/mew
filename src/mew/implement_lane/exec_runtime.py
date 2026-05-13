@@ -158,6 +158,7 @@ SOURCE_MUTATION_IGNORED_DIRS = frozenset(
 SOURCE_MUTATION_SNAPSHOT_MAX_FILES = 500
 SOURCE_MUTATION_HASH_MAX_BYTES = 1024 * 1024
 SOURCE_MUTATION_CHANGED_PATH_LIMIT = 40
+SHELL_REDIRECTION_TOKENS = frozenset({"<", "<<", "<<<", ">", ">>", ">|"})
 
 
 class ExecToolContractMisuse(ValueError):
@@ -190,6 +191,7 @@ class ImplementV2ManagedExecRuntime:
         allow_shell: bool = False,
         run_command_available: bool = False,
         route_run_tests_shell_surface: bool = True,
+        source_write_tools_available: bool = False,
         task_contract: dict[str, object] | None = None,
         frontier_state: dict[str, object] | None = None,
         source_mutation_roots: tuple[str, ...] | list[str] | None = None,
@@ -201,6 +203,7 @@ class ImplementV2ManagedExecRuntime:
         self.allow_shell = bool(allow_shell)
         self.run_command_available = bool(run_command_available)
         self.route_run_tests_shell_surface = bool(route_run_tests_shell_surface)
+        self.source_write_tools_available = bool(source_write_tools_available)
         self.task_contract = dict(task_contract or {})
         self.frontier_state = dict(frontier_state or {})
         self.runner = ManagedCommandRunner(max_active=max_active)
@@ -292,10 +295,14 @@ class ImplementV2ManagedExecRuntime:
             raise ValueError(f"{call.tool_name} command is empty")
         _reject_resident_mew_loop_command(command, tool_name=call.tool_name)
         use_shell = _use_shell_for_call(call.tool_name, command, args=args, command_source=command_source)
+        cwd = _workspace_path(args.get("cwd") or ".", self.workspace)
+        cwd = resolve_allowed_path(cwd, self.allowed_roots)
+        if not cwd.is_dir():
+            raise ValueError(f"{call.tool_name} cwd is not a directory: {cwd}")
         effective_tool_name = call.tool_name
         tool_contract_recovery: dict[str, object] | None = None
         if call.tool_name == "run_tests":
-            mutation_misuse = _run_tests_source_mutation_misuse(command, use_shell=use_shell)
+            mutation_misuse = _run_tests_source_mutation_misuse(command, use_shell=use_shell, cwd=cwd)
             if mutation_misuse is not None:
                 raise RunTestsShellSurfaceMisuse(mutation_misuse)
             misuse = _run_tests_shell_surface_misuse(command, use_shell=use_shell)
@@ -326,15 +333,25 @@ class ImplementV2ManagedExecRuntime:
             command,
             raw_contract=raw_contract,
             tool_name=call.tool_name,
+            cwd=cwd,
         )
         if compound_misuse is not None:
             raise ExecToolContractMisuse(compound_misuse)
         patch_misuse = _run_command_source_patch_misuse(
             command,
             tool_name=call.tool_name,
+            cwd=cwd,
         )
         if patch_misuse is not None:
             raise ExecToolContractMisuse(patch_misuse)
+        creation_misuse = _run_command_source_creation_shell_surface_misuse(
+            command,
+            tool_name=call.tool_name,
+            source_write_tools_available=self.source_write_tools_available,
+            cwd=cwd,
+        )
+        if creation_misuse is not None:
+            raise ExecToolContractMisuse(creation_misuse)
         exploration_misuse = _run_command_source_exploration_shell_surface_misuse(
             command,
             tool_name=call.tool_name,
@@ -342,10 +359,6 @@ class ImplementV2ManagedExecRuntime:
         if exploration_misuse is not None:
             exploration_misuse["cwd"] = str(args.get("cwd") or ".")
             raise ExecToolContractMisuse(exploration_misuse)
-        cwd = _workspace_path(args.get("cwd") or ".", self.workspace)
-        cwd = resolve_allowed_path(cwd, self.allowed_roots)
-        if not cwd.is_dir():
-            raise ValueError(f"{call.tool_name} cwd is not a directory: {cwd}")
         command_run_id = _command_run_id(call)
         output_ref = f"{call.lane_attempt_id}/{command_run_id}/output.log"
         output_path = _output_path(self.workspace, output_ref)
@@ -1492,8 +1505,10 @@ def _run_tests_shell_surface_misuse(command: object, *, use_shell: bool) -> dict
     }
 
 
-def _run_tests_source_mutation_misuse(command: object, *, use_shell: bool) -> dict[str, object] | None:
-    paths = _source_like_mutation_paths(command)
+def _run_tests_source_mutation_misuse(
+    command: object, *, use_shell: bool, cwd: Path | None = None
+) -> dict[str, object] | None:
+    paths = _source_like_mutation_paths(command, cwd=cwd)
     if not paths:
         return None
     features: list[str] = ["source_tree_mutation"]
@@ -1504,8 +1519,7 @@ def _run_tests_source_mutation_misuse(command: object, *, use_shell: bool) -> di
     return {
         "reason": (
             "run_tests must not mutate source-like files; apply the source change with "
-            "write_file/edit_file/apply_patch, or use an explicit bounded run_command writer for "
-            "large generated files, then run a separate verifier"
+            "write_file/edit_file/apply_patch, then run a separate verifier"
         ),
         "kind": "run_tests_source_mutation",
         "failure_class": "tool_contract_misuse",
@@ -1527,17 +1541,18 @@ def _run_command_source_mutation_verifier_compound_misuse(
     *,
     raw_contract: dict[str, object],
     tool_name: str,
+    cwd: Path | None = None,
 ) -> dict[str, object] | None:
     if tool_name != "run_command" or not _raw_execution_contract_is_verifier_like(raw_contract):
         return None
-    paths = _source_like_mutation_paths(command)
+    paths = _source_like_mutation_paths(command, cwd=cwd)
     if not paths:
         return None
     return {
         "reason": (
             "run_command verifier commands must not also mutate source-like files; split this into "
-            "a source mutation step with write_file/edit_file/apply_patch or an explicit bounded "
-            "run_command writer, then run a separate verifier command"
+            "a source mutation step with write_file/edit_file/apply_patch, then run a separate "
+            "verifier command"
         ),
         "kind": "run_command_source_mutation_verifier_compound",
         "failure_class": "tool_contract_misuse",
@@ -1558,10 +1573,11 @@ def _run_command_source_patch_misuse(
     command: object,
     *,
     tool_name: str,
+    cwd: Path | None = None,
 ) -> dict[str, object] | None:
     if tool_name != "run_command":
         return None
-    mutation_paths = _source_like_mutation_paths(command)
+    mutation_paths = _source_like_mutation_paths(command, cwd=cwd)
     if not mutation_paths:
         return None
     read_paths = _source_like_read_paths(command)
@@ -1575,8 +1591,7 @@ def _run_command_source_patch_misuse(
         "reason": (
             "run_command must not patch an existing source-like file by reading and writing the "
             "same path; use write_file/edit_file/apply_patch for source patches, then run a "
-            "separate verifier. Reserve bounded run_command writers for large generated files "
-            "that are not patching an existing source path."
+            "separate verifier."
         ),
         "kind": "run_command_source_patch_shell_surface",
         "failure_class": "tool_contract_misuse",
@@ -1592,6 +1607,40 @@ def _run_command_source_patch_misuse(
         "mutation_paths": list(mutation_paths[:8]),
         "read_paths": list(read_paths[:8]),
         "common_paths": list(common_paths[:8]),
+    }
+
+
+def _run_command_source_creation_shell_surface_misuse(
+    command: object,
+    *,
+    tool_name: str,
+    source_write_tools_available: bool,
+    cwd: Path | None = None,
+) -> dict[str, object] | None:
+    if tool_name != "run_command" or not source_write_tools_available:
+        return None
+    mutation_paths = _source_like_mutation_paths(command, cwd=cwd)
+    if not mutation_paths:
+        return None
+    return {
+        "reason": (
+            "run_command must not create or rewrite source-like files when write_file/edit_file/apply_patch "
+            "are available; use the source mutation tools for source/config changes, then run a separate "
+            "build/runtime/verifier command. Reserve run_command for execution, probes, dependency/build "
+            "steps, and non-source runtime artifacts."
+        ),
+        "kind": "run_command_source_creation_shell_surface",
+        "failure_class": "tool_contract_misuse",
+        "failure_subclass": "run_command_source_creation_shell_surface",
+        "recoverable": True,
+        "recoverable_tool_contract_misuse": True,
+        "tool_contract_recovery_eligible": False,
+        "terminal_failure_reaction_eligible": False,
+        "features": ["source_tree_mutation", "write_tools_available"],
+        "preserved_command": str(command or ""),
+        "suggested_tool": "write_file/edit_file/apply_patch",
+        "suggested_use_shell": False,
+        "mutation_paths": list(mutation_paths[:8]),
     }
 
 
@@ -1799,23 +1848,25 @@ def _unquoted_run_tests_shell_surface_features(command: object) -> list[str]:
     return features
 
 
-def _source_like_mutation_paths(command: object) -> tuple[str, ...]:
+def _source_like_mutation_paths(command: object, *, cwd: Path | None = None) -> tuple[str, ...]:
     text = str(command or "")
     if not text.strip():
         return ()
     paths: list[str] = []
-    paths.extend(_shell_redirection_write_paths(text))
-    if _text_matches_any(
-        text,
-        (
-            r"\b(?:writefilesync|writeFileSync|write_text|write_bytes)\b",
-            r"\bopen\s*\([^)]*,\s*['\"][^'\"]*[wax+]",
-            r"\bopen\s*\([^)]*,[^)]*\bmode\s*=\s*['\"][^'\"]*[wax+]",
-        ),
-    ):
-        paths.extend(_shell_write_api_paths(text))
-    if _text_matches_any(text, (r"(?:^|[;&|()]\s*)(?:sed\s+-i|perl\s+-pi|cp|mv|install|touch)\b",)):
-        paths.extend(_shell_token_paths(text))
+    for candidate in _shell_semantic_texts(text):
+        paths.extend(_shell_redirection_write_paths(candidate))
+        if _text_matches_any(
+            candidate,
+            (
+                r"\b(?:writefilesync|writeFileSync|write_text|write_bytes)\b",
+                r"\bopen\s*\([^)]*,\s*['\"][^'\"]*[wax+]",
+                r"\bopen\s*\([^)]*,[^)]*\bmode\s*=\s*['\"][^'\"]*[wax+]",
+            ),
+        ):
+            paths.extend(_shell_write_api_paths(candidate))
+        if _text_matches_any(candidate, (r"(?:^|[;&|()]\s*)(?:sed\s+-i|perl\s+-pi)\b",)):
+            paths.extend(_shell_token_paths(candidate))
+        paths.extend(_shell_file_command_mutation_paths(candidate, cwd=cwd))
     seen: set[str] = set()
     source_like: list[str] = []
     for path in paths:
@@ -1832,9 +1883,11 @@ def _source_like_read_paths(command: object) -> tuple[str, ...]:
     text = str(command or "")
     if not text.strip():
         return ()
-    paths = list(_shell_read_api_paths(text))
-    if _text_matches_any(text, (r"(?:^|[;&|()]\s*)(?:sed\s+-i|perl\s+-pi)\b",)):
-        paths.extend(_shell_token_paths(text))
+    paths: list[str] = []
+    for candidate in _shell_semantic_texts(text):
+        paths.extend(_shell_read_api_paths(candidate))
+        if _text_matches_any(candidate, (r"(?:^|[;&|()]\s*)(?:sed\s+-i|perl\s+-pi)\b",)):
+            paths.extend(_shell_token_paths(candidate))
     seen: set[str] = set()
     source_like: list[str] = []
     for path in paths:
@@ -1855,41 +1908,45 @@ def _shell_redirection_write_paths(command: str) -> tuple[str, ...]:
         if operator_index < 0:
             break
         next_index = operator_index + 1
+        ampersand_redirect = False
+        if next_index < len(command) and command[next_index] == "&":
+            ampersand_redirect = True
+            next_index += 1
         if next_index < len(command) and command[next_index] in {">", "|"}:
             next_index += 1
         while next_index < len(command) and command[next_index].isspace():
             next_index += 1
         word, end_index = _read_shell_word(command, next_index)
-        if word:
+        if word and not (ampersand_redirect and (word.isdigit() or word == "-")):
             paths.append(word)
         index = max(end_index, operator_index + 1)
     for segment in split_unquoted_shell_command_segments(command):
+        segment = _space_unquoted_shell_control_tokens(segment)
         try:
             tee_tokens = shlex.split(segment)
         except ValueError:
             tee_tokens = re.split(r"\s+", segment)
-        tee_index = _tee_command_index(tee_tokens)
-        if tee_index < 0:
-            continue
-        paths.extend(token for token in tee_tokens[tee_index + 1 :] if token and not token.startswith("-"))
+        for tee_chunk in _shell_command_token_chunks(tee_tokens):
+            paths.extend(_tee_command_write_paths(tee_chunk))
     return tuple(paths)
 
 
-def _tee_command_index(tokens: list[str]) -> int:
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if "=" in token and not token.startswith("-") and token.split("=", 1)[0].replace("_", "A").isalnum():
-            index += 1
+def _tee_command_write_paths(tokens: list[str]) -> tuple[str, ...]:
+    command_tokens = _shell_command_tokens(_space_joined_shell_tokens(tokens))
+    if not command_tokens or Path(str(command_tokens[0] or "")).name != "tee":
+        return ()
+    paths: list[str] = []
+    index = 1
+    while index < len(command_tokens):
+        token = str(command_tokens[index] or "")
+        redirection_end = _shell_redirection_span_end(command_tokens, index)
+        if redirection_end is not None:
+            index = redirection_end
             continue
-        if token == "env":
-            index += 1
-            continue
-        if token == "command":
-            index += 1
-            continue
-        return index if token == "tee" else -1
-    return -1
+        if token and not token.startswith("-"):
+            paths.append(token)
+        index += 1
+    return tuple(paths)
 
 
 def _next_unquoted_redirection_index(text: str, *, start: int = 0) -> int:
@@ -2123,6 +2180,285 @@ def _shell_token_paths(command: str) -> tuple[str, ...]:
     return tuple(token for token in tokens if token and not token.startswith("-"))
 
 
+def _shell_semantic_texts(command: str) -> tuple[str, ...]:
+    text = str(command or "").strip()
+    if not text:
+        return ()
+    scripts = _explicit_shell_interpreter_scripts(text)
+    return (text, *scripts)
+
+
+def _explicit_shell_interpreter_scripts(command: str) -> tuple[str, ...]:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return ()
+    tokens = _unwrap_env_split_string(tokens)
+    scripts: list[str] = []
+    for index, token in enumerate(tokens[:-2]):
+        executable = Path(str(token or "")).name
+        if executable not in {"bash", "sh", "zsh"}:
+            continue
+        script_index = _explicit_shell_script_argument_index(tokens, shell_index=index)
+        if script_index is not None:
+            scripts.append(str(tokens[script_index]))
+    return tuple(scripts)
+
+
+def _explicit_shell_script_argument_index(tokens: list[str], *, shell_index: int) -> int | None:
+    index = shell_index + 1
+    while index < len(tokens) - 1:
+        token = str(tokens[index] or "")
+        if token in {"-c", "-lc", "-cl"}:
+            return index + 1
+        if token.startswith("-") and "c" in token[1:] and not token.startswith("--"):
+            return index + 1
+        if token in {"--rcfile", "--init-file"} and index + 1 < len(tokens):
+            index += 2
+            continue
+        if (
+            (
+                token in {"-o", "-O"}
+                or (token.startswith("-") and not token.startswith("--") and "o" in token[1:] and "c" not in token[1:])
+            )
+            and index + 1 < len(tokens)
+        ):
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return None
+    return None
+
+
+def _shell_file_command_mutation_paths(command: str, *, cwd: Path | None = None) -> tuple[str, ...]:
+    paths: list[str] = []
+    for segment in split_unquoted_shell_command_segments(command):
+        segment = _space_unquoted_shell_control_tokens(segment)
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            tokens = re.split(r"\s+", segment)
+        for command_tokens in _shell_command_token_chunks(tokens):
+            command_tokens = _shell_command_tokens(command_tokens)
+            if not command_tokens:
+                continue
+            command_name = Path(str(command_tokens[0] or "")).name
+            args = _strip_shell_redirection_tokens(command_tokens[1:])
+            if command_name in {"cp", "install"}:
+                paths.extend(_destination_paths_for_copy_like_command(args, cwd=cwd))
+            elif command_name == "mv":
+                sources, destinations = _copy_like_command_source_and_destination_paths(args, cwd=cwd)
+                paths.extend(sources)
+                paths.extend(destinations)
+            elif command_name == "touch":
+                paths.extend(_touch_mutation_paths(args))
+    return tuple(paths)
+
+
+def _space_unquoted_shell_control_tokens(text: str) -> str:
+    chars: list[str] = []
+    in_single = False
+    in_double = False
+    escaped = False
+    control_chars = {"&", "(", ")", "{", "}", ";", "|", "<", ">"}
+    for char in str(text or ""):
+        if escaped:
+            chars.append(char)
+            escaped = False
+            continue
+        if char == "\\" and not in_single:
+            chars.append(char)
+            escaped = True
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            chars.append(char)
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            chars.append(char)
+            continue
+        if not in_single and not in_double and char in control_chars:
+            chars.extend((" ", char, " "))
+            continue
+        chars.append(char)
+    return "".join(chars)
+
+
+def _shell_command_token_chunks(tokens: list[str]) -> tuple[list[str], ...]:
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    separators = {"&&", "||", ";", "|", "&", "(", ")", "{", "}"}
+    for token in tokens:
+        value = str(token or "")
+        if value == "&" and current and str(current[-1] or "") in SHELL_REDIRECTION_TOKENS:
+            current.append(value)
+            continue
+        if value in separators:
+            if current:
+                chunks.append(current)
+                current = []
+            continue
+        current.append(value)
+    if current:
+        chunks.append(current)
+    return tuple(chunks)
+
+
+def _shell_command_tokens(tokens: list[str]) -> list[str]:
+    tokens = list(tokens or [])
+    index = 0
+    while index < len(tokens):
+        token = str(tokens[index] or "")
+        redirection_end = _shell_redirection_span_end(tokens, index)
+        if redirection_end is not None:
+            index = redirection_end
+            continue
+        if "=" in token and not token.startswith("-") and token.split("=", 1)[0].replace("_", "A").isalnum():
+            index += 1
+            continue
+        if Path(token).name == "env":
+            tokens = _unwrap_env_split_string(tokens[index:])
+            index = 0
+            continue
+        if token == "command":
+            index += 1
+            continue
+        return tokens[index:]
+    return []
+
+
+def _space_joined_shell_tokens(tokens: list[str]) -> list[str]:
+    text = " ".join(str(token or "") for token in tokens)
+    try:
+        return shlex.split(_space_unquoted_shell_control_tokens(text))
+    except ValueError:
+        return re.split(r"\s+", _space_unquoted_shell_control_tokens(text))
+
+
+def _strip_shell_redirection_tokens(tokens: list[str]) -> list[str]:
+    stripped: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = str(tokens[index] or "")
+        redirection_end = _shell_redirection_span_end(tokens, index)
+        if redirection_end is not None:
+            index = redirection_end
+            continue
+        stripped.append(token)
+        index += 1
+    return stripped
+
+
+def _shell_redirection_span_end(tokens: list[str], index: int) -> int | None:
+    if index >= len(tokens):
+        return None
+    token = str(tokens[index] or "")
+    if token.isdigit() and index + 1 < len(tokens) and str(tokens[index + 1] or "") in SHELL_REDIRECTION_TOKENS:
+        index += 1
+    elif token not in SHELL_REDIRECTION_TOKENS:
+        return None
+    while index < len(tokens) and str(tokens[index] or "") in SHELL_REDIRECTION_TOKENS:
+        index += 1
+    if index < len(tokens) and str(tokens[index] or "") == "&":
+        index += 2 if index + 1 < len(tokens) else 1
+        return index
+    if index < len(tokens):
+        index += 1
+    return index
+
+
+def _destination_paths_for_copy_like_command(args: list[str], *, cwd: Path | None = None) -> tuple[str, ...]:
+    _sources, destinations = _copy_like_command_source_and_destination_paths(args, cwd=cwd)
+    return destinations
+
+
+def _copy_like_command_source_and_destination_paths(
+    args: list[str], *, cwd: Path | None = None
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    positionals: list[str] = []
+    target_directory = ""
+    index = 0
+    while index < len(args):
+        token = str(args[index] or "")
+        if not token:
+            index += 1
+            continue
+        if token in {"-t", "--target-directory"}:
+            if index + 1 < len(args):
+                target_directory = str(args[index + 1])
+                index += 2
+                continue
+            return (), ()
+        if token.startswith("--target-directory="):
+            target_directory = token.split("=", 1)[1]
+            index += 1
+            continue
+        if token in {"-m", "-o", "-g", "-S", "-b"} and index + 1 < len(args):
+            index += 2
+            continue
+        if token.startswith("-") and token not in {"-"}:
+            index += 1
+            continue
+        positionals.append(token)
+        index += 1
+    if "=" in positionals:
+        return (), ()
+    if target_directory:
+        return tuple(positionals), _destination_paths_under_directory(target_directory, positionals)
+    if len(positionals) < 2:
+        return tuple(positionals), ()
+    sources = tuple(positionals[:-1])
+    destination = positionals[-1]
+    if _copy_destination_looks_like_directory(destination, source_count=len(sources), cwd=cwd):
+        return sources, _destination_paths_under_directory(destination, sources)
+    return sources, (destination,)
+
+
+def _destination_paths_under_directory(directory: str, sources: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    destinations: list[str] = []
+    for source in sources:
+        basename = posixpath.basename(_normalize_shell_path_token(source).replace("\\", "/"))
+        if not basename:
+            continue
+        if directory in {"", "."}:
+            destinations.append(basename)
+        else:
+            destinations.append(posixpath.join(_normalize_shell_path_token(directory).replace("\\", "/"), basename))
+    return tuple(destinations)
+
+
+def _copy_destination_looks_like_directory(destination: str, *, source_count: int, cwd: Path | None = None) -> bool:
+    value = _normalize_shell_path_token(destination).replace("\\", "/")
+    if value in {".", ".."} or value.endswith("/") or source_count > 1:
+        return True
+    if cwd is None:
+        return False
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = cwd / value
+    return candidate.is_dir()
+
+
+def _touch_mutation_paths(args: list[str]) -> tuple[str, ...]:
+    paths: list[str] = []
+    index = 0
+    while index < len(args):
+        token = str(args[index] or "")
+        if token in {"-d", "-r", "-t"} and index + 1 < len(args):
+            index += 2
+            continue
+        if token.startswith("-") and token != "-":
+            index += 1
+            continue
+        if token:
+            paths.append(token)
+        index += 1
+    return tuple(paths)
+
+
 def _normalize_shell_path_token(path: object) -> str:
     return str(path or "").strip().strip("'\"")
 
@@ -2160,7 +2496,7 @@ def _has_explicit_shell_interpreter(command: object) -> bool:
     parts = _unwrap_env_split_string(parts)
     for index, token in enumerate(parts[:-1]):
         executable = Path(str(token or "")).name
-        if executable in {"bash", "sh", "zsh"} and parts[index + 1] in {"-c", "-lc", "-cl"}:
+        if executable in {"bash", "sh", "zsh"} and _explicit_shell_script_argument_index(parts, shell_index=index):
             return True
     return False
 

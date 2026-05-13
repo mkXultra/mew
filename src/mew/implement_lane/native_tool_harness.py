@@ -49,6 +49,7 @@ from .tool_policy import (
     list_v2_tool_specs_for_mode,
     list_v2_tool_specs_for_task,
 )
+from .tool_routes import route_records_from_results, with_tool_route_decision
 from .types import ImplementLaneInput, ImplementLaneResult, ToolCallEnvelope, ToolResultEnvelope
 from .v2_runtime import (
     _acceptance_session_from_tool_results,
@@ -291,6 +292,7 @@ def run_native_implement_v2(
         allowed_roots=allowed_read_roots,
         allow_shell=bool(lane_config.get("allow_shell")),
         run_command_available=bool(lane_config.get("allow_shell") or lane_config.get("run_command_available")),
+        source_write_tools_available=_native_tool_available("write_file", lane_input=lane_input, lane_config=lane_config),
         task_contract=dict(lane_input.task_contract),
         source_mutation_roots=tuple(str(root) for root in lane_config.get("source_mutation_roots") or (str(workspace),)),
     )
@@ -422,6 +424,7 @@ def run_native_implement_v2(
                 lane_attempt_id=lane_attempt_id,
                 provider=provider,
                 items=items,
+                tool_results=tuple(tool_results),
                 artifact_root=artifact_root,
                 error=str(exc),
             )
@@ -526,6 +529,7 @@ def run_native_implement_v2(
                 )
                 resolver_decisions.append(decision)
                 result = _finish_result_with_resolver_decision(result, decision)
+                result = with_tool_route_decision(_finish_tool_call_envelope(call, _arguments(call)[0]), result)
             latency_finished = time.monotonic()
             output = _native_output_from_result(
                 call,
@@ -620,6 +624,7 @@ def run_native_implement_v2(
         paths = _write_native_artifacts(
             Path(artifact_root),
             transcript,
+            tool_results=tuple(tool_results),
             provider=provider,
             status=status,
             resolver_decisions=tuple(resolver_decisions),
@@ -717,35 +722,36 @@ def _execute_native_call(
     if call.kind == "finish_call":
         envelope = _finish_tool_call_envelope(call, arguments)
     else:
-        envelope = ToolCallEnvelope(
-            lane_attempt_id=call.lane_attempt_id,
-            provider=call.provider,
-            provider_call_id=call.call_id,
-            mew_tool_call_id=f"native:{call.call_id}",
-            tool_name=call.tool_name,
-            arguments=arguments,
-            provider_message_id=call.provider_item_id,
-            turn_index=_turn_number(call.turn_id),
-            sequence_index=call.output_index,
-            status="validated",
-        )
+        envelope = _tool_call_envelope_from_native_call(call, arguments)
     if call.kind == "finish_call":
-        return _finish_result(envelope, lane_input=lane_input, prior_tool_results=prior_tool_results)
+        return with_tool_route_decision(
+            envelope,
+            _finish_result(envelope, lane_input=lane_input, prior_tool_results=prior_tool_results),
+        )
     if not _native_tool_available(call.tool_name, lane_input=lane_input, lane_config=lane_config):
-        return _invalid_result(
-            call,
-            reason=(
-                f"{call.tool_name} is not available in implement_v2 "
-                f"{str(lane_config.get('mode') or 'full')} mode"
+        return with_tool_route_decision(
+            envelope,
+            _invalid_result(
+                call,
+                reason=(
+                    f"{call.tool_name} is not available in implement_v2 "
+                    f"{str(lane_config.get('mode') or 'full')} mode"
+                ),
             ),
         )
     if call.tool_name in READ_ONLY_TOOL_NAMES:
-        return execute_read_only_tool_call(envelope, workspace=workspace, allowed_roots=allowed_read_roots)
+        return with_tool_route_decision(
+            envelope,
+            execute_read_only_tool_call(envelope, workspace=workspace, allowed_roots=allowed_read_roots),
+        )
     if call.tool_name in EXEC_TOOL_NAMES:
-        return exec_runtime.execute(envelope)
+        return with_tool_route_decision(envelope, exec_runtime.execute(envelope))
     if call.tool_name in WRITE_TOOL_NAMES:
         if not _side_effect_id_valid(call):
-            return _invalid_result(call, reason="side-effecting tool call has invalid provider id")
+            return with_tool_route_decision(
+                envelope,
+                _invalid_result(call, reason="side-effecting tool call has invalid provider id"),
+            )
         if bool(lane_config.get("auto_approve_writes")):
             write_runtime = ImplementV2WriteRuntime(
                 workspace=workspace,
@@ -755,8 +761,26 @@ def _execute_native_call(
                 ),
                 allow_governance_writes=bool(lane_config.get("allow_governance_writes")),
             )
-        return write_runtime.execute(envelope)
-    return _invalid_result(call, reason=f"unknown native tool: {call.tool_name}")
+        return with_tool_route_decision(envelope, write_runtime.execute(envelope))
+    return with_tool_route_decision(envelope, _invalid_result(call, reason=f"unknown native tool: {call.tool_name}"))
+
+
+def _tool_call_envelope_from_native_call(
+    call: NativeTranscriptItem,
+    arguments: dict[str, object],
+) -> ToolCallEnvelope:
+    return ToolCallEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider=call.provider,
+        provider_call_id=call.call_id,
+        mew_tool_call_id=f"native:{call.call_id}",
+        tool_name=call.tool_name,
+        arguments=arguments,
+        provider_message_id=call.provider_item_id,
+        turn_index=_turn_number(call.turn_id),
+        sequence_index=call.output_index,
+        status="validated",
+    )
 
 
 def _native_tool_available(
@@ -960,7 +984,10 @@ def _native_active_command_closeout(
         (item for item in payloads if str(item.get("command_run_id") or "") == command_run_id),
         payloads[0] if payloads else {"command_run_id": command_run_id, "status": "orphaned"},
     )
-    result = exec_runtime.project_result_payload(prior, payload)
+    result = with_tool_route_decision(
+        _tool_call_envelope_from_native_call(call, {"command_run_id": command_run_id}),
+        exec_runtime.project_result_payload(prior, payload),
+    )
     latency_finished = time.monotonic()
     latency = {
         "call_id": call.call_id,
@@ -1069,7 +1096,10 @@ def _native_final_verifier_closeout(
         finalized = exec_runtime.finalize_active_commands(timeout_seconds=budget)
         for payload in finalized:
             if str(payload.get("command_run_id") or "") == _command_run_id_from_result(result):
-                result = exec_runtime.project_result_payload(result, payload)
+                result = with_tool_route_decision(
+                    _tool_call_envelope_from_native_call(call, _arguments(call)[0]),
+                    exec_runtime.project_result_payload(result, payload),
+                )
                 break
     latency_finished = time.monotonic()
     latency = {
@@ -1412,6 +1442,7 @@ def _native_output_from_result(
         is_error=result.is_error,
         content_refs=result.content_refs,
         evidence_refs=result.evidence_refs,
+        sidecar_refs=(str(result.route_decision.get("ref")),) if result.route_decision.get("ref") else (),
     )
 
 
@@ -2491,6 +2522,7 @@ def _partial_failure_harness_result(
     lane_attempt_id: str,
     provider: object,
     items: list[NativeTranscriptItem],
+    tool_results: tuple[ToolResultEnvelope, ...],
     artifact_root: str | Path | None,
     error: str,
 ) -> NativeImplementV2HarnessResult:
@@ -2520,11 +2552,19 @@ def _partial_failure_harness_result(
                 lane_input,
                 transcript=transcript,
                 provider=provider,
+                tool_results=tool_results,
                 error=error,
                 artifact_root=Path(artifact_root),
             )
         else:
-            paths = _write_native_artifacts(Path(artifact_root), transcript, provider=provider, status="failed", error=error)
+            paths = _write_native_artifacts(
+                Path(artifact_root),
+                transcript,
+                tool_results=tool_results,
+                provider=provider,
+                status="failed",
+                error=error,
+            )
             proof_artifacts = tuple(str(path) for path in paths.values())
     return NativeImplementV2HarnessResult(
         status="failed",
@@ -2540,6 +2580,7 @@ def _write_live_failure_artifacts(
     *,
     transcript: NativeTranscript,
     provider: NativeCodexResponsesProvider,
+    tool_results: tuple[ToolResultEnvelope, ...] = (),
     error: str,
     artifact_root: Path | None = None,
 ) -> tuple[str, ...]:
@@ -2549,6 +2590,13 @@ def _write_live_failure_artifacts(
     root = Path(root_path)
     root.mkdir(parents=True, exist_ok=True)
     paths = write_native_transcript_artifacts(root, transcript)
+    route_records = route_records_from_results(tool_results)
+    tool_routes_path = root / "tool_routes.jsonl"
+    tool_routes_path.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in route_records),
+        encoding="utf-8",
+    )
+    paths["tool_routes"] = tool_routes_path
     request_path = root / "native-provider-requests.json"
     inventory_path = root / "provider-request-inventory.json"
     response_count = len(provider.responses)
@@ -2647,12 +2695,20 @@ def _write_native_artifacts(
     root: Path,
     transcript: NativeTranscript,
     *,
+    tool_results: tuple[ToolResultEnvelope, ...],
     provider: object,
     status: str = "",
     error: str = "",
     resolver_decisions: tuple[CompletionResolverDecision, ...] = (),
 ) -> dict[str, Path]:
     paths = write_native_transcript_artifacts(root, transcript)
+    route_records = route_records_from_results(tool_results)
+    tool_routes_path = root / "tool_routes.jsonl"
+    tool_routes_path.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in route_records),
+        encoding="utf-8",
+    )
+    paths["tool_routes"] = tool_routes_path
     if resolver_decisions:
         paths.update(
             write_completion_resolver_artifacts(

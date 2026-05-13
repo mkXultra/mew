@@ -116,6 +116,7 @@ class ToolResultEnvelope:
     content_refs: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
     side_effects: tuple[dict[str, object], ...] = ()
+    route_decision: dict[str, object] = field(default_factory=dict)
     started_at: str = ""
     finished_at: str = ""
     schema_version: int = field(default=TOOL_RESULT_SCHEMA_VERSION, init=False)
@@ -133,6 +134,7 @@ class ToolResultEnvelope:
             "content_refs": list(self.content_refs),
             "evidence_refs": list(self.evidence_refs),
             "side_effects": [dict(effect) for effect in self.side_effects],
+            "route_decision": dict(self.route_decision),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
         }
@@ -149,6 +151,7 @@ class ToolResultEnvelope:
             "output_refs": list(self.content_refs),
             "evidence_refs": list(self.evidence_refs),
             "side_effects": [dict(effect) for effect in self.side_effects],
+            "route_decision": dict(self.route_decision),
         }
 
     def natural_result_text(self, *, limit: int = 1200) -> str:

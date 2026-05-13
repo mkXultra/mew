@@ -128,6 +128,14 @@ def test_native_harness_read_finish_and_artifacts(tmp_path: Path) -> None:
     assert manifest["metrics"]["transport_kind"] == "fake_native"
     assert manifest["metrics"]["native_transport_kind"] == "provider_native"
     assert manifest["resolver_decisions_ref"] == "resolver_decisions.jsonl"
+    tool_route_rows = [
+        json.loads(line) for line in (artifact_root / "tool_routes.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [row["tool_route"] for row in tool_route_rows] == ["read", "finish"]
+    assert tool_route_rows[0]["declared_tool"] == "read_file"
+    assert tool_route_rows[1]["declared_tool"] == "finish"
+    finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
+    assert set(tool_route_rows[1]["typed_evidence_refs"]) == set(finish_output.evidence_refs)
     resolver_rows = [
         json.loads(line)
         for line in (artifact_root / "resolver_decisions.jsonl").read_text(encoding="utf-8").splitlines()
@@ -226,7 +234,7 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
     ]
 
 
-def test_live_native_request_hides_write_file_for_hard_runtime_artifact_task(tmp_path: Path) -> None:
+def test_live_native_request_surfaces_write_file_for_hard_runtime_artifact_task(tmp_path: Path) -> None:
     artifact_root = tmp_path / "artifacts"
     live_turn = NativeResponsesStreamParseResult(
         transcript=NativeTranscript(
@@ -279,12 +287,12 @@ def test_live_native_request_hides_write_file_for_hard_runtime_artifact_task(tmp
 
     descriptor = call.call_args.kwargs["descriptor"]
     tool_names = {str(tool.get("name") or "") for tool in descriptor["request_body"]["tools"]}
-    assert "write_file" not in tool_names
+    assert "write_file" in tool_names
     assert {"edit_file", "apply_patch"} <= tool_names
-    assert "write_file" not in str(descriptor["request_body"]["instructions"])
+    assert "write_file/edit_file/apply_patch" in str(descriptor["request_body"]["instructions"])
 
 
-def test_native_hard_runtime_rejects_write_file_call_without_mutation(tmp_path: Path) -> None:
+def test_native_hard_runtime_accepts_write_file_source_creation(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -313,11 +321,10 @@ def test_native_hard_runtime_rejects_write_file_call_without_mutation(tmp_path: 
     )
 
     output = next(item for item in result.transcript.items if item.call_id == "write-1" and item.kind.endswith("_output"))
-    assert output.status == "invalid"
-    assert output.is_error is True
-    assert "write tool is not available" in output.output_text_or_ref
-    assert "write_file" not in output.output_text_or_ref
-    assert not (tmp_path / "vm.js").exists()
+    assert output.status == "completed"
+    assert output.is_error is False
+    assert "write_file" in output.output_text_or_ref
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "bad\n"
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
@@ -353,11 +360,11 @@ def test_native_hard_runtime_sanitizes_missing_target_edit_guidance(tmp_path: Pa
     assert output.status == "failed"
     assert output.is_error is True
     assert "create=True" in output.output_text_or_ref
-    assert "write_file" not in output.output_text_or_ref
+    assert "write_file" in output.output_text_or_ref
     assert not (tmp_path / "vm.js").exists()
 
 
-def test_native_hard_runtime_carry_forward_sanitizes_hidden_write_file_call(tmp_path: Path) -> None:
+def test_native_hard_runtime_carry_forward_preserves_write_file_call(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -389,12 +396,12 @@ def test_native_hard_runtime_carry_forward_sanitizes_hidden_write_file_call(tmp_
     assert result.status == "blocked"
     assert len(provider.requests) == 2
     second_request = json.dumps(provider.requests[1], ensure_ascii=False, sort_keys=True)
-    assert "unavailable_write_tool" in second_request
-    assert "write_file" not in second_request
-    assert not (tmp_path / "vm.js").exists()
+    assert "unavailable_write_tool" not in second_request
+    assert "write_file" in second_request
+    assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "bad\n"
 
 
-def test_native_hard_runtime_prewrite_plateau_guidance_excludes_write_file(tmp_path: Path) -> None:
+def test_native_hard_runtime_prewrite_plateau_guidance_includes_write_file(tmp_path: Path) -> None:
     lane_input = _lane_input(
         tmp_path,
         mode="full",
@@ -428,8 +435,7 @@ def test_native_hard_runtime_prewrite_plateau_guidance_excludes_write_file(tmp_p
     assert result is not None
     assert result.status == "invalid"
     reason = str(result.content[0]["reason"])
-    assert "edit_file/apply_patch" in reason
-    assert "write_file" not in reason
+    assert "write_file/edit_file/apply_patch" in reason
 
 
 def test_native_first_write_overrun_allows_command_lifecycle_tools(tmp_path: Path) -> None:
@@ -578,6 +584,11 @@ def test_live_native_provider_failure_preserves_partial_transcript_artifacts(tmp
     item_kinds = [item["kind"] for item in transcript_payload["items"]]
     assert item_kinds == ["function_call", "function_call_output"]
     assert (artifact_root / "response_items.jsonl").read_text(encoding="utf-8").strip()
+    tool_route_rows = [
+        json.loads(line) for line in (artifact_root / "tool_routes.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert tool_route_rows[0]["tool_route"] == "read"
+    assert tool_route_rows[0]["declared_tool"] == "read_file"
     request_payload = json.loads((artifact_root / "native-provider-requests.json").read_text(encoding="utf-8"))
     assert request_payload["status"] == "failed_before_native_response"
     assert request_payload["request_count"] == 2
@@ -1403,7 +1414,7 @@ def test_native_harness_blocks_more_probes_after_first_write_due_grace(tmp_path:
     assert (tmp_path / "vm.js").read_text(encoding="utf-8") == "patched\n"
 
 
-def test_native_harness_source_mutation_exec_clears_first_write_due(tmp_path: Path) -> None:
+def test_native_harness_rejects_run_command_source_creation_when_write_tools_available(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -1429,15 +1440,16 @@ def test_native_harness_source_mutation_exec_clears_first_write_due(tmp_path: Pa
         ]
     )
 
-    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
 
-    third_signals = _loop_signals(provider.requests[2])
-    assert third_signals["write_count"] == 1
-    assert third_signals["first_write_due"] is False
-    generated = next(item for item in result.transcript.items if item.call_id == "read-generated" and item.kind.endswith("_output"))
-    assert generated.status == "completed"
-    assert "first-write due overrun" not in generated.output_text_or_ref
-    assert "ok" in generated.output_text_or_ref
+    output = next(
+        item for item in result.transcript.items if item.call_id == "generate-source" and item.kind.endswith("_output")
+    )
+    assert output.status == "failed"
+    assert output.is_error is True
+    assert "must not create or rewrite source-like files" in output.output_text_or_ref
+    assert "write_file/edit_file/apply_patch" in output.output_text_or_ref
+    assert not (tmp_path / "generated.py").exists()
 
 
 def test_native_harness_instructions_do_not_leak_persisted_lane_state(tmp_path: Path) -> None:
@@ -2317,20 +2329,14 @@ def test_native_harness_active_verifier_closeout_cancels_when_budget_exhausted(t
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
-def test_native_harness_final_verifier_closeout_detects_run_command_source_mutation(tmp_path: Path) -> None:
+def test_native_harness_final_verifier_closeout_detects_write_file_source_mutation(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
                 fake_call(
                     "generate-source",
-                    "run_command",
-                    {
-                        "command": "printf 'print(1)\\n' > generated.py",
-                        "cwd": ".",
-                        "use_shell": True,
-                        "timeout": 3,
-                        "foreground_budget_seconds": 3,
-                    },
+                    "write_file",
+                    {"path": "generated.py", "content": "print(1)\n", "create": True, "apply": True},
                     output_index=0,
                 ),
                 fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),

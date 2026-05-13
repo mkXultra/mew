@@ -113,8 +113,8 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
             "Write a file through the existing write substrate. Accepts content string or content_lines "
             "array joined with newlines for small and medium writes. Do not emit a single huge "
             "provider-native write_file JSON payload for large generated or replacement source; prefer "
-            "a custom apply_patch/freeform patch for concrete edits, or a bounded run_command writer "
-            "only when the content can be generated compactly and is followed by a verifier. Never "
+            "a custom apply_patch/freeform patch for concrete edits. Do not create or patch source-like "
+            "files through run_command when write_file/edit_file/apply_patch are available. Never "
             "minify generated source into one long line just to fit JSON."
         ),
         approval_required=True,
@@ -177,10 +177,7 @@ def list_v2_tool_specs_for_task(
 ) -> tuple[ImplementLaneToolSpec, ...]:
     """Return the provider-visible v2 tool surface for a task shape."""
 
-    specs = list_v2_tool_specs_for_mode(mode)
-    if is_hard_runtime_artifact_task(task_contract):
-        return tuple(spec for spec in specs if spec.name != "write_file")
-    return specs
+    return list_v2_tool_specs_for_mode(mode)
 
 
 def is_hard_runtime_artifact_task(task_contract: object) -> bool:

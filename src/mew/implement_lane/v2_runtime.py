@@ -43,6 +43,7 @@ from .tool_harness_contract import (
     build_model_turn_index_artifact,
     build_tool_policy_index_artifact,
     build_tool_registry_artifact,
+    build_tool_route_artifact,
     build_tool_result_index_artifact,
     tool_ref_for_name,
     tool_results_jsonl_lines,
@@ -374,6 +375,7 @@ def run_live_json_implement_v2(
         allow_shell=bool(lane_input.lane_config.get("allow_shell")),
         run_command_available=_v2_tool_available(lane_input, "run_command"),
         route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
+        source_write_tools_available=_v2_tool_available(lane_input, "write_file"),
         task_contract=lane_input.task_contract,
         frontier_state=hard_runtime_frontier_state,
         source_mutation_roots=_source_mutation_roots(lane_input),
@@ -1920,6 +1922,7 @@ def run_fake_exec_implement_v2(
             allow_shell=bool(lane_input.lane_config.get("allow_shell")),
             run_command_available=_v2_tool_available(lane_input, "run_command"),
             route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
+            source_write_tools_available=_v2_tool_available(lane_input, "write_file"),
             task_contract=lane_input.task_contract,
             frontier_state=_initial_hard_runtime_frontier_state(lane_input),
             source_mutation_roots=_source_mutation_roots(lane_input),
@@ -2048,6 +2051,7 @@ def run_fake_write_implement_v2(
             allow_shell=bool(lane_input.lane_config.get("allow_shell")),
             run_command_available=_v2_tool_available(lane_input, "run_command"),
             route_run_tests_shell_surface=_route_run_tests_shell_surface(lane_input),
+            source_write_tools_available=_v2_tool_available(lane_input, "write_file"),
             task_contract=lane_input.task_contract,
             frontier_state=_initial_hard_runtime_frontier_state(lane_input),
             source_mutation_roots=_source_mutation_roots(lane_input),
@@ -5179,8 +5183,8 @@ def _first_write_frontier_stall_from_live_results(
         return {}
     target_path = str(missing.get("target_path") or "").strip()
     mutation_tools = (
-        "write_file/edit_file/apply_patch by default for scoped edits; use a bounded run_command writer "
-        "for large generated files only when the content can be generated compactly, then verify"
+        "write_file/edit_file/apply_patch by default for source/config edits; keep run_command "
+        "for build, runtime, verifier commands, and non-source artifacts"
     )
     required = (
         f"create or update {target_path} with {mutation_tools}"
@@ -6929,8 +6933,8 @@ def _first_write_readiness_from_trace(
             f"make one scoped source mutation with {_source_mutation_tool_phrase(write_file_visible=write_file_visible)} "
             "by default; "
             f"{_large_source_mutation_phrase(write_file_visible=write_file_visible)}"
-            "Use a compact bounded run_command writer only when it can generate the content, "
-            f"inside {target_text} before another broad search or verifier"
+            "Keep source-like file creation and patches out of run_command when source mutation tools are available. "
+            f"Target {target_text} before another broad search or verifier"
         )
     return _drop_empty_frontier_values(readiness)
 
@@ -8273,7 +8277,7 @@ def _terminal_failure_reaction_guidance(
             f"or run an external verifier first. Create or update {target} with "
             f"{_source_mutation_tool_phrase(write_file_visible=write_file_visible)} by default for scoped edits. "
             f"{_large_source_mutation_phrase(write_file_visible=write_file_visible)}"
-            "Use one compact bounded run_command writer only when it can generate the content, "
+            "Keep run_command for build, runtime, verifier commands, and non-source artifacts; "
             "then run one verifier-shaped command."
             f"{required_hint}\n"
         )
@@ -8298,8 +8302,7 @@ def _terminal_failure_reaction_guidance(
         "If mutating source/config, use "
         f"{_source_mutation_tool_phrase(write_file_visible=write_file_visible)} by default for scoped edits; "
         f"{_large_source_mutation_phrase(write_file_visible=write_file_visible)}"
-        "Use a compact bounded run_command writer only when it can generate the content. Keep run_command otherwise "
-        "for build, runtime, and verification."
+        "Keep run_command for build, runtime, verifier commands, and non-source artifacts."
         f"{class_hint}{next_probe_hint}{verifier_hint}\n"
     )
 
@@ -8312,8 +8315,8 @@ def _source_mutation_tool_phrase(*, write_file_visible: bool) -> str:
 
 def _large_source_mutation_phrase(*, write_file_visible: bool) -> str:
     if write_file_visible:
-        return "For a large generated file, avoid one huge provider-native write_file payload. "
-    return "For a large generated file, avoid one huge provider-native JSON payload. "
+        return "For large generated source, use write_file content_lines or apply_patch rather than shell writers. "
+    return "For large generated source, use edit_file/apply_patch rather than shell writers. "
 
 
 def _normalize_live_json_payload(payload: object, *, turn_index: int) -> dict[str, object]:
@@ -11388,6 +11391,7 @@ def _write_live_json_artifacts(
         tool_registry_ref=str(tool_registry_artifact.get("tool_registry_ref") or ""),
         provider_tool_spec_hash=str(tool_registry_artifact.get("provider_tool_spec_hash") or ""),
     )
+    tool_route_artifact = build_tool_route_artifact(manifest.tool_results)
     evidence_sidecar_artifact = build_evidence_sidecar_artifact(
         manifest.tool_results,
         task_contract=lane_input.task_contract,
@@ -11405,6 +11409,8 @@ def _write_live_json_artifacts(
     natural_transcript_path = root / "natural_transcript.jsonl"
     tool_results_path = root / "tool_results.jsonl"
     tool_result_index_path = root / "tool_result_index.json"
+    tool_routes_path = root / "tool_routes.json"
+    tool_routes_jsonl_path = root / "tool_routes.jsonl"
     evidence_sidecar_path = root / "evidence_sidecar.json"
     evidence_ref_index_path = root / "evidence_ref_index.json"
     model_turn_index_path = root / "model_turn_index.json"
@@ -11429,6 +11435,18 @@ def _write_live_json_artifacts(
         json.dumps(tool_result_index_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    tool_routes_path.write_text(
+        json.dumps(tool_route_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    write_jsonl(
+        tool_routes_jsonl_path,
+        (
+            json.dumps(record, ensure_ascii=False, sort_keys=True)
+            for record in tool_route_artifact.get("records", ())
+            if isinstance(record, dict)
+        ),
+    )
     evidence_sidecar_path.write_text(
         json.dumps(evidence_sidecar_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -11450,6 +11468,8 @@ def _write_live_json_artifacts(
         str(natural_transcript_path),
         str(tool_results_path),
         str(tool_result_index_path),
+        str(tool_routes_path),
+        str(tool_routes_jsonl_path),
         str(evidence_sidecar_path),
         str(evidence_ref_index_path),
         str(model_turn_index_path),

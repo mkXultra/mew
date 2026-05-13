@@ -10,12 +10,15 @@ from mew.implement_lane.tool_harness_contract import (
     build_model_turn_index_artifact,
     build_tool_policy_index_artifact,
     build_tool_registry_artifact,
+    build_tool_route_artifact,
     build_tool_result_index_artifact,
     tool_ref_for_name,
 )
+from mew.implement_lane.tool_routes import route_records_from_native_transcript_items
 from mew.implement_lane.tool_policy import list_v2_tool_specs_for_mode
 from mew.implement_lane.types import ImplementLaneInput, ImplementLaneProofManifest, ToolResultEnvelope
 from mew.implement_lane.v2_runtime import _tool_result_transcript_events, _write_live_json_artifacts
+from mew.tool_kernel import ToolKernel, ToolKernelConfig, make_tool_call_envelope
 from mew.work_lanes import IMPLEMENT_V2_LANE
 
 
@@ -68,6 +71,7 @@ def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
         tool_registry_ref=str(registry["tool_registry_ref"]),
         provider_tool_spec_hash=str(registry["provider_tool_spec_hash"]),
     )
+    routes = build_tool_route_artifact((result,))
 
     assert registry["tool_registry_hash"] == registry["provider_tool_spec_hash"]
     assert {"read_file", "finish", "model_response_error"}.issubset(set(registry["by_tool_name"]))
@@ -77,7 +81,23 @@ def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
     assert index["by_provider_call_id"]["call-1"]["ref"] == "tool-result:call-1"
     assert index["by_provider_call_id"]["call-1"]["tool_ref"] == tool_ref_for_name("read_file")
     assert index["by_provider_call_id"]["call-1"]["output_refs"] == ["file://README.md"]
+    assert routes["counts"]["read"] == 1
+    assert routes["records"][0]["tool_route"] == "read"
+    assert routes["records"][0]["ref"] == "tool-route:call-1"
     assert index["index_hash"].startswith("sha256:")
+
+
+def test_tool_route_records_classify_process_lifecycle_without_shell_semantics() -> None:
+    records = route_records_from_native_transcript_items(
+        (
+            {"kind": "function_call", "call_id": "poll-1", "tool_name": "poll_command"},
+            {"kind": "function_call_output", "call_id": "poll-1", "status": "completed"},
+        )
+    )
+
+    assert records[0]["tool_route"] == "process_lifecycle"
+    assert records[0]["command_classification"]["result"] == "unavailable"
+    assert records[0]["command_classification"]["not_source_mutation_classifier"] is True
 
 
 def test_evidence_sidecar_and_ref_index_cover_hot_path_lookup() -> None:
@@ -207,6 +227,165 @@ def test_evidence_sidecar_does_not_treat_non_file_side_effects_as_mutations() ->
 
     assert "source_mutation" not in index["by_kind"]
     assert index["by_mutation_ref"] == {}
+
+
+def test_tool_kernel_rejects_run_command_source_creation_when_write_tools_available(tmp_path: Path) -> None:
+    kernel = ToolKernel(
+        ToolKernelConfig(
+            workspace=str(tmp_path),
+            mode="full",
+            allowed_read_roots=(str(tmp_path),),
+            allowed_write_roots=(str(tmp_path),),
+            allow_shell=True,
+            run_command_available=True,
+        )
+    )
+    call = make_tool_call_envelope(
+        "run_command",
+        {
+            "command": "printf 'ok\\n' > generated.py",
+            "cwd": ".",
+            "use_shell": True,
+            "timeout": 3,
+            "foreground_budget_seconds": 1,
+        },
+        provider_call_id="call-shell-writer",
+    )
+
+    result = kernel.execute(call)
+
+    assert result.status == "failed"
+    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
+    assert result.route_decision["tool_route"] == "invalid_tool_contract"
+    assert result.content[0]["tool_route"] == "invalid_tool_contract"
+    assert not (tmp_path / "generated.py").exists()
+
+
+def test_tool_kernel_rejects_run_command_source_move_to_runtime_artifact_when_write_tools_available(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "vm.js"
+    source.write_text("console.log('ok')\n", encoding="utf-8")
+    kernel = ToolKernel(
+        ToolKernelConfig(
+            workspace=str(tmp_path),
+            mode="full",
+            allowed_read_roots=(str(tmp_path),),
+            allowed_write_roots=(str(tmp_path),),
+            allow_shell=True,
+            run_command_available=True,
+        )
+    )
+    call = make_tool_call_envelope(
+        "run_command",
+        {
+            "command": "mv vm.js /tmp/vm.js",
+            "cwd": ".",
+            "use_shell": True,
+            "timeout": 3,
+            "foreground_budget_seconds": 1,
+        },
+        provider_call_id="call-mv-source",
+    )
+
+    result = kernel.execute(call)
+
+    assert result.status == "failed"
+    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
+    assert source.read_text(encoding="utf-8") == "console.log('ok')\n"
+
+
+def test_tool_kernel_rejects_run_command_source_creation_through_shell_argv_when_write_tools_available(
+    tmp_path: Path,
+) -> None:
+    kernel = ToolKernel(
+        ToolKernelConfig(
+            workspace=str(tmp_path),
+            mode="full",
+            allowed_read_roots=(str(tmp_path),),
+            allowed_write_roots=(str(tmp_path),),
+            allow_shell=True,
+            run_command_available=True,
+        )
+    )
+    call = make_tool_call_envelope(
+        "run_command",
+        {
+            "argv": ["bash", "-lc", "printf 'ok\\n' > generated.py"],
+            "cwd": ".",
+            "timeout": 3,
+            "foreground_budget_seconds": 1,
+        },
+        provider_call_id="call-shell-argv-writer",
+    )
+
+    result = kernel.execute(call)
+
+    assert result.status == "failed"
+    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
+    assert not (tmp_path / "generated.py").exists()
+
+
+def test_tool_kernel_rejects_run_command_source_creation_through_shell_argv_options_when_write_tools_available(
+    tmp_path: Path,
+) -> None:
+    kernel = ToolKernel(
+        ToolKernelConfig(
+            workspace=str(tmp_path),
+            mode="full",
+            allowed_read_roots=(str(tmp_path),),
+            allowed_write_roots=(str(tmp_path),),
+            allow_shell=True,
+            run_command_available=True,
+        )
+    )
+    call = make_tool_call_envelope(
+        "run_command",
+        {
+            "argv": ["bash", "-e", "-c", "printf 'ok\\n' > generated.py"],
+            "cwd": ".",
+            "timeout": 3,
+            "foreground_budget_seconds": 1,
+        },
+        provider_call_id="call-shell-argv-option-writer",
+    )
+
+    result = kernel.execute(call)
+
+    assert result.status == "failed"
+    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
+    assert not (tmp_path / "generated.py").exists()
+
+
+def test_tool_kernel_rejects_run_command_source_creation_through_shell_argv_pipefail_when_write_tools_available(
+    tmp_path: Path,
+) -> None:
+    kernel = ToolKernel(
+        ToolKernelConfig(
+            workspace=str(tmp_path),
+            mode="full",
+            allowed_read_roots=(str(tmp_path),),
+            allowed_write_roots=(str(tmp_path),),
+            allow_shell=True,
+            run_command_available=True,
+        )
+    )
+    call = make_tool_call_envelope(
+        "run_command",
+        {
+            "argv": ["bash", "-euo", "pipefail", "-c", "printf 'ok\\n' > generated.py"],
+            "cwd": ".",
+            "timeout": 3,
+            "foreground_budget_seconds": 1,
+        },
+        provider_call_id="call-shell-argv-pipefail-writer",
+    )
+
+    result = kernel.execute(call)
+
+    assert result.status == "failed"
+    assert result.content[0]["failure_subclass"] == "run_command_source_creation_shell_surface"
+    assert not (tmp_path / "generated.py").exists()
 
 
 def test_evidence_sidecar_indexes_exec_source_tree_mutations() -> None:
@@ -368,21 +547,27 @@ def test_live_artifact_writer_emits_phase1_tool_harness_files(tmp_path: Path) ->
     assert str(artifact_root / "natural_transcript.jsonl") in paths
     assert str(artifact_root / "tool_results.jsonl") in paths
     assert str(artifact_root / "tool_result_index.json") in paths
+    assert str(artifact_root / "tool_routes.json") in paths
+    assert str(artifact_root / "tool_routes.jsonl") in paths
     assert str(artifact_root / "evidence_sidecar.json") in paths
     assert str(artifact_root / "evidence_ref_index.json") in paths
     assert str(artifact_root / "model_turn_index.json") in paths
 
     registry = json.loads((artifact_root / "tool_registry.json").read_text(encoding="utf-8"))
     result_index = json.loads((artifact_root / "tool_result_index.json").read_text(encoding="utf-8"))
+    route_artifact = json.loads((artifact_root / "tool_routes.json").read_text(encoding="utf-8"))
     evidence_index = json.loads((artifact_root / "evidence_ref_index.json").read_text(encoding="utf-8"))
     model_turn_index = json.loads((artifact_root / "model_turn_index.json").read_text(encoding="utf-8"))
     transcript_lines = (artifact_root / "natural_transcript.jsonl").read_text(encoding="utf-8").splitlines()
     result_lines = (artifact_root / "tool_results.jsonl").read_text(encoding="utf-8").splitlines()
+    route_lines = (artifact_root / "tool_routes.jsonl").read_text(encoding="utf-8").splitlines()
 
     assert registry["provider"] == "model_json"
     assert {"read_file", "finish", "model_response_error"}.issubset(set(registry["by_tool_name"]))
     assert result_index["by_provider_call_id"]["call-1"]["tool_name"] == "read_file"
     assert result_index["by_provider_call_id"]["call-1"]["tool_ref"] == tool_ref_for_name("read_file")
+    assert route_artifact["counts"]["read"] == 1
+    assert json.loads(route_lines[0])["tool_route"] == "read"
     result_event_payloads = [
         json.loads(line)["payload"] for line in transcript_lines if json.loads(line)["kind"] == "tool_result"
     ]
