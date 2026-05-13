@@ -173,7 +173,7 @@ def test_previous_response_delta_uses_suffix_when_logical_prefix_matches() -> No
     assert updated["capability_decisions"]["request_previous_response_id"] == "resp-prev"  # type: ignore[index]
 
 
-def test_previous_response_delta_replaces_compact_context_with_minimal_task_refresh() -> None:
+def test_previous_response_delta_allows_context_refresh_before_previous_prefix() -> None:
     previous_context = {
         "role": "user",
         "content": [
@@ -234,29 +234,13 @@ def test_previous_response_delta_replaces_compact_context_with_minimal_task_refr
     request = updated["request_body"]
 
     assert request["previous_response_id"] == "resp-prev"  # type: ignore[index]
-    minimal_context = {
-        "role": "user",
-        "content": [
-            {
-                "type": "input_text",
-                "text": json.dumps(
-                    {
-                        "lane": "implement_v2",
-                        "task_contract": {"title": "Task"},
-                        "workspace": "/repo",
-                    },
-                    sort_keys=True,
-                ),
-            }
-        ],
-    }
-    assert request["input"] == [minimal_context, output_item]  # type: ignore[index]
+    assert request["input"] == [refreshed_context, output_item]  # type: ignore[index]
     assert updated["logical_input_items"] == [refreshed_context, call_item, output_item]
-    assert updated["suppressed_context_refresh_items"] == [refreshed_context]
-    assert updated["previous_response_delta_mode"] == "delta_minimal_context_refresh"
+    assert updated["suppressed_context_refresh_items"] == []
+    assert updated["previous_response_delta_mode"] == "delta_with_context_refresh"
     assert updated["previous_response_prefix_item_count"] == 2
     assert updated["previous_response_leading_refresh_item_count"] == 1
-    assert updated["previous_response_suppressed_context_refresh_item_count"] == 1
+    assert updated["previous_response_suppressed_context_refresh_item_count"] == 0
     assert updated["logical_input_item_count"] == 3
     assert updated["wire_input_item_count"] == 2
 

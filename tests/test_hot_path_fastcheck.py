@@ -716,8 +716,8 @@ def test_hot_path_fastcheck_accepts_previous_response_id_for_multi_turn_live_pro
     second_request["turn_index"] = 2
     second_request["previous_response_id"] = "resp-prev"
     second_request["previous_response_id_in_request_body"] = True
-    second_request["previous_response_delta_mode"] = "delta_minimal_context_refresh"
-    second_request["previous_response_suppressed_context_refresh_item_count"] = 1
+    second_request["previous_response_delta_mode"] = "delta_with_context_refresh"
+    second_request["previous_response_suppressed_context_refresh_item_count"] = 0
     second_request["previous_response_leading_refresh_item_count"] = 1
     second_request["request_body"]["previous_response_id"] = "resp-prev"
     output_item = {
@@ -725,29 +725,14 @@ def test_hot_path_fastcheck_accepts_previous_response_id_for_multi_turn_live_pro
         "call_id": "call-read",
         "output": "read_file result: completed",
     }
-    task_payload = json.loads(first_request["request_body"]["input"][0]["content"][0]["text"])
-    minimal_payload = {
-        key: task_payload[key]
-        for key in ("task_contract", "workspace", "lane")
-        if key in task_payload
-    }
-    minimal_context = {
-        "role": "user",
-        "content": [
-            {
-                "type": "input_text",
-                "text": json.dumps(minimal_payload, ensure_ascii=False, sort_keys=True),
-            }
-        ],
-    }
     second_request["logical_input_items"] = list(first_request["request_body"]["input"]) + [output_item]
-    second_request["suppressed_context_refresh_items"] = list(first_request["request_body"]["input"])
-    second_request["request_body"]["input"] = [minimal_context, output_item]
+    second_request["suppressed_context_refresh_items"] = []
+    second_request["request_body"]["input"] = list(first_request["request_body"]["input"]) + [output_item]
     inventory = dict(second_request["provider_request_inventory"])
-    inventory["model_visible_sections"] = ["native_transcript_window", "task_context_refresh"]
-    inventory["compact_sidecar_digest_wire_visible"] = False
-    inventory["previous_response_delta_mode"] = "delta_minimal_context_refresh"
-    inventory["previous_response_suppressed_context_refresh_item_count"] = 1
+    inventory["model_visible_sections"] = ["native_transcript_window", "compact_sidecar_digest"]
+    inventory["compact_sidecar_digest_wire_visible"] = True
+    inventory["previous_response_delta_mode"] = "delta_with_context_refresh"
+    inventory["previous_response_suppressed_context_refresh_item_count"] = 0
     inventory["previous_response_leading_refresh_item_count"] = 1
     second_request["provider_request_inventory"] = inventory
     payload["request_count"] = 2

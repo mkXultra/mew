@@ -92,17 +92,22 @@ descriptors, provider request inventory, and sidecar hashes remain the local
 proof authority. Replay must be able to explain what the provider saw even when
 the provider request used server-side continuation.
 
-When `previous_response_id` is active, refreshed compact sidecar context is a
-local replay/inventory concern by default. The live wire request should replace
-the full refreshed context with a minimal task-context refresh plus the newly
-paired tool/function outputs unless the prefix no longer matches and a full
-refresh is required. The minimal refresh may include only task contract,
-workspace, and lane identity. It must not include compact sidecar, WorkFrame,
-frontier, proof, todo, or controller-pressure fields. This keeps the
-provider-visible hot path close to Codex without depending on provider memory
-to preserve task intent across long runs. Request descriptors still record the
-refreshed compact digest hash, suppressed refresh count, and logical input hash
-for audit.
+When `previous_response_id` is active, refreshed compact sidecar context remains
+wire-visible for the current M6.24 implementation. Two live diagnostics showed
+that suppressing the refreshed context, even with a minimal task-context
+refresh, drove the run back to zero writes. Until native transcript
+server-continuation parity is proven, the safe Codex-like shape is:
+
+```text
+previous_response_id
+  + refreshed compact factual task/sidecar context
+  + newly paired tool/function outputs
+```
+
+The compact sidecar must stay bounded and factual: no WorkFrame, frontier,
+proof, todo, `next_action`, `required_next`, first-write pressure, probe
+thresholds, or controller fields. Request descriptors still record logical
+input hashes and any future suppressed refresh counts for audit.
 
 The provider-visible repair is generic. It must work for ordinary coding tasks,
 hard-runtime artifact tasks, and future implementation tasks without
@@ -553,8 +558,8 @@ The provider inventory must report:
 
 - dynamic sections included in each request;
 - whether `previous_response_id` was used;
-- whether a refreshed compact sidecar context item was replaced by a minimal
-  task-context refresh because `previous_response_id` carried the prior
+- whether a refreshed compact sidecar context item was sent, or suppressed by
+  a future optimization, while `previous_response_id` carried the prior
   transcript;
 - transcript/window hash or equivalent local continuation hash;
 - compact digest hash and byte size;
