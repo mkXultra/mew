@@ -106,7 +106,8 @@ def test_request_descriptor_preserves_codex_like_tool_order_and_collapsed_descri
 
     assert names[:5] == ["apply_patch", "edit_file", "write_file", "run_command", "run_tests"]
     assert names[-1] == "finish"
-    assert "Apply a raw patch to source files" in descriptions
+    assert "Primary source mutation tool" in descriptions
+    assert "smallest runnable candidate" in descriptions
     assert "cheap probe" not in descriptions
     assert "fallback-probe" not in descriptions
     assert "frontier" not in descriptions

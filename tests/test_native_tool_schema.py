@@ -25,7 +25,7 @@ def test_base_tool_specs_lower_to_responses_tools_with_strict_read_file_schema()
     assert read_file == {
         "type": "function",
         "name": "read_file",
-        "description": "Read a bounded workspace file excerpt with line anchors.",
+        "description": "Read only the bounded workspace excerpt needed to choose or validate a patch; returns line anchors.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -82,7 +82,7 @@ def test_base_tool_specs_descriptions_remove_probe_frontier_salience() -> None:
     assert "frontier" not in descriptions
     assert "broad recursive source exploration" not in descriptions
     assert "apply_patch" in descriptions
-    assert "bounded path:line anchors" in descriptions
+    assert "bounded path:line matches" in descriptions
 
 
 def test_lowered_provider_tool_descriptions_remove_probe_frontier_salience() -> None:
@@ -94,7 +94,7 @@ def test_lowered_provider_tool_descriptions_remove_probe_frontier_salience() -> 
     assert "fallback probe" not in descriptions
     assert "frontier" not in descriptions
     assert "broad recursive source exploration" not in descriptions
-    assert "Apply a raw patch to source files" in descriptions
+    assert "Primary source mutation tool" in descriptions
     assert "custom/freeform patch input" in descriptions
 
 
@@ -138,7 +138,8 @@ def test_apply_patch_lowers_to_custom_grammar_tool_when_supported() -> None:
     assert apply_patch.strict is None
     assert apply_patch.provider_tool["type"] == "custom"
     assert apply_patch.provider_tool["name"] == "apply_patch"
-    assert "Apply a raw patch to source files" in apply_patch.provider_tool["description"]
+    assert "Primary source mutation tool" in apply_patch.provider_tool["description"]
+    assert "smallest runnable candidate" in apply_patch.provider_tool["description"]
     assert "custom/freeform patch input" in apply_patch.provider_tool["description"]
     assert apply_patch.provider_tool["format"]["type"] == "grammar"  # type: ignore[index]
     assert apply_patch.provider_tool["format"]["syntax"] == "lark"  # type: ignore[index]

@@ -6037,9 +6037,10 @@ def test_implement_v2_prompt_sections_include_compact_coding_contract() -> None:
 
     assert section.cache_policy == "cacheable"
     assert section.stability == "static"
-    assert "Inspect enough context to understand the smallest coherent change" in section.content
+    assert "Inspect only enough context to choose a minimal runnable candidate" in section.content
     assert "Make source changes with apply_patch or edit_file" in section.content
     assert "Use run_command or run_tests to build, run, and verify" in section.content
+    assert "create the smallest runnable version early" in section.content
     assert "cheap probe" not in section.content
     assert "first_write" not in section.content
     assert "required_next" not in section.content
@@ -10514,6 +10515,7 @@ def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:
     assert specs["write_file"].approval_required is True
     assert "small complete file" in specs["write_file"].description
     assert "Prefer apply_patch or edit_file" in specs["write_file"].description
+    assert "smallest runnable candidate" in specs["apply_patch"].description
     assert specs["edit_file"].dry_run_supported is True
     assert specs["apply_patch"].dry_run_supported is True
     assert specs["apply_patch"].input_transport == "json_line_array"

@@ -45,8 +45,9 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="apply_patch",
         access="write",
         description=(
-            "Apply a raw patch to source files. Use this for multi-line edits, new files, "
-            "deletions, and renames. Do not wrap custom/freeform patch input in JSON."
+            "Primary source mutation tool for multi-line edits, new files, deletions, "
+            "and renames. Use it for the smallest runnable candidate once the target "
+            "file or path is known. Do not wrap custom/freeform patch input in JSON."
         ),
         approval_required=True,
         dry_run_supported=True,
@@ -59,8 +60,8 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="edit_file",
         access="write",
         description=(
-            "Edit a file with exact replacements or structured hunks. Use when anchors "
-            "are precise; ambiguous matches fail closed."
+            "Edit a file with exact replacements or structured hunks. Use for focused "
+            "source changes when anchors are precise; ambiguous matches fail closed."
         ),
         approval_required=True,
         dry_run_supported=True,
@@ -79,9 +80,9 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="run_command",
         access="execute",
         description=(
-            "Run a bounded command, build, or runtime through managed exec. "
-            "Use source mutation tools for edits. Output is compact by default; request a larger "
-            "bounded output budget when terminal text is needed to edit."
+            "Run a bounded command, build, runtime, or verifier through managed exec. "
+            "Use command output to patch or edit source; commands are not the source editing API. "
+            "Output is compact by default; request a larger bounded output budget when terminal text is needed."
         ),
         approval_required=True,
     ),
@@ -89,8 +90,9 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="run_tests",
         access="execute",
         description=(
-            "Run a bounded verifier or test command through managed exec. Output is compact by "
-            "default; request a larger bounded output budget when failure text is needed to repair."
+            "Run a bounded verifier or test command through managed exec. Use failures to patch "
+            "or edit source. Output is compact by default; request a larger bounded output budget "
+            "when failure text is needed."
         ),
         approval_required=True,
     ),
@@ -112,12 +114,12 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
     ImplementLaneToolSpec(
         name="read_file",
         access="read",
-        description="Read a bounded workspace file excerpt with line anchors.",
+        description="Read only the bounded workspace excerpt needed to choose or validate a patch; returns line anchors.",
     ),
     ImplementLaneToolSpec(
         name="search_text",
         access="read",
-        description="Search workspace text and return bounded path:line anchors.",
+        description="Find candidate source anchors and return bounded path:line matches.",
     ),
     ImplementLaneToolSpec(
         name="glob",

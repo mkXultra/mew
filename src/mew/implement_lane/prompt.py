@@ -111,12 +111,14 @@ def build_implement_v2_prompt_sections(
         ),
         PromptSection(
             id="implement_v2_coding_contract",
-            version="v0",
+            version="v1",
             title="Implement V2 Coding Contract",
             content=(
-                "Inspect enough context to understand the smallest coherent change. "
+                "Inspect only enough context to choose a minimal runnable candidate. "
                 f"{mutation_sentence}"
                 f"{verify_sentence}"
+                "When the task asks for a new file or artifact and the target path is known, "
+                "create the smallest runnable version early, then run it and repair from concrete failures. "
                 "Repair from the latest concrete failure shown in the transcript. "
                 "Finish only with fresh evidence from the tools."
             ),

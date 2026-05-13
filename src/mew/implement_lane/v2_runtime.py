@@ -8686,13 +8686,50 @@ def _typed_evidence_digest_for_result(result: ToolResultEnvelope) -> list[dict[s
 
 
 def _full_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:
+    content = result.provider_visible_content()
+    raw_items = content.get("content")
+    if isinstance(raw_items, list):
+        content["content"] = [
+            _hydrate_full_history_terminal_payload(result.tool_name, item) if isinstance(item, dict) else item
+            for item in raw_items
+        ]
     return {
         "provider_call_id": result.provider_call_id,
         "tool_name": result.tool_name,
         "status": result.status,
         "is_error": result.is_error,
-        "content": result.provider_visible_content(),
+        "content": content,
     }
+
+
+def _hydrate_full_history_terminal_payload(tool_name: str, item: dict[str, object]) -> dict[str, object]:
+    """Restore full spooled terminal output for proof artifacts only."""
+
+    if tool_name not in _PROVIDER_HISTORY_TERMINAL_TOOL_NAMES:
+        return dict(item)
+    output_path = str(item.get("output_path") or "").strip()
+    if not output_path:
+        return dict(item)
+    path = Path(output_path)
+    if not path.exists() or not path.is_file():
+        return dict(item)
+    try:
+        output = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return dict(item)
+    if not output:
+        return dict(item)
+    hydrated = dict(item)
+    stdout = str(hydrated.get("stdout") or "")
+    stderr = str(hydrated.get("stderr") or "")
+    if stdout and not stderr:
+        hydrated["stdout"] = output
+    elif stderr and not stdout:
+        hydrated["stderr"] = output
+    else:
+        hydrated["combined_output"] = output
+    hydrated["history_output_hydrated_from"] = output_path
+    return hydrated
 
 
 def _project_terminal_result_for_provider_history(content: dict[str, object]) -> dict[str, object]:

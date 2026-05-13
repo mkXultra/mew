@@ -134,10 +134,7 @@ def lower_implement_lane_tool_spec(
                 provider_tool={
                     "type": "custom",
                     "name": "apply_patch",
-                    "description": (
-                        "Apply a raw patch to source files. Use this for multi-line edits, new files, "
-                        "deletions, and renames. Do not wrap custom/freeform patch input in JSON."
-                    ),
+                    "description": spec.description,
                     "format": {
                         "type": "grammar",
                         "syntax": "lark",
