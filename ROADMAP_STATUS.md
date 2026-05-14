@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; next isolated experiment is H7 sidecar visibility. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is implemented pending live 10 minute diagnostic. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -73,7 +73,7 @@ Current controller mode:
 `m6_24_hot_path_h7_sidecar_visibility_experiment`.
 
 Current diagnostic mode:
-`h10_failed_reverted__h6_passed__h1_partial_keep__h7_next`.
+`h10_failed_reverted__h6_passed__h1_partial_keep__h7_implemented_pending_live_diagnostic`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
@@ -109,6 +109,12 @@ probes. The next isolated experiment is H7: hide or compress
 `compact_sidecar_digest` from provider-visible hot-path input while preserving
 internal sidecar artifacts. Do not combine this with tool wording,
 `next_action`, WorkFrame steering, or threshold control.
+H7 implementation now keeps compact sidecar digest as hidden replay/proof
+artifact and removes it from the provider-visible task support payload.
+Fake-native smoke shows zero visible compact sidecar requests and hot-path
+fastcheck still passes from the hidden digest. codex-ultra re-review approved
+the implementation after two P1 fixes. Next: commit, then one bounded live 10
+minute diagnostic plus salience/step-diff analysis.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -181,6 +187,24 @@ Fixed execution order:
    - first mutation: Codex step 25 after 24 probes, mew step 45 after 43
      probes;
    - decision: partial keep H1; next isolate H7 sidecar visibility.
+11. H7 sidecar visibility implementation:
+   - provider-visible task support payload now contains only `task_contract`,
+     `task_facts`, `workspace`, and `lane`;
+   - hidden request artifact still stores `compact_sidecar_digest` for replay;
+   - provider request inventory sets
+     `compact_sidecar_digest_wire_visible=false`;
+   - focused tests passed:
+     `uv run pytest --no-testmon tests/test_provider_visible_salience.py tests/test_native_tool_harness.py tests/test_native_provider_adapter.py tests/test_hot_path_fastcheck.py tests/test_native_boundary_audit.py -q`
+     -> 217 passed after reviewer fixes;
+   - touched-file ruff passed;
+   - fake-native smoke:
+     `tmp/m6_24_h7_sidecar_hidden_smoke/candidate-codex-hot-path`;
+   - fake-native salience:
+     `tmp/m6_24_h7_smoke_provider_visible_salience.md`;
+   - fake-native fastcheck passed.
+   - reviewer P1 fixes included hidden digest preservation in live provider
+     artifacts and explicit detection of inventory-hidden/wire-visible digest
+     mismatch.
 
 Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
 context, but it no longer controls the immediate next action. Do not resume
@@ -237,12 +261,11 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: implement H7 only. Hide or compress
-  `compact_sidecar_digest` from provider-visible hot-path input while keeping
-  internal sidecar artifacts and saved proof/replay observability intact. Then
-  run focused tests, provider-visible salience smoke, and one bounded 10 minute
-  step-shape diagnostic. Do not tune `apply_patch`, add next-action steering,
-  restore WorkFrame steering, or add threshold control in the same experiment.
+- Current next action: commit the H7 implementation, then run one bounded live
+  H7 10 minute step-shape diagnostic and analyze the fresh artifact with
+  provider-visible salience and Codex step-diff reports. Do not tune
+  `apply_patch`, add next-action steering, restore WorkFrame steering, or add
+  threshold control in the same experiment.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe

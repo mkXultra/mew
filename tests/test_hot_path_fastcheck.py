@@ -785,6 +785,29 @@ def test_hot_path_fastcheck_rejects_suppressed_context_without_task_refresh(tmp_
     )
 
 
+def test_hot_path_fastcheck_rejects_hidden_digest_wire_leak(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, live_shape=True)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    request = payload["requests"][0]
+    inventory = dict(request["provider_request_inventory"])
+    inventory["compact_sidecar_digest_wire_visible"] = False
+    inventory["model_visible_sections"] = ["native_transcript_window", "task_context_refresh"]
+    request["provider_request_inventory"] = inventory
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_provider_visible_state"]["status"] == "fail"
+    assert any(
+        violation["reason"] == "compact_sidecar_digest_wire_leak"
+        for violation in checks["native_provider_visible_state"]["details"]["violations"]
+    )
+
+
 def test_hot_path_fastcheck_replays_live_openai_request_against_codex_digest_identity(tmp_path):
     artifact = _write_native_artifact(tmp_path)
     transcript = _read_native_transcript(artifact)

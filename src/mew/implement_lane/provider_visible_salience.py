@@ -150,7 +150,10 @@ def format_provider_visible_salience_markdown(report: Mapping[str, object]) -> s
 
 def _request_report(*, index: int, request: Mapping[str, object], inventory: Mapping[str, object]) -> dict[str, object]:
     body = _mapping(request.get("request_body"))
-    input_items = tuple(_mapping(item) for item in _sequence(body.get("input")))
+    input_source = body.get("input")
+    if not input_source:
+        input_source = request.get("input_items")
+    input_items = tuple(_mapping(item) for item in _sequence(input_source))
     first_text = _first_input_text(input_items)
     task_payload = _first_json_payload(input_items)
     section_order = list(task_payload.keys())
@@ -161,6 +164,7 @@ def _request_report(*, index: int, request: Mapping[str, object], inventory: Map
         text
         for text in (
             str(body.get("instructions") or ""),
+            str(request.get("instructions") or "") if not body else "",
             *(_input_item_texts(input_items)),
         )
         if text
@@ -168,9 +172,9 @@ def _request_report(*, index: int, request: Mapping[str, object], inventory: Map
     scaffolding_counts = _count_terms(visible_text, SCAFFOLDING_TERMS)
     task_anchor_terms = tuple(_task_anchor_terms(task_facts))
     task_anchor_counts = _count_terms(visible_text, task_anchor_terms)
-    sidecar_visible = bool(
-        inventory.get("compact_sidecar_digest_wire_visible", "compact_sidecar_digest" in task_payload)
-    )
+    wire_contains_sidecar = "compact_sidecar_digest" in task_payload
+    inventory_visible = bool(inventory.get("compact_sidecar_digest_wire_visible", wire_contains_sidecar))
+    sidecar_visible = wire_contains_sidecar or inventory_visible
     return {
         "turn_index": int(request.get("turn_index") or index),
         "previous_response_id_in_request_body": bool(request.get("previous_response_id_in_request_body")),
@@ -187,6 +191,9 @@ def _request_report(*, index: int, request: Mapping[str, object], inventory: Map
         "task_anchor_occurrences": sum(task_anchor_counts.values()),
         "task_anchor_occurrences_by_term": dict(task_anchor_counts),
         "compact_sidecar_visible": sidecar_visible,
+        "compact_sidecar_wire_contains_key": wire_contains_sidecar,
+        "compact_sidecar_inventory_visible": inventory_visible,
+        "compact_sidecar_visibility_inconsistent": inventory_visible != wire_contains_sidecar,
         "compact_sidecar_chars": _json_chars(compact_sidecar),
         "compact_sidecar_digest_text_chars": len(str(compact_sidecar.get("digest_text") or "")),
         "compact_sidecar_key_count": len(compact_sidecar),
@@ -210,6 +217,9 @@ def _aggregate_reports(reports: Sequence[Mapping[str, object]]) -> dict[str, obj
         "json_envelope_request_count": sum(1 for report in reports if report.get("leading_shape") == "json_envelope"),
         "plain_text_first_request_count": sum(1 for report in reports if report.get("leading_shape") == "plain_text"),
         "json_payload_request_count": sum(1 for report in reports if report.get("json_payload_found")),
+        "compact_sidecar_visibility_inconsistent_count": sum(
+            1 for report in reports if report.get("compact_sidecar_visibility_inconsistent")
+        ),
         "max_first_input_text_chars": max((int(report.get("first_input_text_chars") or 0) for report in reports), default=0),
         "max_compact_sidecar_chars": max((int(report.get("compact_sidecar_chars") or 0) for report in reports), default=0),
         "max_scaffolding_occurrences": max((int(report.get("scaffolding_occurrences") or 0) for report in reports), default=0),
@@ -231,6 +241,8 @@ def _interpretation(aggregate: Mapping[str, object], reports: Sequence[Mapping[s
         notes.append("H1 task-first shape is present: every first user item is plain text before the JSON support payload.")
     if int(aggregate.get("compact_sidecar_visible_request_count") or 0) == request_count:
         notes.append("H7 is measurable: compact_sidecar_digest is visible on every saved provider request.")
+    if int(aggregate.get("compact_sidecar_visibility_inconsistent_count") or 0):
+        notes.append("H7 artifact inconsistency: inventory visibility does not match the saved wire payload.")
     if int(aggregate.get("scaffolding_occurrences_total") or 0) > int(aggregate.get("task_anchor_occurrences_total") or 0):
         notes.append("Scaffolding vocabulary appears more often than task-anchor vocabulary in the provider-visible text.")
     first = reports[0] if reports else {}

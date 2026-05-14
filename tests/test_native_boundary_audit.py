@@ -28,7 +28,7 @@ def test_native_boundary_audit_reports_missing_source_marker_in_anchor_window(tm
     _write_complete_fixture(tmp_path)
     harness = tmp_path / "src/mew/implement_lane/native_tool_harness.py"
     harness.write_text(
-        harness.read_text(encoding="utf-8").replace('    "compact_sidecar_digest": dict(compact_sidecar_digest),\n', ""),
+        harness.read_text(encoding="utf-8").replace('    "workspace": lane_input.workspace,\n', ""),
         encoding="utf-8",
     )
 
@@ -72,9 +72,11 @@ def _write_complete_fixture(root: Path) -> None:
         "    tool_calls=tuple(tool_calls),\n"
         ")\n"
         "def _responses_input_items():\n"
-        "    compact_sidecar_digest = {}\n"
+        "    task_facts = {}\n"
         "task_payload = {\n"
-        '    "compact_sidecar_digest": dict(compact_sidecar_digest),\n'
+        '    "task_contract": dict(lane_input.task_contract),\n'
+        '    "task_facts": task_facts,\n'
+        '    "workspace": lane_input.workspace,\n'
         "}\n"
         "def _native_loop_control_state():\n"
         "    first_write_due = True\n"

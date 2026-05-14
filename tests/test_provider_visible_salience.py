@@ -160,6 +160,23 @@ def test_provider_visible_salience_direct_file_input_uses_sibling_inventory(tmp_
     assert str(inputs["provider_request_inventory"]).endswith("provider-request-inventory.json")
 
 
+def test_provider_visible_salience_supports_fake_native_input_items(tmp_path: Path) -> None:
+    root = _write_artifact(tmp_path / "artifact")
+    native = json.loads((root / "native-provider-requests.json").read_text(encoding="utf-8"))
+    for request in native["requests"]:
+        request["input_items"] = request["request_body"].pop("input")
+        request.pop("request_body")
+    (root / "native-provider-requests.json").write_text(json.dumps(native), encoding="utf-8")
+
+    report = analyze_provider_visible_salience(mew_artifact_root=root)
+
+    first = report["first_request"]
+    assert isinstance(first, dict)
+    assert first["leading_shape"] == "json_envelope"
+    assert first["json_payload_found"] is True
+    assert first["compact_sidecar_visible"] is True
+
+
 def test_provider_visible_salience_supports_plain_task_first_with_json_payload_second(tmp_path: Path) -> None:
     root = _write_artifact(tmp_path / "artifact")
     native = json.loads((root / "native-provider-requests.json").read_text(encoding="utf-8"))
@@ -179,3 +196,49 @@ def test_provider_visible_salience_supports_plain_task_first_with_json_payload_s
     assert aggregate["plain_text_first_request_count"] == 2
     assert aggregate["json_payload_request_count"] == 2
     assert "H1 task-first shape is present" in "\n".join(report["interpretation"])  # type: ignore[arg-type]
+
+
+def test_provider_visible_salience_detects_hidden_compact_sidecar(tmp_path: Path) -> None:
+    root = _write_artifact(tmp_path / "artifact")
+    native = json.loads((root / "native-provider-requests.json").read_text(encoding="utf-8"))
+    for request in native["requests"]:
+        request["request_body"]["input"].insert(0, _plain_input_item("Task: create vm.js\nVerify: node vm.js"))
+        support = json.loads(request["request_body"]["input"][1]["content"][0]["text"])
+        support.pop("compact_sidecar_digest")
+        request["request_body"]["input"][1]["content"][0]["text"] = json.dumps(support)
+    (root / "native-provider-requests.json").write_text(json.dumps(native), encoding="utf-8")
+    inventory = json.loads((root / "provider-request-inventory.json").read_text(encoding="utf-8"))
+    for row in inventory["provider_request_inventory"]:
+        row["compact_sidecar_digest_wire_visible"] = False
+    (root / "provider-request-inventory.json").write_text(json.dumps(inventory), encoding="utf-8")
+
+    report = analyze_provider_visible_salience(mew_artifact_root=root)
+
+    first = report["first_request"]
+    assert isinstance(first, dict)
+    assert first["leading_shape"] == "plain_text"
+    assert first["compact_sidecar_visible"] is False
+    assert first["compact_sidecar_chars"] == 0
+    aggregate = report["aggregate"]
+    assert isinstance(aggregate, dict)
+    assert aggregate["compact_sidecar_visible_request_count"] == 0
+
+
+def test_provider_visible_salience_flags_inventory_wire_visibility_mismatch(tmp_path: Path) -> None:
+    root = _write_artifact(tmp_path / "artifact")
+    native = json.loads((root / "native-provider-requests.json").read_text(encoding="utf-8"))
+    for request in native["requests"]:
+        request["request_body"]["input"].insert(0, _plain_input_item("Task: create vm.js\nVerify: node vm.js"))
+    (root / "native-provider-requests.json").write_text(json.dumps(native), encoding="utf-8")
+    inventory = json.loads((root / "provider-request-inventory.json").read_text(encoding="utf-8"))
+    for row in inventory["provider_request_inventory"]:
+        row["compact_sidecar_digest_wire_visible"] = False
+    (root / "provider-request-inventory.json").write_text(json.dumps(inventory), encoding="utf-8")
+
+    report = analyze_provider_visible_salience(mew_artifact_root=root)
+
+    aggregate = report["aggregate"]
+    assert isinstance(aggregate, dict)
+    assert aggregate["compact_sidecar_visible_request_count"] == 2
+    assert aggregate["compact_sidecar_visibility_inconsistent_count"] == 2
+    assert "H7 artifact inconsistency" in "\n".join(report["interpretation"])  # type: ignore[arg-type]

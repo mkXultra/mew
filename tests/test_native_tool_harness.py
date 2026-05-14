@@ -85,6 +85,9 @@ def _task_payload(request: dict[str, object]) -> dict[str, object]:
 
 
 def _compact_sidecar_digest(request: dict[str, object]) -> dict[str, object]:
+    hidden_digest = request.get("compact_sidecar_digest")
+    if isinstance(hidden_digest, dict):
+        return hidden_digest
     return _task_payload(request)["compact_sidecar_digest"]
 
 
@@ -243,10 +246,12 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
     inventory_payload = json.loads((artifact_root / "provider-request-inventory.json").read_text(encoding="utf-8"))
     assert request_payload["status"] == "completed"
     assert request_payload["request_count"] == 1
+    assert request_payload["requests"][0]["compact_sidecar_digest"]["digest_hash"]
     assert inventory_payload["provider_request_inventory"][0]["model_visible_sections"] == [
         "native_transcript_window",
-        "compact_sidecar_digest",
+        "task_context_refresh",
     ]
+    assert inventory_payload["provider_request_inventory"][0]["compact_sidecar_digest_wire_visible"] is False
     forbidden = inventory_payload["provider_request_inventory"][0]["provider_visible_forbidden_fields"]
     assert forbidden["ok"] is True
     assert forbidden["detected"] == []
@@ -836,10 +841,12 @@ def test_native_provider_input_is_task_first_before_support_json(tmp_path: Path)
     assert list(support_payload) == [
         "task_contract",
         "task_facts",
-        "compact_sidecar_digest",
         "workspace",
         "lane",
     ]
+    assert "compact_sidecar_digest" not in support_payload
+    assert provider.requests[0]["compact_sidecar_digest"]["digest_hash"]
+    assert provider.requests[0]["provider_request_inventory"]["compact_sidecar_digest_wire_visible"] is False
 
 
 @pytest.mark.parametrize("objective_key", ["objective", "goal", "task", "prompt"])
@@ -1188,11 +1195,13 @@ def test_live_native_provider_failure_writes_request_inventory_artifacts(tmp_pat
     request_payload = json.loads(request_path.read_text(encoding="utf-8"))
     inventory_payload = json.loads(inventory_path.read_text(encoding="utf-8"))
     assert request_payload["request_count"] == 1
+    assert request_payload["requests"][0]["compact_sidecar_digest"]["digest_hash"]
     assert inventory_payload["request_count"] == 1
     assert inventory_payload["provider_request_inventory"][0]["model_visible_sections"] == [
         "native_transcript_window",
-        "compact_sidecar_digest",
+        "task_context_refresh",
     ]
+    assert inventory_payload["provider_request_inventory"][0]["compact_sidecar_digest_wire_visible"] is False
 
 
 def test_live_native_first_turn_value_error_writes_failure_artifacts(tmp_path: Path) -> None:
@@ -2191,9 +2200,14 @@ def test_native_harness_adds_first_write_control_after_probe_budget(tmp_path: Pa
     assert "persisted_lane_state" not in payload
     assert second_request["provider_request_inventory"]["model_visible_sections"] == [
         "native_transcript_window",
-        "compact_sidecar_digest",
+        "task_context_refresh",
     ]
-    assert second_request["provider_request_inventory"]["compact_sidecar_digest_hash"] == payload["compact_sidecar_digest"]["digest_hash"]
+    assert "compact_sidecar_digest" not in payload
+    assert (
+        second_request["provider_request_inventory"]["compact_sidecar_digest_hash"]
+        == _compact_sidecar_digest(second_request)["digest_hash"]
+    )
+    assert second_request["provider_request_inventory"]["compact_sidecar_digest_wire_visible"] is False
     assert second_request["provider_request_inventory"]["provider_visible_forbidden_fields"]["ok"] is True
     assert "first_write_due" not in json.dumps(_compact_sidecar_digest(second_request), sort_keys=True)
     assert "prewrite_probe_plateau" not in json.dumps(_compact_sidecar_digest(second_request), sort_keys=True)

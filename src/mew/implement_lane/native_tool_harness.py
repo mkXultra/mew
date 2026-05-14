@@ -238,6 +238,8 @@ class NativeCodexResponsesProvider:
             model=self.model,
             request_descriptor=request_descriptor,
         )
+        if isinstance(request_descriptor.get("compact_sidecar_digest"), Mapping):
+            descriptor["compact_sidecar_digest"] = dict(request_descriptor["compact_sidecar_digest"])  # type: ignore[index]
         logical_input_items = _mapping_list(dict(descriptor.get("request_body") or {}).get("input"))
         if self.previous_response_id:
             descriptor = apply_previous_response_delta(
@@ -260,6 +262,9 @@ class NativeCodexResponsesProvider:
         inventory["previous_response_leading_refresh_item_count"] = int(
             descriptor.get("previous_response_leading_refresh_item_count") or 0
         )
+        digest_wire_visible = bool(
+            inventory.get("compact_sidecar_digest_wire_visible", True)
+        )
         if suppressed_refresh_count:
             sections = inventory.get("model_visible_sections")
             if isinstance(sections, list):
@@ -273,7 +278,7 @@ class NativeCodexResponsesProvider:
                 inventory["model_visible_sections"] = visible_sections
             inventory["compact_sidecar_digest_wire_visible"] = False
         else:
-            inventory["compact_sidecar_digest_wire_visible"] = True
+            inventory["compact_sidecar_digest_wire_visible"] = digest_wire_visible
         descriptor["provider_request_inventory"] = inventory
         descriptor["input_item_count"] = request_descriptor.get("input_item_count")
         descriptor["turn_index"] = request_descriptor.get("turn_index")
@@ -2808,12 +2813,14 @@ def _request_descriptor(
         input_items=input_items,
         instructions=instructions,
         compact_sidecar_digest=compact_sidecar_digest,
+        compact_sidecar_digest_wire_visible=False,
     )
     provider_request_inventory = build_native_prompt_input_inventory(
         compact_sidecar_digest=compact_sidecar_digest,
         provider_visible_forbidden_fields=forbidden_fields_report,
         diagnostic_only_fields=loop_signals.keys(),
         diagnostic_loop_signals=loop_signals,
+        compact_sidecar_digest_wire_visible=False,
     )
     provider_request_inventory["tool_surface"] = tool_surface.request_metadata()
     return {
@@ -2825,6 +2832,7 @@ def _request_descriptor(
         "input_item_count": len(transcript_items),
         "input_items": input_items,
         "transcript_window": [item.as_dict() for item in provider_visible_transcript_items],
+        "compact_sidecar_digest": dict(compact_sidecar_digest),
         "provider_request_inventory": provider_request_inventory,
         "tool_surface": tool_surface.request_metadata(),
         "tool_surface_profile_id": tool_surface.profile_id,
@@ -3012,7 +3020,6 @@ def _responses_input_items(
     task_payload = {
         "task_contract": dict(lane_input.task_contract),
         "task_facts": task_facts,
-        "compact_sidecar_digest": dict(compact_sidecar_digest),
         "workspace": lane_input.workspace,
         "lane": lane_input.lane,
     }

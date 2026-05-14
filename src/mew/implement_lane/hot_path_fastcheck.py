@@ -773,13 +773,12 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
             request.get("previous_response_leading_refresh_item_count")
             or inventory.get("previous_response_leading_refresh_item_count")
         )
-        expected_sections = (
-            ["native_transcript_window", "task_context_refresh"]
-            if suppressed_refresh_count and leading_refresh_count
-            else ["native_transcript_window"]
-            if suppressed_refresh_count
-            else ["native_transcript_window", "compact_sidecar_digest"]
-        )
+        digest_wire_visible = bool(inventory.get("compact_sidecar_digest_wire_visible", True))
+        expected_sections = ["native_transcript_window"]
+        if digest_wire_visible:
+            expected_sections.append("compact_sidecar_digest")
+        elif not suppressed_refresh_count or leading_refresh_count:
+            expected_sections.append("task_context_refresh")
         if suppressed_refresh_count and not leading_refresh_count:
             violations.append(
                 {
@@ -812,6 +811,13 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
             )
         visible_task_payload = _native_request_wire_task_payload(request)
         visible_digest = visible_task_payload.get("compact_sidecar_digest")
+        if not digest_wire_visible and isinstance(visible_digest, Mapping):
+            violations.append(
+                {
+                    "request": index,
+                    "reason": "compact_sidecar_digest_wire_leak",
+                }
+            )
         forbidden_violations = scan_forbidden_provider_visible(
             {
                 "input_items": _native_request_input_items(request),
@@ -1179,6 +1185,9 @@ def _native_provider_requests(*, artifact_path: Path, manifest_path: Path) -> tu
 
 
 def _native_request_compact_digest(request: Mapping[str, object]) -> dict[str, object]:
+    hidden_digest = request.get("compact_sidecar_digest")
+    if isinstance(hidden_digest, Mapping):
+        return dict(hidden_digest)
     payload = _native_request_task_payload(request)
     digest = payload.get("compact_sidecar_digest")
     return dict(digest) if isinstance(digest, Mapping) else {}

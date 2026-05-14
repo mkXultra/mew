@@ -301,6 +301,7 @@ def test_previous_response_delta_allows_context_refresh_before_previous_prefix()
                 "text": json.dumps(
                     {
                         "task_contract": {"title": "Task"},
+                        "task_facts": {"missing_workspace_paths": ["vm.js"]},
                         "compact_sidecar_digest": {"digest_hash": "old"},
                         "workspace": "/repo",
                         "lane": "implement_v2",
@@ -317,6 +318,7 @@ def test_previous_response_delta_allows_context_refresh_before_previous_prefix()
                 "text": json.dumps(
                     {
                         "task_contract": {"title": "Task"},
+                        "task_facts": {"missing_workspace_paths": ["vm.js"]},
                         "compact_sidecar_digest": {"digest_hash": "new"},
                         "workspace": "/repo",
                         "lane": "implement_v2",

@@ -409,7 +409,18 @@ def _is_provider_context_refresh_item(item: Mapping[str, object]) -> bool:
     if item.get("role") != "user":
         return False
     text = _provider_input_text(item)
-    return "compact_sidecar_digest" in text and "task_contract" in text
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, Mapping):
+        return False
+    return (
+        "task_contract" in payload
+        and "task_facts" in payload
+        and "workspace" in payload
+        and "lane" in payload
+    )
 
 
 def _provider_input_text(item: Mapping[str, object]) -> str:

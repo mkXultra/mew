@@ -249,16 +249,23 @@ def build_native_prompt_input_inventory(
     diagnostic_loop_signals: Mapping[str, object] | None = None,
     previous_response_delta_mode: str = "none",
     previous_response_suppressed_context_refresh_item_count: int = 0,
+    compact_sidecar_digest_wire_visible: bool = True,
 ) -> dict[str, object]:
     """Describe the native provider input inventory for Phase 4 tests."""
 
     diagnostic_fields = sorted(str(item) for item in diagnostic_only_fields if str(item).strip())
     diagnostic_signals = dict(diagnostic_loop_signals or {})
     suppressed_refresh_count = max(0, int(previous_response_suppressed_context_refresh_item_count or 0))
+    digest_wire_visible = bool(compact_sidecar_digest_wire_visible) and suppressed_refresh_count == 0
+    model_visible_sections = ["native_transcript_window"]
+    if digest_wire_visible:
+        model_visible_sections.append("compact_sidecar_digest")
+    else:
+        model_visible_sections.append("task_context_refresh")
     return {
         "schema_version": NATIVE_PROMPT_INPUT_INVENTORY_SCHEMA_VERSION,
         "input_contract": "native_transcript_window_plus_compact_sidecar_digest",
-        "model_visible_sections": ["native_transcript_window", "compact_sidecar_digest"],
+        "model_visible_sections": model_visible_sections,
         "ordinary_model_visible_state": {
             "frontier": False,
             "todo": False,
@@ -287,7 +294,7 @@ def build_native_prompt_input_inventory(
             }
         ),
         "compact_sidecar_digest_hash": compact_sidecar_digest.get("digest_hash") or "",
-        "compact_sidecar_digest_wire_visible": suppressed_refresh_count == 0,
+        "compact_sidecar_digest_wire_visible": digest_wire_visible,
         "previous_response_delta_mode": previous_response_delta_mode or "none",
         "previous_response_suppressed_context_refresh_item_count": suppressed_refresh_count,
         "source_prompt_inventory": [dict(item) for item in source_prompt_inventory if isinstance(item, Mapping)],
@@ -299,13 +306,16 @@ def build_provider_visible_forbidden_fields_report(
     input_items: Iterable[Mapping[str, object]],
     instructions: str,
     compact_sidecar_digest: Mapping[str, object],
+    compact_sidecar_digest_wire_visible: bool = True,
 ) -> dict[str, object]:
     """Report steering/control fields visible to the provider request hot path."""
 
     provider_visible_payload = {
         "input_items": [dict(item) for item in input_items if isinstance(item, Mapping)],
         "instructions": instructions,
-        "compact_sidecar_digest": dict(compact_sidecar_digest),
+        "compact_sidecar_digest": dict(compact_sidecar_digest)
+        if compact_sidecar_digest_wire_visible
+        else {},
     }
     violations = scan_forbidden_provider_visible(provider_visible_payload, surface="provider_request")
     detected = fields_from_forbidden_violations(violations)
