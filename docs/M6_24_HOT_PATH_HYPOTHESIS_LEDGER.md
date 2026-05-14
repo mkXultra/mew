@@ -106,7 +106,7 @@ tuning before a minimal H10 change is designed and measured.
 | H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | observability first | TBD |
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | pending observability | TBD |
 | H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | observability first | TBD |
-| H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | observability first | TBD |
+| H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | pending observability | TBD |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
 | H9 | mew lacks a first-patch readiness threshold: it keeps exploring after enough evidence exists to write a runnable skeleton. | Add observability first: compute first-patch readiness candidates and readiness-to-mutation latency. Behavior change only after a measured miss. | Readiness-to-mutation latency shrinks; first mutation happens after enough evidence but before broad re-exploration/design stalls. | observability first | TBD |
@@ -209,6 +209,53 @@ Focused validation before the diagnostic:
   `uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter --mode step-check-10min --tool-surface-profile-id codex_hot_path`.
 - analysis output:
   `tmp/m6_24_h10_step_diff.json` and `tmp/m6_24_h10_step_diff.md`.
+
+### EXP-20260515-2: H6 Synthetic Apply Patch Affordance
+
+Hypothesis:
+The model may still avoid `apply_patch` under `codex_hot_path` even when the
+required source mutation is trivial and the target path/content are already
+known.
+
+Change:
+Added an observability-only provider-native check:
+`scripts/check_apply_patch_affordance.py`. It builds a one-turn
+`codex_hot_path` tool-surface request with tools
+`apply_patch`, `exec_command`, `write_stdin`, and `finish`, then records the
+first tool call without executing it. No live loop behavior changes.
+
+Reference artifacts:
+No Harbor reference needed; this is a synthetic affordance check.
+
+Mew artifact:
+`proof-artifacts/m6_24_apply_patch_affordance/20260514T222246Z.json`
+
+Expected signal:
+The first provider-native tool call is `apply_patch`.
+
+Observed signal:
+Passed. The first tool call was a custom `apply_patch` call. Transcript item
+count was 1. This proves the current `codex_hot_path` surface can make the model
+choose `apply_patch` for a trivial known-path source mutation.
+
+Decision:
+Keep the check and do not change live behavior. H6 is not the proximate blocker
+for `make-mips-interpreter`: the problem is not that the model cannot see or
+choose `apply_patch` in principle. Continue with hypotheses about prompt /
+transcript / task-shape salience and evidence-to-patch synthesis. Do not tune
+`apply_patch` wording until a later measured artifact contradicts this result.
+
+Notes:
+Focused validation before the live check:
+
+- `uv run pytest --no-testmon tests/test_apply_patch_affordance.py -q`
+  passed with 3 tests.
+- `uv run ruff check src/mew/implement_lane/apply_patch_affordance.py scripts/check_apply_patch_affordance.py tests/test_apply_patch_affordance.py`
+  passed.
+- descriptor-only smoke:
+  `uv run python scripts/check_apply_patch_affordance.py --descriptor-only --out tmp/h6_apply_patch_affordance_descriptor.json`.
+- live check:
+  `uv run python scripts/check_apply_patch_affordance.py --timeout 90`.
 
 ## Stop Conditions
 

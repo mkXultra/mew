@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts experiment failed and was reverted; next experiment must address why the model still over-probes after readiness. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed, so next work should target prompt/transcript/task-shape salience rather than apply_patch wording. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,10 +70,10 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_hot_path_post_h10_reselect_next_experiment`.
+`m6_24_hot_path_post_h6_reselect_prompt_transcript_experiment`.
 
 Current diagnostic mode:
-`h10_measured_failed_reverted`.
+`h10_measured_failed_reverted__h6_measured_pass`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
@@ -84,6 +84,13 @@ not: mew still produced no source mutation and increased pre-mutation probes.
 The behavior change was reverted by `f9b0059`. Do not re-add task-facts
 constraints by intuition. The next experiment must explain why the model still
 uses repeated `exec_command` probes after readiness.
+H6 then tested whether the model can choose `apply_patch` at all under the
+`codex_hot_path` tool surface. The synthetic one-turn provider-native check
+passed: the first tool call was a custom `apply_patch` call in
+`proof-artifacts/m6_24_apply_patch_affordance/20260514T222246Z.json`. Therefore
+do not spend the next cycle tuning `apply_patch` wording or transport by
+intuition. The next measured experiment should target prompt/transcript/task
+shape salience or evidence-to-patch synthesis.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -121,6 +128,14 @@ Fixed execution order:
      turn 2 and reached `source_plus_artifact_probe` by turn 8.
 6. H10 decision: revert. Commit `f9b0059` removes the behavior change. Next:
    choose a new measured experiment from the H0/H10 evidence, not broad polish.
+7. H6 synthetic apply_patch affordance implementation and validation:
+   - added `scripts/check_apply_patch_affordance.py` and
+     `src/mew/implement_lane/apply_patch_affordance.py`;
+   - focused validation passed:
+     `uv run pytest --no-testmon tests/test_apply_patch_affordance.py -q`
+     and `uv run ruff check src/mew/implement_lane/apply_patch_affordance.py scripts/check_apply_patch_affordance.py tests/test_apply_patch_affordance.py`;
+   - live one-turn provider-native check passed with first tool
+     `apply_patch`.
 
 Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
 context, but it no longer controls the immediate next action. Do not resume
@@ -177,17 +192,18 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: H0 observability is done. Do not repair broad behavior
-  by intuition. Start H10 by designing a minimal exploration-to-patch
-  compression experiment: compact accepted implementation constraints should
-  become task facts while proof/evidence remains sidecar-only.
+- Current next action: H0 and H6 observability are done, and H10 failed. Do not
+  repair broad behavior by intuition. Select the next single measured
+  prompt/transcript/task-shape experiment that explains why the model keeps
+  probing after readiness even though `apply_patch` affordance passes in
+  isolation.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe
-  thresholds, or WorkFrame steering as a shortcut. Do not run another
-  same-shape 10 minute `codex_hot_path` step-check, `speed_1`, or `proof_5`
-  before the H10 minimal experiment is implemented and measured with saved
-  artifacts first.
+  thresholds, WorkFrame steering, or `apply_patch` wording tweaks as a
+  shortcut. Do not run another same-shape 10 minute `codex_hot_path`
+  step-check, `speed_1`, or `proof_5` before the next single hypothesis is
+  selected and has a bounded measurement plan.
 
 Latest phase status: Phase 0-6 of
 `docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md` is implemented.
