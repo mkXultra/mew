@@ -59,7 +59,6 @@ from .tool_policy import (
     ImplementLaneToolSpec,
     hide_unavailable_write_file_guidance,
     is_hard_runtime_artifact_task,
-    list_v2_tool_specs_for_mode,
     list_v2_tool_specs_for_task,
 )
 from .tool_registry import (
@@ -1613,6 +1612,7 @@ def _native_final_verifier_closeout(
         lane_attempt_id=lane_attempt_id,
         provider=provider,
         turn_index=turn_index,
+        lane_config=lane_config,
         plan=plan,
         timeout_seconds=budget,
         pending_mutation=pending_mutation,
@@ -1665,11 +1665,18 @@ def _native_final_verifier_closeout_allowed(
         return False
     if not bool(lane_config.get("allow_shell") or lane_config.get("run_command_available")):
         return False
-    mode = str(lane_config.get("mode") or "full").strip().casefold()
-    tool_names = {tool.name for tool in list_v2_tool_specs_for_mode(mode)}
-    if "run_command" not in tool_names:
-        return False
-    return bool(lane_input.workspace)
+    return bool(lane_input.workspace) and bool(_native_final_verifier_tool_name(lane_input, lane_config=lane_config))
+
+
+def _native_final_verifier_tool_name(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_config: Mapping[str, object],
+) -> str:
+    for candidate in ("exec_command", "run_command"):
+        if _native_tool_available(candidate, lane_input=lane_input, lane_config=lane_config):
+            return candidate
+    return ""
 
 
 def _configured_native_final_verifier_command(lane_input: ImplementLaneInput) -> str:
@@ -1966,6 +1973,7 @@ def _native_final_verifier_closeout_call(
     lane_attempt_id: str,
     provider: object,
     turn_index: int,
+    lane_config: Mapping[str, object],
     plan: _NativeFinishVerifierPlan,
     timeout_seconds: float,
     pending_mutation: Mapping[str, object],
@@ -1996,6 +2004,14 @@ def _native_final_verifier_closeout_call(
             "latest_source_mutation_path": pending_mutation.get("path") or "",
         },
     }
+    tool_name = _native_final_verifier_tool_name(lane_input, lane_config=lane_config) or "run_command"
+    if tool_name == "exec_command":
+        arguments = {
+            **arguments,
+            "cmd": plan.command,
+            "timeout_ms": int(round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds) * 1000)),
+            "yield_time_ms": int(round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds) * 1000)),
+        }
     return NativeTranscriptItem(
         sequence=0,
         turn_id=f"turn-{turn_index}-final-verifier-closeout",
@@ -2003,11 +2019,11 @@ def _native_final_verifier_closeout_call(
         provider=str(getattr(provider, "provider", "") or "native-controller"),
         model=str(getattr(provider, "model", "") or lane_input.model or ""),
         response_id=f"native-final-verifier-closeout-{turn_index}",
-        provider_item_id=f"item-{call_id}",
+        provider_item_id=f"fc_mew_final_verifier_closeout_{turn_index:03d}",
         output_index=0,
         kind="function_call",
         call_id=call_id,
-        tool_name="run_command",
+        tool_name=tool_name,
         arguments_json_text=json.dumps(arguments, sort_keys=True),
     )
 

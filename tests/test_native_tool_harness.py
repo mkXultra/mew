@@ -18,10 +18,12 @@ from mew.implement_lane.native_provider_adapter import NativeResponsesStreamPars
 from mew.implement_lane.native_tool_harness import (
     NativeCodexResponsesProvider,
     PHASE3_NATIVE_SURFACE,
+    _NativeFinishVerifierPlan,
     _NativeCloseoutContext,
     _completion_resolver_input_from_finish,
     _finish_gate_block_resolved_by_closeout,
     _finish_gate_missing_obligations,
+    _native_final_verifier_closeout_call,
     _native_finish_supplied_closeout_context,
     run_live_native_implement_v2,
     run_native_implement_v2,
@@ -2801,6 +2803,41 @@ def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path:
     assert closeout_args["finish_verifier_plan"]["separate_agent"] is True
     assert closeout_args["execution_contract"]["acceptance_kind"] == "external_verifier"
     assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_codex_hot_path_finish_verifier_planner_uses_exec_command_surface(tmp_path: Path) -> None:
+    lane_input = _lane_input(
+        tmp_path,
+        allow_verify=True,
+        experimental_finish_verifier_planner=True,
+        final_verifier_closeout_seconds=3,
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+    )
+    provider = NativeFakeProvider.from_item_batches([])
+
+    closeout_call = _native_final_verifier_closeout_call(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        provider=provider,
+        turn_index=2,
+        lane_config=lane_input.lane_config,
+        plan=_NativeFinishVerifierPlan(
+            command="test -f vm.js",
+            cwd=".",
+            source="finish_verifier_planner",
+            reason="verify the file created by the implementation",
+        ),
+        timeout_seconds=3,
+        pending_mutation={"provider_call_id": "write-1", "path": str(tmp_path / "vm.js")},
+    )
+
+    assert closeout_call.tool_name == "exec_command"
+    assert closeout_call.provider_item_id.startswith("fc_")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["cmd"] == "test -f vm.js"
+    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
+    assert closeout_args["execution_contract"]["acceptance_kind"] == "external_verifier"
 
 
 @pytest.mark.parametrize(
