@@ -22,7 +22,7 @@ _VISIBLE_TOOL_OUTPUT_CARD_MAX_BYTES = 60_000
 _MUTATION_VISIBLE_CARD_HARD_BYTES = 4096
 _NATURAL_RESULT_TEXT_LIMIT = 1200
 _NATURAL_RESULT_TEXT_MAX_LIMIT = 50_000
-_COMMAND_NATURAL_RESULT_TEXT_MAX_LIMIT = 12_000
+_COMMAND_NATURAL_RESULT_TEXT_LIMIT = 2_400
 _VISIBLE_PATH_CHARS = 260
 _VISIBLE_REF_CHARS = 160
 _FORBIDDEN_VISIBLE_FIELD_SET = frozenset(CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS)
@@ -255,23 +255,11 @@ def _visible_output_budget(
 ) -> int:
     if tool_name not in {"run_command", "run_tests", "poll_command", "cancel_command"}:
         return int(default)
-    # `max_output_chars` controls command capture/storage and is also a useful
-    # model signal that a bounded terminal excerpt is worth seeing. Keep a
-    # hard live-transcript ceiling so huge logs stay in refs/readbacks, but do
-    # not collapse intentional source/ELF/build probes to a tiny tail.
-    command_default = min(int(default), _COMMAND_NATURAL_RESULT_TEXT_MAX_LIMIT)
-    for key in ("provider_visible_output_chars", "max_output_chars"):
-        value = payload.get(key)
-        if value in (None, ""):
-            continue
-        try:
-            return max(
-                command_default,
-                min(_COMMAND_NATURAL_RESULT_TEXT_MAX_LIMIT, int(value)),
-            )
-        except (TypeError, ValueError):
-            continue
-    return command_default
+    # `max_output_chars` / `provider_visible_output_chars` control command
+    # capture, storage, and explicit readback. They must not turn ordinary live
+    # transcript output into a multi-kilobyte archaeology surface; full output
+    # remains available through refs/read_command_output.
+    return _COMMAND_NATURAL_RESULT_TEXT_LIMIT
 
 
 def _visible_card_hard_bytes(output_limit: int) -> int:

@@ -412,12 +412,42 @@ def test_run_command_natural_text_includes_stderr_and_stdout_previews() -> None:
     assert "runtime result marker" in text
 
 
-def test_command_family_natural_text_honors_medium_requested_output_budget() -> None:
-    marker_after_tiny_cap = "VISIBLE_AFTER_2400_CHARS"
+def test_command_family_default_live_budget_is_medium_without_tail() -> None:
+    marker_after_old_default = "VISIBLE_AFTER_1200_CHARS"
+    stdout = "first useful line\n" + ("a" * 1500) + f"\n{marker_after_old_default}\n" + ("b" * 200)
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:run:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout": stdout,
+                "provider_visible_output_chars": 50_000,
+                "output_ref": "exec://attempt-1/run/output",
+            },
+        ),
+        content_refs=("exec://attempt-1/run/output",),
+    )
+
+    text = result.natural_result_text()
+
+    assert len(text) <= 2_400
+    assert "first useful line" in text
+    assert marker_after_old_default in text
+    assert "exec://attempt-1/run/output" in text
+
+
+def test_command_family_natural_text_keeps_requested_output_budget_out_of_hot_path() -> None:
+    marker_after_live_cap = "HIDDEN_AFTER_LIVE_CAP"
     noisy_stdout = (
         "first useful line\n"
-        + ("a" * 2600)
-        + f"\n{marker_after_tiny_cap}\n"
+        + ("a" * 1500)
+        + "\n"
+        + ("b" * 1100)
+        + f"\n{marker_after_live_cap}\n"
         + ("large bounded probe output\n" * 120)
         + "final useful line\n"
     )
@@ -442,9 +472,9 @@ def test_command_family_natural_text_honors_medium_requested_output_budget() -> 
 
         text = result.natural_result_text()
 
-        assert len(text) <= 12_000
+        assert len(text) <= 2_400
         assert "first useful line" in text
-        assert marker_after_tiny_cap in text
+        assert marker_after_live_cap not in text
         assert "final useful line" in text
         assert f"exec://attempt-1/{tool_name}/output" in text
 
