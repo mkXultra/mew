@@ -59,11 +59,48 @@ If those artifacts are missing, add observability first.
 - Codex vs Claude Code exploration-to-patch report:
   `docs/REVIEW_2026-05-15_CODEX_VS_CLAUDE_EXPLORATION_TO_PATCH.md`
 
+## H0 Measurement Result
+
+Measured on 2026-05-15 from saved artifacts only, using:
+
+```bash
+uv run python scripts/analyze_hot_path_step_diff.py \
+  --codex-reference-root proof-artifacts/terminal-bench/reference-trace/codex-make-mips-interpreter-20260507-174138/2026-05-07__17-41-39/make-mips-interpreter__y58SFkq \
+  --claude-code-reference-root proof-artifacts/terminal-bench/reference-trace/claude-code-make-mips-interpreter-20260507-174138/2026-05-07__17-41-39/make-mips-interpreter__WuLGVMp \
+  --mew-artifact-root proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-20260514-092606/2026-05-14__09-26-07/make-mips-interpreter__prSv5Ny/agent/terminal-bench-harbor-smoke/unknown-task \
+  --out-json tmp/m6_24_hot_path_observability.json \
+  --out-md tmp/m6_24_hot_path_observability.md
+```
+
+Key result:
+
+| Agent | Readiness step | First mutation | Readiness -> mutation | Duplicate-after-readiness families |
+|---|---:|---:|---:|---:|
+| Codex | 3 | 25 | 22 steps | 3 |
+| Claude Code | 3 | none | none | 3 |
+| mew | 2 | none | none | 6 |
+
+Interpretation:
+
+- mew does not primarily lack early evidence. It reaches first-patch readiness
+  at step 2.
+- mew fails to compress early probe facts into a runnable patch. It continues
+  source listing, text search, file reads, disassembly, and even build attempts
+  without producing a first mutation.
+- Codex also probes substantially, but turns probe facts into an `apply_patch`
+  at step 25 and immediately runs a verifier at step 26.
+- Claude Code is the control anti-pattern here: useful facts exist, but the
+  loop does not mutate and spends long design/re-exploration effort.
+
+Decision: H0 is complete. The next behavior experiment is H10: improve
+exploration-to-patch compression. Do not switch to broad prompt/tool/render
+tuning before a minimal H10 change is designed and measured.
+
 ## Hypothesis Queue
 
 | ID | Hypothesis | Minimal change | Expected signal | Status | Decision |
 |---|---|---|---|---|---|
-| H0 | Hot-path behavior cannot be judged until first-patch readiness and exploration compression are measured. | Observability only: compute first-patch readiness timestamp/basis, readiness-to-mutation latency, accepted implementation constraints, and duplicate exploration after readiness. | We can say whether mew lacks evidence, fails to compress evidence into constraints, or stalls after enough evidence exists. | active first | TBD |
+| H0 | Hot-path behavior cannot be judged until first-patch readiness and exploration compression are measured. | Observability only: compute first-patch readiness timestamp/basis, readiness-to-mutation latency, accepted implementation constraints, and duplicate exploration after readiness. | We can say whether mew lacks evidence, fails to compress evidence into constraints, or stalls after enough evidence exists. | measured | mew has early evidence but does not compress it into a patch; use H10 next |
 | H1 | Provider-visible task shape is wrong: mew leads with sidecar/task JSON rather than a plain task. | Make the hot-path first visible content environment context plus plain user task; move sidecar/task facts out of the leading position. | Earlier target-path mutation; fewer prewrite probes; no native rebuild branch before `vm.js`. | blocked by H0 | TBD |
 | H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | pending observability | TBD |
 | H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | observability first | TBD |
@@ -73,7 +110,7 @@ If those artifacts are missing, add observability first.
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | pending observability | TBD |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
 | H9 | mew lacks a first-patch readiness threshold: it keeps exploring after enough evidence exists to write a runnable skeleton. | Add observability first: compute first-patch readiness candidates and readiness-to-mutation latency. Behavior change only after a measured miss. | Readiness-to-mutation latency shrinks; first mutation happens after enough evidence but before broad re-exploration/design stalls. | observability first | TBD |
-| H10 | Exploration is not compressed into patch constraints. | Add a diagnostic field that summarizes accepted implementation constraints from probes: target path, artifact path, ABI/runtime facts, verifier command. Behavior change later may make these constraints visible as task facts, not next-action steering. | More direct transition from probes to one coherent patch; fewer repeated same-family probes. | observability first | TBD |
+| H10 | Exploration is not compressed into patch constraints. | Minimal behavior change: make accepted implementation constraints from probe facts visible as task facts, not as `next_action` steering. Keep the diagnostic sidecar as the source of truth and avoid adding a new frontier. | More direct transition from probes to one coherent patch; fewer repeated same-family probes; first mutation appears before repeated build/disassembly loops. | selected next | design and run one bounded experiment |
 | H11 | Read-only exploration handoff can become an anti-pattern if the parent re-explores instead of patching. | For any future memory/explore provider, require a patch-readiness packet and measure duplicate post-handoff probes. Do not add another autonomous planner for this. | Duplicate exploration after a handoff decreases; mutation follows accepted facts faster. | deferred | TBD |
 | H12 | Long private design passes after readiness are a hidden stall class. | Add metric: model turns or completion tokens after readiness with no tool call/mutation/verifier. Behavior change later may shorten visible instructions or force a small runnable skeleton. | Fewer high-token no-action turns after readiness; earlier verifier feedback. | observability first | TBD |
 
@@ -126,36 +163,14 @@ Stop polishing a hypothesis and escalate when:
 
 Follow this execution order. Do not reorder it after context compression:
 
-1. Wait for controller `86823` to finish hot-path step-diff observability
-   implementation.
-2. Inspect its final YAML, handoff, changed files, reviewer findings, and
-   verification commands.
-3. If the workflow completed with no accepted `needs_fix` findings, commit only
-   the related analyzer implementation, tests, and directly related docs. Do
-   not stage unrelated dirty files such as stale roadmap/status or local
-   `.DS_Store` files.
-4. Wait for controller `21086` to finish
-   `docs/DESIGN_2026-05-15_M6_24_HOT_PATH_OBSERVABILITY.md`.
-5. Compare the completed design against the committed analyzer. Implement any
-   missing H0 observability fields required by the design.
-6. Run focused tests and the analyzer against saved artifacts only. Do not run
-   live Harbor / Terminal-Bench for this step.
-7. Use the analyzer output to evaluate H0.
-
-Then run the analyzer on the saved Codex reference, Claude Code reference, and
-latest mew diagnostic.
-
-The first hypothesis to evaluate is H0, not H1. Do not begin by changing the
-provider-visible task shape. First determine:
-
-1. when Codex, Claude Code, and mew each had enough evidence to write a
-   runnable first patch;
-2. whether mew lacked evidence, failed to compress evidence into implementation
-   constraints, or stalled after readiness;
-3. how long each system took from readiness to mutation;
-4. whether mew moved toward the Codex pattern (probe facts -> patch
-   constraints -> runnable patch) or the Claude Code anti-pattern (useful facts
-   -> re-exploration / long design pass -> no mutation).
-
-Only after H0 is measured should M6.24 choose H1, H2, H4, or H7 as the first
-behavior experiment.
+1. Treat H0 as measured. Do not rerun live Harbor / Terminal-Bench just to
+   re-answer H0.
+2. Design the first H10 behavior experiment: expose compact implementation
+   constraints derived from probe facts as task facts, while keeping diagnostics
+   sidecar-only and avoiding `next_action`, `required_next`, probe thresholds,
+   or new frontier objects.
+3. Add the smallest implementation that can change the step shape.
+4. Run focused tests, fastcheck/replay where applicable, then the artifact-only
+   analyzer. Only after that, run one bounded 10 minute step-shape diagnostic.
+5. Keep, revise, or revert based on whether first mutation appears earlier and
+   duplicate-after-readiness probe families decrease.
