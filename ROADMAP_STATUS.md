@@ -93,10 +93,14 @@ internal sidecars or diagnostics, not live `next_action` steering.
 Latest boundary: fake-native A/B smoke and default-switch gate are committed,
 and live/pre-speed A/B now has explicit profile plumbing via
 `mew work --oneshot --work-guidance tool_surface_profile_id=<profile>` plus
-`scripts/run_harbor_mew_diagnostic.py --tool-surface-profile-id`. The next
-bounded step is to define the smallest fixed live A/B set and run paired
-`mew_legacy` / `codex_hot_path` diagnostics before any default switch or broad
-speed proof.
+`scripts/run_harbor_mew_diagnostic.py --tool-surface-profile-id`. The paired
+diagnostic wrapper `scripts/run_tool_surface_ab_diagnostic.py` is the intended
+entry point for the smallest fixed live A/B set; use it to produce Phase 4
+report and Phase 5 gate artifacts before any default switch or broad speed
+proof. That wrapper is single-pair only: it rejects proof-5/multi-trial runs,
+requires explicit real workspace/task identity for comparable default-switch
+evidence, and blocks the gate if either child diagnostic fails or lacks a
+passing external reward.
 
 Latest Codex-like hot-path validation:
 

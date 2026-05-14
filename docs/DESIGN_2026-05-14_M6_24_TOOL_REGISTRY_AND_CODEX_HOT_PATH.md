@@ -1113,7 +1113,13 @@ report and Phase 5 gate result. Live/pre-speed A/B can now select the same
 profile surface through `mew work --oneshot --work-guidance
 tool_surface_profile_id=<profile>`; `scripts/run_harbor_mew_diagnostic.py`
 also exposes `--tool-surface-profile-id` and includes it in the generated
-jobs-dir name.
+jobs-dir name. `scripts/run_tool_surface_ab_diagnostic.py` wraps one paired
+`mew_legacy` / `codex_hot_path` live diagnostic item, then writes the Phase 4
+A/B report and Phase 5 gate artifacts. The wrapper is deliberately conservative:
+it rejects multi-trial/proof-5 runs, blocks the default-switch gate if either
+child diagnostic fails or lacks a passing external reward, and requires explicit
+real `workspace_snapshot_id` / `task_contract_hash` inputs before the report can
+be comparable default-switch evidence.
 
 Close gate:
 
@@ -1137,6 +1143,10 @@ Close gate:
 - `write_stdin` limitations do not appear in successful hot-path traces, or
   interactive stdin support is implemented;
 - reviewer accepts the A/B report.
+- paired live A/B evidence comes from a single-task wrapper run with explicit
+  real workspace/task identity; synthetic hashes, failed child diagnostics, and
+  missing or non-passing external rewards are not accepted as default-switch
+  evidence.
 
 Only after this gate may `codex_hot_path` become the default. `mew_legacy` can
 remain available as an explicit diagnostic/A-B profile until release cleanup.
