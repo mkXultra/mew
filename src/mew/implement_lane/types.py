@@ -26,6 +26,17 @@ _COMMAND_NATURAL_RESULT_TEXT_MAX_LIMIT = 12_000
 _VISIBLE_PATH_CHARS = 260
 _VISIBLE_REF_CHARS = 160
 _FORBIDDEN_VISIBLE_FIELD_SET = frozenset(CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS)
+_GENERIC_TEXT_FORBIDDEN_VISIBLE_FIELDS = frozenset({"proof", "todo", "frontier", "workframe"})
+_PLAIN_TEXT_FORBIDDEN_VISIBLE_FIELD_SET = frozenset(
+    field for field in _FORBIDDEN_VISIBLE_FIELD_SET if field not in _GENERIC_TEXT_FORBIDDEN_VISIBLE_FIELDS
+)
+_GENERIC_VISIBLE_RENDERED_PATTERNS = {
+    field: re.compile(
+        rf'(?i)(["\']{re.escape(field)}["\']\s*:|\b{re.escape(field)}\s*[:=]|<\s*{re.escape(field)}\s*>|^#+\s*{re.escape(field)}\b)',
+        re.MULTILINE,
+    )
+    for field in _GENERIC_TEXT_FORBIDDEN_VISIBLE_FIELDS
+}
 
 TranscriptEventKind = Literal[
     "model_message",
@@ -157,17 +168,26 @@ class ToolResultEnvelope:
         payload = self.content[0] if self.content and isinstance(self.content[0], dict) else {}
         output_limit = _visible_output_budget(self.tool_name, payload)
         card = self.visible_tool_output_card()
+        visible_content = _redact_forbidden_visible_fields(list(self.content))
+        if not isinstance(visible_content, list):
+            visible_content = []
+        visible_side_effects = _redact_forbidden_visible_fields([dict(effect) for effect in self.side_effects])
+        if not isinstance(visible_side_effects, list):
+            visible_side_effects = []
+        visible_route_decision = _redact_forbidden_visible_fields(dict(self.route_decision))
+        if not isinstance(visible_route_decision, dict):
+            visible_route_decision = {}
         return {
             "mew_status": self.status,
             "acceptance_evidence": bool(self.evidence_refs) and self.status == "completed",
             "natural_result_text": self.natural_result_text(limit=output_limit),
             "tool_output_card": card,
-            "content": list(self.content),
+            "content": visible_content,
             "content_refs": list(self.content_refs),
             "output_refs": list(self.content_refs),
             "evidence_refs": list(self.evidence_refs),
-            "side_effects": [dict(effect) for effect in self.side_effects],
-            "route_decision": dict(self.route_decision),
+            "side_effects": visible_side_effects,
+            "route_decision": visible_route_decision,
         }
 
     def visible_tool_output_card(self) -> dict[str, object]:
@@ -578,8 +598,10 @@ def _redact_forbidden_visible_fields(value: object) -> object:
 
 def _redact_forbidden_visible_markers(text: str) -> str:
     cleaned = str(text)
-    for field_name in sorted(_FORBIDDEN_VISIBLE_FIELD_SET, key=len, reverse=True):
+    for field_name in sorted(_PLAIN_TEXT_FORBIDDEN_VISIBLE_FIELD_SET, key=len, reverse=True):
         cleaned = cleaned.replace(field_name, "[redacted]")
+    for pattern in _GENERIC_VISIBLE_RENDERED_PATTERNS.values():
+        cleaned = pattern.sub("[redacted]", cleaned)
     return cleaned
 
 

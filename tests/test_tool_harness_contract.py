@@ -173,6 +173,52 @@ def test_visible_tool_output_card_redacts_forbidden_latest_failure_fields() -> N
     assert "required_next" not in json.dumps(card, ensure_ascii=False)
     assert "required_next" not in visible["natural_result_text"]
     assert scan_forbidden_provider_visible(card, surface="tool_output_card") == []
+    assert scan_forbidden_provider_visible(visible, surface="provider_visible_tool_result") == []
+
+
+def test_provider_visible_tool_result_redacts_raw_content_side_effects_and_route_pressure() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="failed",
+        is_error=True,
+        content=(
+            {
+                "latest_failure": {
+                    "summary": "artifact missing",
+                    "required_next_probe": "read_file src/main.c",
+                },
+                "acceptance_kind": "candidate_final_proof",
+                "note": "proof artifact is an ordinary phrase here",
+                "stderr_tail": "required_next_action should not leak",
+            },
+        ),
+        side_effects=(
+            {
+                "kind": "failure_classification",
+                "record": {
+                    "summary": "artifact missing",
+                    "required_next_probe": "inspect more",
+                },
+            },
+        ),
+        route_decision={
+            "route": "execute",
+            "suggested_next_action": "use apply_patch next",
+        },
+    )
+
+    visible = result.provider_visible_content()
+    serialized = json.dumps(visible, ensure_ascii=False, sort_keys=True)
+
+    assert "artifact missing" in serialized
+    assert "candidate_final_proof" in serialized
+    assert "proof artifact is an ordinary phrase here" in serialized
+    assert "required_next" not in serialized
+    assert "suggested_next_action" not in serialized
+    assert scan_forbidden_provider_visible(visible, surface="provider_visible_tool_result") == []
 
 
 def test_visible_tool_output_card_enforces_hard_caps_for_paths_and_mutation() -> None:

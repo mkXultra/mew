@@ -568,6 +568,38 @@ survives, but partial native transcript artifacts are still lost when a later
 provider turn times out. The repair is reviewed and ready to commit; after that,
 rerun and analyze one bounded native step-shape diagnostic.
 
+### M6.24 CODEX_LIKE_AFFORDANCE_COLLAPSE Status
+
+Status as of 2026-05-14: **Phase 4 active; Phase 5 pending**. The governing
+design is
+`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_AFFORDANCE_COLLAPSE.md`.
+
+Current phase state:
+
+- Phase 0 static leak gates and caps: `done` via `879a581`.
+- Phase 1 prompt collapse: `done` via `6cd3a36`; provider-visible prompt is a
+  short coding contract plus task facts and compact factual context.
+- Phase 2 tool salience collapse: `done` via `ca6ca9b`; mutation/execution
+  tools are ordered and described ahead of read/search/probe tools.
+- Phase 3 apply_patch/edit primary mutation affordance: `done` via `672c82e`;
+  normal provider-native `apply_patch` uses custom/freeform transport with an
+  auditable JSON fallback.
+- Phase 4 compact editable tool outputs: `active`; output cards, command
+  output caps, task facts, lifecycle tool visibility, routed verifier evidence,
+  and finish closeout evidence have landed, but the phase is not closed until
+  every visible tool-output surface is steering-free and compact-output
+  fastcheck/replay gates are green.
+- Phase 5 fastcheck plus 10 minute step-shape validation: `pending`; do not run
+  broad `speed_1` or proof batches before Phase 4 is closed and one bounded
+  pre-speed diagnostic is explicitly selected.
+
+Latest diagnostic context: the 2026-05-14 `make-mips-interpreter`
+`step-check-10min` run preserved `previous_response_id`, task facts, and
+forbidden-field inventory, but still produced `0` source edits across 31 tool
+calls. Treat this as evidence that Phase 4/5 affordance and output-shape gates
+remain open, not as a reason to return to task-specific facts or finish-only
+polish.
+
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 
 Status as of 2026-05-10: **implementation complete, proof gate pending**. The
