@@ -30,7 +30,10 @@ from mew.implement_lane.native_transcript import (
     native_transcript_hash,
 )
 from mew.implement_lane.tool_policy import list_v2_base_tool_specs
-from mew.implement_lane.tool_registry import build_tool_surface_snapshot
+from mew.implement_lane.tool_registry import (
+    CODEX_HOT_PATH_PROFILE_ID,
+    build_tool_surface_snapshot,
+)
 
 
 def _input_item() -> dict[str, object]:
@@ -170,6 +173,36 @@ def test_request_descriptor_normalizes_tool_surface_parallel_metadata_to_provide
     assert descriptor["request_body"]["parallel_tool_calls"] is False  # type: ignore[index]
     assert descriptor["tool_surface"]["parallel_tool_calls_requested"] is True  # type: ignore[index]
     assert descriptor["tool_surface"]["parallel_tool_calls_effective"] is False  # type: ignore[index]
+
+
+def test_request_descriptor_lowers_codex_hot_path_tool_schemas() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"mode": "full", "tool_surface_profile_id": CODEX_HOT_PATH_PROFILE_ID},
+        task_contract={},
+        transcript_items=(),
+    )
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[_input_item()],
+        transcript_window=[{"sequence": 1, "kind": "input_message"}],
+        tool_specs=snapshot.tool_specs,
+        provider_request_id="req-codex-hot-path",
+        tool_surface_snapshot=snapshot.request_metadata(),
+    )
+    tools = descriptor["request_body"]["tools"]  # type: ignore[index]
+    names = [str(tool.get("name") or "") for tool in tools]  # type: ignore[union-attr]
+
+    assert names == ["apply_patch", "exec_command", "write_stdin", "finish"]
+    assert descriptor["tool_surface_profile_id"] == CODEX_HOT_PATH_PROFILE_ID
+    exec_schema = next(tool for tool in tools if tool.get("name") == "exec_command")  # type: ignore[union-attr]
+    write_stdin_schema = next(tool for tool in tools if tool.get("name") == "write_stdin")  # type: ignore[union-attr]
+    assert exec_schema["strict"] is False
+    assert write_stdin_schema["strict"] is False
+    assert "cmd" in exec_schema["parameters"]["properties"]  # type: ignore[index]
+    assert "session_id" in write_stdin_schema["parameters"]["properties"]  # type: ignore[index]
+    assert "required" not in exec_schema["parameters"]  # type: ignore[operator]
+    assert "required" not in write_stdin_schema["parameters"]  # type: ignore[operator]
 
 
 def test_request_descriptor_records_apply_patch_json_fallback_when_custom_tools_unavailable() -> None:

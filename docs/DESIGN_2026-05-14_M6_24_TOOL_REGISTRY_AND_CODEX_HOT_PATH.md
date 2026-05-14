@@ -1,6 +1,6 @@
 # Design 2026-05-14 - M6.24 ToolRegistry And Codex Hot Path
 
-Status: Phase 0-1 implemented; Phase 2 pending.
+Status: Phase 0-2 implemented; Phase 3 pending.
 
 Scope: `implement_v2` native tool surface selection, provider-visible tool
 descriptors, provider-visible tool result rendering, route observability, and
@@ -955,6 +955,13 @@ Suggested tests:
 ### Phase 2: `codex_hot_path` Descriptors And Routes
 
 Intent: expose the Codex-like tool names and map them to existing kernels.
+
+Implementation status: explicit `codex_hot_path` selection now exposes
+`apply_patch`, `exec_command`, `write_stdin`, and `finish` by default.
+`list_dir` is available only behind an explicit boolean profile option.
+`exec_command` routes to managed exec, `write_stdin` is poll-only when chars
+are empty, and route records preserve provider-visible declared names plus the
+internal effective kernel.
 
 Implementation slice:
 

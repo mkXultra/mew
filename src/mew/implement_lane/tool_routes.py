@@ -143,7 +143,7 @@ def build_tool_route_decision(
         or result.tool_name
         or declared_tool
     )
-    route, reason = _route_for_result(declared_tool, result)
+    route, reason = _route_for_result(resolved_effective_tool, result)
     classification = None
     if route in {"process_runner", "process_lifecycle", "invalid_tool_contract"}:
         classification = _command_classification_from_payload(payload) or CommandClassificationResult(

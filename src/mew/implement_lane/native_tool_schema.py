@@ -153,6 +153,22 @@ def lower_implement_lane_tool_spec(
             validation=validate_strict_json_schema(schema),
         )
 
+    if spec.name in {"exec_command", "write_stdin"}:
+        schema = structured_tool_json_schema(spec.name)
+        if schema is None:
+            schema = {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": True,
+            }
+        return _function_tool(
+            spec,
+            schema,
+            strict=False,
+            strict_false_reason="codex_hot_path_optional_arguments",
+            validation=validate_strict_json_schema(schema),
+        )
+
     schema = structured_tool_json_schema(spec.name)
     if schema is None:
         fallback_schema = {
@@ -290,6 +306,30 @@ def structured_tool_json_schema(tool_name: str) -> dict[str, object] | None:
                 "max_chars": _nullable_integer("Maximum diff characters to return."),
             }
         ),
+        "list_dir": _strict_object(
+            {
+                "path": _nullable_string("Workspace-relative directory path to list."),
+                "max_entries": _nullable_integer(
+                    "Maximum directory entries to return."
+                ),
+            }
+        ),
+        "exec_command": _codex_exec_command_schema(),
+        "write_stdin": _loose_object(
+            {
+                "session_id": _string("Yielded command session id to poll."),
+                "chars": _nullable_string(
+                    "Characters to write. Empty or omitted chars performs a poll."
+                ),
+                "yield_time_ms": _nullable_integer("Optional poll wait in milliseconds."),
+                "max_output_chars": _nullable_integer(
+                    "Optional provider-visible terminal output character budget."
+                ),
+                "max_output_tokens": _nullable_integer(
+                    "Optional Codex-style terminal output token budget alias."
+                ),
+            }
+        ),
         "run_command": _command_schema(),
         "run_tests": _command_schema(),
         "poll_command": _strict_object(
@@ -417,6 +457,36 @@ def _command_schema() -> dict[str, object]:
             ),
         }
     )
+
+
+def _codex_exec_command_schema() -> dict[str, object]:
+    return _loose_object(
+        {
+            "cmd": _nullable_string("Command string to run through the managed shell."),
+            "command": _nullable_string("Command string alias."),
+            "argv": _nullable_string_array("Command argv array to run without shell parsing."),
+            "cwd": _nullable_string("Workspace-relative working directory."),
+            "workdir": _nullable_string("Workspace-relative working directory alias."),
+            "timeout_ms": _nullable_integer("Maximum command runtime in milliseconds."),
+            "yield_time_ms": _nullable_integer(
+                "Foreground wait budget before yielding the command session."
+            ),
+            "max_output_chars": _nullable_integer(
+                "Optional provider-visible terminal output character budget."
+            ),
+            "max_output_tokens": _nullable_integer(
+                "Optional Codex-style terminal output token budget alias."
+            ),
+        }
+    )
+
+
+def _loose_object(properties: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": dict(properties),
+        "additionalProperties": False,
+    }
 
 
 def _apply_patch_json_fallback_schema() -> dict[str, object]:

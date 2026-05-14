@@ -63,7 +63,12 @@ from .tool_policy import (
     list_v2_tool_specs_for_mode,
     list_v2_tool_specs_for_task,
 )
-from .tool_registry import ToolSurfaceSnapshot, build_tool_surface_snapshot
+from .tool_registry import (
+    CODEX_HOT_PATH_PROFILE_ID,
+    ToolSurfaceSnapshot,
+    build_tool_surface_snapshot,
+    tool_surface_profile_id,
+)
 from .tool_routes import route_records_from_results, with_tool_route_decision
 from .types import ImplementLaneInput, ImplementLaneResult, ToolCallEnvelope, ToolResultEnvelope
 from .v2_runtime import (
@@ -831,17 +836,46 @@ def _execute_native_call(
                 ),
             ),
         )
-    if call.tool_name in READ_ONLY_TOOL_NAMES:
+    adapted_call, adapted_arguments, adapter_error = _adapt_codex_hot_path_call(
+        call,
+        arguments,
+        lane_input=lane_input,
+        lane_config=lane_config,
+    )
+    if adapter_error:
         return with_tool_route_decision(
             envelope,
-            execute_read_only_tool_call(envelope, workspace=workspace, allowed_roots=allowed_read_roots),
+            _invalid_result(call, reason=adapter_error),
         )
-    if call.tool_name in EXEC_TOOL_NAMES:
-        return with_tool_route_decision(envelope, exec_runtime.execute(envelope))
-    if call.tool_name in WRITE_TOOL_NAMES:
+    provider_envelope = envelope
+    if adapted_call is not call or adapted_arguments != arguments:
+        envelope = _tool_call_envelope_from_native_call(adapted_call, adapted_arguments)
+    if adapted_call.tool_name in READ_ONLY_TOOL_NAMES:
+        result = _result_with_provider_tool_name(
+            execute_read_only_tool_call(envelope, workspace=workspace, allowed_roots=allowed_read_roots),
+            provider_tool_name=call.tool_name,
+            internal_tool_name=adapted_call.tool_name,
+        )
+        return with_tool_route_decision(
+            provider_envelope,
+            result,
+            effective_tool=adapted_call.tool_name,
+        )
+    if adapted_call.tool_name in EXEC_TOOL_NAMES:
+        result = _result_with_provider_tool_name(
+            exec_runtime.execute(envelope),
+            provider_tool_name=call.tool_name,
+            internal_tool_name=adapted_call.tool_name,
+        )
+        return with_tool_route_decision(
+            provider_envelope,
+            result,
+            effective_tool=adapted_call.tool_name,
+        )
+    if adapted_call.tool_name in WRITE_TOOL_NAMES:
         if not _side_effect_id_valid(call):
             return with_tool_route_decision(
-                envelope,
+                provider_envelope,
                 _invalid_result(call, reason="side-effecting tool call has invalid provider id"),
             )
         if bool(lane_config.get("auto_approve_writes")):
@@ -854,8 +888,124 @@ def _execute_native_call(
                 allow_governance_writes=bool(lane_config.get("allow_governance_writes")),
                 artifact_dir=lane_config.get("artifact_dir"),
             )
-        return with_tool_route_decision(envelope, write_runtime.execute(envelope))
-    return with_tool_route_decision(envelope, _invalid_result(call, reason=f"unknown native tool: {call.tool_name}"))
+        result = _result_with_provider_tool_name(
+            write_runtime.execute(envelope),
+            provider_tool_name=call.tool_name,
+            internal_tool_name=adapted_call.tool_name,
+        )
+        return with_tool_route_decision(
+            provider_envelope,
+            result,
+            effective_tool=adapted_call.tool_name,
+        )
+    return with_tool_route_decision(
+        envelope,
+        _invalid_result(call, reason=f"unknown native tool: {call.tool_name}"),
+    )
+
+
+def _result_with_provider_tool_name(
+    result: ToolResultEnvelope,
+    *,
+    provider_tool_name: str,
+    internal_tool_name: str,
+) -> ToolResultEnvelope:
+    if provider_tool_name == internal_tool_name:
+        return result
+    content = []
+    for item in result.content:
+        if isinstance(item, Mapping):
+            payload = dict(item)
+            payload["provider_tool_name"] = provider_tool_name
+            payload["internal_kernel"] = internal_tool_name
+            if payload.get("tool_name") == internal_tool_name:
+                payload["tool_name"] = provider_tool_name
+            if payload.get("effective_tool_name") == internal_tool_name:
+                payload["effective_tool_name"] = internal_tool_name
+            content.append(payload)
+        else:
+            content.append(item)
+    return replace(result, tool_name=provider_tool_name, content=tuple(content))
+
+
+def _adapt_codex_hot_path_call(
+    call: NativeTranscriptItem,
+    arguments: Mapping[str, object],
+    *,
+    lane_input: ImplementLaneInput,
+    lane_config: Mapping[str, object],
+) -> tuple[NativeTranscriptItem, dict[str, object], str]:
+    if tool_surface_profile_id(lane_config) != CODEX_HOT_PATH_PROFILE_ID:
+        return call, dict(arguments), ""
+    args = dict(arguments)
+    if call.tool_name == "exec_command":
+        mapped = _codex_exec_command_arguments(args, lane_input=lane_input)
+        return replace(call, tool_name="run_command"), mapped, ""
+    if call.tool_name == "write_stdin":
+        chars = str(args.get("chars") or "")
+        if chars:
+            return call, args, "write_stdin non-empty chars are not supported in poll_only mode"
+        session_id = str(args.get("session_id") or args.get("command_run_id") or "").strip()
+        if not session_id:
+            return call, args, "write_stdin session_id is required"
+        mapped = {
+            "command_run_id": session_id,
+            "wait_seconds": max(0.0, _safe_float(args.get("yield_time_ms"), default=0.0) / 1000.0),
+        }
+        for key in ("max_output_chars", "max_output_tokens"):
+            if args.get(key) not in (None, ""):
+                mapped[key] = args[key]
+        return replace(call, tool_name="poll_command"), mapped, ""
+    if call.tool_name == "list_dir":
+        mapped = {
+            "path": args.get("path") or ".",
+            "max_entries": args.get("max_entries"),
+        }
+        return replace(call, tool_name="inspect_dir"), mapped, ""
+    return call, args, ""
+
+
+def _codex_exec_command_arguments(
+    args: dict[str, object],
+    *,
+    lane_input: ImplementLaneInput,
+) -> dict[str, object]:
+    mapped = dict(args)
+    if mapped.get("command") in (None, "") and mapped.get("cmd") not in (None, ""):
+        mapped["command"] = mapped["cmd"]
+    if mapped.get("cwd") in (None, "") and mapped.get("workdir") not in (None, ""):
+        mapped["cwd"] = mapped["workdir"]
+    if mapped.get("foreground_budget_seconds") in (None, "") and mapped.get("yield_time_ms") not in (None, ""):
+        mapped["foreground_budget_seconds"] = max(
+            0.0,
+            _safe_float(mapped.get("yield_time_ms"), default=0.0) / 1000.0,
+        )
+    if _matches_verify_command(mapped, lane_input=lane_input):
+        mapped.setdefault("command_intent", "verify")
+    return mapped
+
+
+def _matches_verify_command(
+    args: Mapping[str, object],
+    *,
+    lane_input: ImplementLaneInput,
+) -> bool:
+    verify_command = str(
+        (lane_input.lane_config or {}).get("verify_command")
+        or (lane_input.task_contract or {}).get("verify_command")
+        or ""
+    ).strip()
+    if not verify_command:
+        return False
+    command = str(args.get("command") or args.get("cmd") or "").strip()
+    return command == verify_command
+
+
+def _safe_float(value: object, *, default: float) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
 
 
 def _tool_call_envelope_from_native_call(
@@ -882,6 +1032,16 @@ def _native_tool_available(
     lane_input: ImplementLaneInput,
     lane_config: Mapping[str, object],
 ) -> bool:
+    if tool_surface_profile_id(lane_config) == CODEX_HOT_PATH_PROFILE_ID:
+        try:
+            snapshot = build_tool_surface_snapshot(
+                lane_config=lane_config,
+                task_contract=lane_input.task_contract,
+                transcript_items=(),
+            )
+        except ValueError:
+            return False
+        return str(tool_name or "") in set(snapshot.provider_tool_names)
     mode = str(lane_config.get("mode") or "full").strip() or "full"
     return str(tool_name or "") in {
         spec.name
@@ -2172,6 +2332,13 @@ def _tool_specs_from_request_descriptor(
         for name in (request_descriptor.get("provider_tool_names") or ())
         if str(name or "").strip()
     }
+    if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
+        snapshot = _tool_surface_snapshot_for_request(
+            lane_input,
+            (),
+            available_provider_tool_names=tuple(sorted(names)) if names else None,
+        )
+        return snapshot.tool_specs
     specs = list_v2_tool_specs_for_task(
         lane_input.lane_config.get("mode") or "full",
         task_contract=lane_input.task_contract,
@@ -2563,7 +2730,7 @@ def _native_call_is_prewrite_probe(item: NativeTranscriptItem) -> bool:
 
 
 def _native_call_is_source_mutating_exec(item: NativeTranscriptItem) -> bool:
-    if item.tool_name != "run_command":
+    if item.tool_name not in {"run_command", "exec_command"}:
         return False
     arguments, _ = _arguments(item)
     command_intent = str(arguments.get("command_intent") or arguments.get("intent") or "").strip().casefold()
@@ -2720,7 +2887,7 @@ def _truncate_control_text(value: str) -> str:
 def _native_call_is_verifier(item: NativeTranscriptItem) -> bool:
     if item.tool_name == "run_tests":
         return True
-    if item.tool_name != "run_command":
+    if item.tool_name not in {"run_command", "exec_command"}:
         return False
     arguments, _ = _arguments(item)
     command_intent = str(arguments.get("command_intent") or arguments.get("intent") or "").strip().casefold()

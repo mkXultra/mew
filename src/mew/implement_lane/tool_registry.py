@@ -193,11 +193,18 @@ def build_tool_surface_snapshot(
     """Build a deterministic tool-surface snapshot for one provider request."""
 
     profile_id = tool_surface_profile_id(lane_config)
+    mode = str((lane_config or {}).get("mode") or "full")
+    profile_options = tool_surface_profile_options(lane_config)
+    if profile_id == CODEX_HOT_PATH_PROFILE_ID:
+        return _codex_hot_path_snapshot(
+            mode=mode,
+            profile_options=profile_options,
+            available_provider_tool_names=available_provider_tool_names,
+            provider_supports_parallel_tool_calls=provider_supports_parallel_tool_calls,
+        )
     if profile_id != MEW_LEGACY_PROFILE_ID:
         raise ValueError(f"unsupported tool_surface_profile_id: {profile_id}")
 
-    mode = str((lane_config or {}).get("mode") or "full")
-    profile_options = tool_surface_profile_options(lane_config)
     profile = ToolSurfaceProfile(
         profile_id=MEW_LEGACY_PROFILE_ID,
         profile_version="v1",
@@ -238,6 +245,130 @@ def build_tool_surface_snapshot(
         parallel_tool_calls_requested=requested_parallel,
         parallel_tool_calls_effective=effective_parallel,
         interactive_stdin=profile.interactive_stdin,
+    )
+
+
+def _codex_hot_path_snapshot(
+    *,
+    mode: str,
+    profile_options: Mapping[str, object],
+    available_provider_tool_names: Sequence[str] | None,
+    provider_supports_parallel_tool_calls: bool,
+) -> ToolSurfaceSnapshot:
+    profile = ToolSurfaceProfile(
+        profile_id=CODEX_HOT_PATH_PROFILE_ID,
+        profile_version="v0",
+        prompt_contract_id="codex_hot_path_prompt_v1",
+        render_policy_id="codex_hot_path_result_text_v1",
+        default_parallel_tool_calls=True,
+        interactive_stdin=False,
+    )
+    effective_options = {"write_stdin_mode": "poll_only", **dict(profile_options)}
+    specs = _codex_hot_path_specs(enable_list_dir=effective_options.get("enable_list_dir") is True)
+    if available_provider_tool_names is not None:
+        names = {str(name) for name in available_provider_tool_names}
+        specs = tuple(spec for spec in specs if spec.name in names)
+    entries = tuple(_codex_hot_path_entry(spec, profile) for spec in specs)
+    descriptor_payload = [spec.as_dict() for spec in specs]
+    route_payload = [entry.as_dict() for entry in entries]
+    render_payload = {
+        "profile_id": profile.profile_id,
+        "render_policy_id": profile.render_policy_id,
+        "provider_tool_names": [spec.name for spec in specs],
+    }
+    requested_parallel = profile.default_parallel_tool_calls
+    effective_parallel = requested_parallel and bool(provider_supports_parallel_tool_calls)
+    return ToolSurfaceSnapshot(
+        schema_version=TOOL_REGISTRY_SCHEMA_VERSION,
+        profile=profile,
+        profile_options=effective_options,
+        mode=mode,
+        provider_tool_names=tuple(spec.name for spec in specs),
+        tool_specs=tuple(specs),
+        entries=entries,
+        profile_hash=stable_json_hash(profile.as_dict()),
+        descriptor_hash=stable_json_hash(descriptor_payload),
+        route_table_hash=stable_json_hash(route_payload),
+        render_policy_hash=stable_json_hash(render_payload),
+        parallel_tool_calls_requested=requested_parallel,
+        parallel_tool_calls_effective=effective_parallel,
+        interactive_stdin=profile.interactive_stdin,
+    )
+
+
+def _codex_hot_path_specs(*, enable_list_dir: bool) -> tuple[ImplementLaneToolSpec, ...]:
+    legacy_by_name = {spec.name: spec for spec in list_v2_tool_specs_for_task("full")}
+    specs = [
+        legacy_by_name["apply_patch"],
+        ImplementLaneToolSpec(
+            name="exec_command",
+            access="execute",
+            description=(
+                "Run a bounded shell command in the workspace. Use it for builds, "
+                "tests, and probes; use apply_patch for source edits."
+            ),
+            approval_required=True,
+        ),
+        ImplementLaneToolSpec(
+            name="write_stdin",
+            access="execute",
+            description=(
+                "Poll an existing yielded command session with empty chars. "
+                "Interactive stdin is disabled in this profile version."
+            ),
+        ),
+        legacy_by_name["finish"],
+    ]
+    if enable_list_dir:
+        specs.insert(
+            1,
+            ImplementLaneToolSpec(
+                name="list_dir",
+                access="read",
+                description="List a workspace directory with bounded entries.",
+            ),
+        )
+    return tuple(specs)
+
+
+def _codex_hot_path_entry(
+    spec: ImplementLaneToolSpec,
+    profile: ToolSurfaceProfile,
+) -> ToolRegistryEntry:
+    internal_kernel = {
+        "exec_command": "run_command",
+        "write_stdin": "poll_command",
+        "list_dir": "inspect_dir",
+    }.get(spec.name, spec.name)
+    family = _tool_family(spec)
+    availability_class = _availability_class(spec, family=family)
+    if spec.name == "write_stdin":
+        family = "lifecycle"
+        availability_class = "active_session"
+    payload = {
+        "provider_name": spec.name,
+        "internal_kernel": internal_kernel,
+        "visibility": "provider_visible",
+        "access": spec.access,
+        "render_policy_id": profile.render_policy_id,
+        "family": family,
+        "availability_class": availability_class,
+        "descriptor_adapter_id": "codex_hot_path_descriptor_v1",
+        "argument_adapter_id": f"codex_hot_path_{spec.name}_arguments_v1",
+        "supports_parallel_tool_calls": True,
+    }
+    return ToolRegistryEntry(
+        provider_name=spec.name,
+        internal_kernel=internal_kernel,
+        visibility="provider_visible",
+        access=spec.access,
+        render_policy_id=profile.render_policy_id,
+        family=family,
+        availability_class=availability_class,
+        descriptor_adapter_id="codex_hot_path_descriptor_v1",
+        argument_adapter_id=f"codex_hot_path_{spec.name}_arguments_v1",
+        supports_parallel_tool_calls=True,
+        route_hash=stable_json_hash(payload),
     )
 
 

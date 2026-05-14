@@ -31,6 +31,7 @@ from mew.implement_lane.native_transcript import (
     native_proof_manifest_from_transcript,
     validate_native_transcript_pairing,
 )
+from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID
 from mew.implement_lane.types import ImplementLaneInput
 
 
@@ -412,6 +413,200 @@ def test_live_native_descriptor_preserves_requested_lifecycle_tools(tmp_path: Pa
         for tool in provider.requests[0]["request_body"]["tools"]  # type: ignore[index]
     }
     assert "read_command_output" in tool_names
+
+
+def test_live_native_descriptor_preserves_codex_hot_path_tools(tmp_path: Path) -> None:
+    lane_input = _lane_input(
+        tmp_path,
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+    )
+    provider = NativeCodexResponsesProvider(
+        lane_input=lane_input,
+        auth={"access_token": "token"},
+        base_url="https://example.invalid",
+        timeout=10,
+        model="gpt-5.5",
+    )
+    completed = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+        ),
+        response_id="resp-1",
+        status="completed",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
+        return_value=completed,
+    ):
+        provider.next_response(
+            {
+                "lane_attempt_id": "ws-native:task-native:implement_v2:native",
+                "turn_index": 1,
+                "input_items": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "{}"}],
+                    }
+                ],
+                "instructions": "test",
+                "transcript_window": [],
+                "provider_tool_names": [
+                    "apply_patch",
+                    "exec_command",
+                    "write_stdin",
+                    "finish",
+                ],
+                "tool_surface": {
+                    "profile_id": CODEX_HOT_PATH_PROFILE_ID,
+                    "profile_version": "v0",
+                },
+            }
+        )
+
+    tool_names = [
+        tool.get("name") or dict(tool.get("function") or {}).get("name")
+        for tool in provider.requests[0]["request_body"]["tools"]  # type: ignore[index]
+    ]
+    assert tool_names == ["apply_patch", "exec_command", "write_stdin", "finish"]
+
+
+def test_codex_hot_path_exec_command_routes_to_managed_exec(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "exec-1",
+                    "exec_command",
+                    {"cmd": f"{sys.executable} -c \"print('ok')\"", "yield_time_ms": 1000},
+                    output_index=0,
+                ),
+                fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        artifact_root=tmp_path / "artifacts-codex-hot-path",
+        max_turns=1,
+    )
+
+    assert provider.requests[0]["provider_tool_names"] == [
+        "apply_patch",
+        "exec_command",
+        "write_stdin",
+        "finish",
+    ]
+    output = next(item for item in result.transcript.items if item.kind == "function_call_output")
+    assert output.tool_name == "exec_command"
+    assert output.status == "completed"
+    assert "command_run_id=" in output.output_text_or_ref
+    assert "run_command result" not in output.output_text_or_ref
+    routes = [
+        json.loads(line)
+        for line in (tmp_path / "artifacts-codex-hot-path" / "tool_routes.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert routes[0]["declared_tool"] == "exec_command"
+    assert routes[0]["effective_tool"] == "run_command"
+    assert routes[0]["tool_route"] == "process_runner"
+
+
+def test_codex_hot_path_exec_command_matching_verifier_preserves_verify_intent(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "exec-verify",
+                    "exec_command",
+                    {"cmd": "test -f done.txt", "yield_time_ms": 1000},
+                    output_index=0,
+                ),
+                fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+            verify_command="test -f done.txt",
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    exec_output = next(item for item in result.transcript.items if item.kind == "function_call_output")
+    assert exec_output.tool_name == "exec_command"
+    assert any("structured_finish_gate" in ref for ref in exec_output.evidence_refs)
+
+
+def test_codex_hot_path_write_stdin_empty_chars_polls_session(tmp_path: Path) -> None:
+    command_id = _command_run_id("exec-1")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "exec-1",
+                    "exec_command",
+                    {
+                        "cmd": f"{sys.executable} -c \"print('done')\"",
+                        "yield_time_ms": 0,
+                    },
+                    output_index=0,
+                )
+            ],
+            [
+                fake_call(
+                    "stdin-1",
+                    "write_stdin",
+                    {"session_id": command_id, "chars": "", "yield_time_ms": 1000},
+                    output_index=0,
+                )
+            ],
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        max_turns=2,
+    )
+
+    output = result.transcript.items[-1]
+    assert output.tool_name == "write_stdin"
+    assert output.status == "completed"
+    assert "command_run_id=" in output.output_text_or_ref
+
+
+def test_codex_hot_path_write_stdin_non_empty_chars_fails_poll_only(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "stdin-1",
+                    "write_stdin",
+                    {"session_id": "session-1", "chars": "q"},
+                    output_index=0,
+                )
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        max_turns=1,
+    )
+
+    output = next(item for item in result.transcript.items if item.kind == "function_call_output")
+    assert output.tool_name == "write_stdin"
+    assert output.status == "invalid"
+    assert "poll_only" in output.output_text_or_ref
 
 
 def test_native_provider_input_surfaces_missing_verify_path_as_factual_task_fact(tmp_path: Path) -> None:
