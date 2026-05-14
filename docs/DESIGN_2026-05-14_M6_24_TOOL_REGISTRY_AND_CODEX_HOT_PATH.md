@@ -1,6 +1,7 @@
 # Design 2026-05-14 - M6.24 ToolRegistry And Codex Hot Path
 
-Status: Phase 0-4 implemented; Phase 5 pending.
+Status: Phase 0-5 implemented; default remains `mew_legacy` until the Phase 5
+gate passes real fixed-set evidence.
 
 Scope: `implement_v2` native tool surface selection, provider-visible tool
 descriptors, provider-visible tool result rendering, route observability, and
@@ -1098,6 +1099,14 @@ Suggested tests:
 
 Intent: switch the default profile only after evidence says the new surface is
 better.
+
+Implementation status: implemented as an explicit blocker gate, not a default
+switch. `src/mew/implement_lane/tool_surface_default_gate.py` and
+`scripts/check_tool_surface_default_switch_gate.py` consume Phase 4 A/B report
+artifacts, require a fixed A/B set and reviewer acceptance, and block default
+switching when comparability, forbidden-field scans, pairing/proof/evidence,
+success/acceptance, first-write/probe cadence, verifier repair latency,
+visible-byte safety, or `write_stdin`/adapter limitations regress.
 
 Close gate:
 
