@@ -1109,7 +1109,11 @@ success/acceptance, first-write/probe cadence, verifier repair latency,
 visible-byte safety, or `write_stdin`/adapter limitations regress.
 `scripts/run_tool_surface_ab_smoke.py` generates a reusable fake-native
 `mew_legacy` vs `codex_hot_path` smoke artifact set and writes both the Phase 4
-report and Phase 5 gate result.
+report and Phase 5 gate result. Live/pre-speed A/B can now select the same
+profile surface through `mew work --oneshot --work-guidance
+tool_surface_profile_id=<profile>`; `scripts/run_harbor_mew_diagnostic.py`
+also exposes `--tool-surface-profile-id` and includes it in the generated
+jobs-dir name.
 
 Close gate:
 

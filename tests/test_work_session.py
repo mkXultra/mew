@@ -11355,6 +11355,136 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_selected_implement_v2_accepts_tool_surface_profile_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = "selected_lane=implement_v2 tool_surface_profile_id=codex_hot_path"
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertEqual(lane_input.lane_config["tool_surface_profile_id"], "codex_hot_path")
+                self.assertNotIn("tool_surface_profile_id", lane_input.task_contract["guidance"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_accepts_json_tool_surface_options(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = json.dumps(
+                    {
+                        "selected_lane": "implement_v2",
+                        "lane_config": {
+                            "tool_surface_profile_id": "codex_hot_path",
+                            "tool_surface_profile_options": {"enable_list_dir": True},
+                        },
+                    }
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertEqual(lane_input.lane_config["tool_surface_profile_id"], "codex_hot_path")
+                self.assertEqual(lane_input.lane_config["tool_surface_profile_options"], {"enable_list_dir": True})
+                task_guidance = json.loads(lane_input.task_contract["guidance"])
+                self.assertNotIn("lane_config", task_guidance)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_oneshot_selected_implement_v2_accepts_json_repair_history_guidance(self):
         from mew.implement_lane import ImplementLaneResult
 

@@ -16,6 +16,7 @@ from mew.mew_harbor_runner import (
     make_jobs_dir,
     observer_detail_missing,
     step_budget_preempted,
+    strip_tool_surface_profile_guidance,
     summarize_latest_run,
     work_guidance_with_workframe_variant,
 )
@@ -82,6 +83,19 @@ def test_parser_accepts_repeated_work_guidance_fragments():
     assert args.work_guidance == ["selected_lane=implement_v2", "m6_24_step_shape_check=true"]
 
 
+def test_parser_accepts_tool_surface_profile_id():
+    args = build_parser().parse_args(
+        [
+            "make-mips-interpreter",
+            "--tool-surface-profile-id",
+            "codex_hot_path",
+            "--dry-run",
+        ]
+    )
+
+    assert args.tool_surface_profile_id == "codex_hot_path"
+
+
 def test_combine_work_guidance_keeps_diagnostic_defaults_and_adds_fragments():
     guidance = combine_work_guidance(
         ["m6_24_step_shape_check=true"],
@@ -130,6 +144,38 @@ def test_mew_command_template_can_pass_workframe_variant(tmp_path):
     template = build_mew_work_command_template(_config(tmp_path, workframe_variant="transcript_first"))
 
     assert "workframe_variant=transcript_first" in template
+
+
+def test_mew_command_template_can_pass_tool_surface_profile(tmp_path):
+    template = build_mew_work_command_template(
+        _config(
+            tmp_path,
+            work_guidance=(
+                "selected_lane=implement_v2 "
+                "write_integration_observation_detail=true "
+                "tool_surface_profile_id=codex_hot_path"
+            ),
+        )
+    )
+
+    assert "tool_surface_profile_id=codex_hot_path" in template
+
+
+def test_strip_tool_surface_profile_guidance_removes_string_profile_selection():
+    guidance = strip_tool_surface_profile_guidance(
+        "selected_lane=implement_v2 tool_surface_profile_id=mew_legacy extra=true"
+    )
+
+    assert guidance == "selected_lane=implement_v2 extra=true"
+
+
+def test_strip_tool_surface_profile_guidance_removes_nested_json_profile_selection():
+    guidance = strip_tool_surface_profile_guidance(
+        '{"selected_lane":"implement_v2","lane_config":{"tool_surface_profile_id":"mew_legacy","x":1}}'
+    )
+
+    payload = json.loads(guidance)
+    assert payload == {"lane_config": {"x": 1}, "selected_lane": "implement_v2"}
 
 
 def test_work_guidance_with_workframe_variant_preserves_existing_choice():
@@ -238,6 +284,17 @@ def test_make_jobs_dir_includes_current_workframe_variant_when_explicit(tmp_path
     )
 
     assert jobs_dir == tmp_path / "mew-make-mips-interpreter-step-check-10min-wf-current-20260508-173000"
+
+
+def test_make_jobs_dir_includes_tool_surface_profile_when_explicit(tmp_path):
+    jobs_dir = make_jobs_dir(
+        "make-mips-interpreter",
+        tmp_path,
+        now=dt.datetime(2026, 5, 8, 17, 30, 0),
+        tool_surface_profile_id="codex_hot_path",
+    )
+
+    assert jobs_dir == tmp_path / "mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260508-173000"
 
 
 def test_collect_mew_trial_summary_reports_observer_detail(tmp_path):

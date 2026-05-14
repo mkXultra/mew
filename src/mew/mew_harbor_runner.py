@@ -105,13 +105,16 @@ def make_jobs_dir(
     now: dt.datetime | None = None,
     run_mode: str = "step-check-10min",
     workframe_variant: str = "",
+    tool_surface_profile_id: str = "",
 ) -> Path:
     timestamp = (now or dt.datetime.now()).strftime("%Y%m%d-%H%M%S")
     task_slug = task_name.removeprefix("terminal-bench/").replace("/", "-")
     mode_slug = run_mode.replace("_", "-")
     variant_slug = workframe_variant.strip().replace("_", "-") if workframe_variant else ""
     variant_part = f"-wf-{variant_slug}" if variant_slug else ""
-    return jobs_root / f"mew-{task_slug}-{mode_slug}{variant_part}-{timestamp}"
+    tool_surface_slug = tool_surface_profile_id.strip().replace("_", "-") if tool_surface_profile_id else ""
+    tool_surface_part = f"-ts-{tool_surface_slug}" if tool_surface_slug else ""
+    return jobs_root / f"mew-{task_slug}-{mode_slug}{variant_part}{tool_surface_part}-{timestamp}"
 
 
 def work_guidance_with_workframe_variant(work_guidance: str, workframe_variant: str) -> str:
@@ -192,6 +195,32 @@ def _coerce_guidance_scalar(value: str) -> object:
         return int(text)
     except ValueError:
         return text
+
+
+def strip_tool_surface_profile_guidance(guidance: str) -> str:
+    """Remove profile-selection guidance so an explicit CLI flag can override it."""
+
+    text = str(guidance or "").strip()
+    if not text:
+        return ""
+    payload = _guidance_json_object(text)
+    if payload is not None:
+        cleaned = dict(payload)
+        for key in ("tool_surface_profile_id", "tool_surface_profile", "tool_surface_profile_options"):
+            cleaned.pop(key, None)
+        lane_config = cleaned.get("lane_config")
+        if isinstance(lane_config, dict):
+            lane_config = dict(lane_config)
+            for key in ("tool_surface_profile_id", "tool_surface_profile", "tool_surface_profile_options"):
+                lane_config.pop(key, None)
+            if lane_config:
+                cleaned["lane_config"] = lane_config
+            else:
+                cleaned.pop("lane_config", None)
+        return json.dumps(cleaned, ensure_ascii=False, separators=(",", ":"), sort_keys=True) if cleaned else ""
+    for name in ("tool_surface_profile_id", "tool_surface_profile", "tool_surface_profile_options"):
+        text = re.sub(rf"(?:^|\s){re.escape(name)}\s*=\s*[A-Za-z0-9_.-]+", " ", text)
+    return " ".join(text.split())
 
 
 def build_mew_work_command_template(config: MewHarborRun) -> str:
@@ -741,6 +770,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="WorkFrame reducer variant to pass into mew work, e.g. transition_contract, current, or transcript_first.",
     )
+    parser.add_argument(
+        "--tool-surface-profile-id",
+        default="",
+        help="ToolSurfaceProfile id to pass into implement_v2, e.g. mew_legacy or codex_hot_path.",
+    )
     parser.add_argument("--install-command", default=DEFAULT_INSTALL_COMMAND)
     parser.add_argument(
         "--allow-missing-observer-detail",
@@ -761,7 +795,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.jobs_root,
         run_mode=args.mode,
         workframe_variant=args.workframe_variant,
+        tool_surface_profile_id=args.tool_surface_profile_id,
     )
+    work_guidance_fragments = list(args.work_guidance or [])
+    if args.tool_surface_profile_id:
+        work_guidance_fragments = [
+            cleaned
+            for fragment in work_guidance_fragments
+            if (cleaned := strip_tool_surface_profile_guidance(fragment))
+        ]
+        work_guidance_fragments.append(f"tool_surface_profile_id={args.tool_surface_profile_id}")
     config = MewHarborRun(
         task_name=args.task_name,
         dataset=args.dataset,
@@ -780,7 +823,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else mode_defaults.timeout_reserve_seconds
         ),
         agent_timeout_multiplier=args.agent_timeout_multiplier,
-        work_guidance=combine_work_guidance(args.work_guidance, mode_defaults.work_guidance),
+        work_guidance=combine_work_guidance(work_guidance_fragments, mode_defaults.work_guidance),
         install_command=args.install_command,
         run_mode=args.mode,
         require_observer_detail=require_observer_detail,

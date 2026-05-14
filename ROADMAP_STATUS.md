@@ -90,6 +90,14 @@ provider-visible tools and result text are profile-controlled; transcript,
 proof, replay, typed evidence, observer artifacts, and finish gates remain
 internal sidecars or diagnostics, not live `next_action` steering.
 
+Latest boundary: fake-native A/B smoke and default-switch gate are committed,
+and live/pre-speed A/B now has explicit profile plumbing via
+`mew work --oneshot --work-guidance tool_surface_profile_id=<profile>` plus
+`scripts/run_harbor_mew_diagnostic.py --tool-surface-profile-id`. The next
+bounded step is to define the smallest fixed live A/B set and run paired
+`mew_legacy` / `codex_hot_path` diagnostics before any default switch or broad
+speed proof.
+
 Latest Codex-like hot-path validation:
 
 - Phase 0 contract/static gates: committed as `eee130d`, codex-ultra approved.

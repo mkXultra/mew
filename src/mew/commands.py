@@ -7193,6 +7193,21 @@ def _work_guidance_string_option(guidance, *names):
     return ""
 
 
+def _work_guidance_dict_option(guidance, *names):
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        value = payload.get(name) if isinstance(payload, dict) else None
+        if isinstance(value, dict):
+            return dict(value)
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            value = lane_config.get(name)
+            if isinstance(value, dict):
+                return dict(value)
+    return {}
+
+
 def _work_guidance_persisted_lane_state(guidance):
     payload = _work_guidance_json_payload(guidance)
     if not payload:
@@ -7236,6 +7251,9 @@ def _work_guidance_task_contract_guidance(guidance):
         "resume_repair_history",
         "workframe_variant",
         "work_frame_variant",
+        "tool_surface_profile_id",
+        "tool_surface_profile",
+        "tool_surface_profile_options",
     ):
         sanitized.pop(key, None)
     lane_config = sanitized.get("lane_config")
@@ -7243,6 +7261,9 @@ def _work_guidance_task_contract_guidance(guidance):
         lane_config = dict(lane_config)
         lane_config.pop("workframe_variant", None)
         lane_config.pop("work_frame_variant", None)
+        lane_config.pop("tool_surface_profile_id", None)
+        lane_config.pop("tool_surface_profile", None)
+        lane_config.pop("tool_surface_profile_options", None)
         if lane_config:
             sanitized["lane_config"] = lane_config
         else:
@@ -7252,7 +7273,13 @@ def _work_guidance_task_contract_guidance(guidance):
 
 def _strip_internal_work_guidance_options(guidance):
     text = str(guidance or "")
-    for name in ("workframe_variant", "work_frame_variant"):
+    for name in (
+        "workframe_variant",
+        "work_frame_variant",
+        "tool_surface_profile_id",
+        "tool_surface_profile",
+        "tool_surface_profile_options",
+    ):
         text = re.sub(rf"(?:^|\s){re.escape(name)}\s*=\s*[A-Za-z0-9_.-]+", " ", text)
     return " ".join(text.split())
 
@@ -7448,6 +7475,41 @@ def _run_work_ai_implement_v2(
         if active_work_todo:
             persisted_lane_state["active_work_todo"] = active_work_todo
 
+    tool_surface_profile_id = _work_guidance_string_option(
+        getattr(effective_args, "work_guidance", None),
+        "tool_surface_profile_id",
+        "tool_surface_profile",
+    )
+    tool_surface_profile_options = _work_guidance_dict_option(
+        getattr(effective_args, "work_guidance", None),
+        "tool_surface_profile_options",
+    )
+    lane_config = {
+        "mode": "full",
+        "allowed_read_roots": _work_ai_workspace_roots(effective_args.allow_read or [], workspace),
+        "allowed_write_roots": _work_ai_workspace_roots(effective_args.allow_write or [], workspace),
+        "allow_shell": bool(effective_args.allow_shell),
+        "allow_verify": bool(effective_args.allow_verify),
+        "verify_command": getattr(effective_args, "verify_command", None) or "",
+        "auto_approve_writes": work_auto_approve_edits_enabled(effective_args),
+        "artifact_dir": getattr(effective_args, "oneshot_artifacts", "") or "",
+        "max_steps": max_steps,
+        "workframe_variant": _work_guidance_string_option(
+            getattr(effective_args, "work_guidance", None),
+            "workframe_variant",
+            "work_frame_variant",
+        ),
+        "write_integration_observation_detail": _work_guidance_bool_option(
+            getattr(effective_args, "work_guidance", None),
+            "write_integration_observation_detail",
+            "integration_observation_detail",
+        ),
+    }
+    if tool_surface_profile_id:
+        lane_config["tool_surface_profile_id"] = tool_surface_profile_id
+    if tool_surface_profile_options:
+        lane_config["tool_surface_profile_options"] = tool_surface_profile_options
+
     lane_input = ImplementLaneInput(
         work_session_id=str(session_id),
         task_id=str(task_id),
@@ -7464,27 +7526,7 @@ def _run_work_ai_implement_v2(
             verify_command=getattr(effective_args, "verify_command", None) or "",
         ),
         persisted_lane_state=persisted_lane_state,
-        lane_config={
-            "mode": "full",
-            "allowed_read_roots": _work_ai_workspace_roots(effective_args.allow_read or [], workspace),
-            "allowed_write_roots": _work_ai_workspace_roots(effective_args.allow_write or [], workspace),
-            "allow_shell": bool(effective_args.allow_shell),
-            "allow_verify": bool(effective_args.allow_verify),
-            "verify_command": getattr(effective_args, "verify_command", None) or "",
-            "auto_approve_writes": work_auto_approve_edits_enabled(effective_args),
-            "artifact_dir": getattr(effective_args, "oneshot_artifacts", "") or "",
-            "max_steps": max_steps,
-            "workframe_variant": _work_guidance_string_option(
-                getattr(effective_args, "work_guidance", None),
-                "workframe_variant",
-                "work_frame_variant",
-            ),
-            "write_integration_observation_detail": _work_guidance_bool_option(
-                getattr(effective_args, "work_guidance", None),
-                "write_integration_observation_detail",
-                "integration_observation_detail",
-            ),
-        },
+        lane_config=lane_config,
     )
     if progress:
         progress("selected implement_v2 native transcript runtime; bypassing v1 THINK/ACT")
