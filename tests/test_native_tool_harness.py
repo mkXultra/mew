@@ -816,6 +816,108 @@ def test_native_provider_input_does_not_mark_existing_verify_path_missing(tmp_pa
     assert "missing_workspace_paths" not in task_facts
 
 
+def test_native_provider_input_exposes_probe_constraints_as_task_facts(tmp_path: Path) -> None:
+    (tmp_path / "doomgeneric_mips").write_text("elf", encoding="utf-8")
+    source_dir = tmp_path / "doomgeneric" / "doomgeneric"
+    source_dir.mkdir(parents=True)
+    (source_dir / "doomgeneric_img.c").write_text("void DG_DrawFrame(void) {}\n", encoding="utf-8")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("scan-1", "inspect_dir", {"path": "doomgeneric"}, output_index=1),
+                fake_call("binary-1", "run_command", {"command": "file doomgeneric_mips"}, output_index=2),
+                fake_call("read-1", "read_file", {"path": "doomgeneric/doomgeneric/doomgeneric_img.c"}, output_index=3),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "description": "Implement vm.js using doomgeneric_mips and doomgeneric/.",
+            "verify_command": "node vm.js",
+        },
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=2)
+
+    task_facts = _task_payload(provider.requests[1])["task_facts"]
+    constraints = task_facts["implementation_constraints"]
+    assert constraints["source"] == "native_transcript_probe_facts"
+    assert "source_scan" in constraints["observed_probe_families"]
+    assert "source_read" in constraints["observed_probe_families"]
+    assert "binary_probe" in constraints["observed_probe_families"]
+    assert constraints["patch_context"]["source_observed"] is True
+    assert constraints["patch_context"]["artifact_or_runtime_observed"] is True
+    assert constraints["patch_context"]["basis"] == "source_plus_artifact_probe"
+    assert "doomgeneric_mips" in constraints["observed_paths"]
+    assert "doomgeneric/doomgeneric/doomgeneric_img.c" in constraints["observed_paths"]
+    rendered = json.dumps(task_facts, sort_keys=True)
+    assert "next_action" not in rendered
+    assert "required_next" not in rendered
+    assert "first_write" not in rendered
+
+
+def test_native_probe_constraints_ignore_mutation_and_process_lifecycle_tools(tmp_path: Path) -> None:
+    (tmp_path / "src.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("read-1", "read_file", {"path": "src.c"}, output_index=1),
+                fake_call("write-1", "apply_patch", {"patch": "*** Begin Patch\n*** End Patch\n"}, output_index=2),
+                fake_call("poll-1", "poll_command", {"command_id": "cmd-1"}, output_index=3),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    constraints = _task_payload(provider.requests[1])["task_facts"]["implementation_constraints"]
+    assert constraints["observed_probe_families"] == ["source_read"]
+    rendered = json.dumps(constraints, sort_keys=True)
+    assert "apply_patch" not in rendered
+    assert "poll_command" not in rendered
+
+
+def test_native_probe_constraints_understand_codex_hot_path_provider_tool_aliases(tmp_path: Path) -> None:
+    (tmp_path / "doomgeneric_mips").write_text("elf", encoding="utf-8")
+    (tmp_path / "doomgeneric").mkdir()
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("scan-1", "list_dir", {"path": "doomgeneric"}, output_index=1),
+                fake_call("binary-1", "exec_command", {"cmd": "file doomgeneric_mips"}, output_index=2),
+                fake_call(
+                    "mutate-1",
+                    "exec_command",
+                    {"cmd": "cat > vm.js", "command_intent": "implementation"},
+                    output_index=3,
+                ),
+                fake_call("poll-1", "write_stdin", {"session_id": "cmd-1"}, output_index=4),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+        tool_surface_profile_options={"enable_list_dir": True},
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=2)
+
+    constraints = _task_payload(provider.requests[1])["task_facts"]["implementation_constraints"]
+    assert "source_scan" in constraints["observed_probe_families"]
+    assert "binary_probe" in constraints["observed_probe_families"]
+    assert "doomgeneric" in constraints["observed_paths"]
+    assert "doomgeneric_mips" in constraints["observed_paths"]
+    rendered = json.dumps(constraints, sort_keys=True)
+    assert "write_stdin" not in rendered
+    assert "cat > vm.js" not in rendered
+    assert "vm.js" not in constraints["observed_paths"]
+
+
 def test_native_provider_input_task_facts_relativize_workspace_absolute_paths(tmp_path: Path) -> None:
     (tmp_path / "doomgeneric_mips").write_text("elf", encoding="utf-8")
     (tmp_path / "doomgeneric").mkdir()
