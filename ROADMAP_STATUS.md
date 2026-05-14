@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed, so next work should target prompt/transcript/task-shape salience rather than apply_patch wording. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1/H7 provider-visible salience snapshot shows a JSON envelope with `compact_sidecar_digest` leading every saved request. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,10 +70,10 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_hot_path_post_h6_reselect_prompt_transcript_experiment`.
+`m6_24_hot_path_h1_task_first_provider_shape_experiment`.
 
 Current diagnostic mode:
-`h10_measured_failed_reverted__h6_measured_pass`.
+`h10_failed_reverted__h6_passed__h1_h7_salience_measured`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
@@ -91,6 +91,14 @@ passed: the first tool call was a custom `apply_patch` call in
 do not spend the next cycle tuning `apply_patch` wording or transport by
 intuition. The next measured experiment should target prompt/transcript/task
 shape salience or evidence-to-patch synthesis.
+The H1/H7 salience snapshot then analyzed the existing H10
+`native-provider-requests.json` without live execution. Result: 50/50 requests
+used a JSON envelope as the first user item, 50/50 exposed
+`compact_sidecar_digest`, and the first request section order started with
+`compact_sidecar_digest, lane` before `task_contract` and `task_facts`.
+Therefore the next behavior experiment is H1 only: make the provider-visible
+hot-path task payload task-first while keeping H7 sidecar visibility unchanged.
+Do not combine this with hiding the compact sidecar yet.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -136,6 +144,14 @@ Fixed execution order:
      and `uv run ruff check src/mew/implement_lane/apply_patch_affordance.py scripts/check_apply_patch_affordance.py tests/test_apply_patch_affordance.py`;
    - live one-turn provider-native check passed with first tool
      `apply_patch`.
+8. H1/H7 provider-visible salience analyzer:
+   - added `scripts/analyze_provider_visible_salience.py` and
+     `src/mew/implement_lane/provider_visible_salience.py`;
+   - saved-artifact report for H10:
+     `tmp/m6_24_h10_provider_visible_salience.md`;
+   - observed JSON envelope on every first user item, visible
+     `compact_sidecar_digest` on every request, and sidecar section order
+     before task content.
 
 Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
 context, but it no longer controls the immediate next action. Do not resume
@@ -192,11 +208,10 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: H0 and H6 observability are done, and H10 failed. Do not
-  repair broad behavior by intuition. Select the next single measured
-  prompt/transcript/task-shape experiment that explains why the model keeps
-  probing after readiness even though `apply_patch` affordance passes in
-  isolation.
+- Current next action: H0/H10/H6 and the H1/H7 salience snapshot are measured.
+  Implement the smallest H1 behavior change: task-first provider-visible input
+  shape, with compact sidecar still visible. Do not tune `apply_patch`, add
+  next-action steering, or hide the sidecar in the same experiment.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe

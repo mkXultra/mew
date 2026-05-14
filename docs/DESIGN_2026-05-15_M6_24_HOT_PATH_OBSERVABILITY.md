@@ -1,6 +1,7 @@
 # Design 2026-05-15 - M6.24 Hot-Path Observability
 
-Status: design only.
+Status: implemented for H0 step-diff and H1/H7 provider-visible salience
+snapshots.
 
 Scope: sidecar-only measurement for comparing Codex, Claude Code, and mew
 hot-path step shapes before any live behavior change. This document defines
@@ -80,6 +81,13 @@ mew-specific sidecars are measurement sources only. The analyzer may read them
 to compute prompt/input size, pairing validity, tool result refs, and mutation
 evidence, but it must not infer a live next action from them.
 
+For H1/H7 provider-visible shape questions, the analyzer may also read the
+saved request body from `native-provider-requests.json` and inventory fields
+from `provider-request-inventory.json` to report first input shape, top-level
+section order, compact-sidecar visibility, and resident scaffolding term
+counts. This is still sidecar-only measurement and must not rewrite the live
+request.
+
 ## Output Contract
 
 The analyzer produces both JSON and Markdown from the same in-memory report.
@@ -139,6 +147,56 @@ Required rules:
   numeric metrics are `null`, not omitted.
 - `warnings` are non-fatal report-level issues. Fatal issues return a non-zero
   CLI exit and should not be formatted as a successful comparison.
+
+### Provider-Visible Salience Report
+
+H1/H7 use a narrower report kind:
+
+```json
+{
+  "schema_version": 1,
+  "report_kind": "m6_24_provider_visible_salience",
+  "sidecar_only": true,
+  "provider_visible_behavior_changed": false,
+  "inputs": {
+    "mew_artifact_root": "...",
+    "native_provider_requests": ".../native-provider-requests.json",
+    "provider_request_inventory": ".../provider-request-inventory.json"
+  },
+  "request_count": 50,
+  "aggregate": {
+    "json_envelope_request_count": 50,
+    "compact_sidecar_visible_request_count": 50,
+    "max_first_input_text_chars": 9120,
+    "max_compact_sidecar_chars": 5981,
+    "scaffolding_occurrences_total": 2474
+  },
+  "first_request": {
+    "leading_shape": "json_envelope",
+    "top_level_section_order": [
+      "compact_sidecar_digest",
+      "lane",
+      "task_contract",
+      "task_facts",
+      "workspace"
+    ]
+  },
+  "turns": [],
+  "interpretation": []
+}
+```
+
+The CLI is:
+
+```bash
+uv run python scripts/analyze_provider_visible_salience.py \
+  --mew-artifact-root <mew-artifact-root> \
+  --out-json tmp/provider-visible-salience.json \
+  --out-md tmp/provider-visible-salience.md
+```
+
+Use this report to choose H1 versus H7. It does not authorize combining both
+changes in one behavior experiment.
 
 ## Reference And Candidate Selection
 

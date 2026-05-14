@@ -101,13 +101,13 @@ tuning before a minimal H10 change is designed and measured.
 | ID | Hypothesis | Minimal change | Expected signal | Status | Decision |
 |---|---|---|---|---|---|
 | H0 | Hot-path behavior cannot be judged until first-patch readiness and exploration compression are measured. | Observability only: compute first-patch readiness timestamp/basis, readiness-to-mutation latency, accepted implementation constraints, and duplicate exploration after readiness. | We can say whether mew lacks evidence, fails to compress evidence into constraints, or stalls after enough evidence exists. | measured | mew has early evidence but does not compress it into a patch; use H10 next |
-| H1 | Provider-visible task shape is wrong: mew leads with sidecar/task JSON rather than a plain task. | Make the hot-path first visible content environment context plus plain user task; move sidecar/task facts out of the leading position. | Earlier target-path mutation; fewer prewrite probes; no native rebuild branch before `vm.js`. | blocked by H0 | TBD |
+| H1 | Provider-visible task shape is wrong: mew leads with sidecar/task JSON rather than a plain task. | Make the hot-path first visible content environment context plus plain user task; move sidecar/task facts out of the leading position. | Earlier target-path mutation; fewer prewrite probes; no native rebuild branch before `vm.js`. | observable measured | Current H10 artifact starts every provider request with a JSON envelope; due sorted keys, `compact_sidecar_digest` is the first top-level section |
 | H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | pending observability | TBD |
 | H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | observability first | TBD |
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | pending observability | TBD |
 | H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | observability first | TBD |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
-| H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | pending observability | TBD |
+| H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | observable measured | Current H10 artifact exposes `compact_sidecar_digest` on all 50 provider requests; defer behavior change until H1 task-first shape is isolated |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
 | H9 | mew lacks a first-patch readiness threshold: it keeps exploring after enough evidence exists to write a runnable skeleton. | Add observability first: compute first-patch readiness candidates and readiness-to-mutation latency. Behavior change only after a measured miss. | Readiness-to-mutation latency shrinks; first mutation happens after enough evidence but before broad re-exploration/design stalls. | observability first | TBD |
 | H10 | Exploration is not compressed into patch constraints. | Minimal behavior change: make accepted implementation constraints from probe facts visible as task facts, not as `next_action` steering. Keep the diagnostic sidecar as the source of truth and avoid adding a new frontier. | More direct transition from probes to one coherent patch; fewer repeated same-family probes; first mutation appears before repeated build/disassembly loops. | measured failed, reverted | compact task facts alone do not create probe-to-patch compression |
@@ -257,6 +257,66 @@ Focused validation before the live check:
 - live check:
   `uv run python scripts/check_apply_patch_affordance.py --timeout 90`.
 
+### EXP-20260515-3: H1/H7 Provider Visible Salience Snapshot
+
+Hypothesis:
+After H6, the model can choose `apply_patch` in isolation, but the live
+task-shaped provider input may still make resident sidecar scaffolding more
+salient than the task itself.
+
+Change:
+Added an observability-only saved-artifact analyzer:
+`scripts/analyze_provider_visible_salience.py`. It reads
+`native-provider-requests.json` and `provider-request-inventory.json`, then
+reports first-input shape, top-level section order, compact sidecar visibility,
+section sizes, task-anchor counts, and resident scaffolding term counts. It
+does not call a model and does not affect live behavior.
+
+Reference artifacts:
+No live reference run. This analyzer uses the existing H10 mew artifact and
+the Codex/Claude Code step references remain the comparison context.
+
+Mew artifact:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-070200/2026-05-15__07-02-01/make-mips-interpreter__WD3uvwZ/agent/terminal-bench-harbor-smoke/unknown-task`
+
+Generated reports:
+
+- `tmp/m6_24_h10_provider_visible_salience.json`
+- `tmp/m6_24_h10_provider_visible_salience.md`
+
+Expected signal:
+The report can say whether H1/H7 are measurable without changing behavior:
+plain-task-first versus JSON envelope, and whether compact sidecar scaffolding
+is visible enough to compete with task facts.
+
+Observed signal:
+
+- 50/50 provider requests had `json_envelope` as the first user item shape.
+- 50/50 provider requests had visible `compact_sidecar_digest`.
+- First request section order was
+  `compact_sidecar_digest, lane, task_contract, task_facts, workspace`.
+- Max first input text was 9,120 chars.
+- Max compact sidecar JSON was 5,981 chars.
+- Scaffolding terms occurred 2,474 times, including resident refs such as
+  `implement-v2-exec://`, `implement-v2-evidence://`, `tool-result:`,
+  `provider_input_authority`, `sidecar_hashes`, and `runtime_id`.
+
+Decision:
+Keep the analyzer and use it to select the next behavior experiment. H1 and H7
+are both measurable, but do not change both at once. The next behavior
+experiment should isolate H1 first: make the provider-visible hot-path task
+payload task-first while keeping compact sidecar visibility unchanged. If that
+does not improve step shape, use this same analyzer to justify an H7
+sidecar-visibility experiment.
+
+Notes:
+Focused validation:
+
+- `uv run pytest --no-testmon tests/test_provider_visible_salience.py -q`
+  passed with 2 tests.
+- `uv run ruff check src/mew/implement_lane/provider_visible_salience.py scripts/analyze_provider_visible_salience.py tests/test_provider_visible_salience.py`
+  passed.
+
 ## Stop Conditions
 
 Stop polishing a hypothesis and escalate when:
@@ -273,12 +333,14 @@ Follow this execution order. Do not reorder it after context compression:
 
 1. Treat H0 as measured. Do not rerun live Harbor / Terminal-Bench just to
    re-answer H0.
-2. Design the first H10 behavior experiment: expose compact implementation
-   constraints derived from probe facts as task facts, while keeping diagnostics
-   sidecar-only and avoiding `next_action`, `required_next`, probe thresholds,
-   or new frontier objects.
-3. Add the smallest implementation that can change the step shape.
-4. Run focused tests, fastcheck/replay where applicable, then the artifact-only
-   analyzer. Only after that, run one bounded 10 minute step-shape diagnostic.
-5. Keep, revise, or revert based on whether first mutation appears earlier and
+2. Treat H10 as measured failed/reverted and H6 as measured pass.
+3. Treat EXP-20260515-3 as the current provider-visible shape measurement:
+   H1/H7 are measurable, with `compact_sidecar_digest` leading the first user
+   payload and visible on every request.
+4. Run the next single behavior experiment as H1 only: make live
+   provider-visible task input task-first while keeping H7 sidecar visibility
+   unchanged.
+5. Run focused tests, fastcheck/replay where applicable, the provider-visible
+   salience analyzer, then one bounded 10 minute step-shape diagnostic.
+6. Keep, revise, or revert based on whether first mutation appears earlier and
    duplicate-after-readiness probe families decrease.
