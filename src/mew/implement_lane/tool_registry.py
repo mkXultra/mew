@@ -24,6 +24,7 @@ PROCESS_LIFECYCLE_TOOL_NAMES = frozenset(
 )
 _COMMAND_OUTPUT_REF_RE = re.compile(
     r"(?:^|[\s;,])(?:command_run_id|command_output_ref|spool_path)=['\"]?(?P<id>[^'\"\s;,]+)"
+    r"|Process running with session ID (?P<session>[^\s]+)"
 )
 _IMPLEMENT_V2_EXEC_REF_RE = re.compile(
     r"implement-v2-exec://[^/\s]+/(?P<id>[^/\s]+)/output"
@@ -464,6 +465,8 @@ def _latest_command_lifecycle_states(transcript_items: object) -> dict[str, dict
         call_id = str(item.get("call_id") or "").strip()
         tool_name = str(item.get("tool_name") or "").strip()
         if not call_id or tool_name not in {
+            "exec_command",
+            "write_stdin",
             "run_command",
             "run_tests",
             "poll_command",
@@ -492,6 +495,7 @@ def _latest_command_lifecycle_states(transcript_items: object) -> dict[str, dict
             "has_output_ref": "command_output_ref=" in text
             or "command_run_id=" in text
             or "spool_path=" in text
+            or "Process running with session ID " in text
             or has_content_ref,
         }
     return states
@@ -511,7 +515,7 @@ def _command_run_id_from_item(item: Mapping[str, object]) -> str:
     text = str(item.get("output_text_or_ref") or "")
     match = _COMMAND_OUTPUT_REF_RE.search(text)
     if match:
-        return match.group("id")
+        return str(match.group("id") or match.group("session") or "")
     refs = item.get("content_refs")
     if isinstance(refs, Sequence) and not isinstance(refs, (str, bytes, bytearray)):
         for ref in refs:

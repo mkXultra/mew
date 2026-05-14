@@ -1,6 +1,6 @@
 # Design 2026-05-14 - M6.24 ToolRegistry And Codex Hot Path
 
-Status: Phase 0-2 implemented; Phase 3 pending.
+Status: Phase 0-3 implemented; Phase 4 pending.
 
 Scope: `implement_v2` native tool surface selection, provider-visible tool
 descriptors, provider-visible tool result rendering, route observability, and
@@ -1008,6 +1008,13 @@ Suggested tests:
 
 Intent: make the transcript output look like Codex on the hot path while
 keeping mew cards in `mew_legacy`.
+
+Implementation status: implemented in `tool_result_renderer.py` and wired into
+the native harness. `mew_legacy` preserves `natural_result_text()` output.
+`codex_hot_path` renders command-family results with terminal-shaped output,
+`apply_patch` with changed-path output, and `finish` with concise
+accepted/blocked output. Render metrics and leak-scan records are written to
+`tool_render_outputs.jsonl`.
 
 Implementation slice:
 

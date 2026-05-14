@@ -36,7 +36,6 @@ from .native_transcript import (
     NativeTranscript,
     NativeTranscriptItem,
     OUTPUT_ITEM_KINDS,
-    build_synthetic_error_output,
     native_transcript_hash,
     normalize_codex_response_items,
     validate_native_transcript_pairing,
@@ -69,6 +68,7 @@ from .tool_registry import (
     build_tool_surface_snapshot,
     tool_surface_profile_id,
 )
+from .tool_result_renderer import render_observability_record, render_tool_result_for_profile
 from .tool_routes import route_records_from_results, with_tool_route_decision
 from .types import ImplementLaneInput, ImplementLaneResult, ToolCallEnvelope, ToolResultEnvelope
 from .v2_runtime import (
@@ -110,7 +110,10 @@ _NATIVE_MODEL_TIMEOUT_MIN_SECONDS = 30.0
 _SOURCE_MUTATION_COMMAND_INTENTS = frozenset(
     {"implement", "implementation", "write", "edit", "mutation", "source_mutation"}
 )
-_COMMAND_RUN_ID_RE = re.compile(r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)")
+_COMMAND_RUN_ID_RE = re.compile(
+    r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)"
+    r"|Process running with session ID (?P<session>[^\s]+)"
+)
 _COMMAND_OUTPUT_REF_RE = re.compile(r"implement-v2-exec://[^/\s]+/(?P<id>[^/\s]+)/output")
 _TASK_PATH_TOKEN_RE = re.compile(
     r"(?<![\w./\\:-])(?P<path>(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\."
@@ -565,22 +568,41 @@ def run_native_implement_v2(
         for call in calls:
             if accepted_finish is not None and _call_order_key(call) > _call_order_key(accepted_finish):
                 output_records.append(
-                    build_synthetic_error_output(
-                        call,
-                        sequence=0,
-                        reason=f"cancelled because finish call {accepted_finish.call_id} completed earlier in the same response",
+                    replace(
+                        _native_output_from_result(
+                            call,
+                            _invalid_result(
+                                call,
+                                reason=(
+                                    f"cancelled because finish call {accepted_finish.call_id} "
+                                    "completed earlier in the same response"
+                                ),
+                            ),
+                            sequence=0,
+                            lane_input=lane_input,
+                            lane_config=lane_config,
+                        ),
+                        status="synthetic_error",
                     )
                 )
                 continue
             if terminal_blocked_finish is not None and _call_order_key(call) > _call_order_key(terminal_blocked_finish):
                 output_records.append(
-                    build_synthetic_error_output(
-                        call,
-                        sequence=0,
-                        reason=(
-                            "cancelled because finish call "
-                            f"{terminal_blocked_finish.call_id} returned control to supervisor"
+                    replace(
+                        _native_output_from_result(
+                            call,
+                            _invalid_result(
+                                call,
+                                reason=(
+                                    "cancelled because finish call "
+                                    f"{terminal_blocked_finish.call_id} returned control to supervisor"
+                                ),
+                            ),
+                            sequence=0,
+                            lane_input=lane_input,
+                            lane_config=lane_config,
                         ),
+                        status="synthetic_error",
                     )
                 )
                 continue
@@ -939,6 +961,9 @@ def _adapt_codex_hot_path_call(
         return call, dict(arguments), ""
     args = dict(arguments)
     if call.tool_name == "exec_command":
+        error = _codex_exec_command_adapter_error(args)
+        if error:
+            return call, args, error
         mapped = _codex_exec_command_arguments(args, lane_input=lane_input)
         return replace(call, tool_name="run_command"), mapped, ""
     if call.tool_name == "write_stdin":
@@ -963,6 +988,17 @@ def _adapt_codex_hot_path_call(
         }
         return replace(call, tool_name="inspect_dir"), mapped, ""
     return call, args, ""
+
+
+def _codex_exec_command_adapter_error(args: Mapping[str, object]) -> str:
+    if args.get("tty") not in (None, "", False):
+        return "exec_command adapter error: tty is not supported"
+    if args.get("login") not in (None, "", False):
+        return "exec_command adapter error: login shells are not supported"
+    has_command = any(args.get(key) not in (None, "", []) for key in ("cmd", "command", "argv"))
+    if not has_command:
+        return "exec_command adapter error: cmd is required"
+    return ""
 
 
 def _codex_exec_command_arguments(
@@ -1689,9 +1725,14 @@ def _native_output_from_result(
         output_kind = "custom_tool_call_output"
     else:
         output_kind = "function_call_output"
-    output_text = result.natural_result_text()
+    rendered = render_tool_result_for_profile(
+        result,
+        profile_id=tool_surface_profile_id(lane_config),
+    )
+    output_text = rendered.text
     if not _native_tool_available("write_file", lane_input=lane_input, lane_config=lane_config):
         output_text = hide_unavailable_write_file_guidance(output_text)
+    route_ref = str(result.route_decision.get("ref") or "")
     return NativeTranscriptItem(
         sequence=sequence,
         turn_id=call.turn_id,
@@ -1707,9 +1748,10 @@ def _native_output_from_result(
         output_text_or_ref=output_text,
         status=_native_output_status(call, result),
         is_error=result.is_error,
+        metrics_ref=rendered.metrics_ref(lane_attempt_id=call.lane_attempt_id, call_id=call.call_id),
         content_refs=result.content_refs,
         evidence_refs=result.evidence_refs,
-        sidecar_refs=(str(result.route_decision.get("ref")),) if result.route_decision.get("ref") else (),
+        sidecar_refs=(route_ref,) if route_ref else (),
     )
 
 
@@ -2398,7 +2440,14 @@ def _native_latest_command_lifecycle_states(transcript_items: object) -> dict[st
             continue
         if item.kind not in OUTPUT_ITEM_KINDS:
             continue
-        if item.tool_name not in {"run_command", "run_tests", "poll_command", "cancel_command"}:
+        if item.tool_name not in {
+            "exec_command",
+            "write_stdin",
+            "run_command",
+            "run_tests",
+            "poll_command",
+            "cancel_command",
+        }:
             continue
         command_run_id = _command_run_id_from_output_item(item)
         if not command_run_id:
@@ -2827,7 +2876,7 @@ def _command_run_id_from_output_text(value: str) -> str:
     match = _COMMAND_RUN_ID_RE.search(str(value or ""))
     if not match:
         return ""
-    return match.group("id").strip()
+    return str(match.group("id") or match.group("session") or "").strip()
 
 
 def _native_output_is_terminal(item: NativeTranscriptItem) -> bool:
@@ -3154,6 +3203,7 @@ def _write_live_failure_artifacts(
     root.mkdir(parents=True, exist_ok=True)
     paths = write_native_transcript_artifacts(root, transcript)
     paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
+    paths.update(_write_native_render_output_sidecar(root, transcript))
     route_records = _route_records_with_tool_surface(
         route_records_from_results(tool_results),
         provider=provider,
@@ -3315,6 +3365,7 @@ def _write_native_artifacts(
 ) -> dict[str, Path]:
     paths = write_native_transcript_artifacts(root, transcript)
     paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
+    paths.update(_write_native_render_output_sidecar(root, transcript))
     route_records = _route_records_with_tool_surface(
         route_records_from_results(tool_results),
         provider=provider,
@@ -3389,6 +3440,31 @@ def _write_native_tool_result_sidecars(
         "evidence_sidecar": evidence_sidecar_path,
         "evidence_ref_index": evidence_ref_index_path,
     }
+
+
+def _write_native_render_output_sidecar(root: Path, transcript: NativeTranscript) -> dict[str, Path]:
+    """Write renderer observability for provider-visible paired outputs."""
+
+    records: list[dict[str, object]] = []
+    for item in transcript.items:
+        if item.kind not in OUTPUT_ITEM_KINDS or not item.metrics_ref:
+            continue
+        records.append(
+            render_observability_record(
+                metrics_ref=item.metrics_ref,
+                tool_name=item.tool_name,
+                call_id=item.call_id,
+                output_text=item.output_text_or_ref,
+            )
+        )
+    if not records:
+        return {}
+    path = root / "tool_render_outputs.jsonl"
+    path.write_text(
+        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
+        encoding="utf-8",
+    )
+    return {"tool_render_outputs": path}
 
 
 def _provider_request_records(provider: object) -> tuple[dict[str, object], ...]:

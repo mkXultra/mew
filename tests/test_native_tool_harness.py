@@ -504,8 +504,21 @@ def test_codex_hot_path_exec_command_routes_to_managed_exec(tmp_path: Path) -> N
     output = next(item for item in result.transcript.items if item.kind == "function_call_output")
     assert output.tool_name == "exec_command"
     assert output.status == "completed"
-    assert "command_run_id=" in output.output_text_or_ref
+    assert "Process exited with code 0" in output.output_text_or_ref
+    assert "Output:" in output.output_text_or_ref
+    assert "ok" in output.output_text_or_ref
     assert "run_command result" not in output.output_text_or_ref
+    finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
+    assert "finish blocked:" in finish_output.output_text_or_ref
+    assert "completion_resolver" not in finish_output.output_text_or_ref
+    render_rows = [
+        json.loads(line)
+        for line in (tmp_path / "artifacts-codex-hot-path" / "tool_render_outputs.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert render_rows[0]["renderer_id"] == "codex_terminal_text_v1"
+    assert render_rows[0]["leak_ok"] is True
     routes = [
         json.loads(line)
         for line in (tmp_path / "artifacts-codex-hot-path" / "tool_routes.jsonl").read_text(encoding="utf-8").splitlines()
@@ -580,7 +593,7 @@ def test_codex_hot_path_write_stdin_empty_chars_polls_session(tmp_path: Path) ->
     output = result.transcript.items[-1]
     assert output.tool_name == "write_stdin"
     assert output.status == "completed"
-    assert "command_run_id=" in output.output_text_or_ref
+    assert "Process exited with code 0" in output.output_text_or_ref
 
 
 def test_codex_hot_path_write_stdin_non_empty_chars_fails_poll_only(tmp_path: Path) -> None:
@@ -607,6 +620,154 @@ def test_codex_hot_path_write_stdin_non_empty_chars_fails_poll_only(tmp_path: Pa
     assert output.tool_name == "write_stdin"
     assert output.status == "invalid"
     assert "poll_only" in output.output_text_or_ref
+    assert "Process exited with code 1" in output.output_text_or_ref
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "expected"),
+    [
+        ("exec_command", {"cmd": ""}, "exec_command adapter error: cmd is required"),
+        (
+            "exec_command",
+            {"cmd": "echo ok", "tty": True},
+            "exec_command adapter error: tty is not supported",
+        ),
+        (
+            "exec_command",
+            {"cmd": "echo ok", "login": True},
+            "exec_command adapter error: login shells are not supported",
+        ),
+        ("write_stdin", {"session_id": "missing", "chars": ""}, "no managed command is active"),
+    ],
+)
+def test_codex_hot_path_adapter_failures_use_terminal_renderer(
+    tmp_path: Path,
+    tool_name: str,
+    arguments: dict[str, object],
+    expected: str,
+) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_call("call-1", tool_name, arguments, output_index=0)]]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        max_turns=1,
+    )
+
+    output = next(item for item in result.transcript.items if item.kind == "function_call_output")
+    assert output.tool_name == tool_name
+    assert output.status in {"failed", "invalid"}
+    assert "Process exited with code 1" in output.output_text_or_ref
+    assert expected in output.output_text_or_ref
+    assert "run_command result" not in output.output_text_or_ref
+
+
+def test_codex_hot_path_exec_command_yielded_uses_terminal_session_shape(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "exec-yield",
+                    "exec_command",
+                    {
+                        "cmd": f"{sys.executable} -c \"import time; print('start'); time.sleep(2)\"",
+                        "yield_time_ms": 0,
+                    },
+                    output_index=0,
+                )
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        max_turns=1,
+    )
+
+    output = next(item for item in result.transcript.items if item.kind == "function_call_output")
+    assert output.tool_name == "exec_command"
+    assert output.status in {"yielded", "running", "completed", "failed", "interrupted"}
+    assert "Process running with session ID" in output.output_text_or_ref
+    assert "run_command result" not in output.output_text_or_ref
+
+
+def test_codex_hot_path_apply_patch_success_uses_patch_renderer(tmp_path: Path) -> None:
+    target = tmp_path / "sample.txt"
+    target.write_text("before\n", encoding="utf-8")
+    patch_text = "\n".join(
+        [
+            "*** Begin Patch",
+            "*** Update File: sample.txt",
+            "@@",
+            "-before",
+            "+after",
+            "*** End Patch",
+        ]
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call("patch-1", "apply_patch", {"patch": patch_text, "apply": True}, output_index=0),
+                fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        max_turns=1,
+    )
+
+    output = next(item for item in result.transcript.items if item.call_id == "patch-1" and item.kind.endswith("_output"))
+    assert output.status == "completed"
+    assert output.output_text_or_ref.startswith("Success. Updated files:")
+    assert "M sample.txt" in output.output_text_or_ref
+    assert "suggested_next_action" not in output.output_text_or_ref
+    assert target.read_text(encoding="utf-8") == "after\n"
+
+
+def test_codex_hot_path_malformed_apply_patch_uses_patch_failure_renderer(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_call("patch-bad", "apply_patch", {"patch": "not a patch", "apply": True}, output_index=0)]]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        max_turns=1,
+    )
+
+    output = next(item for item in result.transcript.items if item.call_id == "patch-bad" and item.kind.endswith("_output"))
+    assert output.status == "failed"
+    assert output.output_text_or_ref.startswith("apply_patch failed:")
+    assert "suggested_next_action" not in output.output_text_or_ref
+
+
+def test_codex_hot_path_synthetic_cancel_output_uses_profile_renderer(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_finish("finish-1", {"outcome": "blocked_return", "summary": "return"}, output_index=0),
+                fake_call("exec-after", "exec_command", {"cmd": "echo late"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        max_turns=1,
+    )
+
+    output = next(item for item in result.transcript.items if item.call_id == "exec-after" and item.kind.endswith("_output"))
+    assert output.metrics_ref
+    assert "Process exited with code 1" in output.output_text_or_ref
+    assert "cancelled because finish call finish-1" in output.output_text_or_ref
+    assert "run_command result" not in output.output_text_or_ref
 
 
 def test_native_provider_input_surfaces_missing_verify_path_as_factual_task_fact(tmp_path: Path) -> None:
