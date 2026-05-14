@@ -586,19 +586,25 @@ Current phase state:
   auditable JSON fallback.
 - Phase 4 compact editable tool outputs: `active`; output cards, command
   output caps, task facts, lifecycle tool visibility, routed verifier evidence,
-  and finish closeout evidence have landed, but the phase is not closed until
-  every visible tool-output surface is steering-free and compact-output
-  fastcheck/replay gates are green.
-- Phase 5 fastcheck plus 10 minute step-shape validation: `pending`; do not run
-  broad `speed_1` or proof batches before Phase 4 is closed and one bounded
-  pre-speed diagnostic is explicitly selected.
+  finish closeout evidence, and raw provider-visible tool-result redaction have
+  landed. Current fastcheck status: provider-visible leak gates pass, but
+  `native_trace_summary` remains yellow/fail on diagnostics without internal
+  verifier calls.
+- Phase 5 fastcheck plus 10 minute step-shape validation: `active/yellow`; do
+  not run broad `speed_1` or proof batches until one more targeted closeout or
+  verification-latency decision is made.
 
-Latest diagnostic context: the 2026-05-14 `make-mips-interpreter`
-`step-check-10min` run preserved `previous_response_id`, task facts, and
-forbidden-field inventory, but still produced `0` source edits across 31 tool
-calls. Treat this as evidence that Phase 4/5 affordance and output-shape gates
-remain open, not as a reason to return to task-specific facts or finish-only
-polish.
+Latest diagnostic context: after `ffb2db4`, the 2026-05-14
+`make-mips-interpreter` `step-check-10min` run at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-20260514-after-redaction`
+got external reward `1.0` with `previous_response_id`, task facts, and
+provider-visible forbidden-field inventory preserved. The failure shape moved
+from `0` writes to `1` source mutation: `apply_patch` created `vm.js` on turn
+10, but first edit latency was still high at `573.5s` versus the Codex
+reference `367.8s`, and internal verifier/finish did not run before the
+diagnostic boundary. Treat the next work as Codex-like latency/closeout polish,
+not as task-specific facts, WorkFrame, threshold, or hidden next-action
+steering.
 
 ### M6.24 HOT_PATH_COLLAPSE Phase Status
 
