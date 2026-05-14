@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -61,13 +64,12 @@ def main(argv: list[str] | None = None) -> int:
         return _print_payload(payload, as_json=args.json, exit_code=2)
     root = args.output_root or _default_output_root(args.task_name, args.mode)
     root = root.expanduser()
-    baseline_jobs = root / "baseline-mew-legacy"
-    candidate_jobs = root / "candidate-codex-hot-path"
     ab_pair_id = args.ab_pair_id or f"{args.fixed_ab_set_id}:{_task_slug(args.task_name)}:{args.mode}"
-    commands = {
-        "baseline": _diagnostic_command(args, profile_id=MEW_LEGACY_PROFILE_ID, jobs_dir=baseline_jobs),
-        "candidate": _diagnostic_command(args, profile_id=CODEX_HOT_PATH_PROFILE_ID, jobs_dir=candidate_jobs),
-    }
+    commands = _profile_commands(
+        args,
+        root=root,
+        auth_json_paths={"baseline": args.codex_auth_json, "candidate": args.codex_auth_json},
+    )
     if args.dry_run:
         return _print_payload(
             {
@@ -83,8 +85,23 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     root.mkdir(parents=True, exist_ok=True)
-    baseline_run = _run_diagnostic(commands["baseline"])
-    candidate_run = _run_diagnostic(commands["candidate"])
+    try:
+        with tempfile.TemporaryDirectory(prefix="mew-tool-surface-ab-auth-") as auth_tmp:
+            commands = _profile_commands(
+                args,
+                root=root,
+                auth_json_paths=_copy_parallel_auth_files(Path(auth_tmp), args.codex_auth_json),
+            )
+            baseline_run, candidate_run = _run_profile_diagnostics(commands)
+    except Exception as exc:
+        payload = {
+            "status": "failed",
+            "artifact_root": str(root.resolve(strict=False)),
+            "reason": "parallel_auth_preparation_failed",
+            "detail": _safe_error_detail(exc),
+        }
+        _write_json(root / "tool_surface_ab_diagnostic.json", payload)
+        return _print_payload(payload, as_json=args.json, exit_code=1)
     if not baseline_run.get("artifact_root") or not candidate_run.get("artifact_root"):
         payload = {
             "status": "failed",
@@ -137,7 +154,71 @@ def main(argv: list[str] | None = None) -> int:
     return _print_payload(payload, as_json=args.json)
 
 
-def _diagnostic_command(args: argparse.Namespace, *, profile_id: str, jobs_dir: Path) -> list[str]:
+def _profile_commands(
+    args: argparse.Namespace,
+    *,
+    root: Path,
+    auth_json_paths: dict[str, Path],
+) -> dict[str, list[str]]:
+    return {
+        "baseline": _diagnostic_command(
+            args,
+            profile_id=MEW_LEGACY_PROFILE_ID,
+            jobs_dir=root / "baseline-mew-legacy",
+            codex_auth_json=auth_json_paths["baseline"],
+        ),
+        "candidate": _diagnostic_command(
+            args,
+            profile_id=CODEX_HOT_PATH_PROFILE_ID,
+            jobs_dir=root / "candidate-codex-hot-path",
+            codex_auth_json=auth_json_paths["candidate"],
+        ),
+    }
+
+
+def _copy_parallel_auth_files(temp_root: Path, source_auth_json: Path) -> dict[str, Path]:
+    """Give each child process an isolated auth-file copy.
+
+    Codex OAuth refresh writes back to auth.json. Running the two A/B profiles
+    with the same mutable auth file can race on refresh-token rotation and make
+    the comparison nondeterministic. The wrapper does not refresh or mutate the
+    source auth file; it only copies the current file into per-profile temp
+    files that live for the child process lifetime.
+    """
+
+    source_auth_json = source_auth_json.expanduser()
+    auth_dir = temp_root / "auth"
+    auth_dir.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "baseline": auth_dir / "baseline-mew-legacy.auth.json",
+        "candidate": auth_dir / "candidate-codex-hot-path.auth.json",
+    }
+    for path in paths.values():
+        shutil.copyfile(source_auth_json, path)
+        path.chmod(0o600)
+    return paths
+
+
+def _run_profile_diagnostics(commands: dict[str, list[str]]) -> tuple[dict[str, object], dict[str, object]]:
+    """Run baseline and candidate diagnostics concurrently.
+
+    The paired A/B wrapper is intentionally single-pair, but the two child
+    profiles are independent once the shared output root is allocated.
+    """
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        baseline = executor.submit(_run_diagnostic_safely, commands["baseline"])
+        candidate = executor.submit(_run_diagnostic_safely, commands["candidate"])
+        return baseline.result(), candidate.result()
+
+
+def _diagnostic_command(
+    args: argparse.Namespace,
+    *,
+    profile_id: str,
+    jobs_dir: Path,
+    codex_auth_json: Path,
+) -> list[str]:
     command = [
         sys.executable,
         str(ROOT / "scripts" / "run_harbor_mew_diagnostic.py"),
@@ -149,7 +230,7 @@ def _diagnostic_command(args: argparse.Namespace, *, profile_id: str, jobs_dir: 
         "--model",
         args.model,
         "--codex-auth-json",
-        str(args.codex_auth_json),
+        str(codex_auth_json),
         "--tool-surface-profile-id",
         profile_id,
     ]
@@ -221,6 +302,36 @@ def _run_diagnostic(command: list[str]) -> dict[str, object]:
         "stdout_tail": _tail(completed.stdout),
         "stderr_tail": _tail(completed.stderr),
     }
+
+
+def _run_diagnostic_safely(command: list[str]) -> dict[str, object]:
+    try:
+        return _run_diagnostic(command)
+    except Exception as exc:
+        return {
+            "returncode": 1,
+            "artifact_root": "",
+            "summary": {},
+            "stdout_tail": "",
+            "stderr_tail": _safe_error_detail(exc),
+            "error": {
+                "type": exc.__class__.__name__,
+                "detail": _safe_error_detail(exc),
+                "command": _redacted_command(command),
+            },
+        }
+
+
+def _safe_error_detail(exc: Exception) -> str:
+    return f"{exc.__class__.__name__}: {exc}"[:1000]
+
+
+def _redacted_command(command: list[str]) -> list[str]:
+    redacted = [str(part) for part in command]
+    for index, part in enumerate(redacted):
+        if part == "--codex-auth-json" and index + 1 < len(redacted):
+            redacted[index + 1] = "<isolated-auth-json>"
+    return redacted
 
 
 def _json_object_lines(text: str) -> list[dict[str, object]]:
