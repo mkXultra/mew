@@ -317,6 +317,63 @@ Focused validation:
 - `uv run ruff check src/mew/implement_lane/provider_visible_salience.py scripts/analyze_provider_visible_salience.py tests/test_provider_visible_salience.py`
   passed.
 
+### EXP-20260515-4: H1 Task-First Provider Input
+
+Hypothesis:
+The H10 artifact starts each request with resident JSON scaffolding, so the
+model sees sidecar context before task content. Moving the task into the first
+plain-text input item, while leaving the JSON support payload and compact
+sidecar visible, should reduce the task-shape salience problem without testing
+H7 at the same time.
+
+Change:
+`implement_v2` native requests now emit two leading user input items:
+
+1. a plain task-first summary with title/description/guidance/verifier and
+   factual task paths;
+2. the existing JSON support payload with `task_contract`, `task_facts`,
+   `compact_sidecar_digest`, `workspace`, and `lane`.
+
+The JSON payload no longer uses sorted keys, so `task_contract` and
+`task_facts` precede `compact_sidecar_digest` inside the support payload.
+Compact sidecar visibility is intentionally unchanged; this is not an H7
+experiment.
+
+Reference artifacts:
+Use the same Codex and Claude Code references as H0/H10. No new reference trace
+is needed for the implementation step.
+
+Mew artifact:
+Pending. The next live diagnostic should produce a fresh 10 minute
+`make-mips-interpreter` step-shape artifact after focused validation and
+provider-visible salience smoke.
+
+Expected signal:
+The salience analyzer on a new mew artifact reports plain-text first input
+items, JSON support payload found, and compact sidecar still visible. The 10
+minute step-shape diagnostic should show an earlier first mutation or fewer
+duplicate-after-readiness probe families than H10/H0.
+
+Observed signal:
+Pending live diagnostic.
+
+Decision:
+Pending. Keep only if H1 changes the expected signal. If not, revert or revise
+before testing H7 sidecar hiding.
+
+Notes:
+Focused validation for the implementation slice:
+
+- `uv run pytest --no-testmon tests/test_native_tool_harness.py tests/test_provider_visible_salience.py -q`
+  passed with 130 tests before the `previous_response_id` fix.
+- `uv run pytest --no-testmon tests/test_native_provider_adapter.py tests/test_native_tool_harness.py tests/test_provider_visible_salience.py -q`
+  passed with 157 tests after the `previous_response_id` task-first refresh
+  fix and `goal`/`objective` task summary fix.
+- `uv run pytest --no-testmon tests/test_hot_path_fastcheck.py tests/test_native_boundary_audit.py -q`
+  passed with 56 tests.
+- `uv run ruff check src/mew/implement_lane/native_provider_adapter.py src/mew/implement_lane/native_tool_harness.py src/mew/implement_lane/provider_visible_salience.py tests/test_native_provider_adapter.py tests/test_native_tool_harness.py tests/test_provider_visible_salience.py`
+  passed.
+
 ## Stop Conditions
 
 Stop polishing a hypothesis and escalate when:
@@ -337,10 +394,9 @@ Follow this execution order. Do not reorder it after context compression:
 3. Treat EXP-20260515-3 as the current provider-visible shape measurement:
    H1/H7 are measurable, with `compact_sidecar_digest` leading the first user
    payload and visible on every request.
-4. Run the next single behavior experiment as H1 only: make live
-   provider-visible task input task-first while keeping H7 sidecar visibility
-   unchanged.
-5. Run focused tests, fastcheck/replay where applicable, the provider-visible
-   salience analyzer, then one bounded 10 minute step-shape diagnostic.
+4. EXP-20260515-4 implements H1 only: live provider-visible task input is
+   task-first while H7 sidecar visibility stays unchanged.
+5. Next, run focused tests if files changed, a provider-visible salience smoke
+   on the fresh artifact, then one bounded 10 minute step-shape diagnostic.
 6. Keep, revise, or revert based on whether first mutation appears earlier and
    duplicate-after-readiness probe families decrease.

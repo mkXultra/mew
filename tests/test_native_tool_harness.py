@@ -73,8 +73,15 @@ def _command_run_id(call_id: str) -> str:
 
 
 def _task_payload(request: dict[str, object]) -> dict[str, object]:
-    first = request["input_items"][0]  # type: ignore[index]
-    return json.loads(first["content"][0]["text"])  # type: ignore[index]
+    for item in request["input_items"]:  # type: ignore[index]
+        for chunk in item["content"]:  # type: ignore[index]
+            try:
+                decoded = json.loads(chunk["text"])  # type: ignore[index]
+            except json.JSONDecodeError:
+                continue
+            if isinstance(decoded, dict) and "task_contract" in decoded:
+                return decoded
+    raise AssertionError("task payload not found")
 
 
 def _compact_sidecar_digest(request: dict[str, object]) -> dict[str, object]:
@@ -800,6 +807,61 @@ def test_native_provider_input_surfaces_missing_verify_path_as_factual_task_fact
     assert "first_write" not in rendered
 
 
+def test_native_provider_input_is_task_first_before_support_json(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "title": "Build a small runtime",
+            "description": "Implement vm.js.",
+            "verify_command": "node vm.js",
+        },
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    input_items = provider.requests[0]["input_items"]
+    first_text = input_items[0]["content"][0]["text"]  # type: ignore[index]
+    second_text = input_items[1]["content"][0]["text"]  # type: ignore[index]
+    support_payload = json.loads(second_text)
+
+    assert first_text.startswith("Task\n")
+    assert "Title: Build a small runtime" in first_text
+    assert "Objective: Implement vm.js." in first_text
+    assert "Verifier: node vm.js" in first_text
+    assert "Missing task paths: vm.js" in first_text
+    assert "compact_sidecar_digest" not in first_text
+    assert list(support_payload) == [
+        "task_contract",
+        "task_facts",
+        "compact_sidecar_digest",
+        "workspace",
+        "lane",
+    ]
+
+
+@pytest.mark.parametrize("objective_key", ["objective", "goal", "task", "prompt"])
+def test_native_provider_task_first_text_uses_common_objective_keys(tmp_path: Path, objective_key: str) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            objective_key: "Patch a Python bug and run tests.",
+            "verify_command": "pytest -q",
+        },
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    first_text = provider.requests[0]["input_items"][0]["content"][0]["text"]  # type: ignore[index]
+    assert "Objective: Patch a Python bug and run tests." in first_text
+    assert "Verifier: pytest -q" in first_text
+
+
 def test_native_provider_input_does_not_mark_existing_verify_path_missing(tmp_path: Path) -> None:
     (tmp_path / "vm.js").write_text("console.log('ok')\n", encoding="utf-8")
     provider = NativeFakeProvider.from_item_batches(
@@ -1506,6 +1568,136 @@ def test_live_native_provider_uses_previous_response_id_delta_after_prefix_match
     assert provider.requests[1]["previous_response_delta_mode"] == "delta"
     assert provider.requests[1]["logical_input_item_count"] == 3
     assert provider.requests[1]["wire_input_item_count"] == 1
+
+
+def test_live_native_provider_uses_previous_response_id_with_task_first_context_refresh(tmp_path: Path) -> None:
+    lane_input = _lane_input(tmp_path)
+    provider = NativeCodexResponsesProvider(
+        lane_input=lane_input,
+        auth={"access_token": "x"},
+        base_url="https://example.invalid",
+        timeout=3,
+    )
+    task_item = {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": "Task\nObjective: Implement vm.js.\nSupporting JSON facts follow in the next input item.",
+            }
+        ],
+    }
+    old_context_item = {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": json.dumps(
+                    {
+                        "task_contract": {"title": "Task"},
+                        "task_facts": {"missing_workspace_paths": ["vm.js"]},
+                        "compact_sidecar_digest": {"digest_hash": "old"},
+                        "workspace": str(tmp_path),
+                        "lane": "implement_v2",
+                    }
+                ),
+            }
+        ],
+    }
+    new_context_item = {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": json.dumps(
+                    {
+                        "task_contract": {"title": "Task"},
+                        "task_facts": {"missing_workspace_paths": ["vm.js"]},
+                        "compact_sidecar_digest": {"digest_hash": "new"},
+                        "workspace": str(tmp_path),
+                        "lane": "implement_v2",
+                    }
+                ),
+            }
+        ],
+    }
+    call_item = {
+        "type": "function_call",
+        "id": "item-read",
+        "call_id": "call-read",
+        "name": "read_file",
+        "arguments": '{"path":"README.md"}',
+    }
+    output_item = {
+        "type": "function_call_output",
+        "call_id": "call-read",
+        "output": "read_file result: completed",
+    }
+    first_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+            items=(
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id="ws-native:task-native:implement_v2:native",
+                    provider="openai",
+                    model="gpt-5.5",
+                    response_id="resp-1",
+                    provider_item_id="item-read",
+                    output_index=0,
+                    kind="function_call",
+                    call_id="call-read",
+                    tool_name="read_file",
+                    arguments_json_text='{"path":"README.md"}',
+                ),
+            ),
+        ),
+        response_id="resp-1",
+        status="completed",
+    )
+    second_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+        ),
+        response_id="resp-2",
+        status="completed",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
+        side_effect=[first_turn, second_turn],
+    ):
+        provider.next_response(
+            {
+                "lane_attempt_id": "ws-native:task-native:implement_v2:native",
+                "turn_index": 1,
+                "input_items": [task_item, old_context_item],
+                "instructions": "test",
+                "transcript_window": [],
+            }
+        )
+        provider.next_response(
+            {
+                "lane_attempt_id": "ws-native:task-native:implement_v2:native",
+                "turn_index": 2,
+                "input_items": [task_item, new_context_item, call_item, output_item],
+                "instructions": "test",
+                "transcript_window": [],
+            }
+        )
+
+    second_request = provider.requests[1]["request_body"]
+    assert second_request["previous_response_id"] == "resp-1"
+    assert second_request["input"] == [task_item, new_context_item, output_item]
+    assert provider.requests[1]["previous_response_delta_mode"] == "delta_with_context_refresh"
+    assert provider.requests[1]["previous_response_leading_refresh_item_count"] == 2
+    assert provider.requests[1]["logical_input_item_count"] == 4
+    assert provider.requests[1]["wire_input_item_count"] == 3
 
 
 def test_native_harness_write_apply_patch_exec_poll_cancel_and_read_output(tmp_path: Path) -> None:

@@ -73,7 +73,7 @@ Current controller mode:
 `m6_24_hot_path_h1_task_first_provider_shape_experiment`.
 
 Current diagnostic mode:
-`h10_failed_reverted__h6_passed__h1_h7_salience_measured`.
+`h10_failed_reverted__h6_passed__h1_salience_implemented_pending_step_check`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
@@ -99,6 +99,10 @@ used a JSON envelope as the first user item, 50/50 exposed
 Therefore the next behavior experiment is H1 only: make the provider-visible
 hot-path task payload task-first while keeping H7 sidecar visibility unchanged.
 Do not combine this with hiding the compact sidecar yet.
+H1 implementation now emits a plain task-first input item before the existing
+JSON support payload. The JSON support payload still contains
+`compact_sidecar_digest`, and compact sidecar visibility is intentionally
+unchanged. This is not an H7 experiment.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -152,6 +156,13 @@ Fixed execution order:
    - observed JSON envelope on every first user item, visible
      `compact_sidecar_digest` on every request, and sidecar section order
      before task content.
+9. H1 task-first provider shape implementation:
+   - live native requests now place a plain task summary first and the JSON
+     support payload second;
+   - support payload order is task-first:
+     `task_contract`, `task_facts`, `compact_sidecar_digest`, `workspace`,
+     `lane`;
+   - H7 is intentionally unchanged: compact sidecar remains visible.
 
 Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
 context, but it no longer controls the immediate next action. Do not resume
@@ -208,10 +219,11 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: H0/H10/H6 and the H1/H7 salience snapshot are measured.
-  Implement the smallest H1 behavior change: task-first provider-visible input
-  shape, with compact sidecar still visible. Do not tune `apply_patch`, add
-  next-action steering, or hide the sidecar in the same experiment.
+- Current next action: H1 behavior is implemented. Run a fresh provider-visible
+  salience smoke and one bounded 10 minute step-shape diagnostic. Keep, revise,
+  or revert based on earlier first mutation and fewer duplicate-after-readiness
+  probe families. Do not tune `apply_patch`, add next-action steering, or hide
+  the sidecar in the same experiment.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe

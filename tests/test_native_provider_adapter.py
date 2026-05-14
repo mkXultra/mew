@@ -43,6 +43,33 @@ def _input_item() -> dict[str, object]:
     }
 
 
+def _task_first_item(text: str = "Task\nObjective: Implement vm.js.\nSupporting JSON facts follow in the next input item.") -> dict[str, object]:
+    return {
+        "role": "user",
+        "content": [{"type": "input_text", "text": text}],
+    }
+
+
+def _support_payload_item(digest_hash: str) -> dict[str, object]:
+    return {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_text",
+                "text": json.dumps(
+                    {
+                        "task_contract": {"title": "Task"},
+                        "task_facts": {"missing_workspace_paths": ["vm.js"]},
+                        "compact_sidecar_digest": {"digest_hash": digest_hash},
+                        "workspace": "/repo",
+                        "lane": "implement_v2",
+                    }
+                ),
+            }
+        ],
+    }
+
+
 def test_request_descriptor_records_native_transport_hashes_headers_and_reasoning_refs() -> (
     None
 ):
@@ -335,6 +362,47 @@ def test_previous_response_delta_allows_context_refresh_before_previous_prefix()
     assert updated["previous_response_suppressed_context_refresh_item_count"] == 0
     assert updated["logical_input_item_count"] == 3
     assert updated["wire_input_item_count"] == 2
+
+
+def test_previous_response_delta_allows_task_first_context_refresh_group() -> None:
+    previous_task = _task_first_item()
+    previous_context = _support_payload_item("old")
+    refreshed_task = _task_first_item()
+    refreshed_context = _support_payload_item("new")
+    call_item = {
+        "type": "function_call",
+        "id": "item-read",
+        "call_id": "call-read",
+        "name": "read_file",
+        "arguments": '{"path":"README.md"}',
+    }
+    output_item = {
+        "type": "function_call_output",
+        "call_id": "call-read",
+        "output": "read_file result: completed",
+    }
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[refreshed_task, refreshed_context, call_item, output_item],
+        provider_request_id="req-task-first-refresh-delta",
+    )
+
+    updated = apply_previous_response_delta(
+        descriptor,
+        previous_response_id="resp-prev",
+        previous_logical_input_items=[previous_task, previous_context],
+        previous_response_output_items=[call_item],
+    )
+    request = updated["request_body"]
+
+    assert request["previous_response_id"] == "resp-prev"  # type: ignore[index]
+    assert request["input"] == [refreshed_task, refreshed_context, output_item]  # type: ignore[index]
+    assert updated["previous_response_delta_mode"] == "delta_with_context_refresh"
+    assert updated["previous_response_prefix_item_count"] == 3
+    assert updated["previous_response_leading_refresh_item_count"] == 2
+    assert updated["logical_input_item_count"] == 4
+    assert updated["wire_input_item_count"] == 3
 
 
 def test_previous_response_delta_falls_back_to_full_input_on_prefix_miss() -> None:

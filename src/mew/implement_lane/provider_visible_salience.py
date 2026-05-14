@@ -152,11 +152,11 @@ def _request_report(*, index: int, request: Mapping[str, object], inventory: Map
     body = _mapping(request.get("request_body"))
     input_items = tuple(_mapping(item) for item in _sequence(body.get("input")))
     first_text = _first_input_text(input_items)
-    parsed = _parse_json_object(first_text)
-    section_order = list(parsed.keys())
-    compact_sidecar = _mapping(parsed.get("compact_sidecar_digest"))
-    task_facts = _mapping(parsed.get("task_facts"))
-    task_contract = _mapping(parsed.get("task_contract"))
+    task_payload = _first_json_payload(input_items)
+    section_order = list(task_payload.keys())
+    compact_sidecar = _mapping(task_payload.get("compact_sidecar_digest"))
+    task_facts = _mapping(task_payload.get("task_facts"))
+    task_contract = _mapping(task_payload.get("task_contract"))
     visible_text = "\n".join(
         text
         for text in (
@@ -168,16 +168,19 @@ def _request_report(*, index: int, request: Mapping[str, object], inventory: Map
     scaffolding_counts = _count_terms(visible_text, SCAFFOLDING_TERMS)
     task_anchor_terms = tuple(_task_anchor_terms(task_facts))
     task_anchor_counts = _count_terms(visible_text, task_anchor_terms)
-    sidecar_visible = bool(inventory.get("compact_sidecar_digest_wire_visible", "compact_sidecar_digest" in parsed))
+    sidecar_visible = bool(
+        inventory.get("compact_sidecar_digest_wire_visible", "compact_sidecar_digest" in task_payload)
+    )
     return {
         "turn_index": int(request.get("turn_index") or index),
         "previous_response_id_in_request_body": bool(request.get("previous_response_id_in_request_body")),
         "input_item_count": len(input_items),
         "instructions_chars": len(str(body.get("instructions") or "")),
         "first_input_text_chars": len(first_text),
-        "leading_shape": _leading_shape(first_text, parsed),
+        "leading_shape": _leading_shape(first_text),
+        "json_payload_found": bool(task_payload),
         "top_level_section_order": section_order,
-        "top_level_section_chars": {key: _json_chars(value) for key, value in parsed.items()},
+        "top_level_section_chars": {key: _json_chars(value) for key, value in task_payload.items()},
         "task_description_chars": len(str(task_contract.get("description") or "")),
         "task_guidance_chars": len(str(task_contract.get("guidance") or "")),
         "task_anchor_terms": list(task_anchor_terms),
@@ -205,6 +208,8 @@ def _aggregate_reports(reports: Sequence[Mapping[str, object]]) -> dict[str, obj
         "request_count": len(reports),
         "compact_sidecar_visible_request_count": sum(1 for report in reports if report.get("compact_sidecar_visible")),
         "json_envelope_request_count": sum(1 for report in reports if report.get("leading_shape") == "json_envelope"),
+        "plain_text_first_request_count": sum(1 for report in reports if report.get("leading_shape") == "plain_text"),
+        "json_payload_request_count": sum(1 for report in reports if report.get("json_payload_found")),
         "max_first_input_text_chars": max((int(report.get("first_input_text_chars") or 0) for report in reports), default=0),
         "max_compact_sidecar_chars": max((int(report.get("compact_sidecar_chars") or 0) for report in reports), default=0),
         "max_scaffolding_occurrences": max((int(report.get("scaffolding_occurrences") or 0) for report in reports), default=0),
@@ -222,6 +227,8 @@ def _interpretation(aggregate: Mapping[str, object], reports: Sequence[Mapping[s
         return ["No provider requests were found; H7/H1 cannot be evaluated from this artifact."]
     if int(aggregate.get("json_envelope_request_count") or 0) == request_count:
         notes.append("H1 is measurable: every first user item is a JSON envelope, not a plain task-first message.")
+    if int(aggregate.get("plain_text_first_request_count") or 0) == request_count:
+        notes.append("H1 task-first shape is present: every first user item is plain text before the JSON support payload.")
     if int(aggregate.get("compact_sidecar_visible_request_count") or 0) == request_count:
         notes.append("H7 is measurable: compact_sidecar_digest is visible on every saved provider request.")
     if int(aggregate.get("scaffolding_occurrences_total") or 0) > int(aggregate.get("task_anchor_occurrences_total") or 0):
@@ -291,17 +298,20 @@ def _first_input_text(items: Sequence[Mapping[str, object]]) -> str:
     return ""
 
 
-def _parse_json_object(text: str) -> Mapping[str, object]:
-    try:
-        value = json.loads(text)
-    except json.JSONDecodeError:
-        return {}
-    return value if isinstance(value, Mapping) else {}
+def _first_json_payload(items: Sequence[Mapping[str, object]]) -> Mapping[str, object]:
+    for text in _input_item_texts(items):
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, Mapping):
+            return value
+    return {}
 
 
-def _leading_shape(text: str, parsed: Mapping[str, object]) -> str:
+def _leading_shape(text: str) -> str:
     stripped = text.lstrip()
-    if parsed:
+    if stripped.startswith("{") or stripped.startswith("["):
         return "json_envelope"
     if stripped:
         return "plain_text"

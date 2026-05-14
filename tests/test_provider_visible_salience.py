@@ -17,6 +17,13 @@ def _input_item(payload: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _plain_input_item(text: str) -> dict[str, object]:
+    return {
+        "role": "user",
+        "content": [{"type": "input_text", "text": text}],
+    }
+
+
 def _write_artifact(root: Path) -> Path:
     payload = {
         "workspace": {"cwd": "/workspace"},
@@ -151,3 +158,24 @@ def test_provider_visible_salience_direct_file_input_uses_sibling_inventory(tmp_
     inputs = report["inputs"]
     assert isinstance(inputs, dict)
     assert str(inputs["provider_request_inventory"]).endswith("provider-request-inventory.json")
+
+
+def test_provider_visible_salience_supports_plain_task_first_with_json_payload_second(tmp_path: Path) -> None:
+    root = _write_artifact(tmp_path / "artifact")
+    native = json.loads((root / "native-provider-requests.json").read_text(encoding="utf-8"))
+    for request in native["requests"]:
+        request["request_body"]["input"].insert(0, _plain_input_item("Task: create vm.js\nVerify: node vm.js"))
+    (root / "native-provider-requests.json").write_text(json.dumps(native), encoding="utf-8")
+
+    report = analyze_provider_visible_salience(mew_artifact_root=root)
+
+    first = report["first_request"]
+    assert isinstance(first, dict)
+    assert first["leading_shape"] == "plain_text"
+    assert first["json_payload_found"] is True
+    assert first["compact_sidecar_visible"] is True
+    aggregate = report["aggregate"]
+    assert isinstance(aggregate, dict)
+    assert aggregate["plain_text_first_request_count"] == 2
+    assert aggregate["json_payload_request_count"] == 2
+    assert "H1 task-first shape is present" in "\n".join(report["interpretation"])  # type: ignore[arg-type]

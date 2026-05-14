@@ -3008,9 +3008,10 @@ def _responses_input_items(
     *,
     compact_sidecar_digest: Mapping[str, object],
 ) -> list[dict[str, object]]:
+    task_facts = _provider_visible_task_facts(lane_input)
     task_payload = {
         "task_contract": dict(lane_input.task_contract),
-        "task_facts": _provider_visible_task_facts(lane_input),
+        "task_facts": task_facts,
         "compact_sidecar_digest": dict(compact_sidecar_digest),
         "workspace": lane_input.workspace,
         "lane": lane_input.lane,
@@ -3021,7 +3022,16 @@ def _responses_input_items(
             "content": [
                 {
                     "type": "input_text",
-                    "text": json.dumps(task_payload, ensure_ascii=False, sort_keys=True),
+                    "text": _task_first_provider_visible_text(lane_input, task_facts=task_facts),
+                }
+            ],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": json.dumps(task_payload, ensure_ascii=False),
                 }
             ],
         }
@@ -3033,6 +3043,52 @@ def _responses_input_items(
         if converted:
             items.append(converted)
     return items
+
+
+def _task_first_provider_visible_text(
+    lane_input: ImplementLaneInput,
+    *,
+    task_facts: Mapping[str, object],
+) -> str:
+    contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
+    lines = ["Task"]
+    title = str(contract.get("title") or "").strip()
+    if title:
+        lines.append(f"Title: {title}")
+    objective = _task_contract_objective_text(contract)
+    if objective:
+        lines.append(f"Objective: {objective}")
+    guidance = str(contract.get("guidance") or "").strip()
+    if guidance:
+        lines.append(f"Guidance: {guidance}")
+    verify_command = str(contract.get("verify_command") or "").strip()
+    if verify_command:
+        lines.append(f"Verifier: {verify_command}")
+    constraints = contract.get("acceptance_constraints")
+    if isinstance(constraints, list):
+        rendered_constraints = [str(item or "").strip() for item in constraints if str(item or "").strip()]
+        if rendered_constraints:
+            lines.append("Acceptance constraints:")
+            lines.extend(f"- {item}" for item in rendered_constraints)
+    for key, label in (
+        ("missing_workspace_paths", "Missing task paths"),
+        ("existing_workspace_paths", "Existing task paths"),
+        ("verify_command_paths", "Verifier paths"),
+    ):
+        raw_paths = task_facts.get(key)
+        paths = [str(item).strip() for item in raw_paths if str(item).strip()] if isinstance(raw_paths, list) else []
+        if paths:
+            lines.append(f"{label}: {', '.join(paths)}")
+    lines.append("Supporting JSON facts follow in the next input item.")
+    return "\n".join(lines)
+
+
+def _task_contract_objective_text(contract: Mapping[str, object]) -> str:
+    for key in ("objective", "description", "goal", "task", "prompt"):
+        value = contract.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def _provider_visible_task_facts(lane_input: ImplementLaneInput) -> dict[str, object]:

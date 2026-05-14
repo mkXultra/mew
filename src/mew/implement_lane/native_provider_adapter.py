@@ -367,30 +367,55 @@ def _previous_response_prefix_match(
             prefix_item_count=len(expected_prefix),
         )
 
-    if (
-        full_input
-        and previous_input
-        and _is_provider_context_refresh_item(full_input[0])
-        and _is_provider_context_refresh_item(previous_input[0])
-    ):
-        refreshed_prefix = (*previous_input[1:], *previous_output)
-        if _input_prefix_matches(full_input[1:], refreshed_prefix):
+    full_refresh = _leading_provider_context_refresh_group(full_input)
+    previous_refresh = _leading_provider_context_refresh_group(previous_input)
+    if full_refresh and previous_refresh:
+        refreshed_prefix = (*previous_input[len(previous_refresh) :], *previous_output)
+        if _input_prefix_matches(full_input[len(full_refresh) :], refreshed_prefix):
             return _PreviousResponsePrefixMatch(
                 matched=True,
                 mode="delta_with_context_refresh",
-                prefix_item_count=1 + len(refreshed_prefix),
-                leading_refresh_items=(dict(full_input[0]),),
+                prefix_item_count=len(full_refresh) + len(refreshed_prefix),
+                leading_refresh_items=tuple(dict(item) for item in full_refresh),
             )
 
     return _PreviousResponsePrefixMatch(matched=False, mode="prefix_miss")
 
 
+def _leading_provider_context_refresh_group(
+    items: Sequence[Mapping[str, object]],
+) -> tuple[Mapping[str, object], ...]:
+    if not items:
+        return ()
+    if _is_provider_context_refresh_item(items[0]):
+        return (items[0],)
+    if (
+        len(items) >= 2
+        and _is_provider_plain_task_refresh_item(items[0])
+        and _is_provider_context_refresh_item(items[1])
+    ):
+        return (items[0], items[1])
+    return ()
+
+
+def _is_provider_plain_task_refresh_item(item: Mapping[str, object]) -> bool:
+    if item.get("role") != "user":
+        return False
+    text = _provider_input_text(item).strip()
+    return text.startswith("Task\n") and "Supporting JSON facts follow in the next input item." in text
+
+
 def _is_provider_context_refresh_item(item: Mapping[str, object]) -> bool:
     if item.get("role") != "user":
         return False
+    text = _provider_input_text(item)
+    return "compact_sidecar_digest" in text and "task_contract" in text
+
+
+def _provider_input_text(item: Mapping[str, object]) -> str:
     content = item.get("content")
     if not isinstance(content, Sequence) or isinstance(content, (str, bytes, bytearray)):
-        return False
+        return ""
     text_chunks: list[str] = []
     for part in content:
         if not isinstance(part, Mapping):
@@ -398,10 +423,7 @@ def _is_provider_context_refresh_item(item: Mapping[str, object]) -> bool:
         if str(part.get("type") or "") != "input_text":
             continue
         text_chunks.append(str(part.get("text") or ""))
-    if not text_chunks:
-        return False
-    text = "\n".join(text_chunks)
-    return "compact_sidecar_digest" in text and "task_contract" in text
+    return "\n".join(text_chunks)
 
 
 def _jsonish_mapping(value: object) -> dict[str, object]:
