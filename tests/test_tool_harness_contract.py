@@ -449,6 +449,93 @@ def test_command_family_natural_text_honors_medium_requested_output_budget() -> 
         assert f"exec://attempt-1/{tool_name}/output" in text
 
 
+def test_run_command_natural_text_surfaces_factual_output_readback_access() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:run:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "command_run_id": "cmd-42",
+                "exit_code": 0,
+                "stdout": "ELF Header: entry 0x400110\n" + ("symbol row\n" * 500),
+                "stdout_tail": "final symbol row\n",
+                "output_ref": "attempt-1/cmd-42/output.log",
+                "output_bytes": 48_000,
+                "output_truncated": True,
+                "provider_visible_output_chars": 12_000,
+            },
+        ),
+        content_refs=("implement-v2-exec://attempt-1/cmd-42/output",),
+    )
+
+    text = result.natural_result_text()
+    card = result.visible_tool_output_card()
+
+    assert "stdout_preview:" in text
+    assert "ELF Header: entry 0x400110" in text
+    assert "final symbol row" in text
+    assert "output: bytes=48000; visible_limit=12000; truncated=true" in text
+    assert "ref=implement-v2-exec://attempt-1/cmd-42/output" in text
+    assert "readback=read_command_output(command_run_id=cmd-42)" in text
+    assert card["output"]["bytes"] == 48_000
+    assert card["output"]["truncated"] is True
+    assert card["output"]["command_run_id"] == "cmd-42"
+
+
+def test_run_command_natural_text_does_not_advertise_readback_without_output_ref() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:run:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "command_run_id": "cmd-no-ref",
+                "exit_code": 0,
+                "stdout": "ok\n",
+            },
+        ),
+    )
+
+    text = result.natural_result_text()
+
+    assert "read_command_output(command_run_id=cmd-no-ref)" not in text
+    assert "output:" not in text
+
+
+def test_run_command_natural_text_preserves_zero_byte_output_state() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:run:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "command_run_id": "cmd-empty",
+                "exit_code": 0,
+                "output_bytes": 0,
+                "output_truncated": False,
+                "output_ref": "attempt-1/cmd-empty/output.log",
+                "provider_visible_output_chars": 1200,
+            },
+        ),
+        content_refs=("implement-v2-exec://attempt-1/cmd-empty/output",),
+    )
+
+    text = result.natural_result_text()
+    card = result.visible_tool_output_card()
+
+    assert "output: bytes=0; visible_limit=1200; truncated=false" in text
+    assert "readback=read_command_output(command_run_id=cmd-empty)" in text
+    assert card["output"]["bytes"] == 0
+    assert card["output"]["truncated"] is False
+
+
 def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
     registry = build_tool_registry_artifact(
         provider="model_json",

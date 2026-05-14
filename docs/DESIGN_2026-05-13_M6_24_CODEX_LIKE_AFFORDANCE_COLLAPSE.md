@@ -1,8 +1,10 @@
 # Design 2026-05-13 - M6.24 Codex-Like Affordance Collapse
 
 Status: active implementation. Phases 1-3 have landed. Phase 4 is in
-progress, with the current slice focused on keeping command/verifier output
-compact in the live native transcript while preserving full refs/sidecars.
+progress. The current slice has added factual command output access metadata
+so compact live transcript output still exposes output size/truncation,
+stable refs, and `read_command_output(command_run_id=...)` readback without
+adding provider-visible action hints.
 
 Scope: the next `implement_v2` M6.24 repair after native transcript and
 `previous_response_id` support. This design changes only the provider-visible
@@ -741,6 +743,8 @@ Implementation slice:
 - introduce or normalize concise visible result cards for read/search,
   command/verifier, and mutation tools;
 - ensure command/test failures put the newest concrete failure first;
+- surface factual command output access metadata: bytes, truncation state,
+  stable output ref, and readback command id;
 - add path:line anchors and bounded excerpts where possible;
 - keep full output, diffs, and evidence in refs;
 - update fastcheck/replay to validate output shape and byte caps.
@@ -749,6 +753,8 @@ Close gate:
 
 - read/search fixtures include path:line anchors and bounded excerpts;
 - command/test failure fixtures show latest failure before generic output tail;
+- command/test fixtures expose factual output readback metadata when full
+  terminal output is ref-backed;
 - mutation fixtures include changed paths, diffstat/hunk count, diff refs, and
   typed evidence refs;
 - visible tool outputs contain no `next_action`, `required_next`,

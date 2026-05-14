@@ -231,6 +231,9 @@ class ToolResultEnvelope:
         mutation = _visible_mutation_card(payload)
         if mutation:
             card["mutation"] = mutation
+        output = _visible_command_output_access(self.tool_name, payload, self.content_refs, output_limit=output_limit)
+        if output:
+            card["output"] = output
         return _fit_visible_tool_output_card(
             _drop_empty_card_values(card),
             hard_bytes=_visible_card_hard_bytes(output_limit),
@@ -407,9 +410,31 @@ def _render_visible_tool_output_card(card: dict[str, object]) -> str:
     refs = card.get("refs")
     if isinstance(refs, list) and refs:
         parts.append("refs: " + ",".join(str(ref) for ref in refs[:12]))
+    output = card.get("output") if isinstance(card.get("output"), dict) else {}
+    if output:
+        parts.append("output: " + _render_command_output_access(output))
     visible_parts = [part for part in parts if part]
     separator = "\n" if any("\n" in part for part in visible_parts) else "; "
     return separator.join(visible_parts)
+
+
+def _render_command_output_access(output: dict[str, object]) -> str:
+    parts: list[str] = []
+    for key in ("bytes", "visible_limit"):
+        value = output.get(key)
+        if value not in (None, "", [], {}):
+            parts.append(f"{key}={_scalar_preview(value, limit=80)}")
+    if output.get("truncated") is True:
+        parts.append("truncated=true")
+    elif output.get("truncated") is False:
+        parts.append("truncated=false")
+    ref = _scalar_preview(output.get("ref"), limit=_VISIBLE_REF_CHARS)
+    if ref:
+        parts.append(f"ref={ref}")
+    command_run_id = _scalar_preview(output.get("command_run_id"), limit=120)
+    if command_run_id:
+        parts.append(f"readback=read_command_output(command_run_id={command_run_id})")
+    return "; ".join(parts)
 
 
 def _render_mutation_summary(mutation: dict[str, object]) -> str:
@@ -512,6 +537,54 @@ def _visible_output_tail(tool_name: str, payload: dict[str, object], *, limit: i
     return ""
 
 
+def _visible_command_output_access(
+    tool_name: str,
+    payload: dict[str, object],
+    content_refs: tuple[str, ...],
+    *,
+    output_limit: int,
+) -> dict[str, object]:
+    if tool_name not in {"run_command", "run_tests", "poll_command", "cancel_command"}:
+        return {}
+    command_run_id = str(payload.get("command_run_id") or "").strip()
+    ref = next((str(item).strip() for item in content_refs if str(item).strip()), "")
+    if not ref:
+        ref = str(payload.get("output_ref") or "").strip()
+    output: dict[str, object] = {}
+    output_bytes = _optional_nonnegative_int(payload.get("output_bytes"))
+    if output_bytes is not None:
+        output["bytes"] = output_bytes
+    if "output_truncated" in payload:
+        output["truncated"] = bool(payload.get("output_truncated"))
+    if ref:
+        output["ref"] = ref
+    if command_run_id and ref:
+        output["command_run_id"] = command_run_id
+    if output:
+        provider_visible = _optional_positive_int(payload.get("provider_visible_output_chars"))
+        if provider_visible is not None:
+            output["visible_limit"] = min(provider_visible, output_limit)
+        elif output_limit:
+            output["visible_limit"] = output_limit
+    return output
+
+
+def _optional_nonnegative_int(value: object) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _optional_positive_int(value: object) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
 def _nonzero_exit_code(value: object) -> bool:
     try:
         return int(value) != 0
@@ -591,6 +664,8 @@ def _fit_visible_tool_output_card(card: dict[str, object], hard_bytes: int = _VI
         fitted["paths"] = [_scalar_preview(path, limit=_VISIBLE_PATH_CHARS) for path in fitted["paths"][:12]]
     if isinstance(fitted.get("refs"), list):
         fitted["refs"] = [_scalar_preview(ref, limit=_VISIBLE_REF_CHARS) for ref in fitted["refs"][:12]]
+    if isinstance(fitted.get("output"), dict):
+        fitted["output"] = _fit_command_output_access_card(fitted["output"])
     mutation = fitted.get("mutation") if isinstance(fitted.get("mutation"), dict) else {}
     if mutation:
         fitted["mutation"] = _fit_mutation_visible_card(mutation)
@@ -613,6 +688,28 @@ def _fit_visible_tool_output_card(card: dict[str, object], hard_bytes: int = _VI
             return fitted
     fitted["card_truncated"] = True
     return _force_fit_mapping(fitted, hard_bytes)
+
+
+def _fit_command_output_access_card(card: dict[str, object]) -> dict[str, object]:
+    fitted = _redact_forbidden_visible_fields(dict(card))
+    if not isinstance(fitted, dict):
+        return {}
+    for key in ("ref", "command_run_id"):
+        if isinstance(fitted.get(key), str):
+            fitted[key] = _scalar_preview(fitted[key], limit=_VISIBLE_REF_CHARS if key == "ref" else 120)
+    byte_value = _optional_nonnegative_int(fitted.get("bytes"))
+    if byte_value is None:
+        fitted.pop("bytes", None)
+    else:
+        fitted["bytes"] = byte_value
+    visible_limit_value = _optional_positive_int(fitted.get("visible_limit"))
+    if visible_limit_value is None:
+        fitted.pop("visible_limit", None)
+    else:
+        fitted["visible_limit"] = visible_limit_value
+    if "truncated" in fitted:
+        fitted["truncated"] = bool(fitted.get("truncated"))
+    return _drop_empty_card_values(fitted)
 
 
 def _fit_mutation_visible_card(card: dict[str, object]) -> dict[str, object]:
