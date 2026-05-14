@@ -1252,6 +1252,10 @@ _NATIVE_FINISH_RESOLVABLE_CLOSEOUT_BLOCKERS = frozenset(
     }
 )
 
+_NATIVE_EXPLICIT_ACCEPTANCE_PASS_RE = re.compile(
+    r"(?im)^\s*(?:acceptance:\s*pass|acceptance_ok|final_acceptance_ok)\b"
+)
+
 
 def _native_finish_supplied_closeout_context(
     refs: tuple[str, ...],
@@ -1326,7 +1330,9 @@ def _native_closeout_context_resolved_by_finish_evidence(
 
 
 def _native_prior_result_can_satisfy_verifier_evidence(result: ToolResultEnvelope) -> bool:
-    if not _native_final_verifier_passed(result):
+    verifier_passed = _native_final_verifier_passed(result)
+    explicit_acceptance_pass = _native_result_has_explicit_acceptance_pass(result)
+    if not verifier_passed and not explicit_acceptance_pass:
         return False
     payload = _native_result_payload(result)
     verifier = payload.get("verifier_evidence")
@@ -1350,11 +1356,50 @@ def _native_prior_result_can_satisfy_verifier_evidence(result: ToolResultEnvelop
         "acceptance",
     }:
         return True
+    if (
+        explicit_acceptance_pass
+        and _native_result_has_verifier_evidence_ref(result)
+        and _native_result_is_process_lifecycle_continuation(result)
+    ):
+        return True
     return False
 
 
 def _native_completion_refs_from_result(result: ToolResultEnvelope) -> tuple[str, ...]:
-    return tuple(ref for ref in result.evidence_refs if _native_closeout_ref_is_completion_evidence(ref))
+    refs = (*result.content_refs, *result.evidence_refs)
+    return tuple(ref for ref in refs if _native_closeout_ref_is_completion_evidence(ref))
+
+
+def _native_result_has_explicit_acceptance_pass(result: ToolResultEnvelope) -> bool:
+    payload = _native_result_payload(result)
+    if result.status != "completed" or result.is_error:
+        return False
+    if payload.get("exit_code") not in (0, "0"):
+        return False
+    for key in ("stdout_tail", "stdout", "text", "content"):
+        value = payload.get(key)
+        if isinstance(value, str) and _NATIVE_EXPLICIT_ACCEPTANCE_PASS_RE.search(value):
+            return True
+    return False
+
+
+def _native_result_has_verifier_evidence_ref(result: ToolResultEnvelope) -> bool:
+    refs = " ".join(str(ref or "") for ref in (*result.content_refs, *result.evidence_refs)).casefold()
+    return "verifier_evidence" in refs or "/verifier/" in refs
+
+
+def _native_result_is_process_lifecycle_continuation(result: ToolResultEnvelope) -> bool:
+    payload = _native_result_payload(result)
+    route = result.route_decision.get("tool_route") if isinstance(result.route_decision, Mapping) else ""
+    if str(route or "").strip() == "process_lifecycle" and result.tool_name in {
+        "write_stdin",
+        "poll_command",
+        "cancel_command",
+    }:
+        return True
+    return result.tool_name in {"write_stdin", "poll_command"} or str(
+        payload.get("internal_kernel") or payload.get("effective_tool_name") or ""
+    ).strip() == "poll_command"
 
 
 def _native_finish_refs_cite_tool_result(
@@ -1380,9 +1425,14 @@ def _native_tool_result_ref_aliases(result: ToolResultEnvelope) -> set[str]:
         aliases.add(f"ev:tool_result:{text}")
         aliases.add(f"tool-result:{text}")
         aliases.add(f"tool_result:{text}")
+        aliases.add(f"tool-route:{text}")
     provider_call_id = str(result.provider_call_id or "").strip()
     if provider_call_id:
         aliases.add(f"native:{provider_call_id}")
+    route_ref = result.route_decision.get("ref") if isinstance(result.route_decision, Mapping) else ""
+    route_ref_text = str(route_ref or "").strip()
+    if route_ref_text:
+        aliases.add(route_ref_text)
     return aliases
 
 

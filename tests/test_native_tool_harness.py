@@ -3161,6 +3161,199 @@ def test_native_finish_tool_result_alias_resolves_unknown_verdict_verify_command
     )
 
 
+def test_native_finish_tool_route_alias_resolves_polled_acceptance_pass() -> None:
+    verifier = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="poll-verify",
+        mew_tool_call_id="native:poll-verify",
+        tool_name="write_stdin",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout_tail": "Modules were successfully checked\nACCEPTANCE: PASS final verifier succeeded",
+                "execution_contract_normalized": {
+                    "proof_role": "none",
+                    "acceptance_kind": "not_acceptance",
+                    "stage": "command",
+                },
+                "verifier_evidence": {"verdict": "unknown"},
+            },
+        ),
+        content_refs=("implement-v2-exec://attempt/command-poll/output",),
+        evidence_refs=(
+            "implement-v2-exec://attempt/command-poll/terminal",
+            "implement-v2-evidence://attempt/command_run/command-poll",
+            "implement-v2-evidence://attempt/verifier_evidence/verifier-poll",
+            "implement-v2-evidence://attempt/failure_classification/failure-poll",
+            "implement-v2-evidence://attempt/structured_finish_gate/finish-gate",
+        ),
+        route_decision={"ref": "tool-route:poll-verify"},
+    )
+
+    context = _native_finish_supplied_closeout_context(
+        ("tool-route:poll-verify",),
+        (verifier,),
+    )
+
+    assert context.fresh_verifier_refs == (
+        "implement-v2-exec://attempt/command-poll/output",
+        "implement-v2-exec://attempt/command-poll/terminal",
+        "implement-v2-evidence://attempt/command_run/command-poll",
+        "implement-v2-evidence://attempt/verifier_evidence/verifier-poll",
+    )
+    joined = " ".join(context.fresh_verifier_refs)
+    assert "failure_classification" not in joined
+    assert "structured_finish_gate" not in joined
+
+
+def test_native_finish_tool_result_alias_resolves_polled_acceptance_ok_marker() -> None:
+    verifier = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="poll-verify",
+        mew_tool_call_id="native:poll-verify",
+        tool_name="write_stdin",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout_tail": "ACCEPTANCE_OK: verifier rebuilt the artifact and final checks passed",
+                "execution_contract_normalized": {
+                    "proof_role": "none",
+                    "acceptance_kind": "not_acceptance",
+                    "stage": "command",
+                },
+                "verifier_evidence": {"verdict": "unknown"},
+            },
+        ),
+        content_refs=("implement-v2-exec://attempt/command-poll/output",),
+        evidence_refs=(
+            "implement-v2-evidence://attempt/verifier_evidence/verifier-poll",
+        ),
+        route_decision={"ref": "tool-route:poll-verify", "tool_route": "process_lifecycle"},
+    )
+
+    context = _native_finish_supplied_closeout_context(
+        ("ev:tool_result:poll-verify",),
+        (verifier,),
+    )
+
+    assert context.fresh_verifier_refs == (
+        "implement-v2-exec://attempt/command-poll/output",
+        "implement-v2-evidence://attempt/verifier_evidence/verifier-poll",
+    )
+
+
+def test_native_finish_tool_result_alias_rejects_polled_output_without_acceptance_pass() -> None:
+    verifier = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="poll-verify",
+        mew_tool_call_id="native:poll-verify",
+        tool_name="write_stdin",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout_tail": "command finished without an explicit verifier pass marker",
+                "execution_contract_normalized": {
+                    "proof_role": "none",
+                    "acceptance_kind": "not_acceptance",
+                    "stage": "command",
+                },
+                "verifier_evidence": {"verdict": "unknown"},
+            },
+        ),
+        content_refs=("implement-v2-exec://attempt/command-poll/output",),
+        evidence_refs=(
+            "implement-v2-evidence://attempt/verifier_evidence/verifier-poll",
+        ),
+    )
+
+    context = _native_finish_supplied_closeout_context(
+        ("ev:tool_result:poll-verify",),
+        (verifier,),
+    )
+
+    assert context == _NativeCloseoutContext()
+
+
+@pytest.mark.parametrize(
+    "stdout_tail",
+    (
+        "NOT ACCEPTANCE_OK: final verifier failed",
+        "final acceptance okay: not a strict marker",
+        "FINAL_ACCEPTANCE_OKAY but still reviewing",
+        "noise output_tail: ACCEPTANCE_OK",
+    ),
+)
+def test_native_finish_tool_result_alias_rejects_negated_or_extended_acceptance_marker(stdout_tail: str) -> None:
+    verifier = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="poll-verify",
+        mew_tool_call_id="native:poll-verify",
+        tool_name="write_stdin",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout_tail": stdout_tail,
+                "execution_contract_normalized": {
+                    "proof_role": "none",
+                    "acceptance_kind": "not_acceptance",
+                    "stage": "command",
+                },
+                "verifier_evidence": {"verdict": "unknown"},
+            },
+        ),
+        content_refs=("implement-v2-exec://attempt/command-poll/output",),
+        evidence_refs=(
+            "implement-v2-evidence://attempt/verifier_evidence/verifier-poll",
+        ),
+        route_decision={"ref": "tool-route:poll-verify", "tool_route": "process_lifecycle"},
+    )
+
+    context = _native_finish_supplied_closeout_context(
+        ("ev:tool_result:poll-verify",),
+        (verifier,),
+    )
+
+    assert context == _NativeCloseoutContext()
+
+
+def test_native_finish_tool_result_alias_rejects_non_lifecycle_acceptance_text() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="generic-pass",
+        mew_tool_call_id="native:generic-pass",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout_tail": "ACCEPTANCE: PASS ordinary command output",
+                "execution_contract_normalized": {
+                    "proof_role": "none",
+                    "acceptance_kind": "not_acceptance",
+                    "stage": "command",
+                },
+                "verifier_evidence": {"verdict": "unknown"},
+            },
+        ),
+        content_refs=("implement-v2-exec://attempt/generic/output",),
+        evidence_refs=(
+            "implement-v2-evidence://attempt/verifier_evidence/generic",
+        ),
+        route_decision={"ref": "tool-route:generic-pass", "tool_route": "process_runner"},
+    )
+
+    context = _native_finish_supplied_closeout_context(
+        ("ev:tool_result:generic-pass",),
+        (result,),
+    )
+
+    assert context == _NativeCloseoutContext()
+
+
 def test_native_finish_tool_result_alias_does_not_resolve_non_verifier_result() -> None:
     read_result = ToolResultEnvelope(
         lane_attempt_id="attempt",
