@@ -1107,6 +1107,9 @@ artifacts, require a fixed A/B set and reviewer acceptance, and block default
 switching when comparability, forbidden-field scans, pairing/proof/evidence,
 success/acceptance, first-write/probe cadence, verifier repair latency,
 visible-byte safety, or `write_stdin`/adapter limitations regress.
+`scripts/run_tool_surface_ab_smoke.py` generates a reusable fake-native
+`mew_legacy` vs `codex_hot_path` smoke artifact set and writes both the Phase 4
+report and Phase 5 gate result.
 
 Close gate:
 
