@@ -101,13 +101,13 @@ tuning before a minimal H10 change is designed and measured.
 | ID | Hypothesis | Minimal change | Expected signal | Status | Decision |
 |---|---|---|---|---|---|
 | H0 | Hot-path behavior cannot be judged until first-patch readiness and exploration compression are measured. | Observability only: compute first-patch readiness timestamp/basis, readiness-to-mutation latency, accepted implementation constraints, and duplicate exploration after readiness. | We can say whether mew lacks evidence, fails to compress evidence into constraints, or stalls after enough evidence exists. | measured | mew has early evidence but does not compress it into a patch; use H10 next |
-| H1 | Provider-visible task shape is wrong: mew leads with sidecar/task JSON rather than a plain task. | Make the hot-path first visible content environment context plus plain user task; move sidecar/task facts out of the leading position. | Earlier target-path mutation; fewer prewrite probes; no native rebuild branch before `vm.js`. | observable measured | Current H10 artifact starts every provider request with a JSON envelope; due sorted keys, `compact_sidecar_digest` is the first top-level section |
+| H1 | Provider-visible task shape is wrong: mew leads with sidecar/task JSON rather than a plain task. | Make the hot-path first visible content environment context plus plain user task; move sidecar/task facts out of the leading position. | Earlier target-path mutation; fewer prewrite probes; no native rebuild branch before `vm.js`. | measured partial keep | Task-first shape is present and first mutation now appears, but still too late: mew step 45 after 43 probes vs Codex step 25 after 24 probes |
 | H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | pending observability | TBD |
 | H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | observability first | TBD |
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | pending observability | TBD |
 | H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | observability first | TBD |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
-| H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | observable measured | Current H10 artifact exposes `compact_sidecar_digest` on all 50 provider requests; defer behavior change until H1 task-first shape is isolated |
+| H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | next experiment | H1 isolated task-first shape; fresh H1 artifact still exposes `compact_sidecar_digest` on all 47 requests and scaffolding terms dominate task anchors |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
 | H9 | mew lacks a first-patch readiness threshold: it keeps exploring after enough evidence exists to write a runnable skeleton. | Add observability first: compute first-patch readiness candidates and readiness-to-mutation latency. Behavior change only after a measured miss. | Readiness-to-mutation latency shrinks; first mutation happens after enough evidence but before broad re-exploration/design stalls. | observability first | TBD |
 | H10 | Exploration is not compressed into patch constraints. | Minimal behavior change: make accepted implementation constraints from probe facts visible as task facts, not as `next_action` steering. Keep the diagnostic sidecar as the source of truth and avoid adding a new frontier. | More direct transition from probes to one coherent patch; fewer repeated same-family probes; first mutation appears before repeated build/disassembly loops. | measured failed, reverted | compact task facts alone do not create probe-to-patch compression |
@@ -344,9 +344,7 @@ Use the same Codex and Claude Code references as H0/H10. No new reference trace
 is needed for the implementation step.
 
 Mew artifact:
-Pending. The next live diagnostic should produce a fresh 10 minute
-`make-mips-interpreter` step-shape artifact after focused validation and
-provider-visible salience smoke.
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-080318/2026-05-15__08-03-18/make-mips-interpreter__ycVG6Vy`
 
 Expected signal:
 The salience analyzer on a new mew artifact reports plain-text first input
@@ -355,11 +353,35 @@ minute step-shape diagnostic should show an earlier first mutation or fewer
 duplicate-after-readiness probe families than H10/H0.
 
 Observed signal:
-Pending live diagnostic.
+
+The fresh 10 minute diagnostic reached reward 0 and timed out at 600 seconds,
+but unlike H10 it did produce a first source mutation:
+
+- provider-visible salience report:
+  `tmp/m6_24_h1_provider_visible_salience.md`;
+- step-diff report:
+  `tmp/m6_24_h1_step_diff.md`;
+- first input shape: `plain_text` on all 47 saved provider requests;
+- JSON support payload found on all saved provider requests;
+- support payload order:
+  `task_contract, task_facts, compact_sidecar_digest, workspace, lane`;
+- compact sidecar remained visible on all 47 requests;
+- scaffolding terms: 2,309 occurrences;
+- Codex first mutation: step 25 after 24 probes;
+- mew first mutation: step 45 after 43 probes;
+- readiness-to-mutation: Codex 22 steps, mew 29 steps;
+- repeated pre-mutation probe families remained:
+  `binary_metadata`, `disassembly`, `symbol_lookup`, `file_read`, and
+  `runtime_verifier`.
 
 Decision:
-Pending. Keep only if H1 changes the expected signal. If not, revert or revise
-before testing H7 sidecar hiding.
+Partial keep. H1 fixed the provider-visible leading shape and improved over H10
+by reaching a first mutation, so do not revert it immediately. It did not close
+the Codex gap: mew still spends 43 probes before mutation and provider-visible
+resident scaffolding remains dominant. The next isolated experiment is H7:
+hide or compress `compact_sidecar_digest` from the live provider-visible hot
+path while preserving sidecar artifacts internally. Do not combine H7 with
+tool wording, next-action steering, WorkFrame steering, or threshold control.
 
 Notes:
 Focused validation for the implementation slice:
@@ -396,7 +418,12 @@ Follow this execution order. Do not reorder it after context compression:
    payload and visible on every request.
 4. EXP-20260515-4 implements H1 only: live provider-visible task input is
    task-first while H7 sidecar visibility stays unchanged.
-5. Next, run focused tests if files changed, a provider-visible salience smoke
-   on the fresh artifact, then one bounded 10 minute step-shape diagnostic.
-6. Keep, revise, or revert based on whether first mutation appears earlier and
-   duplicate-after-readiness probe families decrease.
+5. EXP-20260515-4 measured H1. Keep H1 as a partial improvement because first
+   mutation now appears, but treat it as insufficient because the Codex gap
+   remains large.
+6. Next, run H7 only: hide or compress `compact_sidecar_digest` from
+   provider-visible hot-path input while keeping sidecar artifacts internal.
+7. After H7, run focused tests, provider-visible salience smoke on the fresh
+   artifact, and one bounded 10 minute step-shape diagnostic. Keep, revise, or
+   revert H7 based on whether scaffolding terms drop and mutation moves closer
+   to Codex without adding new steering.

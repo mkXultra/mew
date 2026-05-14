@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1/H7 provider-visible salience snapshot shows a JSON envelope with `compact_sidecar_digest` leading every saved request. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; next isolated experiment is H7 sidecar visibility. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,10 +70,10 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_hot_path_h1_task_first_provider_shape_experiment`.
+`m6_24_hot_path_h7_sidecar_visibility_experiment`.
 
 Current diagnostic mode:
-`h10_failed_reverted__h6_passed__h1_salience_implemented_pending_step_check`.
+`h10_failed_reverted__h6_passed__h1_partial_keep__h7_next`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
@@ -102,7 +102,13 @@ Do not combine this with hiding the compact sidecar yet.
 H1 implementation now emits a plain task-first input item before the existing
 JSON support payload. The JSON support payload still contains
 `compact_sidecar_digest`, and compact sidecar visibility is intentionally
-unchanged. This is not an H7 experiment.
+unchanged. The fresh H1 diagnostic produced a first mutation where H10 produced
+none, so H1 is a partial keep. It is insufficient: mew still reached first
+mutation at step 45 after 43 probes, compared with Codex step 25 after 24
+probes. The next isolated experiment is H7: hide or compress
+`compact_sidecar_digest` from provider-visible hot-path input while preserving
+internal sidecar artifacts. Do not combine this with tool wording,
+`next_action`, WorkFrame steering, or threshold control.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -163,6 +169,18 @@ Fixed execution order:
      `task_contract`, `task_facts`, `compact_sidecar_digest`, `workspace`,
      `lane`;
    - H7 is intentionally unchanged: compact sidecar remains visible.
+10. H1 fresh 10 minute diagnostic:
+   - artifact:
+     `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-080318/2026-05-15__08-03-18/make-mips-interpreter__ycVG6Vy`;
+   - provider-visible salience report:
+     `tmp/m6_24_h1_provider_visible_salience.md`;
+   - step-diff report:
+     `tmp/m6_24_h1_step_diff.md`;
+   - first input shape is now `plain_text` on all 47 saved provider requests;
+   - compact sidecar remains visible on all 47 saved requests;
+   - first mutation: Codex step 25 after 24 probes, mew step 45 after 43
+     probes;
+   - decision: partial keep H1; next isolate H7 sidecar visibility.
 
 Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
 context, but it no longer controls the immediate next action. Do not resume
@@ -219,11 +237,12 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: H1 behavior is implemented. Run a fresh provider-visible
-  salience smoke and one bounded 10 minute step-shape diagnostic. Keep, revise,
-  or revert based on earlier first mutation and fewer duplicate-after-readiness
-  probe families. Do not tune `apply_patch`, add next-action steering, or hide
-  the sidecar in the same experiment.
+- Current next action: implement H7 only. Hide or compress
+  `compact_sidecar_digest` from provider-visible hot-path input while keeping
+  internal sidecar artifacts and saved proof/replay observability intact. Then
+  run focused tests, provider-visible salience smoke, and one bounded 10 minute
+  step-shape diagnostic. Do not tune `apply_patch`, add next-action steering,
+  restore WorkFrame steering, or add threshold control in the same experiment.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe
