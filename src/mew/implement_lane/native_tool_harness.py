@@ -95,7 +95,7 @@ PHASE3_NATIVE_SURFACE = {
 _FIRST_WRITE_DUE_PROBE_THRESHOLD = 10
 _FIRST_WRITE_DUE_TURN_THRESHOLD = 6
 _FIRST_WRITE_DUE_GRACE_PROBE_CALLS = 1
-_PROCESS_LIFECYCLE_TOOL_NAMES = frozenset({"write_stdin", "poll_command", "cancel_command", "read_command_output"})
+_PROCESS_LIFECYCLE_TOOL_NAMES = frozenset({"poll_command", "cancel_command", "read_command_output"})
 _PREWRITE_PROBE_PLATEAU_THRESHOLD = 30
 _FIRST_WRITE_DUE_HARD_RUNTIME_PROBE_THRESHOLD = 18
 # Hard-runtime tasks often need a long source/binary probe pass before a coherent patch.
@@ -3010,10 +3010,7 @@ def _responses_input_items(
 ) -> list[dict[str, object]]:
     task_payload = {
         "task_contract": dict(lane_input.task_contract),
-        "task_facts": _provider_visible_task_facts(
-            lane_input,
-            transcript_items=transcript_items,
-        ),
+        "task_facts": _provider_visible_task_facts(lane_input),
         "compact_sidecar_digest": dict(compact_sidecar_digest),
         "workspace": lane_input.workspace,
         "lane": lane_input.lane,
@@ -3038,11 +3035,7 @@ def _responses_input_items(
     return items
 
 
-def _provider_visible_task_facts(
-    lane_input: ImplementLaneInput,
-    *,
-    transcript_items: Iterable[NativeTranscriptItem] = (),
-) -> dict[str, object]:
+def _provider_visible_task_facts(lane_input: ImplementLaneInput) -> dict[str, object]:
     """Return factual task/path context without prescribing the next action."""
 
     contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
@@ -3077,163 +3070,7 @@ def _provider_visible_task_facts(
         "existing_workspace_paths": existing_paths,
         "missing_workspace_paths": missing_paths,
     }
-    implementation_constraints = _provider_visible_implementation_constraints(
-        transcript_items,
-        workspace=lane_input.workspace,
-    )
-    if implementation_constraints:
-        facts["implementation_constraints"] = implementation_constraints
     return {key: value for key, value in facts.items() if value}
-
-
-def _provider_visible_implementation_constraints(
-    transcript_items: Iterable[NativeTranscriptItem],
-    *,
-    workspace: str | Path | None,
-) -> dict[str, object]:
-    """Compact observed probe facts into task facts without steering next action."""
-
-    items = [item for item in transcript_items if isinstance(item, NativeTranscriptItem)]
-    if not items:
-        return {}
-    outputs_by_call_id = {
-        item.call_id: item
-        for item in items
-        if item.kind in OUTPUT_ITEM_KINDS and item.call_id
-    }
-    families: list[str] = []
-    paths: list[str] = []
-    latest: list[dict[str, object]] = []
-    for call in (item for item in items if item.kind in CALL_ITEM_KINDS):
-        if call.tool_name in WRITE_TOOL_NAMES or call.tool_name in _PROCESS_LIFECYCLE_TOOL_NAMES:
-            continue
-        if _native_call_is_source_mutating_exec(call):
-            continue
-        family = _implementation_constraint_family(call)
-        if not family:
-            continue
-        if family not in families:
-            families.append(family)
-        call_paths = _implementation_constraint_paths(call, workspace=workspace)
-        paths.extend(call_paths)
-        output = outputs_by_call_id.get(call.call_id)
-        latest.append(
-            {
-                "family": family,
-                "tool": call.tool_name,
-                "status": _native_task_fact_clip(getattr(output, "status", "") if output else "", limit=40),
-                "paths": call_paths[:4],
-            }
-        )
-    if not families:
-        return {}
-    source_observed = any(family in {"source_scan", "source_read", "git_state"} for family in families)
-    artifact_observed = any(
-        family in {"binary_probe", "disassembly", "runtime_verifier", "build_attempt", "dependency_check"}
-        for family in families
-    )
-    payload = {
-        "schema_version": 1,
-        "source": "native_transcript_probe_facts",
-        "observed_probe_families": families[:8],
-        "observed_paths": _dedupe_task_paths(paths)[:12],
-        "patch_context": {
-            "source_observed": source_observed,
-            "artifact_or_runtime_observed": artifact_observed,
-            "basis": "source_plus_artifact_probe" if source_observed and artifact_observed else "",
-        },
-        "latest_probe_facts": latest[-6:],
-    }
-    return _drop_empty_native_task_fact_values(payload)
-
-
-def _implementation_constraint_family(call: NativeTranscriptItem) -> str:
-    tool_name = str(call.tool_name or "")
-    if tool_name == "read_file":
-        return "source_read"
-    if tool_name in {"inspect_dir", "list_dir", "glob", "search_text"}:
-        return "source_scan"
-    if tool_name in {"git_status", "git_diff"}:
-        return "git_state"
-    if tool_name == "run_tests":
-        return "runtime_verifier"
-    if tool_name not in {"run_command", "exec_command"}:
-        return ""
-    arguments, _ = _arguments(call)
-    command = _implementation_constraint_command_text(arguments).casefold()
-    if not command.strip():
-        return ""
-    if re.search(r"\b(objdump|llvm-objdump|gdb|lldb)\b", command):
-        return "disassembly"
-    if re.search(r"\b(readelf|file|nm|strings|otool)\b", command):
-        return "binary_probe"
-    if re.search(r"\b(pytest|npm\s+test|cargo\s+test|go\s+test|node|python3?|ruby|deno)\b", command):
-        return "runtime_verifier"
-    if re.search(r"\b(gcc|clang|make|cmake|cargo\s+build|npm\s+run\s+build)\b", command):
-        return "build_attempt"
-    if re.search(r"\b(which|command\s+-v|--version)\b", command):
-        return "dependency_check"
-    if re.search(r"\b(rg|grep|sed|cat|head|tail|find|ls)\b", command):
-        return "source_scan"
-    return "command_probe"
-
-
-def _implementation_constraint_paths(
-    call: NativeTranscriptItem,
-    *,
-    workspace: str | Path | None,
-) -> list[str]:
-    arguments, _ = _arguments(call)
-    candidates: list[str] = []
-    for key in ("path", "target_path", "source_path", "pattern"):
-        value = arguments.get(key)
-        if isinstance(value, str):
-            candidates.extend(_task_paths_from_text(value, workspace=workspace))
-    for key in ("paths", "target_paths", "source_paths"):
-        value = arguments.get(key)
-        if isinstance(value, list):
-            for item in value:
-                candidates.extend(_task_paths_from_text(item, workspace=workspace))
-    if call.tool_name == "run_command":
-        candidates.extend(_task_paths_from_text(arguments.get("command"), workspace=workspace))
-    elif call.tool_name == "exec_command":
-        candidates.extend(_task_paths_from_text(_implementation_constraint_command_text(arguments), workspace=workspace))
-    return _dedupe_task_paths(candidates)
-
-
-def _implementation_constraint_command_text(arguments: Mapping[str, object]) -> str:
-    for key in ("command", "cmd"):
-        value = arguments.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-    argv = arguments.get("argv")
-    if isinstance(argv, list):
-        return " ".join(str(item) for item in argv)
-    return ""
-
-
-def _native_task_fact_clip(value: object, *, limit: int) -> str:
-    text = str(value or "").strip()
-    if len(text) <= limit:
-        return text
-    return text[: max(0, limit - 1)].rstrip() + "…"
-
-
-def _drop_empty_native_task_fact_values(value: object) -> object:
-    if isinstance(value, dict):
-        dropped = {
-            str(key): _drop_empty_native_task_fact_values(item)
-            for key, item in value.items()
-            if item not in (None, "", [], {})
-        }
-        return {key: item for key, item in dropped.items() if item not in (None, "", [], {})}
-    if isinstance(value, list):
-        return [
-            item
-            for item in (_drop_empty_native_task_fact_values(item) for item in value)
-            if item not in (None, "", [], {})
-        ]
-    return value
 
 
 def _task_paths_from_text(text: object, *, workspace: str | Path | None = None) -> list[str]:
