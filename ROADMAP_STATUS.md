@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Codex-like native hot-path Phase 0 and Phase 1A/1B are implemented/reviewed/committed; current next work is Phase 2/3 validation from `docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md` before any speed proof. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | ToolRegistry / ToolSurfaceProfile design passed multi-model review; current next work is registry-backed `mew_legacy` plus explicit `codex_hot_path` A/B profile before any broad speed proof. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,20 +70,25 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_codex_like_native_hot_path_phase_2_validation`.
+`m6_24_tool_registry_codex_hot_path_substrate`.
 
 Current diagnostic mode:
-`no_live_speed_until_phase_2_3_hot_path_validation_gate`.
+`no_live_speed_until_registry_profile_ab_gate`.
 
 Current reentry decision:
-`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md` is the active
-M6.24 design. Phase 0 landed as `eee130d`; Phase 1A/1B landed as `76f05ab`.
-Do not resume command/edit Phase 7 validation, `speed_1`, `proof_5`, or
-hard-runtime threshold polish until Phase 2/3 validation is green. The target
-is Codex-like live path plus mew sidecar proof: native transcript window +
-compact factual tool-result digest as provider-visible input;
-WorkFrame/proof/replay/typed evidence/loop signals remain internal sidecars
-or diagnostics, not live `next_action` steering.
+`docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md` is the
+active M6.24 design. It was produced with `orchestrate-build-review` and round
+2 review returned `findings: []` from codex-ultra, glm5.1, and claude-ultra.
+The next implementation target is not another direct tool-description polish:
+first implement the registry/profile injection substrate, route current
+`mew_legacy` through it, then add explicit `codex_hot_path` for A/B. Do not
+resume command/edit Phase 7 validation, `speed_1`, `proof_5`,
+hard-runtime threshold polish, or further ad hoc tool-output wording until
+registry-backed `mew_legacy` and `codex_hot_path` can be compared on the same
+task shape. The target remains Codex-like live path plus mew sidecar proof:
+provider-visible tools and result text are profile-controlled; transcript,
+proof, replay, typed evidence, observer artifacts, and finish gates remain
+internal sidecars or diagnostics, not live `next_action` steering.
 
 Latest Codex-like hot-path validation:
 

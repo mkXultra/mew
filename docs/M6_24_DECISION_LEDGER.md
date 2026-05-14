@@ -15,8 +15,55 @@ Companion controller and data files:
 - `docs/DESIGN_2026-05-10_M6_24_IMPLEMENT_V2_WORKFRAME_REDESIGN.md`
 - `docs/M6_24_WORKFRAME_PHASE0_PREP_2026-05-10.md`
 - `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`
+- `docs/REVIEW_2026-05-14_M6_24_CODEX_TOOL_IF_GAP.md`
+- `docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md`
 
 ## Durable Decisions
+
+### 2026-05-14: ToolRegistry Before More Tool Polish
+
+Decision: stop directly polishing individual provider-visible tool descriptions
+or one-off tool-output wording for M6.24 until the `ToolRegistry` /
+`ToolSurfaceProfile` substrate from
+`docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md` is
+implemented. The current implementation problem is no longer a single
+`write_file` or command-output description; the model-visible tool surface is
+fixed in code and cannot be safely A/B tested against a Codex-like hot path.
+
+The next implementation chain is:
+
+```text
+M6.24 -> provider-visible tool-surface gap -> implement ToolRegistry substrate
+      -> route existing mew_legacy through the registry
+      -> add codex_hot_path profile
+      -> compare mew_legacy vs codex_hot_path on the same M6.24 task shape
+```
+
+Close-order for the next work:
+
+1. Implement registry interfaces and profile plumbing with `mew_legacy` as the
+   default. Prove byte-for-byte descriptor stability for legacy provider-visible
+   tools; only sidecar/inventory metadata may gain profile ids or hashes.
+2. Add `codex_hot_path` as an explicit profile, not the default. It exposes
+   `apply_patch`, `exec_command`, `write_stdin`, and a minimal `finish` trigger.
+   `list_dir` stays gated until its advertised options are implemented honestly.
+3. Preserve mew resident value internally: transcript artifacts, proof
+   manifests, evidence refs, route decisions, source snapshots, replay,
+   observer artifacts, and finish gates remain sidecars or internal checks.
+4. Do not let the registry become a planner. It must not consume or expose
+   `next_action`, `required_next`, first-write pressure, probe thresholds,
+   WorkFrame phase, or task-specific semantic policy.
+5. Run descriptor golden tests, route tests, renderer tests, forbidden-field
+   leak scans, and then same-shape A/B diagnostics before any default switch.
+
+Rationale: `codex-ultra`, `glm5.1`, and `claude-ultra` reviewed the design
+through `orchestrate-build-review`; round 2 had `findings: []` for all three
+reviewers. The design intentionally keeps Codex-like model-facing tools and
+mew-specific durable proof as separate layers.
+
+Deferred: direct speed proof, `proof_5`, hard-runtime threshold polish, or more
+ad hoc tool-description edits. Reopen those only after the registry-backed
+`mew_legacy` and `codex_hot_path` profiles can be compared.
 
 ### 2026-05-14: 10 Minute Diagnostics Are Measurement Windows, Not Production Time Control
 
