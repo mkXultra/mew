@@ -19,8 +19,10 @@ from mew.implement_lane.native_tool_harness import (
     NativeCodexResponsesProvider,
     PHASE3_NATIVE_SURFACE,
     _NativeCloseoutContext,
+    _completion_resolver_input_from_finish,
     _finish_gate_block_resolved_by_closeout,
     _finish_gate_missing_obligations,
+    _native_finish_supplied_closeout_context,
     run_live_native_implement_v2,
     run_native_implement_v2,
     run_unavailable_native_implement_v2,
@@ -32,7 +34,7 @@ from mew.implement_lane.native_transcript import (
     validate_native_transcript_pairing,
 )
 from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID
-from mew.implement_lane.types import ImplementLaneInput
+from mew.implement_lane.types import ImplementLaneInput, ToolResultEnvelope
 
 
 def _lane_input(
@@ -3088,6 +3090,258 @@ def test_native_closeout_resolves_only_verifier_typed_gate_missing_obligations()
         gate={"failed_evidence_refs": [{"id": "ev:artifact:frame", "kind": "artifact_check"}], "missing_obligations": []},
         closeout_context=closeout,
     )
+
+
+def test_native_finish_tool_result_alias_resolves_verifier_closeout_context() -> None:
+    verifier = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="verify-call",
+        mew_tool_call_id="native:verify-call",
+        tool_name="exec_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "execution_contract": {
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                },
+                "verifier_evidence": {"verdict": "pass"},
+            },
+        ),
+        evidence_refs=(
+            "implement-v2-exec://attempt/command-verify/terminal",
+            "implement-v2-evidence://attempt/command_run/command-verify",
+            "implement-v2-evidence://attempt/verifier_evidence/verifier-verify",
+            "implement-v2-evidence://attempt/structured_finish_gate/finish-gate",
+        ),
+    )
+
+    context = _native_finish_supplied_closeout_context(
+        ("ev:tool_result:verify-call",),
+        (verifier,),
+    )
+
+    assert context.fresh_verifier_refs == (
+        "implement-v2-exec://attempt/command-verify/terminal",
+        "implement-v2-evidence://attempt/command_run/command-verify",
+        "implement-v2-evidence://attempt/verifier_evidence/verifier-verify",
+    )
+    assert "structured_finish_gate" not in " ".join(context.fresh_verifier_refs)
+
+
+def test_native_finish_tool_result_alias_resolves_unknown_verdict_verify_command() -> None:
+    verifier = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="exec-verify",
+        mew_tool_call_id="native:exec-verify",
+        tool_name="exec_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "command_intent": "verify",
+                "verifier_evidence": {"verdict": "unknown"},
+            },
+        ),
+        evidence_refs=(
+            "implement-v2-exec://attempt/command-exec-verify/terminal",
+            "implement-v2-evidence://attempt/verifier_evidence/verifier-exec-verify",
+        ),
+    )
+
+    context = _native_finish_supplied_closeout_context(
+        ("ev:tool_result:exec-verify",),
+        (verifier,),
+    )
+
+    assert context.fresh_verifier_refs == (
+        "implement-v2-exec://attempt/command-exec-verify/terminal",
+        "implement-v2-evidence://attempt/verifier_evidence/verifier-exec-verify",
+    )
+
+
+def test_native_finish_tool_result_alias_does_not_resolve_non_verifier_result() -> None:
+    read_result = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="read-call",
+        mew_tool_call_id="native:read-call",
+        tool_name="read_file",
+        status="completed",
+        content=({"path": "plus_comm.v", "text": "Theorem plus_comm..."},),
+        evidence_refs=(
+            "implement-v2-evidence://attempt/tool_run_record/read-call",
+            "implement-v2-evidence://attempt/verifier_evidence/spurious-read-ref",
+        ),
+    )
+
+    context = _native_finish_supplied_closeout_context(
+        ("ev:tool_result:read-call",),
+        (read_result,),
+    )
+
+    assert context == _NativeCloseoutContext()
+
+
+def test_native_completion_resolver_accepts_finish_cited_verifier_alias_after_missing_closeout_command(
+    tmp_path: Path,
+) -> None:
+    verifier = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="verify-call",
+        mew_tool_call_id="native:verify-call",
+        tool_name="exec_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "execution_contract": {
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                },
+                "verifier_evidence": {"verdict": "pass"},
+            },
+        ),
+        evidence_refs=(
+            "implement-v2-exec://attempt/command-verify/terminal",
+            "implement-v2-evidence://attempt/command_run/command-verify",
+            "implement-v2-evidence://attempt/verifier_evidence/verifier-verify",
+        ),
+    )
+    finish_call = NativeTranscriptItem(
+        sequence=1,
+        turn_id="turn-1",
+        lane_attempt_id="attempt",
+        provider="codex",
+        model="gpt-5.5",
+        kind="finish_call",
+        call_id="finish-call",
+        tool_name="finish",
+        arguments_json_text=json.dumps(
+            {
+                "outcome": "completed",
+                "summary": "verified",
+                "evidence_refs": ["ev:tool_result:verify-call"],
+            }
+        ),
+    )
+    finish_result = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="finish-call",
+        mew_tool_call_id="native:finish-call",
+        tool_name="finish",
+        status="completed",
+        content=({"summary": "verified", "outcome": "completed"},),
+        evidence_refs=("native-finish://accepted",),
+    )
+
+    resolver_input = _completion_resolver_input_from_finish(
+        finish_call,
+        finish_result,
+        lane_input=_lane_input(tmp_path),
+        transcript_items=(finish_call,),
+        request_descriptor={},
+        prior_tool_results=(verifier,),
+        closeout_context=_NativeCloseoutContext(
+            blockers=("closeout_verifier_command_missing",),
+            missing_obligations=("strict_verifier_evidence",),
+        ),
+    )
+
+    assert "closeout_verifier_command_missing" not in resolver_input.blockers
+    assert "strict_verifier_evidence" not in resolver_input.missing_obligations
+    assert resolver_input.fresh_verifier_refs == (
+        "implement-v2-exec://attempt/command-verify/terminal",
+        "implement-v2-evidence://attempt/command_run/command-verify",
+        "implement-v2-evidence://attempt/verifier_evidence/verifier-verify",
+    )
+
+
+def test_native_completion_resolver_rejects_finish_cited_stale_verifier_before_later_mutation(
+    tmp_path: Path,
+) -> None:
+    verifier = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="verify-call",
+        mew_tool_call_id="native:verify-call",
+        tool_name="exec_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "execution_contract": {
+                    "proof_role": "verifier",
+                    "acceptance_kind": "external_verifier",
+                },
+                "verifier_evidence": {"verdict": "pass"},
+            },
+        ),
+        evidence_refs=(
+            "implement-v2-exec://attempt/command-verify/terminal",
+            "implement-v2-evidence://attempt/command_run/command-verify",
+            "implement-v2-evidence://attempt/verifier_evidence/verifier-verify",
+        ),
+    )
+    later_mutation = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="write-after-verify",
+        mew_tool_call_id="native:write-after-verify",
+        tool_name="write_file",
+        status="completed",
+        content=({"path": str(tmp_path / "plus_comm.v"), "written": True},),
+        side_effects=(
+            {
+                "kind": "source_tree_mutation",
+                "record": {
+                    "changed_count": 1,
+                    "changes": [{"path": str(tmp_path / "plus_comm.v"), "change": "modified"}],
+                },
+            },
+        ),
+    )
+    finish_call = NativeTranscriptItem(
+        sequence=1,
+        turn_id="turn-1",
+        lane_attempt_id="attempt",
+        provider="codex",
+        model="gpt-5.5",
+        kind="finish_call",
+        call_id="finish-call",
+        tool_name="finish",
+        arguments_json_text=json.dumps(
+            {
+                "outcome": "completed",
+                "summary": "verified",
+                "evidence_refs": ["ev:tool_result:verify-call"],
+            }
+        ),
+    )
+    finish_result = ToolResultEnvelope(
+        lane_attempt_id="attempt",
+        provider_call_id="finish-call",
+        mew_tool_call_id="native:finish-call",
+        tool_name="finish",
+        status="completed",
+        content=({"summary": "verified", "outcome": "completed"},),
+        evidence_refs=("native-finish://accepted",),
+    )
+
+    resolver_input = _completion_resolver_input_from_finish(
+        finish_call,
+        finish_result,
+        lane_input=_lane_input(tmp_path),
+        transcript_items=(finish_call,),
+        request_descriptor={},
+        prior_tool_results=(verifier, later_mutation),
+        closeout_context=_NativeCloseoutContext(
+            blockers=("closeout_verifier_command_missing",),
+            missing_obligations=("strict_verifier_evidence",),
+        ),
+    )
+
+    assert resolver_input.fresh_verifier_refs == ()
+    assert "closeout_verifier_command_missing" in resolver_input.blockers
+    assert "strict_verifier_evidence" in resolver_input.missing_obligations
 
 
 def test_native_harness_active_verifier_closeout_cancels_when_budget_exhausted(tmp_path: Path) -> None:

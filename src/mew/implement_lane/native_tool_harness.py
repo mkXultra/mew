@@ -1245,6 +1245,147 @@ def _native_closeout_ref_is_completion_evidence(value: object) -> bool:
     return False
 
 
+_NATIVE_FINISH_RESOLVABLE_CLOSEOUT_BLOCKERS = frozenset(
+    {
+        "closeout_verifier_command_missing",
+        "closeout_verifier_not_run",
+    }
+)
+
+
+def _native_finish_supplied_closeout_context(
+    refs: tuple[str, ...],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    source_mutation_roots: tuple[str, ...] = (),
+) -> _NativeCloseoutContext:
+    cited_refs = tuple(dict.fromkeys(str(ref or "").strip() for ref in refs if str(ref or "").strip()))
+    if not cited_refs:
+        return _NativeCloseoutContext()
+    completion_refs: list[str] = []
+    latest_mutation_index = _latest_native_source_mutation_result_index(
+        prior_tool_results,
+        source_mutation_roots=source_mutation_roots,
+    )
+    for index, result in enumerate(prior_tool_results, start=1):
+        if latest_mutation_index and index < latest_mutation_index:
+            continue
+        if not _native_prior_result_can_satisfy_verifier_evidence(result):
+            continue
+        result_completion_refs = _native_completion_refs_from_result(result)
+        if not result_completion_refs:
+            continue
+        if _native_finish_refs_cite_tool_result(cited_refs, result, result_completion_refs):
+            completion_refs.extend(result_completion_refs)
+    refs_tuple = tuple(dict.fromkeys(completion_refs))
+    if not refs_tuple:
+        return _NativeCloseoutContext()
+    return _NativeCloseoutContext(closeout_refs=refs_tuple, fresh_verifier_refs=refs_tuple)
+
+
+def _latest_native_source_mutation_result_index(
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    source_mutation_roots: tuple[str, ...],
+) -> int:
+    latest = 0
+    for index, result in enumerate(prior_tool_results, start=1):
+        if result.status == "completed" and _native_result_has_source_mutation(
+            result,
+            source_mutation_roots=source_mutation_roots,
+        ):
+            latest = index
+    return latest
+
+
+def _native_closeout_context_resolved_by_finish_evidence(
+    closeout_context: _NativeCloseoutContext,
+    finish_context: _NativeCloseoutContext,
+) -> _NativeCloseoutContext:
+    if not finish_context.fresh_verifier_refs:
+        return closeout_context
+    merged = closeout_context.merge(finish_context)
+    blockers = tuple(
+        blocker
+        for blocker in merged.blockers
+        if blocker not in _NATIVE_FINISH_RESOLVABLE_CLOSEOUT_BLOCKERS
+    )
+    removed_missing_closeout_blocker = len(blockers) != len(merged.blockers)
+    if removed_missing_closeout_blocker:
+        missing = tuple(item for item in merged.missing_obligations if item != "strict_verifier_evidence")
+    else:
+        missing = merged.missing_obligations
+    return _NativeCloseoutContext(
+        closeout_refs=merged.closeout_refs,
+        fresh_verifier_refs=merged.fresh_verifier_refs,
+        blockers=blockers,
+        missing_obligations=missing,
+        unsafe_blockers=merged.unsafe_blockers,
+        budget_blockers=merged.budget_blockers,
+    )
+
+
+def _native_prior_result_can_satisfy_verifier_evidence(result: ToolResultEnvelope) -> bool:
+    if not _native_final_verifier_passed(result):
+        return False
+    payload = _native_result_payload(result)
+    verifier = payload.get("verifier_evidence")
+    if isinstance(verifier, Mapping):
+        verdict = str(verifier.get("verdict") or "").casefold()
+        if verdict == "pass":
+            return True
+        if verdict in {"fail", "failed", "partial"}:
+            return False
+    contract = payload.get("execution_contract_normalized") or payload.get("execution_contract")
+    if _native_execution_contract_is_verifier_like(contract):
+        return True
+    if result.tool_name == "run_tests":
+        return True
+    if str(payload.get("command_intent") or "").strip().casefold() in {
+        "verify",
+        "verifier",
+        "verification",
+        "finish_verifier",
+        "test",
+        "acceptance",
+    }:
+        return True
+    return False
+
+
+def _native_completion_refs_from_result(result: ToolResultEnvelope) -> tuple[str, ...]:
+    return tuple(ref for ref in result.evidence_refs if _native_closeout_ref_is_completion_evidence(ref))
+
+
+def _native_finish_refs_cite_tool_result(
+    refs: tuple[str, ...],
+    result: ToolResultEnvelope,
+    result_completion_refs: tuple[str, ...],
+) -> bool:
+    aliases = _native_tool_result_ref_aliases(result)
+    result_ref_set = set(result_completion_refs)
+    for ref in refs:
+        if ref in aliases or ref in result_ref_set:
+            return True
+    return False
+
+
+def _native_tool_result_ref_aliases(result: ToolResultEnvelope) -> set[str]:
+    aliases: set[str] = set()
+    for raw_id in (result.provider_call_id, result.mew_tool_call_id):
+        text = str(raw_id or "").strip()
+        if not text:
+            continue
+        aliases.add(text)
+        aliases.add(f"ev:tool_result:{text}")
+        aliases.add(f"tool-result:{text}")
+        aliases.add(f"tool_result:{text}")
+    provider_call_id = str(result.provider_call_id or "").strip()
+    if provider_call_id:
+        aliases.add(f"native:{provider_call_id}")
+    return aliases
+
+
 def _native_active_command_closeout(
     lane_input: ImplementLaneInput,
     *,
@@ -1968,14 +2109,25 @@ def _completion_resolver_input_from_finish(
         budget_blockers.append("finish_requested_supervisor_return")
     if arguments.get("unsafe_to_continue") is True:
         unsafe_blockers.append("finish_marked_unsafe_to_continue")
+    finish_evidence_refs = _finish_arg_strings(arguments.get("evidence_refs"))
+    finish_closeout_refs = _finish_arg_strings(arguments.get("closeout_refs"))
+    finish_closeout_context = _native_finish_supplied_closeout_context(
+        tuple(dict.fromkeys((*finish_evidence_refs, *finish_closeout_refs))),
+        prior_tool_results,
+        source_mutation_roots=_native_source_mutation_roots(lane_input, Path(lane_input.workspace or ".")),
+    )
+    effective_closeout_context = _native_closeout_context_resolved_by_finish_evidence(
+        closeout_context,
+        finish_closeout_context,
+    )
     blockers.extend(_finish_arg_strings(arguments.get("blockers")))
     missing.extend(_finish_arg_strings(arguments.get("missing_obligations")))
     unsafe_blockers.extend(_finish_arg_strings(arguments.get("unsafe_blockers")))
     budget_blockers.extend(_finish_arg_strings(arguments.get("budget_blockers")))
-    blockers.extend(closeout_context.blockers)
-    missing.extend(closeout_context.missing_obligations)
-    unsafe_blockers.extend(closeout_context.unsafe_blockers)
-    budget_blockers.extend(closeout_context.budget_blockers)
+    blockers.extend(effective_closeout_context.blockers)
+    missing.extend(effective_closeout_context.missing_obligations)
+    unsafe_blockers.extend(effective_closeout_context.unsafe_blockers)
+    budget_blockers.extend(effective_closeout_context.budget_blockers)
     gate_codes = _finish_gate_blocker_codes(gate) if gate else ()
     gate_missing = _finish_gate_missing_obligations(gate) if gate else ()
     if (
@@ -1985,7 +2137,7 @@ def _completion_resolver_input_from_finish(
             gate_codes,
             gate_missing,
             gate=gate,
-            closeout_context=closeout_context,
+            closeout_context=effective_closeout_context,
         )
     ):
         blockers.append("finish_gate_blocked")
@@ -2010,12 +2162,10 @@ def _completion_resolver_input_from_finish(
             )
         ),
         compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
-        typed_evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *_finish_arg_strings(arguments.get("evidence_refs"))))),
-        fresh_verifier_refs=tuple(closeout_context.fresh_verifier_refs),
+        typed_evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *finish_evidence_refs))),
+        fresh_verifier_refs=tuple(effective_closeout_context.fresh_verifier_refs),
         missing_obligations=tuple(dict.fromkeys(missing)),
-        closeout_refs=tuple(
-            dict.fromkeys((*_finish_arg_strings(arguments.get("closeout_refs")), *closeout_context.closeout_refs))
-        ),
+        closeout_refs=tuple(dict.fromkeys((*finish_closeout_refs, *effective_closeout_context.closeout_refs))),
         blockers=tuple(dict.fromkeys(blockers)),
         unsafe_blockers=tuple(dict.fromkeys(unsafe_blockers)),
         budget_blockers=tuple(dict.fromkeys(budget_blockers)),
