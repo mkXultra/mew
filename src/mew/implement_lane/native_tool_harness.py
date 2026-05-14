@@ -183,6 +183,16 @@ class _NativeCloseoutContext:
         )
 
 
+@dataclass(frozen=True)
+class _NativeFinishVerifierPlan:
+    command: str
+    cwd: str = "."
+    source: str = "configured"
+    reason: str = ""
+    confidence: str = ""
+    raw: Mapping[str, object] | None = None
+
+
 @dataclass
 class NativeCodexResponsesProvider:
     """Live Codex Responses provider for the native implement_v2 harness."""
@@ -324,6 +334,30 @@ class NativeCodexResponsesProvider:
                 result.transcript.items
             )
         return result
+
+    def plan_finish_verifier_command(self, request: Mapping[str, object]) -> Mapping[str, object]:
+        """Ask a separate planner session for one finish verifier command.
+
+        This deliberately does not reuse the implement loop transcript or
+        previous_response_id. The planner is a separate agent whose only job is
+        to propose a command contract; the deterministic finish gate still
+        decides whether the executed result is acceptable.
+        """
+
+        lane_config = self.lane_input.lane_config if isinstance(self.lane_input.lane_config, Mapping) else {}
+        model = str(lane_config.get("finish_verifier_planner_model") or self.model or "gpt-5.5")
+        timeout = _safe_float(
+            lane_config.get("finish_verifier_planner_timeout_seconds"),
+            default=min(max(self.timeout, 1.0), 30.0),
+        )
+        prompt = _finish_verifier_planner_prompt(request)
+        return _codex_api.call_codex_json(
+            self.auth,
+            prompt,
+            model,
+            self.base_url,
+            timeout,
+        )
 
 
 def run_live_native_implement_v2(
@@ -1137,6 +1171,8 @@ def _run_native_finish_time_closeouts(
         return tuple(events), context
     no_run_context = _native_final_verifier_closeout_no_run_context(
         lane_input,
+        provider=provider,
+        tool_results=tuple(scoped_results),
         lane_config=lane_config,
         start_monotonic=start_monotonic,
     )
@@ -1179,6 +1215,8 @@ def _run_native_finish_time_closeouts(
 def _native_final_verifier_closeout_no_run_context(
     lane_input: ImplementLaneInput,
     *,
+    provider: object,
+    tool_results: tuple[ToolResultEnvelope, ...],
     lane_config: Mapping[str, object],
     start_monotonic: float,
 ) -> _NativeCloseoutContext | None:
@@ -1187,7 +1225,12 @@ def _native_final_verifier_closeout_no_run_context(
             unsafe_blockers=("closeout_verifier_not_permitted",),
             missing_obligations=("strict_verifier_evidence",),
         )
-    if not _configured_native_final_verifier_command(lane_input):
+    if not _configured_native_final_verifier_command(lane_input) and not _native_finish_verifier_planner_can_run(
+        lane_input,
+        provider=provider,
+        lane_config=lane_config,
+        tool_results=tool_results,
+    ):
         return _NativeCloseoutContext(
             blockers=("closeout_verifier_command_missing",),
             missing_obligations=("strict_verifier_evidence",),
@@ -1553,8 +1596,13 @@ def _native_final_verifier_closeout(
         return None
     if not _native_final_verifier_closeout_allowed(lane_input, lane_config=lane_config):
         return None
-    command = _configured_native_final_verifier_command(lane_input)
-    if not command:
+    plan = _native_final_verifier_closeout_plan(
+        lane_input,
+        provider=provider,
+        lane_config=lane_config,
+        tool_results=tool_results,
+    )
+    if plan is None:
         return None
     budget = _native_final_verifier_closeout_budget_seconds(lane_input, run_started=start_monotonic)
     if budget < _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS:
@@ -1565,7 +1613,7 @@ def _native_final_verifier_closeout(
         lane_attempt_id=lane_attempt_id,
         provider=provider,
         turn_index=turn_index,
-        command=command,
+        plan=plan,
         timeout_seconds=budget,
         pending_mutation=pending_mutation,
     )
@@ -1632,6 +1680,235 @@ def _configured_native_final_verifier_command(lane_input: ImplementLaneInput) ->
     return ""
 
 
+def _native_final_verifier_closeout_plan(
+    lane_input: ImplementLaneInput,
+    *,
+    provider: object,
+    lane_config: Mapping[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> _NativeFinishVerifierPlan | None:
+    command = _configured_native_final_verifier_command(lane_input)
+    if command:
+        return _NativeFinishVerifierPlan(command=command, source="configured")
+    if not _native_finish_verifier_planner_can_run(
+        lane_input,
+        provider=provider,
+        lane_config=lane_config,
+        tool_results=tool_results,
+    ):
+        return None
+    planner = getattr(provider, "plan_finish_verifier_command", None)
+    if not callable(planner):
+        return None
+    request = _finish_verifier_planner_request(lane_input, tool_results)
+    try:
+        raw_plan = planner(request)
+    except Exception as exc:
+        _emit_progress(getattr(provider, "progress", None), f"finish_verifier_planner failed: {exc}")
+        return None
+    plan = _coerce_native_finish_verifier_plan(raw_plan, request=request)
+    if plan is None:
+        _emit_progress(getattr(provider, "progress", None), "finish_verifier_planner rejected empty or unsafe plan")
+        return None
+    return plan
+
+
+def _native_finish_verifier_planner_can_run(
+    lane_input: ImplementLaneInput,
+    *,
+    provider: object,
+    lane_config: Mapping[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> bool:
+    if not bool(lane_config.get("experimental_finish_verifier_planner")):
+        return False
+    if not tool_results:
+        return False
+    return callable(getattr(provider, "plan_finish_verifier_command", None))
+
+
+def _coerce_native_finish_verifier_plan(
+    value: object,
+    *,
+    request: Mapping[str, object] | None = None,
+) -> _NativeFinishVerifierPlan | None:
+    if not isinstance(value, Mapping):
+        return None
+    command = str(value.get("command") or value.get("cmd") or "").strip()
+    if not _finish_verifier_command_safe(command, request=request):
+        return None
+    cwd = str(value.get("cwd") or ".").strip() or "."
+    if "\x00" in cwd or "\n" in cwd or cwd.startswith("/"):
+        cwd = "."
+    return _NativeFinishVerifierPlan(
+        command=command,
+        cwd=cwd,
+        source="finish_verifier_planner",
+        reason=str(value.get("reason") or value.get("rationale") or "").strip(),
+        confidence=str(value.get("confidence") or "").strip(),
+        raw=dict(value),
+    )
+
+
+_FINISH_VERIFIER_NOOP_COMMAND_RE = re.compile(
+    r"(?is)^\s*(?:true|:|exit\s+0|test\s+1\s*={1,2}\s*1|\[\s*1\s*={1,2}\s*1\s*\])\s*$"
+)
+_FINISH_VERIFIER_SELF_ACCEPTANCE_RE = re.compile(
+    r"(?i)\b(?:acceptance_ok|final_acceptance_ok|acceptance\s*:\s*pass)\b"
+)
+_FINISH_VERIFIER_MUTATION_RE = re.compile(
+    r"(?is)(?:^|[;&|]\s*)(?:rm|mv|cp|touch|mkdir|chmod|chown|truncate|install|tee)\b"
+    r"|\b(?:sed\s+-i|perl\s+-pi)\b"
+    r"|(?:^|[^<])>{1,2}(?!&)"
+)
+_FINISH_VERIFIER_GENERIC_TEST_RE = re.compile(
+    r"(?i)(?:^|[\s;&|()])(?:pytest|npm\s+test|pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test|make\s+(?:test|check)|"
+    r"prove|coqc|coqchk|mvn\s+test|gradle\s+test|tox|ruff\s+check|python\s+-m\s+pytest)(?:$|[\s;&|()])"
+)
+_FINISH_VERIFIER_SUBJECT_RE = re.compile(
+    r"(?<![A-Za-z0-9_./-])(?:[A-Za-z0-9_.@+-]+/)*[A-Za-z0-9_.@+-]+"
+    r"\.(?:py|pyx|pxd|js|ts|tsx|jsx|c|h|cc|cpp|hpp|rs|go|java|rb|php|lua|v|vo|ml|mli|sh|json|toml|yaml|yml|"
+    r"txt|md|so|dylib|dll|exe|o|a)(?![A-Za-z0-9_./-])"
+)
+
+
+def _finish_verifier_command_safe(
+    command: object,
+    *,
+    request: Mapping[str, object] | None = None,
+) -> bool:
+    text = str(command or "").strip()
+    if not text:
+        return False
+    if "\n" in text or "\r" in text:
+        return False
+    if _FINISH_VERIFIER_NOOP_COMMAND_RE.fullmatch(text):
+        return False
+    if _FINISH_VERIFIER_SELF_ACCEPTANCE_RE.search(text):
+        return False
+    if re.search(r"(?i)(?:^|[;&|]\s*)(?:echo|printf)\b", text):
+        return False
+    if "|" in text or ";" in text:
+        return False
+    if re.search(r"(?<!&)&(?!&)", text):
+        return False
+    if _FINISH_VERIFIER_MUTATION_RE.search(text):
+        return False
+    if _FINISH_VERIFIER_GENERIC_TEST_RE.search(text):
+        return True
+    if request is None:
+        return True
+    if not _finish_verifier_command_mentions_task_subject(text, request):
+        return False
+    return True
+
+
+def _finish_verifier_command_mentions_task_subject(command: str, request: Mapping[str, object]) -> bool:
+    terms = _finish_verifier_subject_terms(request)
+    if not terms:
+        return True
+    lowered = command.casefold()
+    return any(term in lowered for term in terms)
+
+
+def _finish_verifier_subject_terms(request: Mapping[str, object]) -> tuple[str, ...]:
+    haystack = json.dumps(dict(request), ensure_ascii=False, sort_keys=True)
+    terms = []
+    for match in _FINISH_VERIFIER_SUBJECT_RE.finditer(haystack):
+        term = str(match.group(0) or "").strip().casefold()
+        if not term or term.startswith("/"):
+            continue
+        basename = term.rsplit("/", 1)[-1]
+        for candidate in (term, basename):
+            if len(candidate) >= 4 and candidate not in terms:
+                terms.append(candidate)
+    return tuple(terms[:80])
+
+
+def _finish_verifier_planner_request(
+    lane_input: ImplementLaneInput,
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "role": "independent_finish_verifier_planner",
+        "task": {
+            "task_id": lane_input.task_id,
+            "description": _native_task_description(lane_input),
+            "contract": _small_jsonable_mapping(lane_input.task_contract),
+        },
+        "workspace": ".",
+        "recent_tool_results": [
+            _finish_verifier_planner_tool_result_summary(index, result)
+            for index, result in enumerate(tool_results[-8:], start=max(1, len(tool_results) - 7))
+        ],
+        "output_contract": {
+            "json_object": True,
+            "required": ["command"],
+            "optional": ["cwd", "reason", "confidence"],
+            "meaning": "one non-mutating command that verifies task completion from the current workspace",
+        },
+        "forbidden": [
+            "Do not trust the implement agent's finish claim.",
+            "Do not output echo/printf/true/exit-0 self-acceptance commands.",
+            "Do not modify source files.",
+            "Return exactly one JSON object.",
+        ],
+    }
+
+
+def _finish_verifier_planner_tool_result_summary(index: int, result: ToolResultEnvelope) -> dict[str, object]:
+    payload = _native_result_payload(result)
+    return {
+        "index": index,
+        "tool_name": result.tool_name,
+        "status": result.status,
+        "exit_code": payload.get("exit_code"),
+        "command": str(payload.get("command") or "")[:500],
+        "command_intent": str(payload.get("command_intent") or "")[:80],
+        "summary": result.natural_result_text(limit=1200),
+        "content_refs": list(result.content_refs[:6]),
+        "evidence_refs": list(result.evidence_refs[:6]),
+    }
+
+
+def _small_jsonable_mapping(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+    allowed = {}
+    for key in (
+        "title",
+        "description",
+        "guidance",
+        "acceptance_constraints",
+        "verify_command",
+        "max_wall_seconds",
+    ):
+        item = value.get(key)
+        if item not in (None, ""):
+            allowed[key] = item
+    return allowed
+
+
+def _finish_verifier_planner_prompt(request: Mapping[str, object]) -> str:
+    return (
+        "You are an independent verifier-planner agent for a coding task. "
+        "You are not the implementer and must not trust an implementer's finish claim.\n\n"
+        "Given the task and recent tool results, return one JSON object describing the smallest "
+        "non-mutating terminal command that should verify whether the task is complete.\n\n"
+        "Rules:\n"
+        "- Return JSON only.\n"
+        "- Required key: command.\n"
+        "- Optional keys: cwd, reason, confidence.\n"
+        "- The command must test the real task outcome, not print a self-acceptance marker.\n"
+        "- Do not use echo/printf/true/exit 0 as the verifier.\n"
+        "- Prefer task-provided tests, exact verifier commands, build/test commands, or a focused runtime smoke.\n"
+        "- If no safe verifier exists, return {\"command\":\"\", \"reason\":\"no safe verifier\"}.\n\n"
+        "Input:\n"
+        f"{json.dumps(dict(request), ensure_ascii=False, sort_keys=True)}"
+    )
+
+
 def _native_final_verifier_closeout_budget_seconds(
     lane_input: ImplementLaneInput,
     *,
@@ -1689,18 +1966,24 @@ def _native_final_verifier_closeout_call(
     lane_attempt_id: str,
     provider: object,
     turn_index: int,
-    command: str,
+    plan: _NativeFinishVerifierPlan,
     timeout_seconds: float,
     pending_mutation: Mapping[str, object],
 ) -> NativeTranscriptItem:
     call_id = f"call-final-verifier-closeout-{turn_index:03d}"
     arguments = {
-        "command": command,
-        "cwd": ".",
+        "command": plan.command,
+        "cwd": plan.cwd or ".",
         "use_shell": True,
         "timeout": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
         "foreground_budget_seconds": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
         "command_intent": "verifier",
+        "finish_verifier_plan": {
+            "source": plan.source,
+            "reason": plan.reason,
+            "confidence": plan.confidence,
+            "separate_agent": plan.source == "finish_verifier_planner",
+        },
         "execution_contract": {
             "role": "runtime",
             "stage": "final-verifier",

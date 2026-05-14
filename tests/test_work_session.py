@@ -11355,6 +11355,143 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_selected_implement_v2_accepts_finish_verifier_planner_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = (
+                    "selected_lane=implement_v2 "
+                    "finish_verifier_planner=true "
+                    "finish_verifier_planner_model=gpt-5.5"
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertTrue(lane_input.lane_config["experimental_finish_verifier_planner"])
+                self.assertEqual(lane_input.lane_config["finish_verifier_planner_model"], "gpt-5.5")
+                self.assertNotIn("experimental_finish_verifier_planner", lane_input.task_contract["guidance"])
+                self.assertNotIn("finish_verifier_planner", lane_input.task_contract["guidance"])
+                self.assertNotIn("finish_verifier_planner_model", lane_input.task_contract["guidance"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_accepts_json_finish_verifier_planner_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = json.dumps(
+                    {
+                        "selected_lane": "implement_v2",
+                        "lane_config": {
+                            "finish_verifier_planner": True,
+                            "finish_verifier_planner_model": "gpt-5.5",
+                        },
+                    }
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertTrue(lane_input.lane_config["experimental_finish_verifier_planner"])
+                self.assertEqual(lane_input.lane_config["finish_verifier_planner_model"], "gpt-5.5")
+                task_guidance = json.loads(lane_input.task_contract["guidance"])
+                self.assertNotIn("lane_config", task_guidance)
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_oneshot_selected_implement_v2_accepts_tool_surface_profile_guidance(self):
         from mew.implement_lane import ImplementLaneResult
 

@@ -2745,6 +2745,127 @@ def test_native_harness_finish_after_mutation_without_verifier_command_blocks_wi
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path: Path) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        planner_requests: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+            self.planner_requests = []
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_requests.append(dict(request))
+            return {
+                "command": "test -f vm.js",
+                "cwd": ".",
+                "reason": "verify the file created by the implementation",
+                "confidence": "high",
+            }
+
+    provider = PlanningProvider()
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert provider.planner_requests
+    assert provider.planner_requests[0]["role"] == "independent_finish_verifier_planner"
+    assert "finish claim" in "\n".join(provider.planner_requests[0]["forbidden"])  # type: ignore[index]
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
+    assert closeout_args["finish_verifier_plan"]["separate_agent"] is True
+    assert closeout_args["execution_contract"]["acceptance_kind"] == "external_verifier"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+@pytest.mark.parametrize(
+    "unsafe_command",
+    (
+        "echo ACCEPTANCE_OK",
+        "python -c 'print(\"ACCEPTANCE_OK\")'",
+        "true # verifier",
+        "test 1 = 1",
+        "pytest || true",
+        "python -m pytest || exit 0",
+        "test -f vm.js; true",
+        "pytest | cat",
+        "test -f vm.js | cat",
+        "pytest & true",
+        "test -f vm.js & true",
+        "pytest\ntrue",
+        "test -f vm.js\ntrue",
+        "touch verified && test -f verified",
+        "sed -i s/ok/bad/ vm.js && test -f vm.js",
+    ),
+)
+def test_native_harness_finish_verifier_planner_rejects_unsafe_command(
+    tmp_path: Path,
+    unsafe_command: str,
+) -> None:
+    class UnsafePlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            return {"command": unsafe_command, "reason": "unsafe verifier plan"}
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=UnsafePlanningProvider(),
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 0
+    assert "closeout_verifier_not_run" in result.metrics["completion_resolver_latest_decision"]["blockers"]
+    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_native_harness_finish_time_final_verifier_no_permission_blocks_return_without_dispatch(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [

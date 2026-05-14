@@ -7254,6 +7254,9 @@ def _work_guidance_task_contract_guidance(guidance):
         "tool_surface_profile_id",
         "tool_surface_profile",
         "tool_surface_profile_options",
+        "experimental_finish_verifier_planner",
+        "finish_verifier_planner",
+        "finish_verifier_planner_model",
     ):
         sanitized.pop(key, None)
     lane_config = sanitized.get("lane_config")
@@ -7264,6 +7267,9 @@ def _work_guidance_task_contract_guidance(guidance):
         lane_config.pop("tool_surface_profile_id", None)
         lane_config.pop("tool_surface_profile", None)
         lane_config.pop("tool_surface_profile_options", None)
+        lane_config.pop("experimental_finish_verifier_planner", None)
+        lane_config.pop("finish_verifier_planner", None)
+        lane_config.pop("finish_verifier_planner_model", None)
         if lane_config:
             sanitized["lane_config"] = lane_config
         else:
@@ -7279,6 +7285,9 @@ def _strip_internal_work_guidance_options(guidance):
         "tool_surface_profile_id",
         "tool_surface_profile",
         "tool_surface_profile_options",
+        "experimental_finish_verifier_planner",
+        "finish_verifier_planner",
+        "finish_verifier_planner_model",
     ):
         text = re.sub(rf"(?:^|\s){re.escape(name)}\s*=\s*[A-Za-z0-9_.-]+", " ", text)
     return " ".join(text.split())
@@ -7504,7 +7513,18 @@ def _run_work_ai_implement_v2(
             "write_integration_observation_detail",
             "integration_observation_detail",
         ),
+        "experimental_finish_verifier_planner": _work_guidance_bool_option(
+            getattr(effective_args, "work_guidance", None),
+            "experimental_finish_verifier_planner",
+            "finish_verifier_planner",
+        ),
     }
+    finish_verifier_planner_model = _work_guidance_string_option(
+        getattr(effective_args, "work_guidance", None),
+        "finish_verifier_planner_model",
+    )
+    if finish_verifier_planner_model:
+        lane_config["finish_verifier_planner_model"] = finish_verifier_planner_model
     if tool_surface_profile_id:
         lane_config["tool_surface_profile_id"] = tool_surface_profile_id
     if tool_surface_profile_options:
