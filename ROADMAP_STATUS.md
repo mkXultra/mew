@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | ToolRegistry / ToolSurfaceProfile design passed multi-model review; current next work is registry-backed `mew_legacy` plus explicit `codex_hot_path` A/B profile before any broad speed proof. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | ToolRegistry / ToolSurfaceProfile A/B is live; one fixed `prove-plus-comm` A/B evidence item was accepted for `codex_hot_path`, but default profile is not switched and broad speed/proof-5 remains blocked. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -73,7 +73,7 @@ Current controller mode:
 `m6_24_tool_registry_codex_hot_path_substrate`.
 
 Current diagnostic mode:
-`no_live_speed_until_registry_profile_ab_gate`.
+`fixed_ab_item_1_accepted_no_default_switch`.
 
 Current reentry decision:
 `docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md` is the
@@ -90,20 +90,28 @@ provider-visible tools and result text are profile-controlled; transcript,
 proof, replay, typed evidence, observer artifacts, and finish gates remain
 internal sidecars or diagnostics, not live `next_action` steering.
 
-Latest boundary: fake-native A/B smoke and default-switch gate are committed,
-and live/pre-speed A/B now has explicit profile plumbing via
-`mew work --oneshot --work-guidance tool_surface_profile_id=<profile>` plus
-`scripts/run_harbor_mew_diagnostic.py --tool-surface-profile-id`. The paired
-diagnostic wrapper `scripts/run_tool_surface_ab_diagnostic.py` is the intended
-entry point for the smallest fixed live A/B set; use it to produce Phase 4
-report and Phase 5 gate artifacts before any default switch or broad speed
-proof. That wrapper is single-pair only: it rejects proof-5/multi-trial runs,
-requires explicit real workspace/task identity for comparable default-switch
-evidence, and blocks the gate if either child diagnostic fails or lacks a
-passing external reward. If the selected Terminal-Bench item does not use
-`/app`, its actual workdir must come from the task cwd map so both profiles
-launch from the same task workspace; `--command-cwd` is an override, not the
-normal recovery path.
+Latest boundary: fake-native A/B smoke, live profile plumbing, conservative
+paired diagnostic runner, task cwd map, and fixed live A/B report comparability
+are committed. The accepted live item is
+`proof-artifacts/tool-surface-ab-diagnostic/prove-plus-comm-step-check-10min-20260514T130411Z/`:
+both children had external reward 1.0; rebuilt Phase 4 report is
+`ab_comparable=true`; reviewer codex-ultra session
+`019e26b8-7b1a-7e60-911f-faf37759e427` returned `ACCEPT_EVIDENCE`; reviewed
+Phase 5 gate is ready when reviewer acceptance is supplied. Caveat: this counts
+as one fixed A/B evidence item, not as permission to switch the default profile
+or run broad speed/proof-5. The internal `lane_status` / accepted finish status
+remained blocked for both profiles, while the wrapper's external verifier
+reward is authoritative for the task outcome in this diagnostic. Keep treating
+that as a closeout/evidence-citation caveat, not a task-success failure.
+
+`scripts/run_tool_surface_ab_diagnostic.py` remains the intended entry point for
+the smallest fixed live A/B set. It is single-pair only: it rejects
+proof-5/multi-trial runs, requires explicit real workspace/task identity for
+comparable default-switch evidence, and blocks the gate if either child
+diagnostic fails or lacks a passing external reward. If the selected
+Terminal-Bench item does not use `/app`, its actual workdir must come from the
+task cwd map so both profiles launch from the same task workspace;
+`--command-cwd` is an override, not the normal recovery path.
 
 Latest Codex-like hot-path validation:
 
