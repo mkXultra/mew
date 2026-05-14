@@ -10,6 +10,7 @@ from mew.mew_harbor_runner import (
     build_parser,
     build_harbor_command,
     build_mew_work_command_template,
+    combine_work_guidance,
     collect_mew_trial_summary,
     extract_harbor_reward,
     make_jobs_dir,
@@ -66,6 +67,65 @@ def test_parser_leaves_max_steps_to_selected_mode_default():
     assert args.max_steps is None
 
 
+def test_parser_accepts_repeated_work_guidance_fragments():
+    args = build_parser().parse_args(
+        [
+            "make-mips-interpreter",
+            "--work-guidance",
+            "selected_lane=implement_v2",
+            "--work-guidance",
+            "m6_24_step_shape_check=true",
+            "--dry-run",
+        ]
+    )
+
+    assert args.work_guidance == ["selected_lane=implement_v2", "m6_24_step_shape_check=true"]
+
+
+def test_combine_work_guidance_keeps_diagnostic_defaults_and_adds_fragments():
+    guidance = combine_work_guidance(
+        ["m6_24_step_shape_check=true"],
+        DEFAULT_WORK_GUIDANCE,
+    )
+
+    assert guidance == (
+        "selected_lane=implement_v2 "
+        "write_integration_observation_detail=true "
+        "m6_24_step_shape_check=true"
+    )
+
+
+def test_combine_work_guidance_allows_explicit_key_override():
+    guidance = combine_work_guidance(
+        ["selected_lane=other_lane extra=true"],
+        DEFAULT_WORK_GUIDANCE,
+    )
+
+    assert guidance == "write_integration_observation_detail=true selected_lane=other_lane extra=true"
+
+
+def test_combine_work_guidance_allows_spaced_explicit_key_override():
+    guidance = combine_work_guidance(
+        ["selected_lane = other_lane"],
+        DEFAULT_WORK_GUIDANCE,
+    )
+
+    assert guidance == "write_integration_observation_detail=true selected_lane = other_lane"
+
+
+def test_combine_work_guidance_preserves_json_payload_shape_with_defaults():
+    guidance = combine_work_guidance(
+        ['{"selected_lane":"other_lane","persisted_lane_state":{"lane_context_capsule":{"ok":true}}}'],
+        DEFAULT_WORK_GUIDANCE,
+    )
+
+    payload = json.loads(guidance)
+
+    assert payload["selected_lane"] == "other_lane"
+    assert payload["write_integration_observation_detail"] is True
+    assert payload["persisted_lane_state"] == {"lane_context_capsule": {"ok": True}}
+
+
 def test_mew_command_template_can_pass_workframe_variant(tmp_path):
     template = build_mew_work_command_template(_config(tmp_path, workframe_variant="transcript_first"))
 
@@ -85,6 +145,31 @@ def test_work_guidance_with_current_workframe_variant_is_explicit_override():
     guidance = work_guidance_with_workframe_variant("selected_lane=implement_v2", "current")
 
     assert guidance == "selected_lane=implement_v2 workframe_variant=current"
+
+
+def test_work_guidance_with_workframe_variant_preserves_json_guidance_shape():
+    guidance = work_guidance_with_workframe_variant(
+        '{"selected_lane":"implement_v2","persisted_lane_state":{"lane_context_capsule":{"ok":true}}}',
+        "transcript_first",
+    )
+
+    payload = json.loads(guidance)
+
+    assert payload["selected_lane"] == "implement_v2"
+    assert payload["workframe_variant"] == "transcript_first"
+    assert payload["persisted_lane_state"] == {"lane_context_capsule": {"ok": True}}
+
+
+def test_work_guidance_with_workframe_variant_preserves_nested_json_variant():
+    guidance = work_guidance_with_workframe_variant(
+        '{"selected_lane":"implement_v2","lane_config":{"workframe_variant":"current"}}',
+        "transcript_first",
+    )
+
+    payload = json.loads(guidance)
+
+    assert "workframe_variant" not in payload
+    assert payload["lane_config"] == {"workframe_variant": "current"}
 
 
 def test_build_harbor_command_uses_mew_wrapper_mounts_and_timeout_shape(tmp_path):

@@ -4,6 +4,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ DEFAULT_INSTALL_COMMAND = (
 )
 DEFAULT_AUTH_CONTAINER_PATH = Path("/codex-auth/auth.json")
 RUN_MODES = ("step-check-10min", "speed-proof", "proof-5")
+_GUIDANCE_PAIR_PATTERN = re.compile(r"(?:^|\s)([A-Za-z0-9_.-]+)\s*=\s*([A-Za-z0-9_.-]+)")
 
 
 @dataclass(frozen=True)
@@ -117,9 +119,79 @@ def work_guidance_with_workframe_variant(work_guidance: str, workframe_variant: 
     guidance = str(work_guidance or "").strip()
     if not variant:
         return guidance
+    payload = _guidance_json_object(guidance)
+    if payload is not None:
+        lane_config = payload.get("lane_config") if isinstance(payload.get("lane_config"), dict) else {}
+        if (
+            "workframe_variant" in payload
+            or "work_frame_variant" in payload
+            or "workframe_variant" in lane_config
+            or "work_frame_variant" in lane_config
+        ):
+            return guidance
+        payload["workframe_variant"] = variant
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     if "workframe_variant" in guidance or "work_frame_variant" in guidance:
         return guidance
     return " ".join(part for part in (guidance, f"workframe_variant={variant}") if part)
+
+
+def combine_work_guidance(
+    requested_guidance: Sequence[str] | None,
+    default_guidance: str,
+) -> str:
+    """Combine repeated CLI guidance fragments without dropping diagnostics defaults."""
+
+    fragments = [str(fragment or "").strip() for fragment in requested_guidance or () if str(fragment or "").strip()]
+    if not fragments:
+        return str(default_guidance or "").strip()
+    json_fragments = [_guidance_json_object(fragment) for fragment in fragments]
+    if any(fragment is not None for fragment in json_fragments):
+        merged: dict[str, object] = _guidance_pairs_as_mapping(default_guidance)
+        for text, payload in zip(fragments, json_fragments):
+            if payload is not None:
+                merged.update(payload)
+            else:
+                merged.update(_guidance_pairs_as_mapping(text))
+        return json.dumps(merged, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+    requested_keys = set()
+    for fragment in fragments:
+        requested_keys.update(_guidance_pairs_as_mapping(fragment))
+    default_tokens = [
+        token
+        for token in str(default_guidance or "").strip().split()
+        if token.split("=", 1)[0] not in requested_keys
+    ]
+    return " ".join(part for part in (*default_tokens, *fragments) if part)
+
+
+def _guidance_json_object(text: str) -> dict[str, object] | None:
+    try:
+        payload = json.loads(str(text or "").strip())
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return dict(payload) if isinstance(payload, dict) else None
+
+
+def _guidance_pairs_as_mapping(text: str) -> dict[str, object]:
+    return {
+        match.group(1): _coerce_guidance_scalar(match.group(2))
+        for match in _GUIDANCE_PAIR_PATTERN.finditer(str(text or ""))
+    }
+
+
+def _coerce_guidance_scalar(value: str) -> object:
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if lowered in {"true", "yes", "on"}:
+        return True
+    if lowered in {"false", "no", "off"}:
+        return False
+    try:
+        return int(text)
+    except ValueError:
+        return text
 
 
 def build_mew_work_command_template(config: MewHarborRun) -> str:
@@ -656,7 +728,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=int)
     parser.add_argument("--timeout-reserve-seconds", type=int)
     parser.add_argument("--agent-timeout-multiplier", type=int, default=2)
-    parser.add_argument("--work-guidance")
+    parser.add_argument(
+        "--work-guidance",
+        action="append",
+        help=(
+            "Additional mew work guidance fragment. May be repeated; fragments "
+            "are merged with the selected run mode's diagnostic defaults."
+        ),
+    )
     parser.add_argument(
         "--workframe-variant",
         default="",
@@ -701,7 +780,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else mode_defaults.timeout_reserve_seconds
         ),
         agent_timeout_multiplier=args.agent_timeout_multiplier,
-        work_guidance=args.work_guidance or mode_defaults.work_guidance,
+        work_guidance=combine_work_guidance(args.work_guidance, mode_defaults.work_guidance),
         install_command=args.install_command,
         run_mode=args.mode,
         require_observer_detail=require_observer_detail,
