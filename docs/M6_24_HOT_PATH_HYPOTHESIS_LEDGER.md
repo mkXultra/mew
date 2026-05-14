@@ -107,7 +107,7 @@ tuning before a minimal H10 change is designed and measured.
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | pending observability | TBD |
 | H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | observability first | TBD |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
-| H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | implemented pending live diagnostic | Fake-native smoke shows provider-visible compact sidecar count 0 and replay still passes; next run one bounded live 10 minute diagnostic |
+| H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | measured hygiene keep | Sidecar visibility was fixed, but first mutation did not move closer to Codex; move to H4 tool-result rendering rather than revising H7 |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
 | H9 | mew lacks a first-patch readiness threshold: it keeps exploring after enough evidence exists to write a runnable skeleton. | Add observability first: compute first-patch readiness candidates and readiness-to-mutation latency. Behavior change only after a measured miss. | Readiness-to-mutation latency shrinks; first mutation happens after enough evidence but before broad re-exploration/design stalls. | observability first | TBD |
 | H10 | Exploration is not compressed into patch constraints. | Minimal behavior change: make accepted implementation constraints from probe facts visible as task facts, not as `next_action` steering. Keep the diagnostic sidecar as the source of truth and avoid adding a new frontier. | More direct transition from probes to one coherent patch; fewer repeated same-family probes; first mutation appears before repeated build/disassembly loops. | measured failed, reverted | compact task facts alone do not create probe-to-patch compression |
@@ -416,7 +416,10 @@ Reference artifacts:
 Use the same Codex and Claude Code references as H0/H10/H1.
 
 Mew artifact:
-Pending live diagnostic. Fake-native smoke artifact:
+Live H7 diagnostic:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-084030/2026-05-15__08-40-31/make-mips-interpreter__rzaTQU9`
+
+Fake-native smoke artifact:
 `tmp/m6_24_h7_sidecar_hidden_smoke/candidate-codex-hot-path`
 
 Expected signal:
@@ -426,7 +429,7 @@ move first mutation closer to Codex without adding `next_action`,
 `first_write_due`, WorkFrame steering, or threshold control.
 
 Observed signal:
-Fake-native smoke only:
+Fake-native smoke and live H7 diagnostic:
 
 - provider-visible salience report:
   `tmp/m6_24_h7_smoke_provider_visible_salience.md`;
@@ -440,14 +443,28 @@ Fake-native smoke only:
 - codex-ultra review found two blocking H7 observability issues and both were
   fixed: live provider descriptors now preserve the hidden digest, and
   salience/fastcheck now detect inventory-hidden but wire-visible digest leaks.
+- live provider-visible salience report:
+  `tmp/m6_24_h7_provider_visible_salience.md`;
+- live requests with visible compact sidecar digest: 0/77;
+- live scaffolding term occurrences: 0;
+- live first request section order:
+  `task_contract, task_facts, workspace, lane`;
+- live step-diff report:
+  `tmp/m6_24_h7_step_diff.md`;
+- live first mutation: mew step 46 after 45 probes, compared with Codex step
+  25 after 24 probes and H1 step 45 after 43 probes.
 
 Decision:
-Pending live diagnostic. codex-ultra re-review approved the implementation
-after the hidden-digest and mismatch-detection fixes. Do not broaden H7 into
-tool wording, prompt rewriting, next-action steering, or new
-frontier/todo/evidence objects. If live H7 fails to improve step shape, use the
-salience and step-diff reports to decide whether to revise H7 or move to H4
-tool-result rendering.
+Measured hygiene keep, not a hot-path performance win. codex-ultra re-review
+approved the implementation after the hidden-digest and mismatch-detection
+fixes, and the live run proves the provider-visible sidecar leak is gone while
+internal replay artifacts still exist. However, the step-shape target did not
+improve: first mutation moved slightly later than H1. Do not revise H7 or
+broaden it into tool wording, prompt rewriting, next-action steering, or new
+frontier/todo/evidence objects. The next isolated experiment is H4:
+tool-result rendering / output salience. H4 must be measured against the same
+Codex reference and must not add time pressure, probe thresholds, or WorkFrame
+steering.
 
 Notes:
 Focused validation before live diagnostic:
@@ -460,6 +477,11 @@ Focused validation before live diagnostic:
   produced a comparable fake-native artifact.
 - `uv run python scripts/check_implement_v2_hot_path.py --artifact tmp/m6_24_h7_sidecar_hidden_smoke/candidate-codex-hot-path --no-baseline`
   passed.
+- Live diagnostic command:
+  `uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter --mode step-check-10min --tool-surface-profile-id codex_hot_path`.
+- Live analyzer outputs:
+  `tmp/m6_24_h7_provider_visible_salience.md` and
+  `tmp/m6_24_h7_step_diff.md`.
 
 ## Stop Conditions
 
@@ -486,10 +508,10 @@ Follow this execution order. Do not reorder it after context compression:
 5. EXP-20260515-4 measured H1. Keep H1 as a partial improvement because first
    mutation now appears, but treat it as insufficient because the Codex gap
    remains large.
-6. H7 is implemented in code and validated with focused tests plus fake-native
-   smoke; it still needs reviewer approval, commit, and one bounded live 10
-   minute diagnostic.
-7. After commit, run one bounded live H7 10 minute step-shape diagnostic, then
-   provider-visible salience and Codex step-diff analyzers on the fresh
-   artifact. Keep, revise, or revert H7 based on whether scaffolding terms drop
-   and mutation moves closer to Codex without adding new steering.
+6. H7 is implemented, reviewed, committed, and measured. Keep it as resident
+   hygiene because provider-visible `compact_sidecar_digest` is now absent and
+   replay still works, but do not count it as closing the Codex step gap.
+7. Next isolated experiment: H4 tool-result rendering / output salience. Use
+   the H7 live artifact plus the Codex reference to identify the smallest
+   renderer change. Do not tune `apply_patch`, add next-action steering,
+   restore WorkFrame steering, or add probe thresholds in the H4 experiment.
