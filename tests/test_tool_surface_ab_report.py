@@ -223,6 +223,44 @@ def test_tool_surface_ab_report_rejects_missing_forbidden_field_report(tmp_path:
     assert candidate["provider_inventory_forbidden_ok"] is False
 
 
+def test_tool_surface_ab_report_allows_legacy_baseline_forbidden_markers(tmp_path: Path) -> None:
+    baseline_root, candidate_root = _paired_artifacts(tmp_path)
+    inventory_path = baseline_root / "provider-request-inventory.json"
+    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    for record in inventory["provider_request_inventory"]:
+        record["provider_visible_forbidden_fields"] = {
+            "ok": False,
+            "detected": ["proof"],
+            "violations": [
+                {
+                    "field": "proof",
+                    "kind": "rendered_generic_marker",
+                    "path": "input_items.0.content.0.text",
+                    "surface": "provider_request",
+                }
+            ],
+        }
+    inventory_path.write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    report = build_tool_surface_ab_report(
+        baseline_artifact_root=baseline_root,
+        candidate_artifact_root=candidate_root,
+        ab_pair_id="ab-unit-legacy-forbidden-marker",
+        workspace_snapshot_id="sha256:workspace",
+        task_contract_hash="sha256:task",
+    )
+
+    by_profile = {row["profile_id"]: row for row in report["rows"]}
+    baseline = by_profile[MEW_LEGACY_PROFILE_ID]
+    candidate = by_profile[CODEX_HOT_PATH_PROFILE_ID]
+    assert report["ab_comparable"] is True
+    assert report["default_switch_evidence_included"] is True
+    assert baseline["provider_inventory_forbidden_ok"] is False
+    assert baseline["row_ok_for_ab"] is True
+    assert candidate["provider_inventory_forbidden_ok"] is True
+    assert candidate["row_ok_for_ab"] is True
+
+
 def test_write_tool_surface_ab_report_writes_report_artifact(tmp_path: Path) -> None:
     baseline_root, candidate_root = _paired_artifacts(tmp_path)
     output = tmp_path / "tool_surface_ab_report.json"

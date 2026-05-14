@@ -570,20 +570,24 @@ def _sidecar_status(root: Path) -> dict[str, object]:
 
 
 def _row_ok_for_ab(row: Mapping[str, object]) -> bool:
-    return all(
+    common_ok = all(
         (
             bool(row.get("profile_id")),
             bool(row.get("profile_hash")),
             bool(row.get("descriptor_hash")),
             row.get("pairing_valid") is True,
             row.get("every_call_has_exactly_one_output") is True,
-            row.get("provider_inventory_forbidden_ok") is True,
             row.get("render_leak_ok") is True,
             row.get("sidecar_artifacts_present") is True,
             row.get("verifier_evidence_preserved") is True,
             _mapping(row.get("proof_replay_status")).get("transcript_hash_matches_manifest") is True,
         )
     )
+    if not common_ok:
+        return False
+    if str(row.get("profile_id") or "") != CODEX_HOT_PATH_PROFILE_ID:
+        return True
+    return row.get("provider_inventory_forbidden_ok") is True
 
 
 def _json_bytes(value: Any) -> int:

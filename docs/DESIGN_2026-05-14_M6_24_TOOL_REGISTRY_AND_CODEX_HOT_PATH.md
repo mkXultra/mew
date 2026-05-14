@@ -1081,7 +1081,10 @@ Close gate:
   snapshot;
 - report rows with different workspace snapshots are marked
   `ab_comparable=false` and excluded from default-switch evidence;
-- provider request inventories for both profiles pass forbidden-field scans;
+- provider request inventories for `codex_hot_path` pass forbidden-field scans;
+  legacy baseline rows may carry old provider-visible markers such as `proof`
+  and still be comparable when pairing, replay, evidence, render, and sidecar
+  integrity are intact;
 - every call has exactly one paired output;
 - sidecar proof, replay, finish, and observer artifacts remain present;
 - verifier evidence is preserved for verifier commands hidden behind
