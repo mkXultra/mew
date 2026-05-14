@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID, MEW_LEGACY_PROFILE_ID  # noqa: E402
 from mew.implement_lane.tool_surface_ab_report import write_tool_surface_ab_report  # noqa: E402
 from mew.implement_lane.tool_surface_default_gate import evaluate_tool_surface_default_switch_gate  # noqa: E402
-from mew.mew_harbor_runner import RUN_MODES  # noqa: E402
+from mew.mew_harbor_runner import RUN_MODES, command_cwd_for_task  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +30,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--task-contract-hash", default="")
     parser.add_argument("--model", default="gpt-5.5")
     parser.add_argument("--codex-auth-json", type=Path, default=Path.home() / ".codex" / "auth.json")
+    parser.add_argument(
+        "--command-cwd",
+        default="",
+        help=(
+            "Override the container working directory for both child Harbor exec and mew work --cwd. "
+            "Omit to use the task cwd map."
+        ),
+    )
     parser.add_argument("-k", type=int)
     parser.add_argument("-n", type=int)
     parser.add_argument("--work-guidance", action="append", default=[])
@@ -143,6 +151,7 @@ def _diagnostic_command(args: argparse.Namespace, *, profile_id: str, jobs_dir: 
         command.extend(["-k", str(args.k)])
     if args.n is not None:
         command.extend(["-n", str(args.n)])
+    command.extend(["--command-cwd", command_cwd_for_task(args.task_name, args.command_cwd)])
     for guidance in args.work_guidance or []:
         command.extend(["--work-guidance", str(guidance)])
     return command

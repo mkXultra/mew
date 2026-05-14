@@ -1119,7 +1119,10 @@ A/B report and Phase 5 gate artifacts. The wrapper is deliberately conservative:
 it rejects multi-trial/proof-5 runs, blocks the default-switch gate if either
 child diagnostic fails or lacks a passing external reward, and requires explicit
 real `workspace_snapshot_id` / `task_contract_hash` inputs before the report can
-be comparable default-switch evidence.
+be comparable default-switch evidence. It also forwards the resolved task cwd to
+the child Harbor diagnostics. The cwd comes from a task map by default
+(`prove-plus-comm` uses `/workspace`; unknown tasks fall back to `/app`), with
+`--command-cwd` available only as an explicit override.
 
 Close gate:
 

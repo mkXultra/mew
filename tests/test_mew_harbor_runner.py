@@ -12,6 +12,7 @@ from mew.mew_harbor_runner import (
     build_mew_work_command_template,
     combine_work_guidance,
     collect_mew_trial_summary,
+    command_cwd_for_task,
     extract_harbor_reward,
     make_jobs_dir,
     observer_detail_missing,
@@ -49,6 +50,7 @@ def test_mew_command_template_enables_implement_v2_and_observer_detail(tmp_path)
     template = build_mew_work_command_template(_config(tmp_path))
 
     assert "selected_lane=implement_v2 write_integration_observation_detail=true" in template
+    assert "--cwd {command_cwd_shell}" in template
     assert "--auth /codex-auth/auth.json" in template
     assert "--model gpt-5.5" in template
     assert "{max_wall_seconds_option}" in template
@@ -236,11 +238,32 @@ def test_build_harbor_command_uses_mew_wrapper_mounts_and_timeout_shape(tmp_path
     assert "--agent" not in command
     assert "timeout_seconds=660" in command
     assert "timeout_reserve_seconds=60" in command
+    assert "command_cwd=/app" in command
     mounts = json.loads(command[command.index("--mounts-json") + 1])
     assert mounts == [
         {"type": "bind", "source": str(tmp_path / "repo"), "target": "/mew"},
         {"type": "bind", "source": str(tmp_path / "auth.json"), "target": "/codex-auth/auth.json"},
     ]
+
+
+def test_build_harbor_command_accepts_task_specific_command_cwd(tmp_path):
+    command = build_harbor_command(_config(tmp_path, command_cwd="/workspace"))
+
+    assert "command_cwd=/workspace" in command
+    assert any(part.startswith("command_template=") and "--cwd {command_cwd_shell}" in part for part in command)
+
+
+def test_parser_accepts_command_cwd_override():
+    args = build_parser().parse_args(["prove-plus-comm", "--command-cwd", "/workspace"])
+
+    assert args.command_cwd == "/workspace"
+
+
+def test_command_cwd_for_task_uses_known_task_map():
+    assert command_cwd_for_task("prove-plus-comm") == "/workspace"
+    assert command_cwd_for_task("terminal-bench/prove-plus-comm") == "/workspace"
+    assert command_cwd_for_task("make-mips-interpreter") == "/app"
+    assert command_cwd_for_task("prove-plus-comm", "/custom") == "/custom"
 
 
 def test_make_jobs_dir_is_stable_and_human_readable(tmp_path):

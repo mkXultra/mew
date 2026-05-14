@@ -36,6 +36,8 @@ def test_tool_surface_ab_diagnostic_dry_run_builds_paired_profile_commands(tmp_p
     assert "--tool-surface-profile-id" in baseline
     assert baseline[baseline.index("--tool-surface-profile-id") + 1] == "mew_legacy"
     assert candidate[candidate.index("--tool-surface-profile-id") + 1] == "codex_hot_path"
+    assert baseline[baseline.index("--command-cwd") + 1] == "/workspace"
+    assert candidate[candidate.index("--command-cwd") + 1] == "/workspace"
     assert str(tmp_path / "ab" / "baseline-mew-legacy") in baseline
     assert str(tmp_path / "ab" / "candidate-codex-hot-path") in candidate
 

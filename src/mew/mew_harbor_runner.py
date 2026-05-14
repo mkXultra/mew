@@ -25,6 +25,10 @@ DEFAULT_INSTALL_COMMAND = (
     "&& python3 -m pip install --break-system-packages -e /mew"
 )
 DEFAULT_AUTH_CONTAINER_PATH = Path("/codex-auth/auth.json")
+DEFAULT_COMMAND_CWD = "/app"
+TASK_COMMAND_CWD_BY_SLUG = {
+    "prove-plus-comm": "/workspace",
+}
 RUN_MODES = ("step-check-10min", "speed-proof", "proof-5")
 _GUIDANCE_PAIR_PATTERN = re.compile(r"(?:^|\s)([A-Za-z0-9_.-]+)\s*=\s*([A-Za-z0-9_.-]+)")
 
@@ -88,6 +92,7 @@ class MewHarborRun:
     agent_timeout_multiplier: int
     work_guidance: str
     install_command: str
+    command_cwd: str = DEFAULT_COMMAND_CWD
     run_mode: str = "step-check-10min"
     require_observer_detail: bool = True
     workframe_variant: str = ""
@@ -97,6 +102,21 @@ class MewHarborRun:
         if self.task_name.startswith("terminal-bench/"):
             return self.task_name
         return f"terminal-bench/{self.task_name}"
+
+
+def command_cwd_for_task(task_name: str, override: str = "") -> str:
+    """Return the container cwd for a Terminal-Bench task.
+
+    Most Terminal-Bench coding tasks use `/app`, but some package Dockerfiles
+    set a different workdir. Keeping the known exceptions in code prevents
+    long-session reentry from relying on a remembered manual flag.
+    """
+
+    explicit = str(override or "").strip()
+    if explicit:
+        return explicit
+    slug = str(task_name or "").removeprefix("terminal-bench/")
+    return TASK_COMMAND_CWD_BY_SLUG.get(slug, DEFAULT_COMMAND_CWD)
 
 
 def make_jobs_dir(
@@ -228,7 +248,7 @@ def build_mew_work_command_template(config: MewHarborRun) -> str:
     return (
         "mew work --oneshot "
         "--instruction {instruction_shell} "
-        "--cwd /app "
+        "--cwd {command_cwd_shell} "
         "--allow-read . "
         "--allow-read /etc/apt "
         "--allow-read /tmp "
@@ -291,7 +311,7 @@ def build_harbor_command(config: MewHarborRun) -> list[str]:
         "--ak",
         f"install_command={config.install_command}",
         "--ak",
-        "command_cwd=/app",
+        f"command_cwd={config.command_cwd}",
         "--ak",
         "container_repo_root=/mew",
         "--ak",
@@ -777,6 +797,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--install-command", default=DEFAULT_INSTALL_COMMAND)
     parser.add_argument(
+        "--command-cwd",
+        default="",
+        help=(
+            "Override the container working directory for both Harbor exec and mew work --cwd. "
+            "Omit to use the task cwd map."
+        ),
+    )
+    parser.add_argument(
         "--allow-missing-observer-detail",
         action="store_true",
         help="Do not fail the diagnostic if integration observation detail was not written.",
@@ -825,6 +853,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         agent_timeout_multiplier=args.agent_timeout_multiplier,
         work_guidance=combine_work_guidance(work_guidance_fragments, mode_defaults.work_guidance),
         install_command=args.install_command,
+        command_cwd=command_cwd_for_task(args.task_name, args.command_cwd),
         run_mode=args.mode,
         require_observer_detail=require_observer_detail,
         workframe_variant=args.workframe_variant,

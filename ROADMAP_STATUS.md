@@ -100,7 +100,10 @@ report and Phase 5 gate artifacts before any default switch or broad speed
 proof. That wrapper is single-pair only: it rejects proof-5/multi-trial runs,
 requires explicit real workspace/task identity for comparable default-switch
 evidence, and blocks the gate if either child diagnostic fails or lacks a
-passing external reward.
+passing external reward. If the selected Terminal-Bench item does not use
+`/app`, its actual workdir must come from the task cwd map so both profiles
+launch from the same task workspace; `--command-cwd` is an override, not the
+normal recovery path.
 
 Latest Codex-like hot-path validation:
 
