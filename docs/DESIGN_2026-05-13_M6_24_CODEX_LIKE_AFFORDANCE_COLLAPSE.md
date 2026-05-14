@@ -394,8 +394,10 @@ load-bearing when a provider shuffles tool specs.
 
 - small complete file creation or non-source generated file writes;
 - not the natural route for large source rewrites;
-- may remain hidden for task shapes where existing policy already removes it,
-  but this design does not depend on task-specific removal.
+- remains visible for hard-runtime artifact tasks as a complete-file creation
+  affordance. Execution-time safety still rejects unreadable large single-line
+  source and records typed mutation evidence, but the live tool surface should
+  not remove the only JSON-native file creation route.
 
 ### Execute tools
 
@@ -711,7 +713,8 @@ Implementation slice:
 - keep JSON fallback explicit and auditable;
 - make `apply_patch` description shorter and stronger;
 - keep `edit_file` as precise replacement;
-- keep `write_file` as small complete file creation or non-source write;
+- keep `write_file` as small/medium complete file creation or non-source write;
+  do not hide it solely because the task is a hard-runtime artifact task;
 - preserve narrow shell-invoked `apply_patch` bridge behavior if implemented,
   with typed mutation evidence.
 

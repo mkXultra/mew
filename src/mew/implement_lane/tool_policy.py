@@ -177,10 +177,7 @@ def list_v2_tool_specs_for_task(
 ) -> tuple[ImplementLaneToolSpec, ...]:
     """Return the provider-visible v2 tool surface for a task shape."""
 
-    specs = list_v2_tool_specs_for_mode(mode)
-    if not is_hard_runtime_artifact_task(task_contract):
-        return specs
-    return tuple(spec for spec in specs if spec.name != "write_file")
+    return list_v2_tool_specs_for_mode(mode)
 
 
 def is_hard_runtime_artifact_task(task_contract: object) -> bool:

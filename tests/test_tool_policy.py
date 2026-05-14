@@ -15,7 +15,7 @@ def test_mutation_tools_prefer_patch_and_edit_before_write_file() -> None:
     assert names.index("apply_patch") < names.index("edit_file") < names.index("write_file")
 
 
-def test_hard_runtime_artifact_task_constrains_write_file_surface() -> None:
+def test_hard_runtime_artifact_task_keeps_complete_file_creation_surface() -> None:
     task_contract = {
         "goal": (
             "Build a MIPS ELF interpreter runtime from provided source and write "
@@ -26,8 +26,7 @@ def test_hard_runtime_artifact_task_constrains_write_file_surface() -> None:
     names = set(_names(list_v2_tool_specs_for_task("full", task_contract=task_contract)))
 
     assert is_hard_runtime_artifact_task(task_contract) is True
-    assert "write_file" not in names
-    assert {"apply_patch", "edit_file", "run_command", "run_tests"}.issubset(names)
+    assert {"write_file", "apply_patch", "edit_file", "run_command", "run_tests"}.issubset(names)
 
 
 def test_non_hard_runtime_write_mode_keeps_small_file_creation_surface() -> None:

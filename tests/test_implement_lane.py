@@ -2087,16 +2087,15 @@ def test_implement_v2_surfaces_patch_tools_from_hard_runtime_prompt_before_probe
     response_contract = prompt.split("response_contract_json:\n", 1)[1].split("\nhistory_json:", 1)[0]
 
     spec_names = {spec.name for spec in specs}
-    assert {"edit_file", "apply_patch"}.issubset(spec_names)
-    assert "write_file" not in spec_names
+    assert {"write_file", "edit_file", "apply_patch"}.issubset(spec_names)
+    assert "write_file only for small complete files" in prompt
     assert "apply_patch or edit_file" in prompt
     assert "edit_file/apply_patch" not in prompt
-    assert "write_file/edit_file/apply_patch" not in prompt
     assert "write tools are temporarily hidden for this turn" not in response_contract
     assert "write tools are available" not in response_contract
     assert "first source mutation is execution-gated" not in response_contract
     assert "source/output contract" not in response_contract
-    assert "write_file" not in response_contract
+    assert "write_file" in response_contract
     assert "edit_file" in response_contract
     assert "apply_patch" in response_contract
     response_shape = json.loads(response_contract)
@@ -2180,8 +2179,7 @@ def test_implement_v2_keeps_patch_tools_visible_after_many_shallow_source_probes
     )
 
     spec_names = {spec.name for spec in specs}
-    assert {"edit_file", "apply_patch"}.issubset(spec_names)
-    assert "write_file" not in spec_names
+    assert {"write_file", "edit_file", "apply_patch"}.issubset(spec_names)
     assert readiness["probe_count_before_first_write"] == 8
     assert readiness["first_write_due"] is False
     assert "runtime_binary_layout" in readiness["prewrite_probe_missing_categories"]
@@ -3383,8 +3381,7 @@ def test_implement_v2_reveals_patch_tools_after_hard_runtime_probe_budget(tmp_pa
     )
 
     spec_names = {spec.name for spec in specs}
-    assert {"edit_file", "apply_patch"} <= spec_names
-    assert "write_file" not in spec_names
+    assert {"write_file", "edit_file", "apply_patch"} <= spec_names
 
 
 def test_implement_v2_allows_normal_task_write_without_deep_prewrite_probe_budget(tmp_path) -> None:
@@ -6164,7 +6161,7 @@ def test_implement_v2_live_json_prompt_hides_prewrite_required_next_probe(tmp_pa
     assert "read_file doomgeneric/doomgeneric/doomgeneric_img.c" not in prompt
 
 
-def test_implement_v2_hard_runtime_live_json_prompt_hides_write_file_guidance(tmp_path) -> None:
+def test_implement_v2_hard_runtime_live_json_prompt_keeps_write_file_creation_guidance(tmp_path) -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
         task_id="task-hard-runtime",
@@ -6199,7 +6196,8 @@ def test_implement_v2_hard_runtime_live_json_prompt_hides_write_file_guidance(tm
     )
 
     assert "apply_patch or edit_file" in prompt
-    assert "edit_file/apply_patch" not in prompt
+    assert "write_file only for small complete files" in prompt
+    assert "write_file" in prompt
     assert "write_file/edit_file/apply_patch" not in prompt
 
 
@@ -22538,7 +22536,7 @@ def test_implement_v2_write_file_approved_apply_records_mutation_evidence(tmp_pa
     assert tool_result["side_effects"][0]["approval_id"] == "approval-1"
 
 
-def test_implement_v2_hard_runtime_write_file_is_unavailable_for_source_mutation(tmp_path) -> None:
+def test_implement_v2_hard_runtime_write_file_allows_complete_file_creation(tmp_path) -> None:
     target = tmp_path / "vm.js"
 
     result = run_fake_write_implement_v2(
@@ -22571,12 +22569,12 @@ def test_implement_v2_hard_runtime_write_file_is_unavailable_for_source_mutation
     tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
     payload = tool_result["content"][0]
 
-    assert result.status == "blocked"
-    assert tool_result["status"] == "invalid"
-    assert tool_result["is_error"] is True
-    assert "write_file is not available" in payload["reason"]
-    assert not target.exists()
-    assert result.metrics.get("write_evidence_count", 0) == 0
+    assert result.status == "analysis_ready"
+    assert tool_result["status"] == "completed"
+    assert tool_result["is_error"] is False
+    assert target.read_text(encoding="utf-8") == "console.log('bad');\n"
+    assert result.metrics.get("write_evidence_count", 0) == 1
+    assert payload["typed_source_mutation"]["changed_paths"] == ["vm.js"]
 
 
 def test_implement_v2_write_file_rejects_large_single_line_source(tmp_path) -> None:
