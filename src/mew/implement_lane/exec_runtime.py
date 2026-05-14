@@ -388,6 +388,7 @@ class ImplementV2ManagedExecRuntime:
             frontier_state=self.frontier_state,
             fallback_id=f"contract:{command_run_id}",
             command_intent=command_intent,
+            declared_tool_name=call.tool_name,
         )
         normalized_contract, unchecked_expected_artifacts = _drop_uncheckable_expected_artifacts(
             normalized_contract,
@@ -1250,6 +1251,7 @@ def _normalize_runtime_contract(
     frontier_state: dict[str, object],
     fallback_id: str,
     command_intent: str = "",
+    declared_tool_name: str = "",
 ):
     raw_value = value if isinstance(value, dict) else {}
     if _intent_downgrades_artifact_contract(command_intent):
@@ -1268,6 +1270,26 @@ def _normalize_runtime_contract(
             frontier_state=None,
         )
     has_explicit_contract = bool(raw_value)
+    if (
+        not has_explicit_contract
+        and str(declared_tool_name or "").strip() == "run_tests"
+        and command_intent not in {"probe", "diagnostic"}
+    ):
+        return normalize_execution_contract(
+            {
+                "id": fallback_id,
+                "role": "verify",
+                "stage": "verification",
+                "purpose": "verification",
+                "proof_role": "verifier",
+                "acceptance_kind": "external_verifier",
+                "expected_exit": {"mode": "zero"},
+                "expected_artifacts": [],
+                "verifier_required": True,
+            },
+            task_contract=None,
+            frontier_state=None,
+        )
     frontier_for_inference = (
         frontier_state
         if has_explicit_contract or bool(frontier_state.get("_same_turn_model_declared_final_artifact"))

@@ -18134,9 +18134,86 @@ def test_implement_v2_run_tests_shell_orchestration_routes_to_run_command_when_s
     assert payload["tool_name"] == "run_tests"
     assert payload["effective_tool_name"] == "run_command"
     assert payload["execution_mode"] == "shell"
+    assert payload["execution_contract_normalized"]["acceptance_kind"] == "external_verifier"
+    assert payload["execution_contract_normalized"]["proof_role"] == "verifier"
+    assert payload["verifier_evidence"]["verdict"] == "pass"
     assert payload["tool_contract_recovery"]["kind"] == "run_tests_shell_surface_routed_to_run_command"
     assert payload["tool_contract_recovery"]["preserved_command_hash"].startswith("sha256:")
     assert (tmp_path / "routed.txt").read_text(encoding="utf-8") == "routed"
+
+
+def test_implement_v2_diagnostic_run_tests_shell_route_does_not_become_external_verifier(tmp_path) -> None:
+    result = run_fake_exec_implement_v2(
+        ImplementLaneInput(
+            work_session_id="ws-1",
+            task_id="task-1",
+            workspace=str(tmp_path),
+            lane=IMPLEMENT_V2_LANE,
+            lane_config={"mode": "exec", "allow_shell": True},
+        ),
+        provider_calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_tests",
+                "arguments": {
+                    "command": "printf diagnostic > diagnostic.txt && test -f diagnostic.txt",
+                    "cwd": ".",
+                    "timeout": 5,
+                    "foreground_budget_seconds": 1,
+                    "use_shell": True,
+                    "command_intent": "diagnostic",
+                },
+            },
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "diagnostic shell routed"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["command_intent"] == "diagnostic"
+    assert payload["execution_contract_normalized"]["acceptance_kind"] == "not_acceptance"
+    assert payload["execution_contract_normalized"]["proof_role"] == "negative_diagnostic"
+    assert payload["verifier_evidence"]["verdict"] == "unknown"
+
+
+def test_implement_v2_verifier_pass_retires_legacy_runtime_finish_blockers() -> None:
+    retired = _typed_retired_legacy_blockers_for_bundle(
+        {
+            "obligations": [
+                {
+                    "id": "oracle:verifier:run",
+                    "kind": "verifier_pass",
+                    "subject": {"verifier_id": "verifier:run"},
+                    "expected": {"verdict": "pass"},
+                    "source": "verifier_evidence",
+                }
+            ]
+        },
+        task_description="Implement an interpreter that runs the program and saves the first frame.",
+    )
+
+    assert "runtime_component_behavior_evidence" in retired
+    assert "runtime_final_verifier_artifact_evidence" not in retired
+    assert "runtime_artifact_freshness_unchecked" not in retired
+
+
+def test_implement_v2_verifier_pass_retirement_requires_specific_verifier_subject() -> None:
+    retired = _typed_retired_legacy_blockers_for_bundle(
+        {
+            "obligations": [
+                {
+                    "id": "oracle:verifier:ambiguous",
+                    "kind": "verifier_pass",
+                    "subject": {},
+                    "expected": {"verdict": "pass"},
+                    "source": "test",
+                }
+            ]
+        },
+        task_description="Implement an interpreter that runs the program and saves the first frame.",
+    )
+
+    assert "runtime_component_behavior_evidence" not in retired
+    assert "runtime_final_verifier_artifact_evidence" not in retired
 
 
 def test_implement_v2_run_tests_shell_source_mutation_routes_to_process_observer(tmp_path) -> None:

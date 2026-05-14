@@ -10303,6 +10303,9 @@ def _typed_retired_legacy_blockers_for_bundle(
     retired: set[str] = set()
     visual_quality_covered = "visual_similarity" in kinds
     artifact_covered = bool(kinds.intersection({"artifact_exists", "artifact_fresh"}))
+    verifier_covered = _verifier_pass_obligation_is_component_behavior_cover(obligations)
+    if verifier_covered:
+        retired.add("runtime_component_behavior_evidence")
     if visual_quality_covered:
         retired.add("runtime_visual_artifact_quality_evidence")
     if artifact_covered and (visual_quality_covered or not is_runtime_visual_artifact_task(task_description)):
@@ -10310,6 +10313,23 @@ def _typed_retired_legacy_blockers_for_bundle(
     if "artifact_fresh" in kinds and (visual_quality_covered or not is_runtime_visual_artifact_task(task_description)):
         retired.add("runtime_artifact_freshness_unchecked")
     return sorted(retired)
+
+
+def _verifier_pass_obligation_is_component_behavior_cover(obligations: object) -> bool:
+    if not isinstance(obligations, list):
+        return False
+    for obligation in obligations:
+        if not isinstance(obligation, dict):
+            continue
+        if str(obligation.get("kind") or "") != "verifier_pass":
+            continue
+        source = str(obligation.get("source") or "")
+        subject = obligation.get("subject") if isinstance(obligation.get("subject"), dict) else {}
+        verifier_id = str(subject.get("verifier_id") or "")
+        contract_id = str(subject.get("contract_id") or "")
+        if source in {"execution_contract", "verifier_evidence"} and (verifier_id or contract_id):
+            return True
+    return False
 
 
 def _typed_acceptance_digest(events: list[dict[str, object]], oracle_bundle: dict[str, object]) -> dict[str, object]:

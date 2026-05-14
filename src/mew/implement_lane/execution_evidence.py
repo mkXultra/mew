@@ -1112,6 +1112,11 @@ def evidence_events_from_tool_payload(
     raw_tool_record = payload.get("tool_run_record")
     tool_record = _tool_run_record(raw_tool_record) if isinstance(raw_tool_record, Mapping) else None
     command_run_id = str(payload.get("command_run_id") or "")
+    payload_evidence_ref_aliases = _payload_evidence_ref_aliases(payload)
+    verifier_evidence_ref_aliases = _payload_evidence_ref_aliases(
+        payload,
+        allowed_kinds={"command_run", "tool_run_record", "verifier_evidence"},
+    )
     if tool_record is not None:
         command_run_id = tool_record.command_run_id or command_run_id
         events.append(
@@ -1129,6 +1134,7 @@ def evidence_events_from_tool_payload(
                 refs=(
                     {"kind": "tool_run_record", "id": tool_record.record_id},
                     {"kind": "command_run", "id": tool_record.command_run_id},
+                    *payload_evidence_ref_aliases,
                 ),
                 contract_id=tool_record.contract_id,
                 provider_call_id=provider_call_id or tool_record.provider_call_id,
@@ -1187,7 +1193,10 @@ def evidence_events_from_tool_payload(
                     "checks": [dict(check) for check in verifier.checks],
                     "missing_evidence": [dict(item) for item in verifier.missing_evidence],
                 },
-                refs=({"kind": "verifier_evidence", "id": verifier.verifier_id},),
+                refs=(
+                    {"kind": "verifier_evidence", "id": verifier.verifier_id},
+                    *verifier_evidence_ref_aliases,
+                ),
                 contract_id=verifier.contract_id,
                 provider_call_id=provider_call_id,
                 command_run_id=command_run_id,
@@ -1343,17 +1352,21 @@ def resolve_typed_finish(
     if invalid:
         valid_cited_ids = tuple(event_id for event_id in cited_ids if event_id in event_by_alias)
         valid_cited_events = _resolve_cited_evidence_events(valid_cited_ids, event_by_alias)
-        return _typed_block(
-            code="invalid_typed_evidence_ref",
-            message="Finish cited typed evidence ids that do not exist.",
-            missing_obligations=tuple(
-                obligation.as_dict()
-                for obligation in bundle.obligations
-                if obligation.required and _covering_event_for_obligation(obligation, valid_cited_events) is None
-            ),
-            invalid_evidence_refs=invalid,
+        missing_after_valid = tuple(
+            obligation.as_dict()
+            for obligation in bundle.obligations
+            if obligation.required and _covering_event_for_obligation(obligation, valid_cited_events) is None
         )
-    cited_events = _resolve_cited_evidence_events(cited_ids, event_by_alias)
+        if missing_after_valid:
+            return _typed_block(
+                code="invalid_typed_evidence_ref",
+                message="Finish cited typed evidence ids that do not exist.",
+                missing_obligations=missing_after_valid,
+                invalid_evidence_refs=invalid,
+            )
+        cited_events = valid_cited_events
+    else:
+        cited_events = _resolve_cited_evidence_events(cited_ids, event_by_alias)
     failed_refs = tuple(_failed_event_ref(event) for event in cited_events if event.status in {"failed", "partial", "unknown"})
     if failed_refs:
         return _typed_block(
@@ -1419,6 +1432,11 @@ def _dedupe_events(events: list[EvidenceEvent]) -> list[EvidenceEvent]:
 
 def _finish_ref_aliases_for_event(event: EvidenceEvent) -> tuple[str, ...]:
     aliases = [event.id]
+    if not _finish_event_is_coverable(event):
+        return tuple(aliases)
+    provider_alias = _safe_finish_ref_alias(event.provider_call_id)
+    if provider_alias:
+        aliases.append(f"tool-result:{provider_alias}")
     for value in (
         event.command_run_id,
         event.tool_run_record_id,
@@ -1437,6 +1455,10 @@ def _finish_ref_aliases_for_event(event: EvidenceEvent) -> tuple[str, ...]:
         if alias:
             aliases.append(alias)
     return tuple(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def _finish_event_is_coverable(event: EvidenceEvent) -> bool:
+    return event.kind in {"artifact_check", "oracle_check", "source_grounding", "verifier_result"}
 
 
 def _safe_finish_ref_alias(value: object) -> str:
@@ -2094,6 +2116,57 @@ def _finish_claim_ref_ids(claim: FinishClaim) -> list[str]:
         if value:
             ids.append(value)
     return ids
+
+
+def _payload_evidence_ref_aliases(
+    payload: Mapping[str, Any],
+    *,
+    allowed_kinds: set[str] | None = None,
+) -> tuple[dict[str, Any], ...]:
+    refs: list[dict[str, Any]] = []
+    for raw in _payload_evidence_ref_alias_values(payload):
+        text = str(raw or "").strip()
+        if allowed_kinds is not None and _payload_evidence_ref_kind(text) not in allowed_kinds:
+            continue
+        if text:
+            refs.append({"kind": "typed_evidence_ref", "id": text})
+    return _unique_refs(refs)
+
+
+def _payload_evidence_ref_alias_values(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    values: list[str] = []
+    for key in ("evidence_refs", "content_refs", "output_refs"):
+        raw = payload.get(key)
+        if isinstance(raw, str):
+            values.append(raw)
+        elif isinstance(raw, (list, tuple)):
+            values.extend(str(item) for item in raw if str(item or "").strip())
+    route = payload.get("tool_route_decision")
+    if isinstance(route, Mapping):
+        raw = route.get("typed_evidence_refs")
+        if isinstance(raw, str):
+            values.append(raw)
+        elif isinstance(raw, (list, tuple)):
+            values.extend(str(item) for item in raw if str(item or "").strip())
+    return tuple(dict.fromkeys(values))
+
+
+def _payload_evidence_ref_kind(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    known = (
+        "artifact_evidence",
+        "command_run",
+        "failure_classification",
+        "structured_finish_gate",
+        "tool_run_record",
+        "verifier_evidence",
+    )
+    for kind in known:
+        if f"/{kind}/" in text or text.startswith(f"{kind}:"):
+            return kind
+    return ""
 
 
 def _typed_block(

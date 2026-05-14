@@ -21,6 +21,7 @@ from mew.implement_lane.execution_evidence import (
     FinishClaim,
     OracleBundle,
     OracleObligation,
+    evidence_events_from_tool_payload,
     recommend_finish_evidence_refs,
     resolve_typed_finish,
 )
@@ -137,6 +138,269 @@ def test_resolve_typed_finish_invalid_refs_report_only_uncovered_obligations():
     assert any(ref["id"] == "missing-ref" for ref in decision.invalid_evidence_refs)
     assert "/tmp/run.log" in decision.continuation_prompt
     assert "/tmp/frame.bmp" not in decision.continuation_prompt
+
+
+def test_resolve_typed_finish_allows_redundant_invalid_ref_when_obligations_are_covered():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:verifier:run",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        provider_call_id="call_verify_1",
+        refs=(
+            {"kind": "verifier_evidence", "id": "verifier:run"},
+            {
+                "kind": "typed_evidence_ref",
+                "id": "implement-v2-evidence://attempt/verifier_evidence/verifier-run",
+            },
+        ),
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {
+                    "kind": "evidence_event",
+                    "id": "implement-v2-evidence://attempt/verifier_evidence/verifier-run",
+                },
+                {"kind": "evidence_event", "id": "/mew/proof-artifacts/truncated"},
+            ),
+        ),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_accepts_provider_tool_result_alias_for_verifier_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:verifier:run",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        provider_call_id="call_verify_1",
+        refs=({"kind": "verifier_evidence", "id": "verifier:run"},),
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=({"kind": "evidence_event", "id": "tool-result:call_verify_1"},),
+        ),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_tool_payload_typed_ref_alias_resolves_to_verifier_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    payload_ref = "implement-v2-evidence://attempt/tool_run_record/tool-run-record-call-verify"
+    events = evidence_events_from_tool_payload(
+        tool_index=1,
+        tool_name="run_tests",
+        tool_status="completed",
+        provider_call_id="call_verify_1",
+        payload={
+            "evidence_refs": [payload_ref],
+            "tool_run_record": {
+                "record_id": "tool-run-record:verify",
+                "command_run_id": "command-run:verify",
+                "provider_call_id": "call_verify_1",
+                "status": "completed",
+                "exit_code": 0,
+            },
+            "verifier_evidence": {
+                "verifier_id": "verifier:run",
+                "contract_id": "contract:verify",
+                "verdict": "pass",
+            },
+            "failure_classification": {
+                "classification_id": "failure:unknown",
+                "failure_class": "unknown_failure",
+                "phase": "unknown",
+                "kind": "unknown_failure",
+            },
+        },
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": payload_ref},)),
+        bundle,
+        events,
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_tool_payload_route_typed_ref_alias_resolves_to_verifier_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    route_ref = "implement-v2-evidence://attempt/command_run/command-run-verify"
+    failure_ref = "implement-v2-evidence://attempt/failure_classification/failure-unknown"
+    finish_gate_ref = "implement-v2-evidence://attempt/structured_finish_gate/gate-verify"
+    events = evidence_events_from_tool_payload(
+        tool_index=1,
+        tool_name="run_tests",
+        tool_status="completed",
+        provider_call_id="call_verify_1",
+        payload={
+            "tool_route_decision": {"typed_evidence_refs": [route_ref, failure_ref, finish_gate_ref]},
+            "tool_run_record": {
+                "record_id": "tool-run-record:verify",
+                "command_run_id": "command-run:verify",
+                "provider_call_id": "call_verify_1",
+                "status": "completed",
+                "exit_code": 0,
+            },
+            "verifier_evidence": {
+                "verifier_id": "verifier:run",
+                "contract_id": "contract:verify",
+                "verdict": "pass",
+            },
+            "failure_classification": {
+                "classification_id": "failure:unknown",
+                "failure_class": "unknown_failure",
+                "phase": "unknown",
+                "kind": "unknown_failure",
+                "evidence_refs": [{"kind": "typed_evidence_ref", "id": failure_ref}],
+            },
+            "structured_finish_gate": {
+                "blocked": True,
+                "evidence_refs": [{"kind": "typed_evidence_ref", "id": finish_gate_ref}],
+            },
+        },
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": route_ref},)),
+        bundle,
+        events,
+    )
+
+    assert decision.decision == "allow_complete"
+
+    failure_decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": failure_ref},)),
+        bundle,
+        events,
+    )
+    finish_gate_decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": finish_gate_ref},)),
+        bundle,
+        events,
+    )
+
+    assert failure_decision.decision != "allow_complete"
+    assert finish_gate_decision.decision != "allow_complete"
+
+
+def test_tool_payload_tool_result_alias_resolves_to_covering_verifier_not_unknown_failure():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    events = evidence_events_from_tool_payload(
+        tool_index=1,
+        tool_name="run_tests",
+        tool_status="completed",
+        provider_call_id="call_verify_1",
+        payload={
+            "tool_run_record": {
+                "record_id": "tool-run-record:verify",
+                "command_run_id": "command-run:verify",
+                "provider_call_id": "call_verify_1",
+                "status": "completed",
+                "exit_code": 0,
+            },
+            "verifier_evidence": {
+                "verifier_id": "verifier:run",
+                "contract_id": "contract:verify",
+                "verdict": "pass",
+            },
+            "failure_classification": {
+                "classification_id": "failure:unknown",
+                "failure_class": "unknown_failure",
+                "phase": "unknown",
+                "kind": "unknown_failure",
+            },
+        },
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "tool-result:call_verify_1"},)),
+        bundle,
+        events,
+    )
+    bare_provider_decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "call_verify_1"},)),
+        bundle,
+        events,
+    )
+
+    assert decision.decision == "allow_complete"
+    assert bare_provider_decision.decision == "allow_complete"
 
 
 def test_resolve_typed_finish_does_not_cross_satisfy_source_grounding():
