@@ -27,6 +27,7 @@ _VISIBLE_PATH_CHARS = 260
 _VISIBLE_REF_CHARS = 160
 _FORBIDDEN_VISIBLE_FIELD_SET = frozenset(CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS)
 _GENERIC_TEXT_FORBIDDEN_VISIBLE_FIELDS = frozenset({"proof", "todo", "frontier", "workframe"})
+_GENERIC_RENDERED_FORBIDDEN_VISIBLE_FIELDS = frozenset({"todo", "frontier", "workframe"})
 _PLAIN_TEXT_FORBIDDEN_VISIBLE_FIELD_SET = frozenset(
     field for field in _FORBIDDEN_VISIBLE_FIELD_SET if field not in _GENERIC_TEXT_FORBIDDEN_VISIBLE_FIELDS
 )
@@ -35,7 +36,7 @@ _GENERIC_VISIBLE_RENDERED_PATTERNS = {
         rf'(?i)(["\']{re.escape(field)}["\']\s*:|\b{re.escape(field)}\s*[:=]|<\s*{re.escape(field)}\s*>|^#+\s*{re.escape(field)}\b)',
         re.MULTILINE,
     )
-    for field in _GENERIC_TEXT_FORBIDDEN_VISIBLE_FIELDS
+    for field in _GENERIC_RENDERED_FORBIDDEN_VISIBLE_FIELDS
 }
 
 TranscriptEventKind = Literal[

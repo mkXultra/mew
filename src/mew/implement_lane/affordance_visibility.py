@@ -71,6 +71,7 @@ MODEL_AUTHORED_PROVIDER_VISIBLE_FIELDS: tuple[str, ...] = (
 )
 
 GENERIC_TEXT_FORBIDDEN_FIELDS = frozenset({"proof", "todo", "frontier", "workframe"})
+GENERIC_RENDERED_FORBIDDEN_FIELDS = frozenset({"todo", "frontier", "workframe"})
 AFFORDANCE_VISIBILITY_CAPS_FIXTURE = "tests/fixtures/implement_v2_affordance_visibility_caps.json"
 
 DEFAULT_AFFORDANCE_VISIBILITY_CAPS: dict[str, object] = {
@@ -131,7 +132,7 @@ _GENERIC_RENDERED_PATTERNS = {
         rf'(?i)(["\']{re.escape(field)}["\']\s*:|\b{re.escape(field)}\s*[:=]|<\s*{re.escape(field)}\s*>|^#+\s*{re.escape(field)}\b)',
         re.MULTILINE,
     )
-    for field in GENERIC_TEXT_FORBIDDEN_FIELDS
+    for field in GENERIC_RENDERED_FORBIDDEN_FIELDS
 }
 
 

@@ -42,8 +42,6 @@ def test_generic_forbidden_words_are_not_rejected_as_plain_prose() -> None:
 @pytest.mark.parametrize(
     ("text", "field"),
     (
-        ('{"proof": {"status": "model-authored"}}', "proof"),
-        ("proof: model-authored state", "proof"),
         ("todo=patch src/app.py", "todo"),
         ("<frontier>incomplete</frontier>", "frontier"),
         ("## WorkFrame\nrequired_next: patch", "WorkFrame"),
@@ -54,6 +52,15 @@ def test_generic_forbidden_words_fail_as_rendered_state_markers(text: str, field
     violations = scan_forbidden_provider_visible({"instructions": text})
 
     assert field in fields_from_forbidden_violations(violations)
+
+
+def test_proof_is_allowed_as_task_domain_text_but_not_as_structural_key() -> None:
+    prose = "Complete the proof in plus_comm.v and compile the proof using coqc."
+
+    assert fields_from_forbidden_violations(scan_forbidden_provider_visible({"instructions": prose})) == []
+    assert "proof" in fields_from_forbidden_violations(
+        scan_forbidden_provider_visible({"proof": {"status": "model-authored"}})
+    )
 
 
 def test_affordance_visibility_caps_fixture_matches_default_contract() -> None:
