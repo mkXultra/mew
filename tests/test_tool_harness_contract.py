@@ -531,8 +531,71 @@ def test_run_command_natural_text_preserves_zero_byte_output_state() -> None:
     card = result.visible_tool_output_card()
 
     assert "output: bytes=0; visible_limit=1200; truncated=false" in text
-    assert "readback=read_command_output(command_run_id=cmd-empty)" in text
+    assert "readback=read_command_output(command_run_id=cmd-empty)" not in text
     assert card["output"]["bytes"] == 0
+    assert card["output"]["truncated"] is False
+
+
+def test_run_command_natural_text_omits_readback_metadata_for_visible_small_output() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:run:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "command_run_id": "cmd-visible",
+                "exit_code": 0,
+                "stdout": "small complete output\n",
+                "output_bytes": 22,
+                "output_truncated": False,
+                "output_ref": "attempt-1/cmd-visible/output.log",
+                "provider_visible_output_chars": 1200,
+            },
+        ),
+        content_refs=("implement-v2-exec://attempt-1/cmd-visible/output",),
+    )
+
+    text = result.natural_result_text()
+    card = result.visible_tool_output_card()
+
+    assert "small complete output" in text
+    assert "output:" not in text
+    assert "readback=read_command_output(command_run_id=cmd-visible)" not in text
+    assert "output" not in card
+
+
+def test_run_command_natural_text_keeps_readback_for_live_omitted_output() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-run",
+        mew_tool_call_id="attempt-1:tool:run:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "command_run_id": "cmd-live-omitted",
+                "exit_code": 0,
+                "stdout": "first line\n" + ("middle\n" * 200) + "final line\n",
+                "stdout_tail": "final line\n",
+                "output_bytes": 5000,
+                "output_truncated": False,
+                "output_ref": "attempt-1/cmd-live-omitted/output.log",
+                "provider_visible_output_chars": 1200,
+            },
+        ),
+        content_refs=("implement-v2-exec://attempt-1/cmd-live-omitted/output",),
+    )
+
+    text = result.natural_result_text()
+    card = result.visible_tool_output_card()
+
+    assert "first line" in text
+    assert "final line" in text
+    assert "output: bytes=5000; visible_limit=1200; truncated=false; live_omitted=true" in text
+    assert "readback=read_command_output(command_run_id=cmd-live-omitted)" in text
+    assert card["output"]["live_omitted"] is True
     assert card["output"]["truncated"] is False
 
 

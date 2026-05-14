@@ -428,6 +428,8 @@ def _render_command_output_access(output: dict[str, object]) -> str:
         parts.append("truncated=true")
     elif output.get("truncated") is False:
         parts.append("truncated=false")
+    if output.get("live_omitted") is True:
+        parts.append("live_omitted=true")
     ref = _scalar_preview(output.get("ref"), limit=_VISIBLE_REF_CHARS)
     if ref:
         parts.append(f"ref={ref}")
@@ -550,22 +552,41 @@ def _visible_command_output_access(
     ref = next((str(item).strip() for item in content_refs if str(item).strip()), "")
     if not ref:
         ref = str(payload.get("output_ref") or "").strip()
-    output: dict[str, object] = {}
     output_bytes = _optional_nonnegative_int(payload.get("output_bytes"))
+    if "output_truncated" in payload:
+        output_truncated = bool(payload.get("output_truncated"))
+    elif output_bytes is not None:
+        output_truncated = output_bytes > int(output_limit)
+    else:
+        output_truncated = False
+    live_omitted = output_bytes is not None and output_bytes > int(output_limit)
+    has_visible_stream = any(
+        _text_payload(payload.get(key)).strip()
+        for key in ("stderr", "stderr_tail", "stdout", "stdout_tail")
+    )
+    should_surface_access = (
+        output_truncated
+        or output_bytes == 0
+        or live_omitted
+        or (bool(ref) and output_bytes is not None and not has_visible_stream)
+    )
+    if not should_surface_access:
+        return {}
+    output: dict[str, object] = {}
     if output_bytes is not None:
         output["bytes"] = output_bytes
-    if "output_truncated" in payload:
-        output["truncated"] = bool(payload.get("output_truncated"))
+    output["truncated"] = output_truncated
+    if live_omitted:
+        output["live_omitted"] = True
     if ref:
         output["ref"] = ref
-    if command_run_id and ref:
+    if command_run_id and ref and (output_truncated or live_omitted):
         output["command_run_id"] = command_run_id
-    if output:
-        provider_visible = _optional_positive_int(payload.get("provider_visible_output_chars"))
-        if provider_visible is not None:
-            output["visible_limit"] = min(provider_visible, output_limit)
-        elif output_limit:
-            output["visible_limit"] = output_limit
+    provider_visible = _optional_positive_int(payload.get("provider_visible_output_chars"))
+    if provider_visible is not None:
+        output["visible_limit"] = min(provider_visible, output_limit)
+    elif output_limit:
+        output["visible_limit"] = output_limit
     return output
 
 
@@ -709,6 +730,8 @@ def _fit_command_output_access_card(card: dict[str, object]) -> dict[str, object
         fitted["visible_limit"] = visible_limit_value
     if "truncated" in fitted:
         fitted["truncated"] = bool(fitted.get("truncated"))
+    if fitted.get("live_omitted") is not True:
+        fitted.pop("live_omitted", None)
     return _drop_empty_card_values(fitted)
 
 
