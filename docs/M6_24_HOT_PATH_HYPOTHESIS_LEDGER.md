@@ -110,7 +110,7 @@ tuning before a minimal H10 change is designed and measured.
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | pending observability | TBD |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
 | H9 | mew lacks a first-patch readiness threshold: it keeps exploring after enough evidence exists to write a runnable skeleton. | Add observability first: compute first-patch readiness candidates and readiness-to-mutation latency. Behavior change only after a measured miss. | Readiness-to-mutation latency shrinks; first mutation happens after enough evidence but before broad re-exploration/design stalls. | observability first | TBD |
-| H10 | Exploration is not compressed into patch constraints. | Minimal behavior change: make accepted implementation constraints from probe facts visible as task facts, not as `next_action` steering. Keep the diagnostic sidecar as the source of truth and avoid adding a new frontier. | More direct transition from probes to one coherent patch; fewer repeated same-family probes; first mutation appears before repeated build/disassembly loops. | implemented, awaiting bounded diagnostic | run one 10 minute step-shape diagnostic and compare against H0 |
+| H10 | Exploration is not compressed into patch constraints. | Minimal behavior change: make accepted implementation constraints from probe facts visible as task facts, not as `next_action` steering. Keep the diagnostic sidecar as the source of truth and avoid adding a new frontier. | More direct transition from probes to one coherent patch; fewer repeated same-family probes; first mutation appears before repeated build/disassembly loops. | measured failed, reverted | compact task facts alone do not create probe-to-patch compression |
 | H11 | Read-only exploration handoff can become an anti-pattern if the parent re-explores instead of patching. | For any future memory/explore provider, require a patch-readiness packet and measure duplicate post-handoff probes. Do not add another autonomous planner for this. | Duplicate exploration after a handoff decreases; mutation follows accepted facts faster. | deferred | TBD |
 | H12 | Long private design passes after readiness are a hidden stall class. | Add metric: model turns or completion tokens after readiness with no tool call/mutation/verifier. Behavior change later may shorten visible instructions or force a small runnable skeleton. | Fewer high-token no-action turns after readiness; earlier verifier feedback. | observability first | TBD |
 
@@ -166,7 +166,7 @@ Reference artifacts:
 Use the Codex, Claude Code, and mew H0 artifacts listed above.
 
 Mew artifact:
-Pending one bounded 10 minute step-shape diagnostic after `5cc6af7`.
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-070200/2026-05-15__07-02-01/make-mips-interpreter__WD3uvwZ`
 
 Expected signal:
 First mutation appears earlier than H0, duplicate-after-readiness probe families
@@ -174,11 +174,26 @@ decrease, and the model moves toward Codex's probe-to-patch shape rather than
 Claude Code's read/design/re-explore shape.
 
 Observed signal:
-Pending.
+Failed. The diagnostic reached reward 0, 50 tool calls, no detected source
+mutation, and no external verifier pass. The analyzer reported:
+
+- first mutation: Codex step 25, mew none;
+- probe count before first mutation: Codex 24, mew 50;
+- first-patch readiness: mew step 7 with no later mutation;
+- repeated pre-mutation families: binary metadata, disassembly, symbol lookup,
+  build, file read, and runtime verifier;
+- provider request inspection confirmed `implementation_constraints` were
+  present from turn 2 onward and reached `source_plus_artifact_probe` by turn 8.
+
+Compared with H0, this did not improve the target signal. It increased probe
+count and still failed to create a first mutation.
 
 Decision:
-Pending diagnostic. Keep only if the observed signal improves without
-task-specific behavior or provider-visible steering.
+Reverted by `f9b0059`. Do not keep this behavior in the live loop. The result
+shows that compact factual `task_facts` are too weak or too unspecific to
+change the model's probe-to-patch transition. The next experiment should not be
+another small task-facts append unless it explains why the model still used
+50 `exec_command` probes despite visible `implementation_constraints`.
 
 Notes:
 Focused validation before the diagnostic:
@@ -190,6 +205,10 @@ Focused validation before the diagnostic:
 - `git diff --check` passed before commit.
 - codex-ultra scoped review initially found provider alias and source-mutating
   exec gaps; both were fixed and re-review reported no blocking findings.
+- bounded diagnostic command:
+  `uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter --mode step-check-10min --tool-surface-profile-id codex_hot_path`.
+- analysis output:
+  `tmp/m6_24_h10_step_diff.json` and `tmp/m6_24_h10_step_diff.md`.
 
 ## Stop Conditions
 
