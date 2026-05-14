@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-13
+Last updated: 2026-05-15
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | ToolRegistry / ToolSurfaceProfile A/B is live; one fixed `prove-plus-comm` A/B evidence item was accepted for `codex_hot_path`, but default profile is not switched and broad speed/proof-5 remains blocked. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is the active gate: finish analyzer/design integration, measure first-patch readiness and exploration compression, then choose a behavior hypothesis. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,25 +70,42 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_tool_registry_codex_hot_path_substrate`.
+`m6_24_hot_path_h0_observability_first`.
 
 Current diagnostic mode:
-`fixed_ab_item_1_accepted_no_default_switch`.
+`h0_readiness_and_exploration_compression_before_behavior_change`.
 
 Current reentry decision:
-`docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md` is the
-active M6.24 design. It was produced with `orchestrate-build-review` and round
-2 review returned `findings: []` from codex-ultra, glm5.1, and claude-ultra.
-The next implementation target is not another direct tool-description polish:
-first implement the registry/profile injection substrate, route current
-`mew_legacy` through it, then add explicit `codex_hot_path` for A/B. Do not
-resume command/edit Phase 7 validation, `speed_1`, `proof_5`,
-hard-runtime threshold polish, or further ad hoc tool-output wording until
-registry-backed `mew_legacy` and `codex_hot_path` can be compared on the same
-task shape. The target remains Codex-like live path plus mew sidecar proof:
-provider-visible tools and result text are profile-controlled; transcript,
-proof, replay, typed evidence, observer artifacts, and finish gates remain
-internal sidecars or diagnostics, not live `next_action` steering.
+H0 comes before H1/H2/H4/H7. Do not start provider-visible task-shape, prompt,
+tool-rendering, or sidecar visibility behavior changes until the H0
+observability report exists. The H0 question is whether mew lacks evidence,
+fails to compress evidence into implementation constraints, or stalls after
+first-patch readiness. The governing docs are:
+
+- `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
+- `docs/DESIGN_2026-05-15_M6_24_HOT_PATH_OBSERVABILITY.md`
+- `docs/M6_24_HOT_PATH_STEP_DIFF_OBSERVABILITY.md`
+- `docs/REVIEW_2026-05-15_CODEX_HOT_PATH_DIVERGENCE_BEYOND_TOOL_IF.md`
+- `docs/REVIEW_2026-05-15_CODEX_VS_CLAUDE_EXPLORATION_TO_PATCH.md`
+
+Fixed execution order:
+
+1. Inspect controller `86823` final YAML, handoff, changed files, review
+   artifacts, and verification output for the hot-path step-diff analyzer.
+2. Commit only the related analyzer implementation, tests, and directly
+   related docs if no accepted `needs_fix` findings remain.
+3. Inspect controller `21086` final
+   `docs/DESIGN_2026-05-15_M6_24_HOT_PATH_OBSERVABILITY.md` workflow result.
+4. Compare the completed observability design against the committed analyzer
+   and implement only missing H0 observability fields.
+5. Run focused tests and the analyzer on saved Codex, Claude Code, and mew
+   artifacts. Do not run live Harbor / Terminal-Bench for this setup step.
+6. Evaluate H0. Only then choose the first behavior experiment.
+
+Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
+context, but it no longer controls the immediate next action. Do not resume
+`speed_1`, `proof_5`, broad benchmark measurement, or ad hoc tool-output
+wording before H0 is measured.
 
 Latest boundary: fake-native A/B smoke, live profile plumbing, conservative
 paired diagnostic runner, task cwd map, and fixed live A/B report comparability
@@ -140,11 +157,20 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: repair the mutation affordance while preserving the
-  Codex-like hot path. Do not restore live `next_action`, `required_next`,
-  `first_write_due`, probe thresholds, or WorkFrame steering; do not run
-  `speed_1` / `proof_5` until Phase 3 revalidation passes or is explicitly
-  yellow for a non-hot-path reason.
+- Current next action: do not repair behavior yet. First finish the H0
+  observability pipeline. Controller `86823` completed the sidecar step-diff
+  analyzer workflow with accepted findings `0`; inspect and commit only its
+  related implementation/tests/docs. Controller `21086` completed the
+  HOT_PATH_OBSERVABILITY design workflow with accepted findings `0`; compare
+  that design against the analyzer and add any missing H0 fields. Only then run
+  the analyzer against the saved Codex reference, Claude Code reference, and
+  latest mew artifact.
+- The analyzer command shape is:
+  `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
+- Do not restore live `next_action`, `required_next`, `first_write_due`, probe
+  thresholds, or WorkFrame steering as a shortcut. Do not run another
+  same-shape 10 minute `codex_hot_path` step-check, `speed_1`, or `proof_5`
+  until H0 has been measured from saved artifacts.
 
 Latest phase status: Phase 0-6 of
 `docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md` is implemented.
@@ -223,14 +249,12 @@ Current implementation rule:
 - Phase 7: deferred. Serial validation before speed remains valid only after
   the Codex-like native hot-path contract gate is green.
 
-Next action: implement Phase 0 of
-`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md`: provider-visible
-contract/static gates, provider request inventory checks, and sidecar-only
-diagnostic field allowlists.
-
+Superseded next action: the old
+`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md` Phase 0 action is
+historical. Current work must follow the H0 observability-first order above.
 Do not resume regex/shlex command-classifier polish, hard-runtime threshold
 polish, 10 minute step-shape, `speed_1`, `proof_5`, or broad measurement
-before the Codex-like native hot-path Phase 0 gate is committed.
+before H0 readiness/compression has been measured from saved artifacts.
 
 Phase 1 of
 `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is
@@ -491,15 +515,15 @@ Controller docs:
 - `docs/M6_24_GAP_BASELINE_2026-04-29.md`
 - `proof-artifacts/m6_24_gap_ledger.jsonl`
 
-Current native-boundary-gated next action:
+Historical native-boundary-gated next action:
 
 ```text
 M6.24 -> native responsibility-boundary Phase 4 green -> implement Phase 5 replay/fastcheck -> review/commit -> then decide whether one bounded native diagnostic is allowed before speed_1/proof_5
 ```
 
 Older scoped-rebaseline, WorkFrame, diagnostic-runner, and native-loop rows
-remain historical evidence. They do not supersede the next bounded native
-diagnostic.
+remain historical evidence. They do not supersede the current H0
+observability-first gate.
 
 The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
 prior-failure repair is replayable and classified, but codex-ultra marked it
