@@ -281,6 +281,53 @@ def test_run_command_natural_text_includes_bounded_stdout_head_and_tail() -> Non
     assert "stdout_tail:" not in text
 
 
+def test_run_command_natural_text_preserves_terminal_line_structure() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout": "ELF Header:\n  Entry point: 0x400110\n  Machine: MIPS\n",
+                "output_ref": "exec://attempt-1/cmd/output",
+            },
+        ),
+        content_refs=("exec://attempt-1/cmd/output",),
+    )
+
+    text = result.natural_result_text()
+
+    assert "stdout_preview:\nELF Header:\n  Entry point: 0x400110\n  Machine: MIPS" in text
+    assert "stdout_preview: ELF Header: Entry point: 0x400110 Machine: MIPS" not in text
+    assert "  Machine: MIPS\nrefs: exec://attempt-1/cmd/output" in text
+
+
+def test_run_command_natural_text_large_output_keeps_line_oriented_tail() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout": "first probe line\n" + ("middle disassembly line\n" * 400),
+                "stdout_tail": "penultimate verifier clue\nfinal verifier clue\n",
+                "output_ref": "exec://attempt-1/cmd/output",
+            },
+        ),
+        content_refs=("exec://attempt-1/cmd/output",),
+    )
+
+    text = result.natural_result_text()
+
+    assert "stdout_preview:\nfirst probe line\n...\ntail:\npenultimate verifier clue\nfinal verifier clue" in text
+
+
 def test_run_command_natural_text_preserves_tail_when_tail_is_inside_full_stdout() -> None:
     result = ToolResultEnvelope(
         lane_attempt_id="attempt-1",

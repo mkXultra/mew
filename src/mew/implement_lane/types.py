@@ -296,33 +296,80 @@ def _command_output_preview(tool_name: str, payload: dict[str, object], *, limit
     if present:
         per_stream_limit = max(220, (limit - max(0, len(present) - 1) * 2) // len(present))
         rendered = [
-            f"{label}: {_head_tail_preview(text or tail, tail if text else '', limit=per_stream_limit)}"
+            f"{label}:\n{_head_tail_preview(text or tail, tail if text else '', limit=per_stream_limit)}"
             for label, text, tail in present
         ]
-        return _clip_preview("; ".join(rendered), limit=limit)
+        return _clip_preview("\n".join(rendered), limit=limit)
     return ""
 
 
 def _head_tail_preview(text: str, tail: str = "", *, limit: int) -> str:
     raw_text = str(text or "").strip()
     raw_tail = str(tail or "").strip()
-    first_line = raw_text.splitlines()[0].strip() if raw_text else ""
-    text = " ".join(raw_text.split())
-    tail = " ".join(raw_tail.split())
+    text = _terminal_preview_text(raw_text)
+    tail = _terminal_preview_text(raw_tail)
     if not text and not tail:
         return ""
     if not tail:
         return _clip_preview(text or tail, limit=limit)
     if len(text) <= limit and tail in text:
         return text
+    first_line = _first_preview_line(text)
     if len(text) > limit * 2 and first_line:
-        first_line = " ".join(first_line.split())
         head_limit = max(80, min(180, limit // 4))
         tail_limit = max(180, limit - head_limit - 22)
-        return f"{_clip_preview(first_line, limit=head_limit)} ... tail: {_clip_preview(tail, limit=tail_limit)}"
+        return (
+            f"{_clip_preview(first_line, limit=head_limit)}\n"
+            "...\n"
+            f"tail:\n{_clip_lines_preserve(tail, limit=tail_limit)}"
+        )
     head_limit = max(120, limit // 2)
     tail_limit = max(120, limit - head_limit - 22)
-    return f"{_clip_preview(text, limit=head_limit)} ... tail: {_clip_preview(tail, limit=tail_limit)}"
+    return (
+        f"{_clip_lines_preserve(text, limit=head_limit)}\n"
+        "...\n"
+        f"tail:\n{_clip_lines_preserve(tail, limit=tail_limit)}"
+    )
+
+
+def _terminal_preview_text(text: str) -> str:
+    """Normalize terminal excerpts without destroying their line structure."""
+
+    lines = [line.rstrip() for line in str(text or "").splitlines()]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+
+def _first_preview_line(text: str) -> str:
+    for line in str(text or "").splitlines():
+        line = line.strip()
+        if line:
+            return line
+    return ""
+
+
+def _clip_lines_preserve(text: str, *, limit: int) -> str:
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return text
+    lines = text.splitlines() or [text]
+    kept: list[str] = []
+    remaining = max(0, limit - 3)
+    for line in lines:
+        separator = 1 if kept else 0
+        if remaining <= separator:
+            break
+        budget = remaining - separator
+        if len(line) > budget:
+            kept.append(line[:budget].rstrip())
+            remaining = 0
+            break
+        kept.append(line)
+        remaining -= len(line) + separator
+    return ("\n".join(kept)).rstrip() + "..."
 
 
 def _clip_preview(text: str, *, limit: int) -> str:
@@ -346,7 +393,8 @@ def _render_visible_tool_output_card(card: dict[str, object]) -> str:
         parts.append("latest_failure: " + latest_failure)
     output_tail = str(card.get("output_tail") or "").strip()
     if output_tail:
-        parts.append("output_tail: " + output_tail)
+        separator = "\n" if "\n" in output_tail else " "
+        parts.append("output_tail:" + separator + output_tail)
     excerpt = str(card.get("excerpt") or "").strip()
     if excerpt:
         parts.append("excerpt:\n" + excerpt)
@@ -359,7 +407,9 @@ def _render_visible_tool_output_card(card: dict[str, object]) -> str:
     refs = card.get("refs")
     if isinstance(refs, list) and refs:
         parts.append("refs: " + ",".join(str(ref) for ref in refs[:12]))
-    return "; ".join(part for part in parts if part)
+    visible_parts = [part for part in parts if part]
+    separator = "\n" if any("\n" in part for part in visible_parts) else "; "
+    return separator.join(visible_parts)
 
 
 def _render_mutation_summary(mutation: dict[str, object]) -> str:
