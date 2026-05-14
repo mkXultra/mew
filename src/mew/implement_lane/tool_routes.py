@@ -95,6 +95,7 @@ class ToolRouteDecision:
     provider_call_id: str
     mew_tool_call_id: str
     route_reason: str
+    turn_index: int = 0
     native_transcript_refs: tuple[str, ...] = ()
     typed_evidence_refs: tuple[str, ...] = ()
     command_classification: CommandClassificationResult | None = None
@@ -114,6 +115,7 @@ class ToolRouteDecision:
             "effective_tool": self.effective_tool,
             "provider_call_id": self.provider_call_id,
             "mew_tool_call_id": self.mew_tool_call_id,
+            "turn_index": self.turn_index,
             "route_reason": self.route_reason,
             "native_transcript_refs": list(self.native_transcript_refs),
             "typed_evidence_refs": list(self.typed_evidence_refs),
@@ -156,6 +158,7 @@ def build_tool_route_decision(
         effective_tool=resolved_effective_tool,
         provider_call_id=str(call.provider_call_id or result.provider_call_id or ""),
         mew_tool_call_id=str(call.mew_tool_call_id or result.mew_tool_call_id or ""),
+        turn_index=int(call.turn_index or 0),
         route_reason=reason,
         native_transcript_refs=_native_transcript_refs(call.provider_call_id or result.provider_call_id),
         typed_evidence_refs=tuple(str(ref) for ref in result.evidence_refs if str(ref).strip()),

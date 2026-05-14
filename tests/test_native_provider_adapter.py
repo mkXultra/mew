@@ -30,6 +30,7 @@ from mew.implement_lane.native_transcript import (
     native_transcript_hash,
 )
 from mew.implement_lane.tool_policy import list_v2_base_tool_specs
+from mew.implement_lane.tool_registry import build_tool_surface_snapshot
 
 
 def _input_item() -> dict[str, object]:
@@ -111,6 +112,64 @@ def test_request_descriptor_preserves_codex_like_tool_order_and_collapsed_descri
     assert "cheap probe" not in descriptions
     assert "fallback-probe" not in descriptions
     assert "frontier" not in descriptions
+
+
+def test_request_descriptor_records_tool_surface_metadata_without_changing_tools() -> None:
+    tool_specs = list_v2_base_tool_specs()
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"mode": "full"},
+        task_contract={},
+        transcript_items=(),
+        available_provider_tool_names=tuple(spec.name for spec in tool_specs),
+    )
+    baseline = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[_input_item()],
+        transcript_window=[{"sequence": 1, "kind": "input_message"}],
+        tool_specs=snapshot.tool_specs,
+        provider_request_id="req-tool-surface-baseline",
+    )
+    with_surface = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[_input_item()],
+        transcript_window=[{"sequence": 1, "kind": "input_message"}],
+        tool_specs=snapshot.tool_specs,
+        provider_request_id="req-tool-surface",
+        tool_surface_snapshot=snapshot.request_metadata(),
+    )
+
+    assert (
+        with_surface["request_body"]["tools"]  # type: ignore[index]
+        == baseline["request_body"]["tools"]  # type: ignore[index]
+    )
+    assert with_surface["tool_surface_profile_id"] == "mew_legacy"
+    assert with_surface["tool_surface_prompt_contract_id"] == "mew_legacy_prompt_v1"
+    assert with_surface["tool_surface"]["descriptor_hash"] == snapshot.descriptor_hash  # type: ignore[index]
+    assert with_surface["capability_decisions"]["tool_surface_profile_id"] == "mew_legacy"  # type: ignore[index]
+
+
+def test_request_descriptor_normalizes_tool_surface_parallel_metadata_to_provider_caps() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"mode": "full"},
+        task_contract={},
+        transcript_items=(),
+    )
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[_input_item()],
+        transcript_window=[{"sequence": 1, "kind": "input_message"}],
+        tool_specs=snapshot.tool_specs,
+        capabilities=NativeProviderCapabilities(supports_parallel_tool_calls=False),
+        provider_request_id="req-tool-surface-no-parallel",
+        tool_surface_snapshot=snapshot.request_metadata(),
+    )
+
+    assert descriptor["request_body"]["parallel_tool_calls"] is False  # type: ignore[index]
+    assert descriptor["tool_surface"]["parallel_tool_calls_requested"] is True  # type: ignore[index]
+    assert descriptor["tool_surface"]["parallel_tool_calls_effective"] is False  # type: ignore[index]
 
 
 def test_request_descriptor_records_apply_patch_json_fallback_when_custom_tools_unavailable() -> None:

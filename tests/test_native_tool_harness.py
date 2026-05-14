@@ -133,6 +133,8 @@ def test_native_harness_read_finish_and_artifacts(tmp_path: Path) -> None:
         json.loads(line) for line in (artifact_root / "tool_routes.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [row["tool_route"] for row in tool_route_rows] == ["read", "finish"]
+    assert tool_route_rows[0]["tool_surface_profile_id"] == "mew_legacy"
+    assert str(tool_route_rows[0]["tool_surface_route_table_hash"]).startswith("sha256:")
     assert tool_route_rows[0]["declared_tool"] == "read_file"
     assert tool_route_rows[1]["declared_tool"] == "finish"
     finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
@@ -320,6 +322,9 @@ def test_native_provider_hides_process_lifecycle_tools_until_command_is_open(tmp
 
     run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
 
+    assert provider.requests[0]["tool_surface_profile_id"] == "mew_legacy"
+    assert provider.requests[0]["tool_surface_prompt_contract_id"] == "mew_legacy_prompt_v1"
+    assert provider.requests[0]["provider_request_inventory"]["tool_surface"]["profile_id"] == "mew_legacy"  # type: ignore[index]
     assert {"poll_command", "cancel_command", "read_command_output"}.isdisjoint(provider.requests[0]["provider_tool_names"])
     assert {"poll_command", "cancel_command", "read_command_output"} <= set(provider.requests[1]["provider_tool_names"])
 

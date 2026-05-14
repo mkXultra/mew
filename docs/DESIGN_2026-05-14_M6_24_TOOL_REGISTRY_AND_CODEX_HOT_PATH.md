@@ -1,6 +1,6 @@
 # Design 2026-05-14 - M6.24 ToolRegistry And Codex Hot Path
 
-Status: design only.
+Status: Phase 0-1 implemented; Phase 2 pending.
 
 Scope: `implement_v2` native tool surface selection, provider-visible tool
 descriptors, provider-visible tool result rendering, route observability, and
@@ -876,6 +876,10 @@ is invalid for default-switch evidence and must be marked
 
 Intent: freeze profile semantics before wiring the registry into live requests.
 
+Implementation status: `mew_legacy` registry schema, profile metadata, hashes,
+visibility/availability metadata, and focused invariants are implemented.
+`codex_hot_path` golden descriptor fixtures remain Phase 2 work.
+
 Implementation slice:
 
 - add profile contract fixtures for `mew_legacy` and `codex_hot_path`;
@@ -915,6 +919,12 @@ Suggested tests:
 
 Intent: make the live path ask a registry for the current surface without
 changing behavior.
+
+Implementation status: live native request construction now routes
+`mew_legacy` through `ToolRegistry`, records profile metadata in request
+descriptor/inventory artifacts, and stamps turn-matched profile metadata on
+`tool_routes.jsonl`. Provider-visible tool names and descriptors remain
+unchanged for `mew_legacy`.
 
 Implementation slice:
 

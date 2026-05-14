@@ -63,6 +63,7 @@ from .tool_policy import (
     list_v2_tool_specs_for_mode,
     list_v2_tool_specs_for_task,
 )
+from .tool_registry import ToolSurfaceSnapshot, build_tool_surface_snapshot
 from .tool_routes import route_records_from_results, with_tool_route_decision
 from .types import ImplementLaneInput, ImplementLaneResult, ToolCallEnvelope, ToolResultEnvelope
 from .v2_runtime import (
@@ -2065,7 +2066,11 @@ def _request_descriptor(
         transcript_items=provider_visible_transcript_items,
         loop_signals=loop_signals,
     )
-    tool_specs = _native_tool_specs_for_request(lane_input, provider_visible_transcript_items)
+    tool_surface = _tool_surface_snapshot_for_request(
+        lane_input,
+        provider_visible_transcript_items,
+    )
+    tool_specs = tool_surface.tool_specs
     input_items = _responses_input_items(
         lane_input,
         provider_visible_transcript_items,
@@ -2077,6 +2082,13 @@ def _request_descriptor(
         instructions=instructions,
         compact_sidecar_digest=compact_sidecar_digest,
     )
+    provider_request_inventory = build_native_prompt_input_inventory(
+        compact_sidecar_digest=compact_sidecar_digest,
+        provider_visible_forbidden_fields=forbidden_fields_report,
+        diagnostic_only_fields=loop_signals.keys(),
+        diagnostic_loop_signals=loop_signals,
+    )
+    provider_request_inventory["tool_surface"] = tool_surface.request_metadata()
     return {
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "transport_kind": "provider_native" if _provider_is_live(lane_input) else "fake_native",
@@ -2086,12 +2098,15 @@ def _request_descriptor(
         "input_item_count": len(transcript_items),
         "input_items": input_items,
         "transcript_window": [item.as_dict() for item in provider_visible_transcript_items],
-        "provider_request_inventory": build_native_prompt_input_inventory(
-            compact_sidecar_digest=compact_sidecar_digest,
-            provider_visible_forbidden_fields=forbidden_fields_report,
-            diagnostic_only_fields=loop_signals.keys(),
-            diagnostic_loop_signals=loop_signals,
-        ),
+        "provider_request_inventory": provider_request_inventory,
+        "tool_surface": tool_surface.request_metadata(),
+        "tool_surface_profile_id": tool_surface.profile_id,
+        "tool_surface_profile_version": tool_surface.profile_version,
+        "tool_surface_profile_hash": tool_surface.profile_hash,
+        "tool_surface_descriptor_hash": tool_surface.descriptor_hash,
+        "tool_surface_route_table_hash": tool_surface.route_table_hash,
+        "tool_surface_render_policy_hash": tool_surface.render_policy_hash,
+        "tool_surface_prompt_contract_id": tool_surface.prompt_contract_id,
         "provider_tool_names": [spec.name for spec in tool_specs],
         "instructions": instructions,
         "model_json_main_path_detected": False,
@@ -2116,6 +2131,9 @@ def _live_responses_request_descriptor(
         reasoning=reasoning,
         provider_request_id=f"{request_descriptor.get('lane_attempt_id')}:turn:{request_descriptor.get('turn_index')}",
         prompt_cache_key=str(request_descriptor.get("lane_attempt_id") or ""),
+        tool_surface_snapshot=_mapping_from_request_descriptor(
+            request_descriptor.get("tool_surface")
+        ),
     )
 
 
@@ -2167,15 +2185,27 @@ def _native_tool_specs_for_request(
     lane_input: ImplementLaneInput,
     transcript_items: object,
 ) -> tuple[ImplementLaneToolSpec, ...]:
-    specs = list_v2_tool_specs_for_task(
-        lane_input.lane_config.get("mode") or "full",
+    return _tool_surface_snapshot_for_request(lane_input, transcript_items).tool_specs
+
+
+def _tool_surface_snapshot_for_request(
+    lane_input: ImplementLaneInput,
+    transcript_items: object,
+    *,
+    available_provider_tool_names: tuple[str, ...] | None = None,
+) -> ToolSurfaceSnapshot:
+    return build_tool_surface_snapshot(
+        lane_config=lane_input.lane_config,
         task_contract=lane_input.task_contract,
+        transcript_items=transcript_items,
+        available_provider_tool_names=available_provider_tool_names,
     )
-    if _native_has_open_command(transcript_items):
-        return specs
-    if _native_has_completed_command_output(transcript_items):
-        return tuple(spec for spec in specs if spec.name not in {"poll_command", "cancel_command"})
-    return tuple(spec for spec in specs if spec.name not in _PROCESS_LIFECYCLE_TOOL_NAMES)
+
+
+def _mapping_from_request_descriptor(value: object) -> Mapping[str, object]:
+    if isinstance(value, Mapping):
+        return value
+    return {}
 
 
 def _native_has_open_command(transcript_items: object) -> bool:
@@ -2957,7 +2987,10 @@ def _write_live_failure_artifacts(
     root.mkdir(parents=True, exist_ok=True)
     paths = write_native_transcript_artifacts(root, transcript)
     paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
-    route_records = route_records_from_results(tool_results)
+    route_records = _route_records_with_tool_surface(
+        route_records_from_results(tool_results),
+        provider=provider,
+    )
     tool_routes_path = root / "tool_routes.jsonl"
     tool_routes_path.write_text(
         "".join(json.dumps(record, sort_keys=True) + "\n" for record in route_records),
@@ -3016,6 +3049,51 @@ def _write_live_failure_artifacts(
     return tuple(str(path) for path in (*paths.values(), request_path, inventory_path))
 
 
+def _route_records_with_tool_surface(
+    route_records: tuple[dict[str, object], ...],
+    *,
+    provider: object,
+) -> tuple[dict[str, object], ...]:
+    metadata_by_turn = _provider_tool_surface_metadata_by_turn(provider)
+    if not metadata_by_turn:
+        return route_records
+    augmented: list[dict[str, object]] = []
+    for record in route_records:
+        turn_index = _safe_int(record.get("turn_index"), default=0)
+        metadata = metadata_by_turn.get(turn_index) or metadata_by_turn.get(-1) or {}
+        item = dict(record)
+        item["tool_surface_profile_id"] = metadata.get("profile_id", "")
+        item["tool_surface_profile_hash"] = metadata.get("profile_hash", "")
+        item["tool_surface_route_table_hash"] = metadata.get("route_table_hash", "")
+        item["tool_surface_descriptor_hash"] = metadata.get("descriptor_hash", "")
+        augmented.append(item)
+    return tuple(augmented)
+
+
+def _provider_tool_surface_metadata_by_turn(provider: object) -> dict[int, Mapping[str, object]]:
+    requests = getattr(provider, "requests", None)
+    if not isinstance(requests, list):
+        return {}
+    by_turn: dict[int, Mapping[str, object]] = {}
+    for request in reversed(requests):
+        if not isinstance(request, Mapping):
+            continue
+        tool_surface = request.get("tool_surface")
+        if isinstance(tool_surface, Mapping):
+            turn_index = _safe_int(request.get("turn_index"), default=0)
+            if turn_index:
+                by_turn.setdefault(turn_index, tool_surface)
+            by_turn.setdefault(-1, tool_surface)
+    return by_turn
+
+
+def _safe_int(value: object, *, default: int) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 def _approved_write_calls(lane_config: Mapping[str, object]) -> tuple[dict[str, object], ...]:
     raw = lane_config.get("approved_write_calls")
     return tuple(dict(item) for item in raw) if isinstance(raw, list) else ()
@@ -3070,7 +3148,10 @@ def _write_native_artifacts(
 ) -> dict[str, Path]:
     paths = write_native_transcript_artifacts(root, transcript)
     paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
-    route_records = route_records_from_results(tool_results)
+    route_records = _route_records_with_tool_surface(
+        route_records_from_results(tool_results),
+        provider=provider,
+    )
     tool_routes_path = root / "tool_routes.jsonl"
     tool_routes_path.write_text(
         "".join(json.dumps(record, sort_keys=True) + "\n" for record in route_records),

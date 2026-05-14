@@ -131,6 +131,7 @@ def build_responses_request_descriptor(
     headers: Mapping[str, object] | None = None,
     provider_request_id: str = "",
     prompt_cache_key: str = "",
+    tool_surface_snapshot: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Build an auditable offline Responses request descriptor.
 
@@ -192,6 +193,14 @@ def build_responses_request_descriptor(
         lowered.name: stable_json_hash(lowered.provider_tool)
         for lowered in lowered_tools
     }
+    tool_surface_metadata = dict(tool_surface_snapshot or {})
+    if tool_surface_metadata:
+        parallel_requested = bool(
+            tool_surface_metadata.get("parallel_tool_calls_requested")
+        )
+        tool_surface_metadata["parallel_tool_calls_effective"] = (
+            parallel_requested and caps.supports_parallel_tool_calls
+        )
     capability_decisions = {
         **caps.as_dict(),
         "request_uses_stream": True,
@@ -202,6 +211,13 @@ def build_responses_request_descriptor(
         "stateless_reasoning_carry_forward": bool(refs_used),
         "apply_patch_transport": _apply_patch_transport(lowered_tools),
     }
+    if tool_surface_metadata:
+        capability_decisions["tool_surface_profile_id"] = tool_surface_metadata.get(
+            "profile_id"
+        )
+        capability_decisions["tool_surface_profile_version"] = tool_surface_metadata.get(
+            "profile_version"
+        )
     descriptor: dict[str, object] = {
         "schema_version": NATIVE_PROVIDER_ADAPTER_SCHEMA_VERSION,
         "transport_change": "yes",
@@ -222,6 +238,16 @@ def build_responses_request_descriptor(
         "tool_spec_hashes": tool_hashes,
         "tool_specs": list(lowered_tool_descriptor_metadata(lowered_tools)),
         "strict_false_reasons": strict_false_reasons(lowered_tools),
+        "tool_surface": tool_surface_metadata,
+        "tool_surface_profile_id": tool_surface_metadata.get("profile_id", ""),
+        "tool_surface_profile_version": tool_surface_metadata.get("profile_version", ""),
+        "tool_surface_profile_hash": tool_surface_metadata.get("profile_hash", ""),
+        "tool_surface_descriptor_hash": tool_surface_metadata.get("descriptor_hash", ""),
+        "tool_surface_route_table_hash": tool_surface_metadata.get("route_table_hash", ""),
+        "tool_surface_render_policy_hash": tool_surface_metadata.get("render_policy_hash", ""),
+        "tool_surface_prompt_contract_id": tool_surface_metadata.get(
+            "prompt_contract_id", ""
+        ),
         "transcript_window_hash": transcript_hash,
         "sidecar_digest_hash": sidecar_digest_hash,
         "reasoning_sidecar_refs_used": list(refs_used),
