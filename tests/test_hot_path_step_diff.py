@@ -17,6 +17,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
 
 def _codex_tool_events(
     *,
+    agent: str = "codex",
     tool: str,
     tool_id: str,
     summary: str,
@@ -28,7 +29,7 @@ def _codex_tool_events(
 ) -> list[dict[str, object]]:
     started = {
         "schema_version": 1,
-        "agent": "codex",
+        "agent": agent,
         "kind": "tool_call",
         "phase": "started",
         "tool": tool,
@@ -52,12 +53,13 @@ def _codex_tool_events(
     return [started, completed]
 
 
-def _write_codex_reference(root: Path) -> Path:
+def _write_codex_reference(root: Path, *, agent: str = "codex") -> Path:
     trace_dir = root / "normalized-trace"
     rows: list[dict[str, object]] = []
     rows.extend(
         _codex_tool_events(
             tool="read_file",
+            agent=agent,
             tool_id="read-1",
             summary="src/main.c",
             arguments={"path": "src/main.c"},
@@ -68,6 +70,7 @@ def _write_codex_reference(root: Path) -> Path:
     rows.extend(
         _codex_tool_events(
             tool="apply_patch",
+            agent=agent,
             tool_id="patch-1",
             summary="*** Begin Patch",
             arguments={"patch": "*** Begin Patch\n*** Update File: src/main.c\n@@\n-old\n+new\n*** End Patch"},
@@ -78,6 +81,7 @@ def _write_codex_reference(root: Path) -> Path:
     rows.extend(
         _codex_tool_events(
             tool="exec_command",
+            agent=agent,
             tool_id="verify-1",
             summary="pytest -q",
             arguments={"cmd": "pytest -q"},
@@ -91,7 +95,7 @@ def _write_codex_reference(root: Path) -> Path:
         json.dumps(
             {
                 "schema_version": 1,
-                "agent": "codex",
+                "agent": agent,
                 "tool_call_count": 6,
                 "tool_call_started_count": 3,
                 "first_edit_seconds": 2.0,
@@ -255,11 +259,14 @@ def test_hot_path_step_diff_compares_reference_and_mew_native_artifact(tmp_path:
         "runtime_verifier",
     ]
     mew_repeats = report["repeated_probe_family_diagnostics"]["mew"]["before_first_mutation"]
-    assert mew_repeats[0]["family"] == "source_scan:rg"
+    assert mew_repeats[0]["family"] == "text_search"
     assert report["possible_first_patch_opportunity_diagnostics"][0]["kind"] == (
         "reference_first_mutation_probe_budget_exceeded"
     )
     assert report["summary"]["mew"]["artifact_summary"]["native_provider_requests"]["request_count"] == 5
+    assert report["h0_readiness_diagnostics"]["agents"]["mew"]["first_patch_readiness_step_index"] == 3
+    assert report["h0_readiness_diagnostics"]["agents"]["codex"]["readiness_to_mutation_steps"] == 0
+    assert report["pairwise_comparisons"][0]["comparison_id"] == "codex_vs_mew"
 
 
 def test_hot_path_step_diff_writes_json_and_markdown(tmp_path: Path) -> None:
@@ -278,9 +285,92 @@ def test_hot_path_step_diff_writes_json_and_markdown(tmp_path: Path) -> None:
 
     assert out_json.exists()
     assert out_md.exists()
-    assert json.loads(out_json.read_text(encoding="utf-8"))["report_kind"] == "m6_24_hot_path_step_diff"
+    assert json.loads(out_json.read_text(encoding="utf-8"))["report_kind"] == "m6_24_hot_path_observability"
     assert "Normalized Codex Steps" in out_md.read_text(encoding="utf-8")
     assert "Normalized mew Steps" in markdown
+
+
+def test_hot_path_step_diff_can_compare_claude_code_reference(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    claude_root = _write_codex_reference(tmp_path / "claude-code", agent="claude")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(
+        codex_reference_root=codex_root,
+        claude_code_reference_root=claude_root,
+        mew_artifact_root=mew_root,
+    )
+
+    assert report["inputs"]["claude_code"]["status"] == "loaded"
+    assert report["summary"]["claude_code"]["first_mutation_step_index"] == 2
+    assert "normalized_claude_code_steps" in report
+    assert [item["comparison_id"] for item in report["pairwise_comparisons"]] == [
+        "codex_vs_mew",
+        "claude_code_vs_mew",
+    ]
+    assert report["h0_readiness_diagnostics"]["agents"]["claude_code"]["diagnostic_only"] is True
+
+
+def test_hot_path_step_diff_marks_missing_reference_not_comparable(tmp_path: Path) -> None:
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=tmp_path / "missing-codex", mew_artifact_root=mew_root)
+
+    assert report["inputs"]["codex"]["status"] == "missing"
+    assert report["pairwise_comparisons"][0]["comparable"] is False
+    assert report["pairwise_comparisons"][0]["metric_deltas"]["probe_count_before_mutation"]["comparable"] is False
+    assert report["pairwise_comparisons"][0]["metric_deltas"]["probe_count_before_mutation"]["delta"] is None
+
+
+def test_hot_path_step_diff_classifies_pure_dependency_checks(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_commands(
+        tmp_path / "codex",
+        [
+            "node --version; which gcc || true; command -v make",
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["normalized_codex_steps"][0]["intent"] == "dependency_probe"
+
+
+def test_hot_path_step_diff_reports_pairing_gaps(tmp_path: Path) -> None:
+    codex_root = tmp_path / "codex"
+    trace_dir = codex_root / "normalized-trace"
+    rows = [
+        {
+            "schema_version": 1,
+            "agent": "codex",
+            "kind": "tool_call",
+            "phase": "started",
+            "tool": "exec_command",
+            "id": "missing-result",
+            "summary": "rg TODO",
+            "arguments": {"cmd": "rg TODO"},
+        },
+        {
+            "schema_version": 1,
+            "agent": "codex",
+            "kind": "tool_call",
+            "phase": "completed",
+            "tool": "exec_command",
+            "id": "missing-call",
+            "summary": "rg FIXME",
+            "arguments": {"cmd": "rg FIXME"},
+        },
+    ]
+    _write_jsonl(trace_dir / "agent_trace.jsonl", rows)
+    (trace_dir / "summary.json").write_text(json.dumps({"schema_version": 1, "agent": "codex"}), encoding="utf-8")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    pairing = report["agents"]["codex"]["metrics"]["tool_result_pairing"]
+    assert pairing["missing_result"] == 1
+    assert pairing["missing_call"] == 1
+    assert pairing["paired"] == 0
 
 
 def test_hot_path_step_diff_accepts_normalized_json_trace(tmp_path: Path) -> None:
@@ -321,11 +411,12 @@ def test_hot_path_step_diff_does_not_treat_readonly_greater_than_text_as_mutatio
         "runtime_verifier",
         "source_scan",
     ]
-    assert codex_steps[5]["intent"] == "mutation"
-    assert report["summary"]["codex"]["first_mutation_step_index"] == 6
+    assert codex_steps[5]["intent"] == "binary_probe"
+    assert all(step["intent"] != "mutation" for step in codex_steps)
+    assert report["summary"]["codex"]["first_mutation_step_index"] is None
 
 
-def test_hot_path_step_diff_keeps_source_file_redirection_as_command_mutation(tmp_path: Path) -> None:
+def test_hot_path_step_diff_does_not_infer_source_redirection_mutation_without_evidence(tmp_path: Path) -> None:
     codex_root = _write_codex_reference_with_commands(
         tmp_path / "codex",
         [
@@ -337,8 +428,8 @@ def test_hot_path_step_diff_keeps_source_file_redirection_as_command_mutation(tm
     report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
 
     first_step = report["normalized_codex_steps"][0]
-    assert first_step["intent"] == "mutation"
-    assert "command_write_pattern" in first_step["classification_basis"]
+    assert first_step["intent"] == "other_probe"
+    assert "command_write_pattern" not in first_step["classification_basis"]
 
 
 def test_hot_path_step_diff_keeps_read_only_shell_operators_out_of_mutations(tmp_path: Path) -> None:
@@ -364,7 +455,7 @@ def test_hot_path_step_diff_keeps_read_only_shell_operators_out_of_mutations(tmp
     assert report["summary"]["codex"]["first_mutation_step_index"] == 4
 
 
-def test_hot_path_step_diff_still_detects_source_redirection_mutation(tmp_path: Path) -> None:
+def test_hot_path_step_diff_keeps_heredoc_redirection_non_mutating_without_side_effect_evidence(tmp_path: Path) -> None:
     codex_root = _write_codex_reference_with_command_steps(
         tmp_path / "codex",
         ["cat <<'EOF' > src/generated.c\nint main(void) { return 0; }\nEOF"],
@@ -373,5 +464,5 @@ def test_hot_path_step_diff_still_detects_source_redirection_mutation(tmp_path: 
 
     report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
 
-    assert report["normalized_codex_steps"][0]["intent"] == "mutation"
-    assert report["summary"]["codex"]["first_mutation_step_index"] == 1
+    assert report["normalized_codex_steps"][0]["intent"] == "source_read"
+    assert report["summary"]["codex"]["first_mutation_step_index"] == 2

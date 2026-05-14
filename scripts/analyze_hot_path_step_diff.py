@@ -16,6 +16,11 @@ from mew.implement_lane.hot_path_step_diff import write_hot_path_step_diff_repor
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--codex-reference-root", required=True, help="root containing normalized Codex trace artifacts")
+    parser.add_argument(
+        "--claude-code-reference-root",
+        default=None,
+        help="optional root containing normalized Claude Code trace artifacts",
+    )
     parser.add_argument("--mew-artifact-root", required=True, help="mew proof/artifact root to analyze")
     parser.add_argument("--out-json", required=True, help="output JSON report path")
     parser.add_argument("--out-md", required=True, help="output Markdown report path")
@@ -27,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = write_hot_path_step_diff_report(
             codex_reference_root=args.codex_reference_root,
+            claude_code_reference_root=args.claude_code_reference_root,
             mew_artifact_root=args.mew_artifact_root,
             out_json=args.out_json,
             out_md=args.out_md,
