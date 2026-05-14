@@ -403,6 +403,94 @@ def test_tool_payload_tool_result_alias_resolves_to_covering_verifier_not_unknow
     assert bare_provider_decision.decision == "allow_complete"
 
 
+def test_finish_alias_prefers_passing_closeout_over_same_command_yielded_verifier():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    yielded = EvidenceEvent(
+        id="ev:verifier:yielded",
+        kind="verifier_result",
+        status="unknown",
+        observed={"verdict": "unknown"},
+        contract_id="contract:verify",
+        provider_call_id="verify-1",
+        command_run_id="command-run:verify",
+        refs=({"kind": "verifier_evidence", "id": "verifier:yielded"},),
+    )
+    closeout = EvidenceEvent(
+        id="ev:verifier:closeout",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        contract_id="contract:verify",
+        provider_call_id="call-active-command-closeout-002",
+        command_run_id="command-run:verify",
+        refs=({"kind": "verifier_evidence", "id": "verifier:closeout"},),
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "command-run:verify"},)),
+        bundle,
+        (yielded, closeout),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_finish_alias_prefers_latest_same_logical_verifier_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    yielded = EvidenceEvent(
+        id="ev:verifier:contract:verify",
+        kind="verifier_result",
+        status="unknown",
+        observed={"verdict": "unknown"},
+        contract_id="contract:verify",
+        provider_call_id="verify-1",
+        command_run_id="command-run:verify",
+        refs=({"kind": "verifier_evidence", "id": "verifier:contract:verify"},),
+    )
+    closeout = EvidenceEvent(
+        id="ev:verifier:contract:verify",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        contract_id="contract:verify",
+        provider_call_id="call-active-command-closeout-002",
+        command_run_id="command-run:verify",
+        refs=({"kind": "verifier_evidence", "id": "verifier:contract:verify"},),
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:verifier:contract:verify"},)),
+        bundle,
+        (yielded, closeout),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
 def test_resolve_typed_finish_does_not_cross_satisfy_source_grounding():
     bundle = OracleBundle(
         id="oracle:bundle:source",

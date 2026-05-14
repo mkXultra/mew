@@ -18,6 +18,9 @@ from mew.implement_lane.native_provider_adapter import NativeResponsesStreamPars
 from mew.implement_lane.native_tool_harness import (
     NativeCodexResponsesProvider,
     PHASE3_NATIVE_SURFACE,
+    _NativeCloseoutContext,
+    _finish_gate_block_resolved_by_closeout,
+    _finish_gate_missing_obligations,
     run_live_native_implement_v2,
     run_native_implement_v2,
     run_unavailable_native_implement_v2,
@@ -446,7 +449,34 @@ def test_native_provider_input_does_not_mark_existing_verify_path_missing(tmp_pa
     task_facts = _task_payload(provider.requests[0])["task_facts"]
     assert task_facts["verify_command_paths"] == ["vm.js"]
     assert task_facts["mentioned_workspace_paths"] == ["vm.js"]
+    assert task_facts["existing_workspace_paths"] == ["vm.js"]
     assert "missing_workspace_paths" not in task_facts
+
+
+def test_native_provider_input_task_facts_relativize_workspace_absolute_paths(tmp_path: Path) -> None:
+    (tmp_path / "doomgeneric_mips").write_text("elf", encoding="utf-8")
+    (tmp_path / "doomgeneric").mkdir()
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "description": (
+                f"I have provided {tmp_path / 'doomgeneric_mips'}, a MIPS elf file, "
+                "along with doomgeneric/, the corresponding source code. Implement vm.js."
+            ),
+            "verify_command": "node vm.js",
+        },
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    task_facts = _task_payload(provider.requests[0])["task_facts"]
+    assert "doomgeneric_mips" in task_facts["mentioned_workspace_paths"]
+    assert "doomgeneric" in task_facts["mentioned_workspace_paths"]
+    assert "vm.js" in task_facts["missing_workspace_paths"]
+    assert task_facts["existing_workspace_paths"] == ["doomgeneric_mips", "doomgeneric"]
 
 
 def test_native_provider_input_task_facts_normalize_dot_slash_and_reject_unsafe_paths(tmp_path: Path) -> None:
@@ -2665,6 +2695,42 @@ def test_native_harness_finalizes_active_verifier_before_deterministic_closeout(
     )
     assert active_output.status == "completed"
     assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_closeout_resolves_only_verifier_typed_gate_missing_obligations() -> None:
+    closeout = _NativeCloseoutContext(fresh_verifier_refs=("implement-v2-evidence://attempt/verifier_evidence/run",))
+
+    assert _finish_gate_missing_obligations(
+        {
+            "missing_obligations": [
+                {"id": "oracle:contract:run:verifier_pass", "kind": "verifier_pass"},
+            ],
+        }
+    ) == ("oracle:contract:run:verifier_pass",)
+    assert _finish_gate_block_resolved_by_closeout(
+        ("missing_typed_obligation",),
+        ("oracle:contract:run:verifier_pass",),
+        gate={"missing_obligations": [{"id": "oracle:contract:run:verifier_pass", "kind": "verifier_pass"}]},
+        closeout_context=closeout,
+    )
+    assert not _finish_gate_block_resolved_by_closeout(
+        ("missing_typed_obligation",),
+        ("oracle:source:doomgeneric_mips",),
+        gate={"missing_obligations": [{"id": "oracle:source:doomgeneric_mips", "kind": "source_grounding"}]},
+        closeout_context=closeout,
+    )
+    assert not _finish_gate_block_resolved_by_closeout(
+        ("missing_typed_obligation",),
+        ("oracle:source:verifier-py",),
+        gate={"missing_obligations": [{"id": "oracle:source:verifier-py", "kind": "source_grounding"}]},
+        closeout_context=closeout,
+    )
+    assert not _finish_gate_block_resolved_by_closeout(
+        ("failed_typed_evidence_ref",),
+        (),
+        gate={"failed_evidence_refs": [{"id": "ev:artifact:frame", "kind": "artifact_check"}], "missing_obligations": []},
+        closeout_context=closeout,
+    )
 
 
 def test_native_harness_active_verifier_closeout_cancels_when_budget_exhausted(tmp_path: Path) -> None:

@@ -111,7 +111,7 @@ def build_implement_v2_prompt_sections(
         ),
         PromptSection(
             id="implement_v2_coding_contract",
-            version="v1",
+            version="v2",
             title="Implement V2 Coding Contract",
             content=(
                 "Inspect only enough context to choose a minimal runnable candidate. "
@@ -123,6 +123,8 @@ def build_implement_v2_prompt_sections(
                 "treat that as the target path and create the smallest runnable file before extended reverse engineering. "
                 "If task_facts.missing_workspace_paths is present, use those factual missing paths as target-path context; "
                 "prefer a minimal runnable artifact at the named path over extended archaeology. "
+                "Treat task_facts.existing_workspace_paths as provided inputs or references, not replacement deliverables; "
+                "do not rebuild or substitute provided artifacts unless the task explicitly asks for that rebuild. "
                 "Repair from the latest concrete failure shown in the transcript. "
                 "Finish only with fresh evidence from the tools."
             ),

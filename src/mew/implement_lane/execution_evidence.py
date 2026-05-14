@@ -1421,11 +1421,12 @@ def _resolve_cited_evidence_events(
 
 def _dedupe_events(events: list[EvidenceEvent]) -> list[EvidenceEvent]:
     deduped: list[EvidenceEvent] = []
-    seen: set[str] = set()
+    index_by_id: dict[str, int] = {}
     for event in events:
-        if event.id in seen:
+        if event.id in index_by_id:
+            deduped[index_by_id[event.id]] = event
             continue
-        seen.add(event.id)
+        index_by_id[event.id] = len(deduped)
         deduped.append(event)
     return deduped
 
@@ -1433,6 +1434,8 @@ def _dedupe_events(events: list[EvidenceEvent]) -> list[EvidenceEvent]:
 def _finish_ref_aliases_for_event(event: EvidenceEvent) -> tuple[str, ...]:
     aliases = [event.id]
     if not _finish_event_is_coverable(event):
+        return tuple(aliases)
+    if event.status != "passed":
         return tuple(aliases)
     provider_alias = _safe_finish_ref_alias(event.provider_call_id)
     if provider_alias:

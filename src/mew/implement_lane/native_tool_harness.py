@@ -1029,10 +1029,23 @@ def _native_closeout_context_from_result(
 
 
 def _native_closeout_refs(call: NativeTranscriptItem, result: ToolResultEnvelope) -> tuple[str, ...]:
-    refs = tuple(ref for ref in result.evidence_refs if str(ref).strip())
+    refs = tuple(ref for ref in result.evidence_refs if _native_closeout_ref_is_completion_evidence(ref))
     if refs:
         return refs
     return (f"native-closeout://{call.call_id}",)
+
+
+def _native_closeout_ref_is_completion_evidence(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if text.startswith("implement-v2-exec://"):
+        return True
+    if "/command_run/" in text or "/tool_run_record/" in text or "/verifier_evidence/" in text:
+        return True
+    if "/failure_classification/" in text or "/structured_finish_gate/" in text:
+        return False
+    return False
 
 
 def _native_active_command_closeout(
@@ -1760,10 +1773,21 @@ def _completion_resolver_input_from_finish(
     missing.extend(closeout_context.missing_obligations)
     unsafe_blockers.extend(closeout_context.unsafe_blockers)
     budget_blockers.extend(closeout_context.budget_blockers)
-    if gate and gate.get("decision") != "allow_complete":
+    gate_codes = _finish_gate_blocker_codes(gate) if gate else ()
+    gate_missing = _finish_gate_missing_obligations(gate) if gate else ()
+    if (
+        gate
+        and gate.get("decision") != "allow_complete"
+        and not _finish_gate_block_resolved_by_closeout(
+            gate_codes,
+            gate_missing,
+            gate=gate,
+            closeout_context=closeout_context,
+        )
+    ):
         blockers.append("finish_gate_blocked")
-        blockers.extend(_finish_gate_blocker_codes(gate))
-        missing.extend(_finish_gate_missing_obligations(gate))
+        blockers.extend(gate_codes)
+        missing.extend(gate_missing)
     return CompletionResolverInput(
         finish_claim=FinishClaim(
             lane_attempt_id=call.lane_attempt_id,
@@ -1882,8 +1906,56 @@ def _finish_gate_blocker_codes(gate: Mapping[str, object]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(codes))
 
 
+def _finish_gate_block_resolved_by_closeout(
+    gate_codes: tuple[str, ...],
+    gate_missing: tuple[str, ...],
+    *,
+    gate: Mapping[str, object],
+    closeout_context: _NativeCloseoutContext,
+) -> bool:
+    if not closeout_context.fresh_verifier_refs:
+        return False
+    closeout_resolvable_codes = {
+        "failed_typed_evidence_ref",
+        "invalid_typed_evidence_ref",
+        "missing_typed_evidence",
+        "missing_typed_obligation",
+    }
+    if any(code not in closeout_resolvable_codes for code in gate_codes):
+        return False
+    top_level_missing = gate.get("missing_obligations")
+    if isinstance(top_level_missing, list):
+        return bool(top_level_missing) and all(_finish_gate_missing_obligation_is_verifier(item) for item in top_level_missing)
+    if not gate_missing:
+        return False
+    return all(
+        not missing
+        or missing == "strict_verifier_evidence"
+        or missing == "verifier_pass"
+        or missing.endswith(":verifier_pass")
+        for missing in gate_missing
+    )
+
+
+def _finish_gate_missing_obligation_is_verifier(value: object) -> bool:
+    if isinstance(value, Mapping):
+        kind = str(value.get("kind") or "").strip()
+        if kind:
+            return kind == "verifier_pass"
+        text = str(value.get("id") or value.get("missing_obligation") or value.get("obligation") or "").strip()
+    else:
+        text = str(value or "").strip()
+    return text in {"strict_verifier_evidence", "verifier_pass"} or text.endswith(":verifier_pass")
+
+
 def _finish_gate_missing_obligations(gate: Mapping[str, object]) -> tuple[str, ...]:
     missing: list[str] = []
+    top_level_missing = gate.get("missing_obligations")
+    if isinstance(top_level_missing, list):
+        for item in top_level_missing:
+            text = _finish_gate_missing_obligation_text(item)
+            if text:
+                missing.append(text)
     blockers = gate.get("blockers")
     if isinstance(blockers, list):
         for blocker in blockers:
@@ -1894,6 +1966,16 @@ def _finish_gate_missing_obligations(gate: Mapping[str, object]) -> tuple[str, .
                 if value:
                     missing.append(value)
     return tuple(dict.fromkeys(missing))
+
+
+def _finish_gate_missing_obligation_text(value: object) -> str:
+    if isinstance(value, Mapping):
+        for key in ("id", "kind", "missing_obligation", "obligation", "required_evidence_ref"):
+            text = str(value.get(key) or "").strip()
+            if text:
+                return text
+        return json.dumps(value, sort_keys=True, default=str)
+    return str(value or "").strip()
 
 
 def _native_finish_gate_blocked(result: ToolResultEnvelope) -> bool:
@@ -2197,8 +2279,15 @@ def _provider_visible_task_facts(lane_input: ImplementLaneInput) -> dict[str, ob
     if isinstance(constraints, list):
         text_sources.extend(str(item or "") for item in constraints)
 
-    verify_paths = _task_paths_from_text(verify_command)
-    mentioned_paths = _dedupe_task_paths(path for source in text_sources for path in _task_paths_from_text(source))
+    verify_paths = _task_paths_from_text(verify_command, workspace=lane_input.workspace)
+    mentioned_paths = _dedupe_task_paths(
+        path for source in text_sources for path in _task_paths_from_text(source, workspace=lane_input.workspace)
+    )
+    existing_paths = [
+        path
+        for path in mentioned_paths
+        if _task_path_has_safe_segments(path) and (Path(lane_input.workspace) / path).exists()
+    ]
     missing_paths = [
         path
         for path in mentioned_paths
@@ -2207,12 +2296,13 @@ def _provider_visible_task_facts(lane_input: ImplementLaneInput) -> dict[str, ob
     facts = {
         "verify_command_paths": verify_paths,
         "mentioned_workspace_paths": mentioned_paths,
+        "existing_workspace_paths": existing_paths,
         "missing_workspace_paths": missing_paths,
     }
     return {key: value for key, value in facts.items() if value}
 
 
-def _task_paths_from_text(text: object) -> list[str]:
+def _task_paths_from_text(text: object, *, workspace: str | Path | None = None) -> list[str]:
     raw = str(text or "")
     if not raw.strip():
         return []
@@ -2222,15 +2312,17 @@ def _task_paths_from_text(text: object) -> list[str]:
     except ValueError:
         tokens = []
     for token in tokens:
-        candidate = _normalize_task_path_token(token)
+        candidate = _normalize_task_path_token(token, workspace=workspace)
         if candidate:
             paths.append(candidate)
-    paths.extend(_normalize_task_path_token(match.group("path")) for match in _TASK_PATH_TOKEN_RE.finditer(raw))
+    paths.extend(
+        _normalize_task_path_token(match.group("path"), workspace=workspace) for match in _TASK_PATH_TOKEN_RE.finditer(raw)
+    )
     return _dedupe_task_paths(path for path in paths if path)
 
 
-def _normalize_task_path_token(token: object) -> str:
-    text = str(token or "").strip().strip("`'\"()[]{}<>").rstrip(".,:;")
+def _normalize_task_path_token(token: object, *, workspace: str | Path | None = None) -> str:
+    text = str(token or "").strip().strip("`'\"()[]{}<>").rstrip(".,:;").rstrip("/")
     if not text:
         return ""
     if "\\" in text or re.match(r"^[A-Za-z]:", text):
@@ -2239,23 +2331,37 @@ def _normalize_task_path_token(token: object) -> str:
         return ""
     if "://" in text:
         return ""
+    if text.startswith("/") and workspace:
+        workspace_path = Path(workspace).resolve()
+        try:
+            relative = Path(text).resolve().relative_to(workspace_path)
+        except (OSError, ValueError):
+            return ""
+        text = relative.as_posix()
     if text.startswith(("/", "../", "/tmp/", "/var/tmp/")):
         return ""
     while text.startswith("./"):
         text = text[2:]
     if not _task_path_is_safe_relative(text):
+        if workspace and _task_path_has_safe_segments(text) and (Path(workspace) / text).exists():
+            return text
         return ""
     return text
 
 
-def _task_path_is_safe_relative(path: object) -> bool:
+def _task_path_has_safe_segments(path: object) -> bool:
     text = str(path or "").strip()
     if not text or "\\" in text or re.match(r"^[A-Za-z]:", text):
         return False
     if text.startswith(("/", "../")) or "/../" in text:
         return False
     parts = text.split("/")
-    if any(part in {"", ".", ".."} or part.startswith("..") for part in parts):
+    return not any(part in {"", ".", ".."} or part.startswith("..") for part in parts)
+
+
+def _task_path_is_safe_relative(path: object) -> bool:
+    text = str(path or "").strip()
+    if not _task_path_has_safe_segments(text):
         return False
     return bool(_TASK_PATH_TOKEN_RE.fullmatch(text))
 
