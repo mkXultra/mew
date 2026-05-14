@@ -110,7 +110,7 @@ tuning before a minimal H10 change is designed and measured.
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | pending observability | TBD |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
 | H9 | mew lacks a first-patch readiness threshold: it keeps exploring after enough evidence exists to write a runnable skeleton. | Add observability first: compute first-patch readiness candidates and readiness-to-mutation latency. Behavior change only after a measured miss. | Readiness-to-mutation latency shrinks; first mutation happens after enough evidence but before broad re-exploration/design stalls. | observability first | TBD |
-| H10 | Exploration is not compressed into patch constraints. | Minimal behavior change: make accepted implementation constraints from probe facts visible as task facts, not as `next_action` steering. Keep the diagnostic sidecar as the source of truth and avoid adding a new frontier. | More direct transition from probes to one coherent patch; fewer repeated same-family probes; first mutation appears before repeated build/disassembly loops. | selected next | design and run one bounded experiment |
+| H10 | Exploration is not compressed into patch constraints. | Minimal behavior change: make accepted implementation constraints from probe facts visible as task facts, not as `next_action` steering. Keep the diagnostic sidecar as the source of truth and avoid adding a new frontier. | More direct transition from probes to one coherent patch; fewer repeated same-family probes; first mutation appears before repeated build/disassembly loops. | implemented, awaiting bounded diagnostic | run one 10 minute step-shape diagnostic and compare against H0 |
 | H11 | Read-only exploration handoff can become an anti-pattern if the parent re-explores instead of patching. | For any future memory/explore provider, require a patch-readiness packet and measure duplicate post-handoff probes. Do not add another autonomous planner for this. | Duplicate exploration after a handoff decreases; mutation follows accepted facts faster. | deferred | TBD |
 | H12 | Long private design passes after readiness are a hidden stall class. | Add metric: model turns or completion tokens after readiness with no tool call/mutation/verifier. Behavior change later may shorten visible instructions or force a small runnable skeleton. | Fewer high-token no-action turns after readiness; earlier verifier feedback. | observability first | TBD |
 
@@ -148,6 +148,48 @@ Observed signal:
 Decision: keep | revert | revise | redesign
 Notes:
 ```
+
+### EXP-20260515-1: H10 Probe Constraints As Task Facts
+
+Hypothesis:
+mew already reaches first-patch readiness, but native transcript probe facts are
+not compacted into model-visible patch constraints.
+
+Change:
+Commit `5cc6af7` exposes compact `implementation_constraints` inside
+provider-visible `task_facts` on later native requests. The payload is factual:
+observed probe families, observed paths, source/artifact context, and latest
+probe facts. It explicitly avoids `next_action`, `required_next`,
+`first_write`, thresholds, a new frontier, or WorkFrame steering.
+
+Reference artifacts:
+Use the Codex, Claude Code, and mew H0 artifacts listed above.
+
+Mew artifact:
+Pending one bounded 10 minute step-shape diagnostic after `5cc6af7`.
+
+Expected signal:
+First mutation appears earlier than H0, duplicate-after-readiness probe families
+decrease, and the model moves toward Codex's probe-to-patch shape rather than
+Claude Code's read/design/re-explore shape.
+
+Observed signal:
+Pending.
+
+Decision:
+Pending diagnostic. Keep only if the observed signal improves without
+task-specific behavior or provider-visible steering.
+
+Notes:
+Focused validation before the diagnostic:
+
+- `uv run pytest --no-testmon tests/test_native_tool_harness.py tests/test_hot_path_fastcheck.py tests/test_hot_path_step_diff.py -q`
+  passed with 191 tests.
+- `uv run ruff check src/mew/implement_lane/native_tool_harness.py tests/test_native_tool_harness.py`
+  passed.
+- `git diff --check` passed before commit.
+- codex-ultra scoped review initially found provider alias and source-mutating
+  exec gaps; both were fixed and re-review reported no blocking findings.
 
 ## Stop Conditions
 

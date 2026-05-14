@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 exploration-to-patch compression is the selected next behavior experiment. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 exploration-to-patch compression is implemented and awaiting one bounded step-shape diagnostic. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -73,15 +73,18 @@ Current controller mode:
 `m6_24_hot_path_h10_exploration_to_patch_next`.
 
 Current diagnostic mode:
-`h0_measured_saved_artifacts_only`.
+`h10_minimal_change_committed_awaiting_bounded_step_shape`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
 first-patch readiness early but does not convert those probe facts into a first
 mutation. The next behavior experiment is H10: exploration-to-patch
-compression. Do not drift into broad prompt/tool/render tuning, live benchmark
-reruns, `next_action`/`required_next` steering, probe thresholds, or new
-frontier objects before the H10 minimal experiment is designed and measured.
+compression. Commit `5cc6af7` implements the minimal H10 behavior change:
+compact probe-derived `implementation_constraints` are exposed as factual
+`task_facts` without `next_action`, `required_next`, `first_write`, thresholds,
+new frontier objects, or WorkFrame steering. Do not drift into broad
+prompt/tool/render tuning or other live benchmark reruns before this one H10
+diagnostic is measured.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -101,11 +104,17 @@ Fixed execution order:
      duplicate-after-readiness families.
 3. H0 decision: mew has enough early evidence, but fails to compress evidence
    into patch constraints.
-4. Next: design and implement a minimal H10 experiment that exposes compact
-   implementation constraints as task facts, not as `next_action` steering.
-5. Validate with focused tests, fastcheck/replay where applicable, then the
-   artifact-only analyzer. Only after that, run one bounded 10 minute
-   step-shape diagnostic.
+4. H10 minimal implementation committed in `5cc6af7`. Focused validation
+   passed:
+   - `uv run pytest --no-testmon tests/test_native_tool_harness.py tests/test_hot_path_fastcheck.py tests/test_hot_path_step_diff.py -q`
+     -> 191 passed.
+   - `uv run ruff check src/mew/implement_lane/native_tool_harness.py tests/test_native_tool_harness.py`
+     -> passed.
+   - codex-ultra scoped review -> no blocking findings after alias and
+     source-mutating exec fixes.
+5. Next: run one bounded 10 minute step-shape diagnostic, then compare against
+   H0 using the artifact-only analyzer. Keep, revise, or revert H10 based on
+   first mutation timing and duplicate-after-readiness probe families.
 
 Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
 context, but it no longer controls the immediate next action. Do not resume
