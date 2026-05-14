@@ -24,6 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reviewer-accepted", action="store_true")
     parser.add_argument("--min-pair-count", type=int, default=1)
     parser.add_argument("--visible-bytes-safety-reason", default="")
+    parser.add_argument(
+        "--external-reward-override-reason",
+        default="",
+        help="Explicit reviewer-visible reason to allow externally verified traces whose internal finish stayed blocked.",
+    )
     parser.add_argument("--output", help="write gate JSON")
     parser.add_argument("--json", action="store_true", help="print JSON instead of text")
     return parser
@@ -40,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
             fixed_ab_set_id=args.fixed_ab_set_id,
             min_pair_count=args.min_pair_count,
             visible_bytes_safety_reason=args.visible_bytes_safety_reason,
+            external_reward_override_reason=args.external_reward_override_reason,
         ).as_dict()
     except Exception as exc:  # noqa: BLE001 - script boundary should print actionable failure.
         print(f"check tool-surface default-switch gate: {exc}", file=sys.stderr)

@@ -43,6 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--work-guidance", action="append", default=[])
     parser.add_argument("--reviewer-accepted", action="store_true")
     parser.add_argument("--visible-bytes-safety-reason", default="")
+    parser.add_argument(
+        "--external-reward-override-reason",
+        default="",
+        help="Explicit reviewer-visible reason to allow externally verified traces whose internal finish stayed blocked.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser
@@ -109,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
         reviewer_accepted=args.reviewer_accepted,
         fixed_ab_set_id=args.fixed_ab_set_id,
         visible_bytes_safety_reason=args.visible_bytes_safety_reason,
+        external_reward_override_reason=args.external_reward_override_reason,
     ).as_dict()
     gate = _block_gate_for_child_failures(gate, baseline=baseline_run, candidate=candidate_run)
     gate_path = root / "tool_surface_default_switch_gate.json"

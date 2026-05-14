@@ -1127,6 +1127,12 @@ the child Harbor diagnostics. The cwd comes from a task map by default
 (`prove-plus-comm` uses `/workspace`; unknown tasks fall back to `/app`), with
 `--command-cwd` available only as an explicit override.
 
+Internal finish acceptance is required for default switching unless an explicit
+reviewer-visible external-reward override is supplied. This keeps externally
+passing Terminal-Bench traces usable as caveated A/B evidence without silently
+treating blocked mew closeout / evidence-citation behavior as a clean default
+switch signal.
+
 Close gate:
 
 - `codex_hot_path` has zero canonical provider-visible steering leaks across
@@ -1134,6 +1140,9 @@ Close gate:
 - pairing, replay, proof manifest, resolver decisions, and source snapshot
   checks pass;
 - success/acceptance rate is not worse than `mew_legacy`;
+- if any `codex_hot_path` candidate finish remains blocked, the gate blocks
+  unless `external_reward_override_reason` explicitly records the reviewer
+  accepted external verifier evidence;
 - accepted completion under `codex_hot_path` always passes through native
   `finish_call` plus `CompletionResolver`, with blocked finish continuation
   preserved in transcript artifacts;

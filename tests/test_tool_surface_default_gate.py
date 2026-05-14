@@ -184,3 +184,83 @@ def test_default_switch_gate_blocks_failed_verifier_without_next_edit() -> None:
 
     assert result.can_switch_default is False
     assert "candidate_failed_verifier_without_next_edit" in result.reasons
+
+
+def test_default_switch_gate_blocks_blocked_candidate_finish_without_override() -> None:
+    result = evaluate_tool_surface_default_switch_gate(
+        [
+            _report(
+                baseline=_row(
+                    MEW_LEGACY_PROFILE_ID,
+                    lane_status="blocked",
+                    accepted_finish_status="blocked",
+                ),
+                candidate=_row(
+                    CODEX_HOT_PATH_PROFILE_ID,
+                    lane_status="blocked",
+                    accepted_finish_status="blocked",
+                ),
+            )
+        ],
+        reviewer_accepted=True,
+        fixed_ab_set_id="fixed-unit-set",
+    )
+
+    assert result.can_switch_default is False
+    assert "candidate_accepted_finish_required" in result.reasons
+
+
+def test_default_switch_gate_allows_blocked_candidate_finish_with_external_reward_override() -> None:
+    result = evaluate_tool_surface_default_switch_gate(
+        [
+            _report(
+                baseline=_row(
+                    MEW_LEGACY_PROFILE_ID,
+                    lane_status="blocked",
+                    accepted_finish_status="blocked",
+                ),
+                candidate=_row(
+                    CODEX_HOT_PATH_PROFILE_ID,
+                    lane_status="blocked",
+                    accepted_finish_status="blocked",
+                ),
+            )
+        ],
+        reviewer_accepted=True,
+        fixed_ab_set_id="fixed-unit-set",
+        external_reward_override_reason="wrapper external_reward=1.0 reviewed",
+    )
+
+    payload = result.as_dict()
+    assert payload["can_switch_default"] is True
+    assert payload["reasons"] == []
+    assert payload["metrics"]["external_reward_override_reason"] == "wrapper external_reward=1.0 reviewed"
+    assert payload["metrics"]["external_reward_override_used"] is True
+
+
+def test_default_switch_gate_rejects_whitespace_external_reward_override() -> None:
+    result = evaluate_tool_surface_default_switch_gate(
+        [
+            _report(
+                baseline=_row(
+                    MEW_LEGACY_PROFILE_ID,
+                    lane_status="blocked",
+                    accepted_finish_status="blocked",
+                ),
+                candidate=_row(
+                    CODEX_HOT_PATH_PROFILE_ID,
+                    lane_status="blocked",
+                    accepted_finish_status="blocked",
+                ),
+            )
+        ],
+        reviewer_accepted=True,
+        fixed_ab_set_id="fixed-unit-set",
+        external_reward_override_reason="   ",
+    )
+
+    payload = result.as_dict()
+    assert payload["can_switch_default"] is False
+    assert "candidate_accepted_finish_required" in payload["reasons"]
+    assert payload["metrics"]["external_reward_override_reason"] == ""
+    assert payload["metrics"]["external_reward_override_used"] is False

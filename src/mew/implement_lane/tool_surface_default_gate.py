@@ -38,9 +38,11 @@ def evaluate_tool_surface_default_switch_gate(
     fixed_ab_set_id: str = "",
     min_pair_count: int = 1,
     visible_bytes_safety_reason: str = "",
+    external_reward_override_reason: str = "",
 ) -> ToolSurfaceDefaultSwitchGateResult:
     """Evaluate whether `codex_hot_path` may become the default profile."""
 
+    external_reward_override_reason = str(external_reward_override_reason or "").strip()
     normalized = tuple(_report_dict(report) for report in reports)
     pairs = tuple(_pair_rows(report) for report in normalized if _pair_rows(report) is not None)
     baseline_rows = tuple(pair[0] for pair in pairs)
@@ -71,6 +73,8 @@ def evaluate_tool_surface_default_switch_gate(
             reasons.append("candidate_proof_replay_failed")
         if any(row.get("verifier_evidence_preserved") is not True for row in candidate_rows):
             reasons.append("candidate_verifier_evidence_not_preserved")
+        if any(_accepted(row) is not True for row in candidate_rows) and not external_reward_override_reason:
+            reasons.append("candidate_accepted_finish_required")
         if any(_successful(row) and _adapter_or_capability_failure_count(row) > 0 for row in candidate_rows):
             reasons.append("candidate_write_stdin_or_adapter_limitation_in_successful_trace")
     else:
@@ -141,6 +145,9 @@ def evaluate_tool_surface_default_switch_gate(
         "baseline_visible_bytes": baseline_visible_bytes,
         "candidate_visible_bytes": candidate_visible_bytes,
         "visible_bytes_safety_reason": visible_bytes_safety_reason,
+        "external_reward_override_reason": external_reward_override_reason,
+        "external_reward_override_used": bool(external_reward_override_reason)
+        and any(_accepted(row) is not True for row in candidate_rows),
     }
     return ToolSurfaceDefaultSwitchGateResult(
         status="ready" if can_switch else "blocked",

@@ -103,6 +103,10 @@ or run broad speed/proof-5. The internal `lane_status` / accepted finish status
 remained blocked for both profiles, while the wrapper's external verifier
 reward is authoritative for the task outcome in this diagnostic. Keep treating
 that as a closeout/evidence-citation caveat, not a task-success failure.
+The Phase 5 gate must block blocked candidate finish traces unless a
+reviewer-visible `external_reward_override_reason` is supplied; caveated
+external-reward evidence must never silently become clean default-switch
+evidence.
 
 `scripts/run_tool_surface_ab_diagnostic.py` remains the intended entry point for
 the smallest fixed live A/B set. It is single-pair only: it rejects
