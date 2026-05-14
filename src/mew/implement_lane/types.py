@@ -214,7 +214,7 @@ class ToolResultEnvelope:
             "is_error": self.is_error,
             "status_line": _clip_preview("; ".join(status_parts), limit=240),
             "paths": _visible_tool_paths(self.tool_name, payload),
-            "refs": _visible_tool_refs(self.content_refs, self.evidence_refs),
+            "refs": _visible_tool_refs(self.tool_name, self.content_refs, self.evidence_refs),
         }
         latest_failure = _visible_latest_failure(self.tool_name, payload, is_error=self.is_error, status=self.status)
         if latest_failure:
@@ -455,9 +455,14 @@ def _visible_tool_paths(tool_name: str, payload: dict[str, object]) -> list[str]
     return paths[:12]
 
 
-def _visible_tool_refs(content_refs: tuple[str, ...], evidence_refs: tuple[str, ...]) -> list[str]:
+def _visible_tool_refs(
+    tool_name: str,
+    content_refs: tuple[str, ...],
+    evidence_refs: tuple[str, ...],
+) -> list[str]:
     refs: list[str] = []
-    for ref in (*content_refs, *evidence_refs):
+    source_refs = content_refs if tool_name in {"run_command", "run_tests", "poll_command", "cancel_command"} else (*content_refs, *evidence_refs)
+    for ref in source_refs:
         text = _scalar_preview(ref, limit=_VISIBLE_REF_CHARS)
         if text and text not in refs:
             refs.append(text)

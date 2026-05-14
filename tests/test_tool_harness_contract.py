@@ -46,10 +46,11 @@ def test_tool_result_provider_content_includes_natural_text_and_output_refs() ->
     visible = result.provider_visible_content()
 
     assert visible["output_refs"] == ["exec://attempt-1/cmd/output"]
+    assert visible["evidence_refs"] == ["ev:compile-error"]
     assert "run_command result: failed" in visible["natural_result_text"]
     assert "exit_code=2" in visible["natural_result_text"]
     assert "fatal error" in visible["natural_result_text"]
-    assert "ev:compile-error" in visible["natural_result_text"]
+    assert "ev:compile-error" not in visible["natural_result_text"]
     assert scan_forbidden_provider_visible(visible["tool_output_card"], surface="tool_output_card") == []
 
 
@@ -303,6 +304,38 @@ def test_run_command_natural_text_preserves_terminal_line_structure() -> None:
     assert "stdout_preview:\nELF Header:\n  Entry point: 0x400110\n  Machine: MIPS" in text
     assert "stdout_preview: ELF Header: Entry point: 0x400110 Machine: MIPS" not in text
     assert "  Machine: MIPS\nrefs: exec://attempt-1/cmd/output" in text
+
+
+def test_run_command_natural_text_keeps_evidence_refs_out_of_terminal_hot_path() -> None:
+    result = ToolResultEnvelope(
+        lane_attempt_id="attempt-1",
+        provider_call_id="call-1",
+        mew_tool_call_id="attempt-1:tool:1:1",
+        tool_name="run_command",
+        status="completed",
+        content=(
+            {
+                "exit_code": 0,
+                "stdout": "verifier marker\n",
+                "output_ref": "exec://attempt-1/cmd/output",
+            },
+        ),
+        content_refs=("exec://attempt-1/cmd/output",),
+        evidence_refs=(
+            "evidence://attempt-1/tool-run-record",
+            "evidence://attempt-1/structured-finish-gate",
+        ),
+    )
+
+    visible = result.provider_visible_content()
+    text = visible["natural_result_text"]
+
+    assert "refs: exec://attempt-1/cmd/output" in text
+    assert "evidence://attempt-1/tool-run-record" not in text
+    assert visible["evidence_refs"] == [
+        "evidence://attempt-1/tool-run-record",
+        "evidence://attempt-1/structured-finish-gate",
+    ]
 
 
 def test_run_command_natural_text_large_output_keeps_line_oriented_tail() -> None:
