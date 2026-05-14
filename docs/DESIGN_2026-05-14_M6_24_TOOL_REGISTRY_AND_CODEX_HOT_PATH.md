@@ -1,6 +1,6 @@
 # Design 2026-05-14 - M6.24 ToolRegistry And Codex Hot Path
 
-Status: Phase 0-3 implemented; Phase 4 pending.
+Status: Phase 0-4 implemented; Phase 5 pending.
 
 Scope: `implement_v2` native tool surface selection, provider-visible tool
 descriptors, provider-visible tool result rendering, route observability, and
@@ -1053,6 +1053,14 @@ Suggested tests:
 ### Phase 4: Profile-Aware Observability And A/B Report
 
 Intent: make profile comparison reliable before any default switch.
+
+Implementation status: implemented by
+`src/mew/implement_lane/tool_surface_ab_report.py` and
+`scripts/build_tool_surface_ab_report.py`. The report reads native
+implement_v2 artifact roots, compares `mew_legacy` and `codex_hot_path` rows,
+marks mismatched workspace snapshots as `ab_comparable=false`, preserves
+provider request / route / render / proof / evidence sidecars, and keeps
+diagnostic-only loop signals out of provider-visible leak decisions.
 
 Implementation slice:
 
