@@ -166,6 +166,7 @@ class _NativeCloseoutEvent:
 class _NativeCloseoutContext:
     closeout_refs: tuple[str, ...] = ()
     fresh_verifier_refs: tuple[str, ...] = ()
+    planner_verified_finish_refs: tuple[str, ...] = ()
     blockers: tuple[str, ...] = ()
     missing_obligations: tuple[str, ...] = ()
     unsafe_blockers: tuple[str, ...] = ()
@@ -175,6 +176,9 @@ class _NativeCloseoutContext:
         return _NativeCloseoutContext(
             closeout_refs=tuple(dict.fromkeys((*self.closeout_refs, *other.closeout_refs))),
             fresh_verifier_refs=tuple(dict.fromkeys((*self.fresh_verifier_refs, *other.fresh_verifier_refs))),
+            planner_verified_finish_refs=tuple(
+                dict.fromkeys((*self.planner_verified_finish_refs, *other.planner_verified_finish_refs))
+            ),
             blockers=tuple(dict.fromkeys((*self.blockers, *other.blockers))),
             missing_obligations=tuple(dict.fromkeys((*self.missing_obligations, *other.missing_obligations))),
             unsafe_blockers=tuple(dict.fromkeys((*self.unsafe_blockers, *other.unsafe_blockers))),
@@ -1249,7 +1253,11 @@ def _native_closeout_context_from_result(
 ) -> _NativeCloseoutContext:
     refs = _native_closeout_refs(call, result)
     if _native_final_verifier_passed(result):
-        return _NativeCloseoutContext(closeout_refs=refs, fresh_verifier_refs=refs)
+        return _NativeCloseoutContext(
+            closeout_refs=refs,
+            fresh_verifier_refs=refs,
+            planner_verified_finish_refs=refs if _native_call_uses_finish_verifier_planner(call) else (),
+        )
     blocker = "closeout_verifier_failed"
     payload = _native_result_payload(result)
     status = str(payload.get("status") or result.status or "").casefold()
@@ -1272,6 +1280,16 @@ def _native_closeout_refs(call: NativeTranscriptItem, result: ToolResultEnvelope
     if refs:
         return refs
     return (f"native-closeout://{call.call_id}",)
+
+
+def _native_call_uses_finish_verifier_planner(call: NativeTranscriptItem) -> bool:
+    arguments, error = _arguments(call)
+    if error:
+        return False
+    plan = arguments.get("finish_verifier_plan")
+    if not isinstance(plan, Mapping):
+        return False
+    return str(plan.get("source") or "").strip() == "finish_verifier_planner"
 
 
 def _native_closeout_ref_is_completion_evidence(value: object) -> bool:
@@ -1364,6 +1382,7 @@ def _native_closeout_context_resolved_by_finish_evidence(
     return _NativeCloseoutContext(
         closeout_refs=merged.closeout_refs,
         fresh_verifier_refs=merged.fresh_verifier_refs,
+        planner_verified_finish_refs=merged.planner_verified_finish_refs,
         blockers=blockers,
         missing_obligations=missing,
         unsafe_blockers=merged.unsafe_blockers,
@@ -2623,6 +2642,13 @@ def _finish_gate_block_resolved_by_closeout(
         "missing_typed_evidence",
         "missing_typed_obligation",
     }
+    planner_verified = bool(closeout_context.planner_verified_finish_refs)
+    if planner_verified:
+        planner_only_codes = {"acceptance_constraints_unchecked"}
+        if gate_codes and all(code in planner_only_codes for code in gate_codes):
+            top_level_missing = gate.get("missing_obligations")
+            if not gate_missing and (not isinstance(top_level_missing, list) or not top_level_missing):
+                return True
     if any(code not in closeout_resolvable_codes for code in gate_codes):
         return False
     top_level_missing = gate.get("missing_obligations")

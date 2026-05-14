@@ -2805,6 +2805,99 @@ def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path:
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_finish_verifier_planner_exit_zero_satisfies_acceptance_constraints(tmp_path: Path) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('booted')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish(
+                                "finish-1",
+                                {"outcome": "completed", "summary": "done"},
+                                output_index=1,
+                            ),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "command": "test -f vm.js",
+                "cwd": ".",
+                "reason": "verify the implemented task artifact independently",
+                "confidence": "high",
+            }
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            task_contract={
+                "description": "Create vm.js for the runtime task.",
+                "acceptance_constraints": ["The runtime task should create vm.js."],
+            },
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=PlanningProvider(),
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "completed"
+    assert result.metrics["completion_resolver_latest_decision"]["result"] == "allow"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_configured_verifier_exit_zero_does_not_satisfy_acceptance_constraints(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('booted')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            task_contract={
+                "description": "Create vm.js for the runtime task.",
+                "acceptance_constraints": ["The runtime task should create vm.js."],
+            },
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["finish_gate_block_count"] == 1
+    decision = result.metrics["completion_resolver_latest_decision"]
+    assert decision["lane_status"] == "blocked_continue"
+    assert "acceptance_constraints_unchecked" in decision["blockers"]
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_codex_hot_path_finish_verifier_planner_uses_exec_command_surface(tmp_path: Path) -> None:
     lane_input = _lane_input(
         tmp_path,
@@ -3216,6 +3309,10 @@ def test_native_harness_finalizes_active_verifier_before_deterministic_closeout(
 
 def test_native_closeout_resolves_only_verifier_typed_gate_missing_obligations() -> None:
     closeout = _NativeCloseoutContext(fresh_verifier_refs=("implement-v2-evidence://attempt/verifier_evidence/run",))
+    planner_closeout = _NativeCloseoutContext(
+        fresh_verifier_refs=("implement-v2-evidence://attempt/verifier_evidence/planner-run",),
+        planner_verified_finish_refs=("implement-v2-evidence://attempt/verifier_evidence/planner-run",),
+    )
 
     assert _finish_gate_missing_obligations(
         {
@@ -3246,6 +3343,24 @@ def test_native_closeout_resolves_only_verifier_typed_gate_missing_obligations()
         ("failed_typed_evidence_ref",),
         (),
         gate={"failed_evidence_refs": [{"id": "ev:artifact:frame", "kind": "artifact_check"}], "missing_obligations": []},
+        closeout_context=closeout,
+    )
+    assert not _finish_gate_block_resolved_by_closeout(
+        ("failed_typed_evidence_ref",),
+        (),
+        gate={"failed_evidence_refs": [{"id": "ev:artifact:frame", "kind": "artifact_check"}], "missing_obligations": []},
+        closeout_context=planner_closeout,
+    )
+    assert _finish_gate_block_resolved_by_closeout(
+        ("acceptance_constraints_unchecked",),
+        (),
+        gate={"blockers": [{"code": "acceptance_constraints_unchecked"}], "missing_obligations": []},
+        closeout_context=planner_closeout,
+    )
+    assert not _finish_gate_block_resolved_by_closeout(
+        ("acceptance_constraints_unchecked",),
+        (),
+        gate={"blockers": [{"code": "acceptance_constraints_unchecked"}], "missing_obligations": []},
         closeout_context=closeout,
     )
 
