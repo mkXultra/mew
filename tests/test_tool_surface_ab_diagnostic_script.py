@@ -32,8 +32,8 @@ def test_tool_surface_ab_diagnostic_dry_run_builds_paired_profile_commands(tmp_p
     baseline = payload["commands"]["baseline"]
     candidate = payload["commands"]["candidate"]
     assert payload["status"] == "dry_run"
-    assert payload["workspace_snapshot_id"] == ""
-    assert payload["task_contract_hash"] == ""
+    assert str(payload["workspace_snapshot_id"]).startswith("git:")
+    assert str(payload["task_contract_hash"]).startswith("sha256:")
     assert "--tool-surface-profile-id" in baseline
     assert baseline[baseline.index("--tool-surface-profile-id") + 1] == "mew_legacy"
     assert candidate[candidate.index("--tool-surface-profile-id") + 1] == "codex_hot_path"

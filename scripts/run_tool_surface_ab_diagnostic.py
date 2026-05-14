@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID, MEW_LEGACY_PROFILE_ID  # noqa: E402
 from mew.implement_lane.tool_surface_ab_report import write_tool_surface_ab_report  # noqa: E402
 from mew.implement_lane.tool_surface_default_gate import evaluate_tool_surface_default_switch_gate  # noqa: E402
+from mew.implement_lane.native_tool_schema import stable_json_hash  # noqa: E402
 from mew.mew_harbor_runner import RUN_MODES, command_cwd_for_task  # noqa: E402
 
 
@@ -64,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
         return _print_payload(payload, as_json=args.json, exit_code=2)
     root = args.output_root or _default_output_root(args.task_name, args.mode)
     root = root.expanduser()
+    workspace_snapshot_id = args.workspace_snapshot_id or _default_workspace_snapshot_id()
+    task_contract_hash = args.task_contract_hash or _default_task_contract_hash(args)
     ab_pair_id = args.ab_pair_id or f"{args.fixed_ab_set_id}:{_task_slug(args.task_name)}:{args.mode}"
     commands = _profile_commands(
         args,
@@ -77,8 +80,8 @@ def main(argv: list[str] | None = None) -> int:
                 "artifact_root": str(root.resolve(strict=False)),
                 "ab_pair_id": ab_pair_id,
                 "fixed_ab_set_id": args.fixed_ab_set_id,
-                "workspace_snapshot_id": args.workspace_snapshot_id,
-                "task_contract_hash": args.task_contract_hash,
+                "workspace_snapshot_id": workspace_snapshot_id,
+                "task_contract_hash": task_contract_hash,
                 "commands": commands,
             },
             as_json=args.json,
@@ -119,8 +122,8 @@ def main(argv: list[str] | None = None) -> int:
         baseline_artifact_root=str(baseline_run["artifact_root"]),
         candidate_artifact_root=str(candidate_run["artifact_root"]),
         ab_pair_id=ab_pair_id,
-        workspace_snapshot_id=args.workspace_snapshot_id,
-        task_contract_hash=args.task_contract_hash,
+        workspace_snapshot_id=workspace_snapshot_id,
+        task_contract_hash=task_contract_hash,
         model=args.model,
         effort="high",
         budget_profile=args.mode,
@@ -357,6 +360,30 @@ def _tail(text: str, *, limit: int = 4000) -> str:
 def _default_output_root(task_name: str, mode: str) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return ROOT / "proof-artifacts" / "tool-surface-ab-diagnostic" / f"{_task_slug(task_name)}-{mode}-{stamp}"
+
+
+def _default_workspace_snapshot_id() -> str:
+    completed = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    head = completed.stdout.strip()
+    if completed.returncode == 0 and head:
+        return f"git:{head}"
+    return stable_json_hash({"repo_root": str(ROOT.resolve(strict=False))})
+
+
+def _default_task_contract_hash(args: argparse.Namespace) -> str:
+    return stable_json_hash(
+        {
+            "task_name": str(args.task_name),
+            "command_cwd": command_cwd_for_task(args.task_name, args.command_cwd),
+            "work_guidance": [str(item) for item in args.work_guidance or []],
+        }
+    )
 
 
 def _task_slug(task_name: str) -> str:
