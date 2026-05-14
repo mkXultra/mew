@@ -117,7 +117,7 @@ def test_execute_tool_schemas_do_not_expose_command_self_labeling() -> None:
         assert "diagnostic" not in serialized
 
 
-def test_write_file_tool_contract_discourages_large_source_payloads() -> None:
+def test_write_file_tool_contract_supports_complete_new_files() -> None:
     lowered = lower_implement_lane_tool_specs(list_v2_base_tool_specs())
     write_file = {tool.name: tool for tool in lowered}["write_file"].provider_tool
 
@@ -126,9 +126,9 @@ def test_write_file_tool_contract_discourages_large_source_payloads() -> None:
         write_file["parameters"]["properties"]["content_lines"]["description"]  # type: ignore[index]
     )
 
-    assert "small complete file" in description
+    assert "complete new file" in description
     assert "Prefer apply_patch or edit_file" in description
-    assert "avoid large generated source payloads in one provider-native call" in content_lines_description
+    assert "multi-line complete new files" in content_lines_description
 
 
 def test_apply_patch_lowers_to_custom_grammar_tool_when_supported() -> None:

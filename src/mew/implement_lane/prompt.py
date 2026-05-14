@@ -71,7 +71,8 @@ def build_implement_v2_prompt_sections(
     tool_names = {spec.name for spec in specs}
     if {"apply_patch", "edit_file"} & tool_names and "write_file" in tool_names:
         mutation_sentence = (
-            "Make source changes with apply_patch or edit_file; use write_file only for small complete files. "
+            "Create complete new files with write_file when the target path is missing; "
+            "modify existing source with apply_patch or edit_file. "
         )
     elif {"apply_patch", "edit_file"} & tool_names:
         mutation_sentence = "Make source changes with apply_patch or edit_file. "

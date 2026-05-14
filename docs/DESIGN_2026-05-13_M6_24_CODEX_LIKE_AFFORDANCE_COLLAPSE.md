@@ -392,8 +392,10 @@ load-bearing when a provider shuffles tool specs.
 
 `write_file`:
 
-- small complete file creation or non-source generated file writes;
-- not the natural route for large source rewrites;
+- complete new file creation when the target path is missing and the full
+  content is known;
+- not the natural route for modifying existing source files or large
+  replacements;
 - remains visible for hard-runtime artifact tasks as a complete-file creation
   affordance. Execution-time safety still rejects unreadable large single-line
   source and records typed mutation evidence, but the live tool surface should
@@ -713,7 +715,7 @@ Implementation slice:
 - keep JSON fallback explicit and auditable;
 - make `apply_patch` description shorter and stronger;
 - keep `edit_file` as precise replacement;
-- keep `write_file` as small/medium complete file creation or non-source write;
+- keep `write_file` as complete new file creation or non-source write;
   do not hide it solely because the task is a hard-runtime artifact task;
 - preserve narrow shell-invoked `apply_patch` bridge behavior if implemented,
   with typed mutation evidence.

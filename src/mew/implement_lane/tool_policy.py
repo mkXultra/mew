@@ -70,8 +70,9 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         name="write_file",
         access="write",
         description=(
-            "Write a small complete file, especially generated non-source output. Prefer "
-            "apply_patch or edit_file for source changes and large replacements."
+            "Write a complete new file when the target path is missing and the full "
+            "content is known. Use content_lines for multi-line source. Prefer "
+            "apply_patch or edit_file for modifying existing source files."
         ),
         approval_required=True,
         dry_run_supported=True,

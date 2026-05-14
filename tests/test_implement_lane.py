@@ -2088,7 +2088,7 @@ def test_implement_v2_surfaces_patch_tools_from_hard_runtime_prompt_before_probe
 
     spec_names = {spec.name for spec in specs}
     assert {"write_file", "edit_file", "apply_patch"}.issubset(spec_names)
-    assert "write_file only for small complete files" in prompt
+    assert "Create complete new files with write_file" in prompt
     assert "apply_patch or edit_file" in prompt
     assert "edit_file/apply_patch" not in prompt
     assert "write tools are temporarily hidden for this turn" not in response_contract
@@ -6196,7 +6196,7 @@ def test_implement_v2_hard_runtime_live_json_prompt_keeps_write_file_creation_gu
     )
 
     assert "apply_patch or edit_file" in prompt
-    assert "write_file only for small complete files" in prompt
+    assert "Create complete new files with write_file" in prompt
     assert "write_file" in prompt
     assert "write_file/edit_file/apply_patch" not in prompt
 
@@ -10516,7 +10516,7 @@ def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:
     assert specs["cancel_command"].approval_required is False
     assert specs["read_command_output"].access == "execute"
     assert specs["write_file"].approval_required is True
-    assert "small complete file" in specs["write_file"].description
+    assert "complete new file" in specs["write_file"].description
     assert "Prefer apply_patch or edit_file" in specs["write_file"].description
     assert "smallest runnable candidate" in specs["apply_patch"].description
     assert specs["edit_file"].dry_run_supported is True
