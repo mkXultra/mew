@@ -16,6 +16,34 @@ Companion controller and data files:
 - `docs/M6_24_WORKFRAME_PHASE0_PREP_2026-05-10.md`
 - `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`
 
+## Durable Decisions
+
+### 2026-05-14: 10 Minute Diagnostics Are Measurement Windows, Not Production Time Control
+
+Decision: do not repair normal `implement_v2` behavior by adding smarter
+wall-clock / low-budget completion control to the production native loop.
+`step-check-10min` exists to shorten feedback during M6.24 calibration; it is
+not the intended way users will run mew, and it must not become a source of
+new provider-visible or controller-visible action policy.
+
+Allowed: diagnostic runners and proof artifacts may record that a run hit the
+10 minute window, may run or report post-run verifier observations as
+diagnostic metadata, and may classify the result as external pass /
+internal-timeout / first-edit-latency / no-closeout.
+
+Not allowed: adding low-remaining-time action selection, deadline pressure,
+forced finalization, probe thresholds, or auto-completion shortcuts to the live
+native provider loop just because a 10 minute diagnostic reached the time
+window. In particular, do not use a low-budget branch to make normal task
+progress decisions. Production progress should come from the Codex-like hot
+path: transcript, compact factual tool output, provider-native tool calls, and
+the model's next action.
+
+Trigger to revisit: only if real unattended mew operation, without artificial
+diagnostic time windows, repeatedly loses completed work because it cannot
+record deterministic verifier evidence at natural stop/resume boundaries. Until
+that signal exists, keep time-window behavior in the diagnostic/proof layer.
+
 ## Current Native-Loop Repair
 
 2026-05-13 Codex-like hot-path Phase 3 diagnostic:

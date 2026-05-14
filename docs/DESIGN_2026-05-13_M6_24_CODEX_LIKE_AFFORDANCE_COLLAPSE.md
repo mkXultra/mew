@@ -821,6 +821,17 @@ The 10 minute step-shape diagnostic is not a speed proof. It answers one
 question: does the live transcript now make mutation and verifier repair a
 natural path without provider-visible controller pressure?
 
+The 10 minute diagnostic is also not a production runtime requirement. It is a
+measurement window for fast M6.24 iteration. A run that reaches the time window
+should be classified by the diagnostic/proof layer; it should not justify
+adding live-loop deadline pressure, low-budget action selection, forced
+completion, probe thresholds, or time-window-specific verifier shortcuts to
+the normal native provider loop. In normal mew operation the target remains a
+Codex-like loop with no artificial wall-clock steering: the model sees native
+transcript/tool output and decides the next action. If the diagnostic needs to
+know whether a late source mutation would have passed, record that as post-run
+diagnostic metadata rather than changing the live hot path.
+
 Allowed yellow/non-hot-path failure classes for the 10 minute diagnostic:
 
 - provider outage, provider read timeout, or rate-limit failure before enough
