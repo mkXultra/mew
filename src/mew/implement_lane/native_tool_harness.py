@@ -2892,21 +2892,10 @@ def _native_instructions(
             "implement_v2_lane_state",
         }
     ]
-    if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
-        rendered = _render_codex_hot_path_instructions(sections)
-    else:
-        rendered = render_prompt_sections(sections)
+    rendered = render_prompt_sections(sections)
     if not any(spec.name == "write_file" for spec in tool_specs):
         return hide_unavailable_write_file_guidance(rendered)
     return rendered
-
-
-def _render_codex_hot_path_instructions(sections: list[object]) -> str:
-    return "\n\n".join(
-        str(getattr(section, "content", "") or "").strip()
-        for section in sections
-        if str(getattr(section, "content", "") or "").strip()
-    )
 
 
 def _tool_specs_from_request_descriptor(

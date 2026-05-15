@@ -20,7 +20,6 @@ from .tool_policy import (
     list_v2_tool_specs_for_mode,
     list_v2_tool_specs_for_task,
 )
-from .tool_registry import CODEX_HOT_PATH_PROFILE_ID, tool_surface_profile_id
 from .types import ImplementLaneInput
 from .affordance_visibility import CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS
 from .workframe import WorkFrameInputs
@@ -43,7 +42,6 @@ _HOT_PATH_SECTION_IDS = frozenset(
         "implement_v2_tool_contract",
         "implement_v2_coding_contract",
         "implement_v2_task_contract",
-        "implement_v2_codex_hot_path_base",
     }
 )
 _ORDINARY_RESIDENT_SUMMARY_SECTION_IDS = frozenset()
@@ -71,8 +69,6 @@ def build_implement_v2_prompt_sections(
         else list_v2_tool_specs_for_task(mode, task_contract=lane_input.task_contract)
     )
     tool_names = {spec.name for spec in specs}
-    if _is_codex_hot_path_profile(lane_input):
-        return _build_codex_hot_path_prompt_sections(lane_input, tool_names=tool_names)
     if {"apply_patch", "edit_file"} & tool_names and "write_file" in tool_names:
         mutation_sentence = (
             "Create complete new files with write_file when the target path is missing; "
@@ -152,56 +148,6 @@ def build_implement_v2_prompt_sections(
         ]
     )
     return sections
-
-
-def _is_codex_hot_path_profile(lane_input: ImplementLaneInput) -> bool:
-    return tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID
-
-
-def _build_codex_hot_path_prompt_sections(
-    lane_input: ImplementLaneInput,
-    *,
-    tool_names: set[str],
-) -> list[PromptSection]:
-    if "apply_patch" in tool_names:
-        mutation_sentence = "Prefer apply_patch for source changes. "
-    elif {"edit_file", "write_file"} & tool_names:
-        mutation_sentence = "Use the available file mutation tool for source changes. "
-    else:
-        mutation_sentence = "Use the available tools to inspect the workspace. "
-    if {"exec_command", "run_command", "run_tests"} & tool_names:
-        verify_sentence = "Run the verifier or closest relevant command, then repair concrete failures. "
-    else:
-        verify_sentence = "Use fresh tool observations as evidence. "
-    return [
-        PromptSection(
-            id="implement_v2_codex_hot_path_base",
-            version="v0",
-            title="Codex Hot Path Base",
-            content=(
-                "You are a coding agent running in a terminal workspace. Be precise, safe, and direct. "
-                "Inspect just enough context to identify the target change. "
-                f"{mutation_sentence}"
-                f"{verify_sentence}"
-                "When the task or verifier names a missing source or artifact path, create the smallest runnable "
-                "implementation at that path once the necessary evidence is available. "
-                "Do not rebuild or replace provided artifacts unless the task explicitly asks for that rebuild. "
-                "Use finish only after a fresh tool result demonstrates the requested behavior or a concrete blocker."
-            ),
-            stability=STABILITY_STATIC,
-            cache_policy=CACHE_POLICY_CACHEABLE,
-            profile="implement_v2",
-        ),
-        PromptSection(
-            id="implement_v2_task_contract",
-            version="v0",
-            title="Implement V2 Task Contract",
-            content=_stable_json(_model_visible_task_contract(lane_input.task_contract)),
-            stability=STABILITY_SEMI_STATIC,
-            cache_policy=CACHE_POLICY_SESSION,
-            profile="implement_v2",
-        ),
-    ]
 
 
 def implement_v2_prompt_section_metrics(lane_input: ImplementLaneInput) -> dict[str, object]:
