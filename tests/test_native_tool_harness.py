@@ -3015,6 +3015,11 @@ def test_native_harness_finish_after_mutation_without_verifier_command_blocks_wi
     assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_continue"
     assert "closeout_verifier_command_missing" in result.metrics["completion_resolver_latest_decision"]["blockers"]
     assert "strict_verifier_evidence" in result.metrics["completion_resolver_latest_decision"]["missing_obligations"]
+    finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
+    assert "missing verifier/task-contract evidence" in finish_output.output_text_or_ref
+    assert "blockers: closeout_verifier_command_missing" in finish_output.output_text_or_ref
+    assert "missing: strict_verifier_evidence" in finish_output.output_text_or_ref
+    assert "completion_resolver" not in finish_output.output_text_or_ref
     assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
     assert validate_native_transcript_pairing(result.transcript).valid is True
 

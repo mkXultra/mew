@@ -20,6 +20,77 @@ Companion controller and data files:
 
 ## Durable Decisions
 
+### 2026-05-15: Task Contract Compiler Default-On Before More String Gate Work
+
+Decision: keep `task_contract_compiler` enabled by default for `implement_v2`
+and require explicit legacy opt-in (`task_contract_compiler=legacy`,
+`task_contract_compiler=false`, or equivalent) to return to natural-language /
+string acceptance gates. The compiler is now the intended path for turning raw
+Terminal-Bench task text into typed completion criteria, expected artifacts,
+source requirements, and verifier obligations.
+
+The next implementation chain is:
+
+```text
+M6.24 -> task-requirement / finish-gate string-gate gap
+      -> validate task_contract_compiler default-on on make-doom-for-mips
+      -> inspect typed contract, typed obligations, finish decision, and verifier result
+      -> repair only generic compiler / typed-evidence / runner plumbing gaps
+```
+
+Close-order for the next work:
+
+1. Run a same-shape `make-doom-for-mips` diagnostic with
+   `selected_lane=implement_v2`, `tool_surface_profile_id=codex_hot_path`, and
+   the default compiler path. Do not add task-specific string gates.
+2. Confirm artifacts record `task_contract_compiler.enabled=true`,
+   `status=compiled` or `typed_fallback`, `legacy_string_gate_mode` disabled,
+   typed oracle obligations, and the provider-visible task description /
+   completion criteria.
+3. If the run misses, classify the miss through replay / dogfood / emulator
+   before changing behavior. Allowed repairs are generic task-contract
+   compiler schema/prompt, typed evidence obligation wiring, Harbor runner
+   task-record plumbing, or finish resolver behavior. Do not add
+   `make-doom-for-mips`-specific regular expressions or visual-frame string
+   heuristics.
+4. If the run passes or cleanly blocks a bad finish for the right typed reason,
+   record the artifact and select the next scoped M6.24 task.
+
+Rationale: the latest `make-doom-for-mips` discussion showed that missing task
+requirements in the structured contract makes finish gating look like a
+string-gate problem. The product direction is to compile requirements into a
+typed contract first, then let typed evidence and verifier obligations drive
+completion. This preserves the Codex-like hot path while keeping mew's resident
+proof/replay advantages.
+
+Follow-up diagnostic 2026-05-15 19:36 JST:
+
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-doom-for-mips-step-check-10min-ts-codex-hot-path-20260515-193616`
+ran the same-shape `step-check-10min` with `codex_hot_path`. It reached
+reward `0.0`, runner errors `0`, `work_exit_code=1`, stop reason
+`implement_v2_blocked`, native pairing valid (`42` calls / `42` outputs),
+provider request inventory present, and no WebSocket close. The task contract
+compiler was provider-visible and compiled the raw task into typed completion
+criteria, expected artifacts (`doomgeneric_mips`, `frame_bmp`,
+`verifier_stdout`), source requirements, and verifier command `node vm.js`.
+
+Classification: the compiler default-on path is validated. The miss is now a
+generic finish/repair continuation gap, not a missing task-description plumbing
+gap and not a WebSocket fallback issue. The model built and repeatedly claimed
+a synthetic MIPS artifact; the native finish resolver correctly blocked six
+finish attempts, but the block output stayed too weak for the model to turn the
+typed obligation failure into the next concrete repair. External verifier then
+failed because stdout lacked the expected real DOOM boot marker and the frame
+was not similar enough to the reference image.
+
+Next repair target: keep avoiding Doom-specific regular expressions. Improve
+the generic typed finish-block continuation so blocked finishes surface the
+failed obligation family and concrete required repair in the model transcript,
+especially when `strict_verifier_evidence` / `verifier_stdout:fresh` is
+missing or when closeout verifier evidence contradicts the task oracle. Do not
+spend another `speed-proof` or `proof-5` before this continuation repair has a
+focused test and one same-shape `step-check-10min`.
+
 ### 2026-05-14: ToolRegistry Before More Tool Polish
 
 Decision: stop directly polishing individual provider-visible tool descriptions

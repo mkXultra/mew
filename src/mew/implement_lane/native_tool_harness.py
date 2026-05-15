@@ -2577,6 +2577,7 @@ def _finish_result_with_resolver_decision(
     payload["outcome"] = decision.lane_status
     payload["blockers"] = list(decision.blockers)
     payload["missing_obligations"] = list(decision.missing_obligations)
+    payload["summary"] = _finish_block_model_visible_summary(decision)
     return replace(
         result,
         status="invalid",
@@ -2584,6 +2585,83 @@ def _finish_result_with_resolver_decision(
         content=(payload,),
         evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *decision.evidence_refs))),
     )
+
+
+def _finish_block_model_visible_summary(decision: CompletionResolverDecision) -> str:
+    """Compact resolver facts into the finish output visible to the model."""
+
+    blockers = _bounded_finish_block_items(decision.blockers, limit=4)
+    missing = _bounded_finish_block_items(
+        (_compact_finish_missing_obligation(item) for item in decision.missing_obligations),
+        limit=6,
+    )
+    lines = [_finish_block_headline(blockers, missing)]
+    if blockers:
+        lines.append("blockers: " + ", ".join(blockers))
+    if missing:
+        lines.append("missing: " + ", ".join(missing))
+    repair = _finish_block_repair_hint(blockers, missing)
+    if repair:
+        lines.append("repair: " + repair)
+    return "\n".join(lines)
+
+
+def _finish_block_headline(blockers: tuple[str, ...], missing: tuple[str, ...]) -> str:
+    joined = " ".join((*blockers, *missing)).casefold()
+    if "verifier" in joined or "strict_verifier_evidence" in joined:
+        return "missing verifier/task-contract evidence"
+    if "unsafe" in joined:
+        return "unsafe finish claim"
+    if "budget" in joined:
+        return "finish needs supervisor or more budget"
+    return "finish claim is not yet supported by typed evidence"
+
+
+def _finish_block_repair_hint(blockers: tuple[str, ...], missing: tuple[str, ...]) -> str:
+    joined = " ".join((*blockers, *missing)).casefold()
+    if "verifier" in joined or "strict_verifier_evidence" in joined:
+        return "run or cite a fresh task verifier that satisfies the typed task contract"
+    if "invalid_typed_evidence_ref" in joined:
+        return "cite completed tool evidence refs, not only prose summaries"
+    if missing:
+        return "satisfy the missing typed obligations before finishing"
+    if blockers:
+        return "repair the blocker and finish again with concrete evidence"
+    return ""
+
+
+def _compact_finish_missing_obligation(item: object) -> str:
+    text = str(item or "").strip()
+    if not text:
+        return ""
+    if text.startswith("oracle:task_contract:compiled:"):
+        parts = text.split(":")
+        if len(parts) >= 5:
+            return f"{parts[3]}:{parts[4]}"
+    if text.startswith("oracle:task_contract_compiler:verifier"):
+        return "task_contract_verifier:fresh"
+    if text.startswith("oracle:contract:") and "/app/" in text:
+        suffix = text[text.find("/app/") :]
+        return _finish_block_clip(suffix, limit=120)
+    return _finish_block_clip(text, limit=120)
+
+
+def _bounded_finish_block_items(items: Iterable[object], *, limit: int) -> tuple[str, ...]:
+    compact: list[str] = []
+    for item in items:
+        text = _finish_block_clip(item, limit=120)
+        if text and text not in compact:
+            compact.append(text)
+        if len(compact) >= limit:
+            break
+    return tuple(compact)
+
+
+def _finish_block_clip(value: object, *, limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
 
 
 def _native_finish_protocol_error(result: ToolResultEnvelope) -> bool:
