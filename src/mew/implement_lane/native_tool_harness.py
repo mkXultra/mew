@@ -2641,6 +2641,10 @@ def _finish_gate_block_resolved_by_closeout(
 ) -> bool:
     if not closeout_context.fresh_verifier_refs:
         return False
+    top_level_missing = gate.get("missing_obligations")
+    runtime_artifact_codes = {"runtime_final_verifier_artifact_evidence"}
+    if gate_codes and all(code in runtime_artifact_codes for code in gate_codes):
+        return not gate_missing and (not isinstance(top_level_missing, list) or not top_level_missing)
     closeout_resolvable_codes = {
         "failed_typed_evidence_ref",
         "invalid_typed_evidence_ref",
@@ -2656,7 +2660,6 @@ def _finish_gate_block_resolved_by_closeout(
                 return True
     if any(code not in closeout_resolvable_codes for code in gate_codes):
         return False
-    top_level_missing = gate.get("missing_obligations")
     if isinstance(top_level_missing, list):
         return bool(top_level_missing) and all(_finish_gate_missing_obligation_is_verifier(item) for item in top_level_missing)
     if not gate_missing:
