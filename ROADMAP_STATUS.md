@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 and H2 failed/reverted; H3 found no continuity defect; H5 terminal head+tail repair measured as keep; current work is internal finish/source-grounding closeout repair, not another hot-path behavior change. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 and H2 failed/reverted; H3 found no continuity defect; H5 terminal head+tail repair measured as keep and the current closeout/debug-cleanup handoff is validated. Next is step-shape comparison and next-gap selection, not another H5 behavior change. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,10 +70,10 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_hot_path_h5_targeted_output_visibility_repair_validation`.
+`m6_24_hot_path_h5_validated_next_gap_selection`.
 
 Current diagnostic mode:
-`h10_failed_reverted__h6_passed__h1_partial_keep__h7_hygiene_keep__h4_failed_reverted__h2_failed_reverted__h3_measured_no_change__h5_measured_gap__repair1_pending_measure`.
+`h10_failed_reverted__h6_passed__h1_partial_keep__h7_hygiene_keep__h4_failed_reverted__h2_failed_reverted__h3_measured_no_change__h5_keep__closeout_cleanup_validated`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
@@ -158,12 +158,23 @@ replacement for full `stdout` / `stderr`. codex-ultra review session
 `019e2963-8a57-72b2-85db-778328eea548` approved after the head-clipped
 stdout-plus-tail case was fixed. The bounded H5 repair 1 diagnostic then
 passed Harbor external reward `1.0` and matched Codex's first mutation step:
-Codex step 25 after 24 probes, mew step 25 after 18 probes. The remaining
-failure is internal closeout: mew reported `implement_v2_failed` after finish
+Codex step 25 after 24 probes, mew step 25 after 18 probes. That run exposed
+an internal closeout issue: mew reported `implement_v2_failed` after finish
 attempts because source-grounding obligations for provided artifacts/source
-trees were not satisfied from provider-native `exec_command` evidence. Current
-work is the generic closeout/source-grounding repair. Do not add more
-prompt/tool wording before that repair is validated.
+trees were not satisfied from provider-native `exec_command` evidence. That
+closeout/source-grounding issue was handled before the follow-up validation
+below. Do not add more prompt/tool wording based on the older closeout failure.
+The closeout and handoff path is now validated. Commit `3bd62da` added a
+diagnostic-only `--debug-cleanup /tmp/frame*.bmp` hook for
+`make-mips-interpreter` Harbor runs. The 2026-05-15 13:41 JST bounded run at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-134113/2026-05-15__13-41-14/make-mips-interpreter__rospwBf`
+reached Harbor external reward `1.0`, `work_exit_code=0`, valid native pairing,
+resolver block count `0`, and verifier `3/3` pass. `post_run_cleanup` removed
+`/tmp/frame.bmp` and `/tmp/frame_0000.bmp`; the new step diff shows mew first
+mutation step 26 after 25 probes versus Codex step 25 after 24 probes. Treat
+the H5 closeout/debug-cleanup handoff blocker as closed for this diagnostic.
+Do not implement a broad LLM cleanup planner or artifact lifecycle from this
+single diagnostic hook.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -396,10 +407,10 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: validate the H5 closeout repair. H5 repair 1 already
-  moved first mutation to Codex's step 25 and reached Harbor external reward
-  1.0; do not make another behavior change until provider-native
-  `exec_command` source grounding can close finish cleanly.
+- Current next action: compare the H5 validated step shape and select the next
+  M6.24 gap. H5 repair 1 and the closeout/debug-cleanup handoff are validated;
+  do not make another H5 behavior change before selecting a new measured
+  hypothesis.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe
@@ -932,15 +943,16 @@ findings. Phases 0-6 were then implemented in small reviewed commits:
 Historical WorkFrame action: close the WorkFrame proof gate by repairing
 `transition_contract` hot-path patch-anchor/runtime-artifact-obligation handling
 and rerunning focused checks plus one same-shape diagnostic. This is not the
-current next action while `native_boundary_phase4_green_phase5_next` is open. Do not resume
-this WorkFrame action until the native boundary row in
-`docs/M6_24_DECISION_LEDGER.md` is closed or explicitly superseded.
+current next action while
+`h5_closeout_cleanup_validated_next_gap_selection` is the newest M6.24 row. Do
+not resume this WorkFrame action until the H5 next-gap decision explicitly
+selects it again.
 
 WorkFrame variant benchmark note (2026-05-10): after Codex, Claude Code, and
 2025-2026 literature reviews of `tool result -> evidence/state -> next action`,
 the historical WorkFrame proof-gate strategy was to measure WorkFrame reducer
 variants before another long polish sequence. That strategy is superseded while
-`native_boundary_phase4_green_phase5_next` is open. The retained lesson is architectural:
+`h5_closeout_cleanup_validated_next_gap_selection` is the newest M6.24 row. The retained lesson is architectural:
 if WorkFrame variants are revisited later, keep variant implementations isolated
 from tool runtime/provider loop/verifier changes and compare them with the same
 fastcheck, same diagnostic, and same analyzer.
