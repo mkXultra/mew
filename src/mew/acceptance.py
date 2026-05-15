@@ -878,7 +878,7 @@ _IMPLEMENTATION_CONTRACT_CONTEXT_MARKERS = (
 _IMPLEMENTATION_SOURCE_REF_RE = re.compile(
     r"(?<![\w./-])(?:/[\w.+-]+(?:/[\w.+-]+)*/?|(?:[\w.+-]+/)+[\w.+-]*/?)"
 )
-_IMPLEMENTATION_SOURCE_GROUNDING_TOOLS = {"glob", "read_file", "run_command", "search_text"}
+_IMPLEMENTATION_SOURCE_GROUNDING_TOOLS = {"exec_command", "glob", "read_file", "run_command", "search_text"}
 
 
 def _clean_constraint_text(text: object, *, limit: int = 260) -> str:

@@ -14931,6 +14931,39 @@ def test_implement_v2_typed_finish_refs_reserve_source_grounding_slots() -> None
     assert len(refs) <= 16
 
 
+def test_implement_v2_typed_finish_refs_treat_exec_command_as_source_grounding() -> None:
+    source_probe = ToolResultEnvelope(
+        lane_attempt_id="lane",
+        provider_call_id="probe-source",
+        mew_tool_call_id="tool-source",
+        tool_name="exec_command",
+        status="completed",
+        content=(
+            {
+                "command": "ls -l /app && find /app/doomgeneric -maxdepth 2 -type f | head",
+                "stdout": (
+                    "total 5608\n"
+                    "-rwxr-xr-x 1 root root 1543608 doomgeneric_mips\n"
+                    "doomgeneric/doomgeneric/doomgeneric_img.c\n"
+                ),
+            },
+        ),
+    )
+
+    refs = _typed_finish_evidence_refs(
+        (source_probe,),
+        task_description=(
+            "I have provided /app/doomgeneric_mips, a MIPS elf file, "
+            "along with doomgeneric/, the corresponding source code."
+        ),
+    )
+
+    ref_ids = {str(ref.get("id") or "") for ref in refs}
+    assert "ev:source:/app/doomgeneric_mips:probe-source" in ref_ids
+    assert "ev:source:doomgeneric/:probe-source" in ref_ids
+    assert len(refs) <= 16
+
+
 def test_implement_v2_typed_finish_refs_reserve_source_grounding_slots_in_fallback() -> None:
     early_results = tuple(
         ToolResultEnvelope(

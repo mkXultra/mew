@@ -1963,6 +1963,56 @@ def test_native_harness_completed_finish_runs_acceptance_gate(tmp_path: Path) ->
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_exec_command_source_grounding_allows_finish_closeout(tmp_path: Path) -> None:
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    (source_dir / "source.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "description": (
+                "I provided src/source.c, the corresponding source code. "
+                "Create frame.bmp from that source-backed task."
+            ),
+        },
+        allow_verify=True,
+        verify_command="test -f frame.bmp",
+        final_verifier_closeout_seconds=3,
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "probe-source",
+                    "exec_command",
+                    {"cmd": "ls src && sed -n '1,5p' src/source.c", "cwd": "."},
+                    output_index=0,
+                ),
+                fake_call(
+                    "patch-frame",
+                    "apply_patch",
+                    {"patch": "*** Begin Patch\n*** Add File: frame.bmp\n+FRAME_QUALITY_OK\n*** End Patch\n", "apply": True},
+                    output_index=1,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    assert result.status == "completed"
+    assert (tmp_path / "frame.bmp").read_text(encoding="utf-8") == "FRAME_QUALITY_OK\n"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "completed"
+    assert result.metrics["completion_resolver_latest_decision"]["result"] == "allow"
+    finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
+    assert finish_output.status == "completed"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_native_harness_unknown_completion_status_still_runs_acceptance_gate(tmp_path: Path) -> None:
     lane_input = replace(
         _lane_input(tmp_path),

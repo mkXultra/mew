@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 and H2 failed/reverted; H3 found no continuity defect; H5 found output-visibility gaps; first targeted H5 terminal head+tail repair is ready for measurement. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 and H2 failed/reverted; H3 found no continuity defect; H5 terminal head+tail repair measured as keep; current work is internal finish/source-grounding closeout repair, not another hot-path behavior change. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -156,8 +156,14 @@ bounded terminal output now preserves both early stream facts and final
 `stdout_tail` / `stderr_tail` facts instead of treating tail as an exclusive
 replacement for full `stdout` / `stderr`. codex-ultra review session
 `019e2963-8a57-72b2-85db-778328eea548` approved after the head-clipped
-stdout-plus-tail case was fixed. Next validation should measure step shape; do
-not add more prompt/tool wording before that measurement.
+stdout-plus-tail case was fixed. The bounded H5 repair 1 diagnostic then
+passed Harbor external reward `1.0` and matched Codex's first mutation step:
+Codex step 25 after 24 probes, mew step 25 after 18 probes. The remaining
+failure is internal closeout: mew reported `implement_v2_failed` after finish
+attempts because source-grounding obligations for provided artifacts/source
+trees were not satisfied from provider-native `exec_command` evidence. Current
+work is the generic closeout/source-grounding repair. Do not add more
+prompt/tool wording before that repair is validated.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -390,10 +396,10 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: validate H5 repair 1. It is a narrow terminal
-  head+tail visibility repair, not broad renderer wording. Measure whether it
-  reduces rereads / repeated probe families or moves first mutation closer to
-  Codex before making another behavior change.
+- Current next action: validate the H5 closeout repair. H5 repair 1 already
+  moved first mutation to Codex's step 25 and reached Harbor external reward
+  1.0; do not make another behavior change until provider-native
+  `exec_command` source grounding can close finish cleanly.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe

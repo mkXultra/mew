@@ -9905,7 +9905,13 @@ def _source_grounding_tool_result(
     tool_results: tuple[ToolResultEnvelope, ...],
 ) -> tuple[int, ToolResultEnvelope] | None:
     for index, result in enumerate(tool_results, start=1):
-        if result.status != "completed" or result.tool_name not in {"glob", "read_file", "run_command", "search_text"}:
+        if result.status != "completed" or result.tool_name not in {
+            "exec_command",
+            "glob",
+            "read_file",
+            "run_command",
+            "search_text",
+        }:
             continue
         evidence_text = "\n".join(
             chunk

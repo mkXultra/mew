@@ -105,7 +105,7 @@ tuning before a minimal H10 change is designed and measured.
 | H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | measured failed, reverted | Plain Codex-like base instructions worsened first mutation to step 57 after 56 probes; reverted by `e857456` |
 | H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | measured no-change | H7 and H2 artifacts show previous_response_id present, matching prior response ids, delta coverage consistent, and valid pairing; do not change continuity without stronger evidence |
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | measured failed, reverted | H4 made first mutation much later: step 73 after 71 probes; reverted by `84b79e6` |
-| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | repair 1 pending measurement | H7/H2 artifacts showed matched provider outputs omit many raw source/binary/path/error/symbol facts; repair 1 preserves terminal head+tail facts under `codex_hot_path` |
+| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | measured keep; closeout repair in progress | H5 repair 1 moved mew to Codex-aligned first mutation step 25 and external reward 1.0; remaining issue is internal finish/source-grounding closeout, not another hot-path behavior change |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | measured hygiene keep | Sidecar visibility was fixed, but first mutation did not move closer to Codex; move to H4 tool-result rendering rather than revising H7 |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
@@ -772,7 +772,7 @@ Use the H5 H7/H2 compaction artifacts from EXP-20260515-9 plus the Codex
 reference trace listed at the top of this document.
 
 Mew artifact:
-Pending next bounded measurement.
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-111837/2026-05-15__11-18-37/make-mips-interpreter__Gvudbfq`
 
 Expected signal:
 The model should need fewer rereads of command/source outputs whose early and
@@ -781,12 +781,27 @@ families should decrease or first mutation should move closer to Codex before
 any further behavior change.
 
 Observed signal:
-Pending.
+Measured keep. The bounded diagnostic reached Harbor external reward `1.0` on
+`make-mips-interpreter`. Step-shape also moved close to Codex:
+
+- Codex first mutation: step 25 after 24 probes.
+- mew H5 repair 1 first mutation: step 25 after 18 probes.
+- H5 repair 1 still had repeated probe families, but it no longer showed the
+  no-mutation or very-late-mutation shape from H10/H7/H4/H2.
+
+The remaining failure was internal closeout, not task behavior:
+`work_exit_code=1`, `stop_reason=implement_v2_failed`, and native provider
+timeout after finish attempts. Artifact inspection showed the model had
+implemented `/app/vm.js`, `node vm.js` exited 0, Doom booted, and valid BMP
+frames were produced. Finish was blocked because source-grounding obligations
+for `/app/doomgeneric_mips` and `doomgeneric/` were not satisfied from
+provider-native `exec_command` evidence.
 
 Decision:
-Keep only through the next bounded measurement if the step-shape signal
-improves or stays neutral without new visible steering leakage. Revert or
-revise if it recreates the H4 broad-renderer regression shape.
+Keep H5 repair 1. Do not add another hot-path behavior change until the
+generic closeout/source-grounding bug is repaired and re-measured. The next
+repair is not prompt/tool wording: provider-native `exec_command` evidence
+must be accepted as source grounding in the same way as `run_command`.
 
 Focused validation:
 
@@ -797,6 +812,13 @@ Focused validation:
 - codex-ultra review session
   `019e2963-8a57-72b2-85db-778328eea548` approved after the head-clipped
   stdout plus separate tail case was added.
+- Measurement command:
+  `uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter --mode step-check-10min --tool-surface-profile-id codex_hot_path`.
+- Step-diff output:
+  `tmp/m6_24_h5_repair1_step_diff.json` and
+  `tmp/m6_24_h5_repair1_step_diff.md`.
+- Closeout repair review session:
+  `019e297d-5ad8-7523-a526-a68d21285585`.
 
 ## Stop Conditions
 
@@ -841,6 +863,11 @@ Follow this execution order. Do not reorder it after context compression:
 11. EXP-20260515-10 implemented H5 repair 1: `codex_hot_path` terminal output
     now preserves bounded head+tail facts, including head-clipped stdout plus
     separate stdout_tail.
-12. Next behavior step: measure H5 repair 1 before making another behavior
-    change. Do not broaden renderer wording, prompt instructions, continuity
-    behavior, WorkFrame steering, probe thresholds, or time pressure.
+12. EXP-20260515-10 measured H5 repair 1 as a keep: mew reached first
+    mutation at Codex's step 25 and Harbor external reward 1.0.
+13. Next implementation step: repair the internal finish/source-grounding
+    closeout mismatch from the H5 artifact. Provider-native `exec_command`
+    must count as completed source grounding evidence for provided artifacts
+    and source trees. Do not broaden renderer wording, prompt instructions,
+    continuity behavior, WorkFrame steering, probe thresholds, or time
+    pressure.
