@@ -111,6 +111,7 @@ from .mew_first_calibration import (
     summarize_mew_first_calibration,
 )
 from .model_backends import (
+    call_model_json,
     load_model_auth,
     model_backend_default_base_url,
     model_backend_default_model,
@@ -127,6 +128,10 @@ from .proof_summary import (
     format_proof_summary,
     summarize_m6_11_replay_calibration,
     summarize_proof_artifacts,
+)
+from .task_contract_compiler import (
+    compile_task_contract_with_model,
+    task_contract_compiler_failure_contract,
 )
 from .typed_memory import FileMemoryBackend, entry_to_dict
 from .morning_paper import (
@@ -7352,6 +7357,80 @@ def _work_guidance_persisted_lane_state(guidance):
     return persisted
 
 
+def _work_guidance_task_contract_compiler_enabled(guidance):
+    value = _work_guidance_task_contract_compiler_raw_value(guidance)
+    if value is None:
+        return True
+    return _task_contract_compiler_value_enabled(value)
+
+
+def _work_guidance_task_contract_compiler_raw_value(guidance):
+    payload = _work_guidance_json_payload(guidance)
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    for name in ("task_contract_compiler", "task_contract_compiler_mode"):
+        if name in payload:
+            return payload.get(name)
+        if isinstance(lane_config, dict) and name in lane_config:
+            return lane_config.get(name)
+    for name in ("legacy_task_contract", "task_contract_legacy"):
+        if name in payload:
+            return False if _coerce_guidance_bool(payload.get(name)) else None
+        if isinstance(lane_config, dict) and name in lane_config:
+            return False if _coerce_guidance_bool(lane_config.get(name)) else None
+    text = str(guidance or "")
+    for name in (
+        "task_contract_compiler",
+        "task_contract_compiler_mode",
+        "legacy_task_contract",
+        "task_contract_legacy",
+    ):
+        pattern = rf"(?:^|\s){re.escape(name)}\s*=\s*([A-Za-z0-9_.-]+)"
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        value = match.group(1).strip()
+        if name in {"legacy_task_contract", "task_contract_legacy"}:
+            return False if _coerce_guidance_bool(value) else None
+        return value
+    return None
+
+
+def _task_contract_compiler_value_enabled(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().casefold()
+    if not text:
+        return True
+    return text not in {"0", "false", "no", "n", "off", "disabled", "disable", "legacy", "heuristic"}
+
+
+def _work_guidance_float_option(guidance, *names):
+    raw = _work_guidance_string_option(guidance, *names)
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        if name in payload:
+            try:
+                return float(payload.get(name))
+            except (TypeError, ValueError):
+                return None
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            if name in lane_config:
+                try:
+                    return float(lane_config.get(name))
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+
 def _work_guidance_task_contract_guidance(guidance):
     payload = _work_guidance_json_payload(guidance)
     if not payload:
@@ -7374,6 +7453,13 @@ def _work_guidance_task_contract_guidance(guidance):
         "experimental_finish_verifier_planner",
         "finish_verifier_planner",
         "finish_verifier_planner_model",
+        "task_contract_compiler",
+        "task_contract_compiler_mode",
+        "task_contract_compiler_model",
+        "task_contract_compiler_timeout_seconds",
+        "task_contract_compiler_required",
+        "legacy_task_contract",
+        "task_contract_legacy",
     ):
         sanitized.pop(key, None)
     lane_config = sanitized.get("lane_config")
@@ -7387,6 +7473,13 @@ def _work_guidance_task_contract_guidance(guidance):
         lane_config.pop("experimental_finish_verifier_planner", None)
         lane_config.pop("finish_verifier_planner", None)
         lane_config.pop("finish_verifier_planner_model", None)
+        lane_config.pop("task_contract_compiler", None)
+        lane_config.pop("task_contract_compiler_mode", None)
+        lane_config.pop("task_contract_compiler_model", None)
+        lane_config.pop("task_contract_compiler_timeout_seconds", None)
+        lane_config.pop("task_contract_compiler_required", None)
+        lane_config.pop("legacy_task_contract", None)
+        lane_config.pop("task_contract_legacy", None)
         if lane_config:
             sanitized["lane_config"] = lane_config
         else:
@@ -7405,6 +7498,13 @@ def _strip_internal_work_guidance_options(guidance):
         "experimental_finish_verifier_planner",
         "finish_verifier_planner",
         "finish_verifier_planner_model",
+        "task_contract_compiler",
+        "task_contract_compiler_mode",
+        "task_contract_compiler_model",
+        "task_contract_compiler_timeout_seconds",
+        "task_contract_compiler_required",
+        "legacy_task_contract",
+        "task_contract_legacy",
     ):
         text = re.sub(rf"(?:^|\s){re.escape(name)}\s*=\s*[A-Za-z0-9_.-]+", " ", text)
     return " ".join(text.split())
@@ -7610,6 +7710,53 @@ def _run_work_ai_implement_v2(
         getattr(effective_args, "work_guidance", None),
         "tool_surface_profile_options",
     )
+    work_guidance = getattr(effective_args, "work_guidance", None) or ""
+    task_contract = _work_ai_implement_v2_task_contract(
+        task,
+        max_steps=max_steps,
+        max_wall_seconds=max_wall_seconds,
+        guidance=work_guidance,
+        verify_command=getattr(effective_args, "verify_command", None) or "",
+    )
+    task_contract_compiler_enabled = _work_guidance_task_contract_compiler_enabled(work_guidance)
+    task_contract_compiler_report = {
+        "status": "legacy_opt_in",
+        "enabled": False,
+        "reason": "task_contract_compiler disabled by work guidance",
+    }
+    if task_contract_compiler_enabled:
+        compiler_model = _work_guidance_string_option(work_guidance, "task_contract_compiler_model") or model
+        compiler_timeout = _work_guidance_float_option(work_guidance, "task_contract_compiler_timeout_seconds")
+        if compiler_timeout is None:
+            compiler_timeout = 45.0 if model_timeout_seconds <= 0 else min(model_timeout_seconds, 45.0)
+        if progress:
+            progress("task_contract_compiler start")
+        try:
+            task_contract, task_contract_compiler_report = compile_task_contract_with_model(
+                task_contract,
+                model_backend=model_backend,
+                model_auth=model_auth,
+                model=compiler_model,
+                base_url=base_url,
+                timeout=compiler_timeout,
+                call_json=call_model_json,
+            )
+        except Exception as exc:
+            task_contract, task_contract_compiler_report = task_contract_compiler_failure_contract(
+                task_contract,
+                error=exc,
+            )
+            task_contract_compiler_report["enabled"] = True
+            if progress:
+                progress(f"task_contract_compiler failed: {exc}")
+        else:
+            task_contract_compiler_report["enabled"] = True
+            task_contract_compiler_report["timeout_seconds"] = compiler_timeout
+            if progress:
+                progress("task_contract_compiler done")
+    report["task_contract_compiler"] = dict(task_contract_compiler_report)
+    implement_v2_runtime_metrics["task_contract_compiler_status"] = task_contract_compiler_report.get("status")
+    implement_v2_runtime_metrics["task_contract_compiler_enabled"] = bool(task_contract_compiler_enabled)
     lane_config = {
         "mode": "full",
         "allowed_read_roots": _work_ai_workspace_roots(effective_args.allow_read or [], workspace),
@@ -7635,6 +7782,8 @@ def _run_work_ai_implement_v2(
             "experimental_finish_verifier_planner",
             "finish_verifier_planner",
         ),
+        "task_contract_compiler_enabled": bool(task_contract_compiler_enabled),
+        "task_contract_compiler_status": str(task_contract_compiler_report.get("status") or ""),
     }
     finish_verifier_planner_model = _work_guidance_string_option(
         getattr(effective_args, "work_guidance", None),
@@ -7655,13 +7804,7 @@ def _run_work_ai_implement_v2(
         model_backend=model_backend,
         model=model,
         effort=os.environ.get("MEW_CODEX_REASONING_EFFORT", ""),
-        task_contract=_work_ai_implement_v2_task_contract(
-            task,
-            max_steps=max_steps,
-            max_wall_seconds=max_wall_seconds,
-            guidance=getattr(effective_args, "work_guidance", None) or "",
-            verify_command=getattr(effective_args, "verify_command", None) or "",
-        ),
+        task_contract=task_contract,
         persisted_lane_state=persisted_lane_state,
         lane_config=lane_config,
     )

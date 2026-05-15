@@ -431,6 +431,7 @@ class ImplementV2ManagedExecRuntime:
         self.command_metadata[command_run_id] = {
             "tool_name": call.tool_name,
             "effective_tool_name": effective_tool_name,
+            "command": command,
             "command_source": command_source,
             "command_classification": command_classification,
             "command_intent": command_intent,
@@ -1114,6 +1115,7 @@ def _command_metadata_for_payload(metadata: object) -> dict[str, object]:
     allowed_keys = (
         "tool_name",
         "effective_tool_name",
+        "command",
         "command_source",
         "command_classification",
         "command_intent",

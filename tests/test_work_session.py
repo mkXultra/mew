@@ -11172,10 +11172,12 @@ class WorkSessionTests(unittest.TestCase):
                 lane_input = v2_run.call_args.args[0]
                 self.assertEqual(lane_input.lane, "implement_v2")
                 self.assertEqual(lane_input.lane_config["mode"], "full")
+                self.assertEqual(lane_input.task_contract["acceptance_constraints"], [])
                 self.assertEqual(
-                    lane_input.task_contract["acceptance_constraints"],
+                    lane_input.task_contract["legacy_acceptance_constraints"],
                     ["The output should change."],
                 )
+                self.assertEqual(lane_input.task_contract["task_contract_compiler"]["status"], "typed_fallback")
                 self.assertTrue(lane_input.lane_config["auto_approve_writes"])
                 self.assertEqual(lane_input.lane_config["allowed_write_roots"], [str(workspace.resolve())])
                 self.assertEqual(

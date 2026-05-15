@@ -3388,6 +3388,7 @@ def acceptance_done_gate_decision(
     typed_decision = str(typed_gate.get("decision") or "")
     typed_blockers = [dict(item) for item in typed_gate.get("blockers") or [] if isinstance(item, dict)]
     retired_legacy_blocker_codes = _typed_retired_legacy_blocker_codes(typed_gate, session)
+    compiled_contract_gate = _compiled_task_contract_gate_active(session)
     legacy_warnings: list[dict[str, str]] = []
 
     def append_legacy_blocker(blocker: object) -> None:
@@ -3406,19 +3407,25 @@ def acceptance_done_gate_decision(
             for blocker in typed_blockers
             if blocker.get("message")
         )
-    runtime_component_gate = runtime_component_finish_gate_decision(task_description, action, session=session)
-    if runtime_component_gate.get("decision") != "allow_complete":
-        for blocker in runtime_component_gate.get("blockers") or []:
-            if isinstance(blocker, dict) and blocker.get("message"):
-                append_legacy_blocker(blocker.get("message"))
-    acceptance_blocker = acceptance_finish_blocker(
-        task_description,
-        action,
-        session=session,
-        include_runtime_component_gate=False,
-    )
-    if acceptance_blocker:
-        append_legacy_blocker(acceptance_blocker)
+    if compiled_contract_gate and typed_decision == "no_typed_decision":
+        blockers.append(
+            "compiled task contract produced no typed acceptance obligations; "
+            "finish must be resolved through typed task-contract evidence or opt into legacy task_contract_compiler=legacy"
+        )
+    if not compiled_contract_gate:
+        runtime_component_gate = runtime_component_finish_gate_decision(task_description, action, session=session)
+        if runtime_component_gate.get("decision") != "allow_complete":
+            for blocker in runtime_component_gate.get("blockers") or []:
+                if isinstance(blocker, dict) and blocker.get("message"):
+                    append_legacy_blocker(blocker.get("message"))
+        acceptance_blocker = acceptance_finish_blocker(
+            task_description,
+            action,
+            session=session,
+            include_runtime_component_gate=False,
+        )
+        if acceptance_blocker:
+            append_legacy_blocker(acceptance_blocker)
     checks = coerce_acceptance_checks(action.get("acceptance_checks"))
     evidence_ref_findings = _evidence_ref_findings_for_checks(checks, session)
     evidence_ref_blocker = str(evidence_ref_findings.get("blocker") or "")
@@ -3438,7 +3445,7 @@ def acceptance_done_gate_decision(
         }
     return {
         "decision": "block_continue",
-        "gate_source": "typed_evidence" if typed_decision == "block_continue" else "legacy_string_safety",
+        "gate_source": "typed_evidence" if typed_decision == "block_continue" or compiled_contract_gate else "legacy_string_safety",
         "reason": blockers[0],
         "blockers": [
             *typed_blockers,
@@ -3484,6 +3491,19 @@ def _typed_acceptance_done_gate_decision(action: dict, session: object) -> dict:
         tuple(item for item in typed.get("evidence_events") or () if isinstance(item, dict)),
     )
     return decision.as_dict()
+
+
+def _compiled_task_contract_gate_active(session: object) -> bool:
+    if not isinstance(session, dict):
+        return False
+    compiler = session.get("task_contract_compiler")
+    if not isinstance(compiler, dict):
+        typed = session.get("typed_acceptance")
+        if isinstance(typed, dict):
+            compiler = typed.get("task_contract_compiler")
+    if not isinstance(compiler, dict):
+        return False
+    return str(compiler.get("status") or "").strip().casefold() in {"compiled", "typed_fallback"}
 
 
 def _typed_acceptance_session(session: object) -> dict:

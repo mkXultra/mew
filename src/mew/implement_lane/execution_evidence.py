@@ -1182,6 +1182,7 @@ def evidence_events_from_tool_payload(
     raw_verifier = payload.get("verifier_evidence")
     if isinstance(raw_verifier, Mapping):
         verifier = _verifier_evidence(raw_verifier)
+        verifier_command = str(payload.get("command") or _mapping(payload.get("command_run")).get("command") or "")
         events.append(
             EvidenceEvent(
                 id=f"ev:verifier:{verifier.verifier_id}",
@@ -1192,6 +1193,7 @@ def evidence_events_from_tool_payload(
                     "reason": verifier.reason,
                     "checks": [dict(check) for check in verifier.checks],
                     "missing_evidence": [dict(item) for item in verifier.missing_evidence],
+                    "command": verifier_command,
                 },
                 refs=(
                     {"kind": "verifier_evidence", "id": verifier.verifier_id},
@@ -1253,6 +1255,11 @@ def build_oracle_bundle(
         item if isinstance(item, ExecutionContract) else normalize_execution_contract(item, task_contract=task_contract)
         for item in execution_contracts
     )
+    compiled_task_contract = _compiled_task_contract_mapping(task_contract)
+    if compiled_task_contract:
+        synthetic_contract = _compiled_task_contract_execution_contract(task_contract, compiled_task_contract)
+        if synthetic_contract is not None:
+            normalized_contracts = (*normalized_contracts, synthetic_contract)
     non_completion_contract_ids: set[str] = set()
     completion_contracts_by_key: dict[tuple[str, ...], ExecutionContract] = {}
     for contract in normalized_contracts:
@@ -1291,6 +1298,21 @@ def build_oracle_bundle(
                     provenance_refs=({"kind": "verifier_evidence", "id": verifier.verifier_id},),
                 )
             )
+    if compiled_task_contract:
+        verifier = _mapping(compiled_task_contract.get("verifier"))
+        command = str(task_contract.get("verify_command") or verifier.get("command") or "").strip()
+        must_pass = True if str(task_contract.get("verify_command") or "").strip() else bool(verifier.get("must_pass", True))
+        if command and must_pass:
+            obligations.append(
+                OracleObligation(
+                    id=f"oracle:task_contract_compiler:verifier:{_stable_token(command)}",
+                    kind="verifier_pass",
+                    subject={"any_verifier": True, "verify_command": command},
+                    expected={"verdict": "pass"},
+                    source="task_contract_compiler",
+                    provenance_refs=({"kind": "task_contract_compiler", "id": "compiled_task_contract"},),
+                )
+            )
     for ref in source_grounding_refs:
         path = str(ref.get("path") or ref.get("source_ref") or "").strip()
         if not path:
@@ -1313,6 +1335,38 @@ def build_oracle_bundle(
         source="structured_execution_evidence",
         obligations=tuple(_dedupe_obligations(obligations)),
         provenance_refs=_unique_refs(provenance_refs),
+    )
+
+
+def _compiled_task_contract_mapping(task_contract: Mapping[str, Any]) -> dict[str, Any]:
+    raw = _mapping(task_contract)
+    compiler = _mapping(raw.get("task_contract_compiler"))
+    if str(compiler.get("status") or "").strip().casefold() not in {"compiled", "typed_fallback"}:
+        return {}
+    compiled = _mapping(raw.get("compiled_task_contract"))
+    return compiled if compiled else raw
+
+
+def _compiled_task_contract_execution_contract(
+    task_contract: Mapping[str, Any],
+    compiled_task_contract: Mapping[str, Any],
+) -> ExecutionContract | None:
+    artifacts = compiled_task_contract.get("expected_artifacts")
+    if not isinstance(artifacts, (list, tuple)) or not artifacts:
+        artifacts = task_contract.get("expected_artifacts")
+    if not isinstance(artifacts, (list, tuple)) or not artifacts:
+        return None
+    return normalize_execution_contract(
+        {
+            "id": "task_contract:compiled",
+            "role": "verify",
+            "stage": "verification",
+            "purpose": "verification",
+            "proof_role": "final_artifact",
+            "acceptance_kind": "candidate_final_proof",
+            "expected_artifacts": [dict(item) for item in artifacts if isinstance(item, Mapping)],
+        },
+        task_contract=task_contract,
     )
 
 
@@ -2263,6 +2317,13 @@ def _covering_event_for_obligation(
 
 def _event_matches_verifier_obligation(event: EvidenceEvent, obligation: OracleObligation) -> bool:
     subject = obligation.subject
+    if subject.get("any_verifier"):
+        expected_command = str(subject.get("verify_command") or "").strip()
+        if expected_command:
+            observed_command = str(event.observed.get("command") or "").strip()
+            if not observed_command or _normalized_command_text(observed_command) != _normalized_command_text(expected_command):
+                return False
+        return str(event.observed.get("verdict") or "") == "pass"
     verifier_id = str(subject.get("verifier_id") or "")
     contract_id = str(subject.get("contract_id") or "")
     if verifier_id:
@@ -2270,6 +2331,10 @@ def _event_matches_verifier_obligation(event: EvidenceEvent, obligation: OracleO
     if contract_id:
         return event.contract_id == contract_id or str(event.observed.get("contract_id") or "") == contract_id
     return False
+
+
+def _normalized_command_text(value: object) -> str:
+    return " ".join(str(value or "").strip().split())
 
 
 def _event_matches_source_grounding_obligation(event: EvidenceEvent, obligation: OracleObligation) -> bool:

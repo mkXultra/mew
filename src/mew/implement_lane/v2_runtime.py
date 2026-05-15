@@ -9650,6 +9650,9 @@ def _live_task_description(lane_input: ImplementLaneInput) -> str:
         str(contract.get("guidance") or "").strip(),
         str(contract.get("verify_command") or "").strip(),
     ]
+    criteria = contract.get("completion_criteria")
+    if isinstance(criteria, list):
+        chunks.extend(str(item or "").strip() for item in criteria)
     return "\n".join(chunk for chunk in chunks if chunk)
 
 
@@ -10216,6 +10219,10 @@ def _acceptance_session_from_tool_results(
     typed_acceptance = _typed_acceptance_session_from_tool_results(tool_results, lane_input=lane_input)
     if typed_acceptance:
         session["typed_acceptance"] = typed_acceptance
+    if lane_input is not None and isinstance(lane_input.task_contract, dict):
+        compiler = lane_input.task_contract.get("task_contract_compiler")
+        if isinstance(compiler, dict):
+            session["task_contract_compiler"] = dict(compiler)
     return session
 
 

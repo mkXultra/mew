@@ -2435,6 +2435,9 @@ def _native_task_description(lane_input: ImplementLaneInput) -> str:
         str(contract.get("guidance") or "").strip(),
         str(contract.get("verify_command") or "").strip(),
     ]
+    criteria = contract.get("completion_criteria")
+    if isinstance(criteria, list):
+        chunks.extend(str(item or "").strip() for item in criteria)
     constraints = contract.get("acceptance_constraints")
     if isinstance(constraints, list):
         chunks.extend(str(item or "").strip() for item in constraints)
@@ -3079,6 +3082,25 @@ def _task_first_provider_visible_text(
     verify_command = str(contract.get("verify_command") or "").strip()
     if verify_command:
         lines.append(f"Verifier: {verify_command}")
+    criteria = contract.get("completion_criteria")
+    if isinstance(criteria, list):
+        rendered_criteria = [str(item or "").strip() for item in criteria if str(item or "").strip()]
+        if rendered_criteria:
+            lines.append("Completion criteria:")
+            lines.extend(f"- {item}" for item in rendered_criteria[:8])
+    expected_artifacts = contract.get("expected_artifacts")
+    if isinstance(expected_artifacts, list):
+        rendered_artifacts = []
+        for item in expected_artifacts[:8]:
+            if not isinstance(item, Mapping):
+                continue
+            path = str(item.get("path") or "").strip()
+            kind = str(item.get("kind") or "file").strip()
+            artifact_id = str(item.get("id") or path or kind).strip()
+            rendered_artifacts.append(f"- {artifact_id}: {kind}" + (f" at {path}" if path else ""))
+        if rendered_artifacts:
+            lines.append("Expected artifacts:")
+            lines.extend(rendered_artifacts)
     constraints = contract.get("acceptance_constraints")
     if isinstance(constraints, list):
         rendered_constraints = [str(item or "").strip() for item in constraints if str(item or "").strip()]

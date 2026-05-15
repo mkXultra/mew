@@ -7147,3 +7147,117 @@ def test_acceptance_finish_blocker_accepts_cat_command_example_itself():
         )
         == ""
     )
+
+
+def test_compiled_task_contract_blocks_when_typed_obligations_are_missing():
+    decision = acceptance_done_gate_decision(
+        "The output must include a generated frame artifact.",
+        {"task_done": True, "outcome": "completed"},
+        session={"task_contract_compiler": {"status": "compiled"}},
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["gate_source"] == "typed_evidence"
+    assert "compiled task contract produced no typed acceptance obligations" in decision["reason"]
+
+
+def test_compiled_task_contract_uses_typed_gate_instead_of_legacy_string_constraints():
+    session = {
+        "task_contract_compiler": {"status": "compiled"},
+        "typed_acceptance": {
+            "oracle_bundle": {
+                "schema_version": 1,
+                "id": "oracle:bundle:test",
+                "source": "test",
+                "obligations": [
+                    {
+                        "schema_version": 1,
+                        "id": "oracle:verifier:any",
+                        "kind": "verifier_pass",
+                        "subject": {"any_verifier": True},
+                        "expected": {"verdict": "pass"},
+                        "source": "task_contract_compiler",
+                        "provenance_refs": [],
+                        "candidate_derived_allowed": False,
+                        "required": True,
+                    }
+                ],
+                "provenance_refs": [],
+            },
+            "evidence_events": [
+                {
+                    "schema_version": 1,
+                    "id": "ev:verifier:pass",
+                    "kind": "verifier_result",
+                    "status": "passed",
+                    "observed": {"verdict": "pass"},
+                    "refs": [{"kind": "verifier_evidence", "id": "verifier:pass"}],
+                }
+            ],
+        },
+    }
+
+    decision = acceptance_done_gate_decision(
+        "The solution must include acceptance checks that would normally trigger legacy string constraints.",
+        {
+            "task_done": True,
+            "outcome": "completed",
+            "typed_evidence_refs": ["ev:verifier:pass"],
+        },
+        session=session,
+    )
+
+    assert decision["decision"] == "allow_complete"
+    assert decision["gate_source"] == "typed_evidence"
+    assert decision["legacy_warnings"] == []
+
+
+def test_compiled_task_contract_verifier_obligation_matches_command():
+    session = {
+        "task_contract_compiler": {"status": "compiled"},
+        "typed_acceptance": {
+            "oracle_bundle": {
+                "schema_version": 1,
+                "id": "oracle:bundle:test",
+                "source": "test",
+                "obligations": [
+                    {
+                        "schema_version": 1,
+                        "id": "oracle:verifier:pytest",
+                        "kind": "verifier_pass",
+                        "subject": {"any_verifier": True, "verify_command": "pytest -q"},
+                        "expected": {"verdict": "pass"},
+                        "source": "task_contract_compiler",
+                        "provenance_refs": [],
+                        "candidate_derived_allowed": False,
+                        "required": True,
+                    }
+                ],
+                "provenance_refs": [],
+            },
+            "evidence_events": [
+                {
+                    "schema_version": 1,
+                    "id": "ev:verifier:wrong-command",
+                    "kind": "verifier_result",
+                    "status": "passed",
+                    "observed": {"verdict": "pass", "command": "echo ok"},
+                    "refs": [{"kind": "verifier_evidence", "id": "verifier:wrong-command"}],
+                }
+            ],
+        },
+    }
+
+    decision = acceptance_done_gate_decision(
+        "Run pytest -q before finishing.",
+        {
+            "task_done": True,
+            "outcome": "completed",
+            "typed_evidence_refs": ["ev:verifier:wrong-command"],
+        },
+        session=session,
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["gate_source"] == "typed_evidence"
+    assert decision["missing_obligations"]
