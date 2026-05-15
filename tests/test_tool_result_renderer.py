@@ -49,7 +49,7 @@ def test_codex_terminal_renderer_sanitizes_guidance_markers() -> None:
     rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
 
     assert rendered.renderer_id == CODEX_TERMINAL_RENDERER_ID
-    assert "Process exited with code 1" in rendered.text
+    assert "exit_code: 1" in rendered.text
     assert "suggested_next_action" not in rendered.text
     assert "required_next" not in rendered.text
     assert rendered.leak_ok is True
@@ -70,7 +70,8 @@ def test_codex_terminal_renderer_preserves_stdout_head_when_tail_exists() -> Non
     assert "first source fact /app/src/main.c" in rendered.text
     assert "final runtime fact" in rendered.text
     assert "output clipped" in rendered.text
-    assert "Refs: output=implement-v2-exec://attempt-1/run-1/output" in rendered.text
+    assert "Refs: output=implement-v2-exec://attempt-1/run-1/output" not in rendered.text
+    assert result.content_refs == ("implement-v2-exec://attempt-1/run-1/output",)
 
 
 def test_codex_terminal_renderer_preserves_separate_tail_for_head_clipped_stdout() -> None:
@@ -106,7 +107,7 @@ def test_codex_terminal_renderer_preserves_head_and_tail_without_stdout_tail() -
     assert "output clipped" in rendered.text
 
 
-def test_codex_terminal_renderer_exposes_neutral_tool_result_alias_for_completed_command() -> None:
+def test_codex_terminal_renderer_hides_debug_alias_for_completed_command() -> None:
     result = _result(
         "exec_command",
         stdout="verifier ok\n",
@@ -116,9 +117,11 @@ def test_codex_terminal_renderer_exposes_neutral_tool_result_alias_for_completed
 
     rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
 
-    assert "Tool result ref: ev:tool_result:call-1" in rendered.text
+    assert rendered.text == "stdout:\nverifier ok"
+    assert "Tool result ref:" not in rendered.text
     assert "Finish evidence ref:" not in rendered.text
     assert "finish_evidence=" not in rendered.text
+    assert result.evidence_refs == ("implement-v2-evidence://attempt/verifier_evidence/verifier-1",)
     assert rendered.leak_ok is True
 
 
@@ -193,4 +196,12 @@ def test_render_observability_record_reads_profile_from_metrics_ref() -> None:
     assert record["profile_id"] == CODEX_HOT_PATH_PROFILE_ID
     assert record["renderer_id"] == CODEX_TERMINAL_RENDERER_ID
     assert record["output_bytes"] == len(rendered.text.encode("utf-8"))
+    assert record["provider_visible_debug_omissions"] == [
+        "chunk_id",
+        "duration_seconds",
+        "token_count",
+        "tool_result_ref",
+        "content_refs",
+        "evidence_refs",
+    ]
     assert record["leak_ok"] is True

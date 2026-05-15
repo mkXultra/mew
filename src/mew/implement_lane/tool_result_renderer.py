@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 from typing import Mapping
 
 from .affordance_visibility import (
@@ -16,7 +15,7 @@ from .types import ToolResultEnvelope
 
 RENDERER_SCHEMA_VERSION = 1
 MEW_LEGACY_RENDERER_ID = "mew_legacy_result_cards_v1"
-CODEX_TERMINAL_RENDERER_ID = "codex_terminal_text_v1"
+CODEX_TERMINAL_RENDERER_ID = "codex_terminal_text_v2"
 CODEX_APPLY_PATCH_RENDERER_ID = "codex_apply_patch_text_v1"
 CODEX_FINISH_RENDERER_ID = "codex_finish_text_v1"
 CODEX_GENERIC_RENDERER_ID = "codex_generic_text_v1"
@@ -140,6 +139,7 @@ def render_observability_record(
         "output_chars": len(output_text),
         "leak_ok": not violations,
         "leak_fields": fields_from_forbidden_violations(violations),
+        "provider_visible_debug_omissions": _provider_visible_debug_omissions(renderer_id),
     }
 
 
@@ -166,28 +166,18 @@ def _rendered(
 def _render_codex_terminal(result: ToolResultEnvelope, *, limit: int) -> str:
     payload = _payload(result)
     command_run_id = str(payload.get("command_run_id") or "").strip()
-    chunk_id = _chunk_id(command_run_id or result.provider_call_id or result.mew_tool_call_id)
-    duration = _float(payload.get("duration_seconds"), default=0.0)
-    output = _command_output_text(result, payload, limit=max(200, limit - 240))
-    lines = [
-        f"Chunk ID: {chunk_id}",
-        f"Wall time: {duration:.3f}s",
-    ]
     if _terminal_status(result, payload) in _NONTERMINAL_STATUSES:
         session_id = command_run_id or str(payload.get("session_id") or result.provider_call_id or "unknown")
-        lines.append(f"Process running with session ID {session_id}")
-    else:
-        lines.append(f"Process exited with code {_exit_code(result, payload)}")
-    lines.append(f"Original token count: {_token_count(output)}")
-    lines.append("Output:")
-    lines.append(output)
-    ref_footer = _content_ref_footer(result, payload, visible_output=output)
-    if ref_footer:
-        lines.append(ref_footer)
-    tool_result_ref_footer = _tool_result_ref_footer(result)
-    if tool_result_ref_footer:
-        lines.append(tool_result_ref_footer)
-    return _clip("\n".join(lines).rstrip(), limit)
+        return _clip(f"Process running with session ID {session_id}", limit)
+
+    output = _command_output_text(result, payload, limit=limit)
+    exit_code = _exit_code(result, payload)
+    if result.is_error or result.status in {"failed", "invalid", "interrupted"} or exit_code not in {"0", ""}:
+        lines = [f"exit_code: {exit_code}"]
+        if output:
+            lines.append(output)
+        return _clip("\n".join(lines).rstrip(), limit)
+    return _clip(output, limit)
 
 
 def _render_codex_apply_patch(result: ToolResultEnvelope, *, limit: int) -> str:
@@ -399,20 +389,6 @@ def _sanitize_visible_text(text: str) -> str:
     return cleaned
 
 
-def _chunk_id(value: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return "tool-output"
-    tail = text.rsplit("/", 1)[-1].rsplit(":", 1)[-1]
-    if 0 < len(tail) <= 32:
-        return tail
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
-
-
-def _token_count(text: str) -> int:
-    return len(str(text or "").split())
-
-
 def _clip(text: str, limit: int) -> str:
     text = str(text or "")
     limit = max(0, int(limit))
@@ -452,6 +428,21 @@ def _profile_id_from_metrics_ref(metrics_ref: str) -> str:
         if profile:
             return profile
     return MEW_LEGACY_PROFILE_ID
+
+
+def _provider_visible_debug_omissions(renderer_id: str) -> list[str]:
+    """Describe fields intentionally kept in sidecars instead of model-visible text."""
+
+    if renderer_id == CODEX_TERMINAL_RENDERER_ID:
+        return [
+            "chunk_id",
+            "duration_seconds",
+            "token_count",
+            "tool_result_ref",
+            "content_refs",
+            "evidence_refs",
+        ]
+    return []
 
 
 __all__ = [
