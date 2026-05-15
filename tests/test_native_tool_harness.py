@@ -316,6 +316,30 @@ def test_live_native_request_keeps_write_file_for_hard_runtime_artifact_task(tmp
     assert "apply_patch or edit_file" in instructions
 
 
+def test_codex_hot_path_instructions_are_plain_and_codex_like(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        mode="full",
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+        task_contract={"description": "Implement vm.js.", "verify_command": "node vm.js"},
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    instructions = str(provider.requests[0]["instructions"])
+    assert instructions.startswith("You are a coding agent running in a terminal workspace.")
+    assert "[section:" not in instructions
+    assert "Implement V2" not in instructions
+    assert "provider-native transcript" not in instructions
+    assert "paired tool results" not in instructions
+    assert "Prefer apply_patch for source changes" in instructions
+    assert "edit_file" not in instructions
+    assert "Use finish only after a fresh tool result" in instructions
+
+
 def test_native_provider_hides_process_lifecycle_tools_until_command_is_open(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [

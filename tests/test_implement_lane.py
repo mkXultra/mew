@@ -43,6 +43,7 @@ from mew.implement_lane import (
     validate_workframe_variant_name,
 )
 from mew.implement_lane.tool_policy import list_v2_tool_specs_for_task
+from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID, build_tool_surface_snapshot
 from mew.implement_lane.provider import FakeProviderAdapter, FakeProviderToolCall
 from mew.implement_lane.legacy_shell_edit_bridge import bridge_registry_manifest
 from mew.implement_lane.v2_runtime import (
@@ -6035,7 +6036,8 @@ def test_implement_v2_prompt_sections_include_compact_coding_contract() -> None:
     assert section.cache_policy == "cacheable"
     assert section.stability == "static"
     assert "Inspect only enough context to choose a minimal runnable candidate" in section.content
-    assert "Make source changes with apply_patch or edit_file" in section.content
+    assert "Create complete new files with write_file when the target path is missing" in section.content
+    assert "modify existing source with apply_patch or edit_file" in section.content
     assert "Use run_command or run_tests to build, run, and verify" in section.content
     assert "create the smallest runnable version early" in section.content
     assert "verify command names a missing source or artifact path" in section.content
@@ -6047,6 +6049,33 @@ def test_implement_v2_prompt_sections_include_compact_coding_contract() -> None:
     assert "first_write" not in section.content
     assert "required_next" not in section.content
     assert "implement_v2_active_coding_rhythm" not in section_ids
+
+
+@pytest.mark.parametrize("profile_key", ["tool_surface_profile_id", "tool_profile"])
+def test_codex_hot_path_prompt_sections_use_plain_coding_agent_contract(profile_key: str) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        lane_config={"mode": "full", profile_key: CODEX_HOT_PATH_PROFILE_ID},
+        task_contract={"description": "Implement vm.js.", "verify_command": "node vm.js"},
+    )
+    snapshot = build_tool_surface_snapshot(lane_config=lane_input.lane_config, task_contract=lane_input.task_contract)
+
+    sections = build_implement_v2_prompt_sections(lane_input, tool_specs=snapshot.tool_specs)
+    by_id = {section.id: section for section in sections}
+    base = by_id["implement_v2_codex_hot_path_base"].content
+
+    assert "implement_v2_lane_base" not in by_id
+    assert "implement_v2_tool_contract" not in by_id
+    assert "implement_v2_coding_contract" not in by_id
+    assert base.startswith("You are a coding agent running in a terminal workspace.")
+    assert "Prefer apply_patch for source changes" in base
+    assert "edit_file" not in base
+    assert "provider-native transcript" not in base
+    assert "paired tool results" not in base
+    assert "Use finish only after a fresh tool result" in base
 
 
 def test_implement_v2_prompt_sections_hide_workframe_state_but_keep_debug_bundle() -> None:
