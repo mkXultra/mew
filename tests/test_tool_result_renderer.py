@@ -10,7 +10,13 @@ from mew.implement_lane.tool_result_renderer import (
 from mew.implement_lane.types import ToolResultEnvelope
 
 
-def _result(tool_name: str, status: str = "completed", **payload: object) -> ToolResultEnvelope:
+def _result(
+    tool_name: str,
+    status: str = "completed",
+    *,
+    evidence_refs: tuple[str, ...] = (),
+    **payload: object,
+) -> ToolResultEnvelope:
     return ToolResultEnvelope(
         lane_attempt_id="attempt-1",
         provider_call_id="call-1",
@@ -20,6 +26,7 @@ def _result(tool_name: str, status: str = "completed", **payload: object) -> Too
         is_error=status in {"failed", "invalid", "interrupted"},
         content=(payload,),
         content_refs=("implement-v2-exec://attempt-1/run-1/output",) if payload.get("output_ref") else (),
+        evidence_refs=evidence_refs,
     )
 
 
@@ -97,6 +104,38 @@ def test_codex_terminal_renderer_preserves_head_and_tail_without_stdout_tail() -
     assert "first path /app/doomgeneric/doomgeneric.c" in rendered.text
     assert "last symbol DG_DrawFrame" in rendered.text
     assert "output clipped" in rendered.text
+
+
+def test_codex_terminal_renderer_exposes_neutral_tool_result_alias_for_completed_command() -> None:
+    result = _result(
+        "exec_command",
+        stdout="verifier ok\n",
+        exit_code=0,
+        evidence_refs=("implement-v2-evidence://attempt/verifier_evidence/verifier-1",),
+    )
+
+    rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
+
+    assert "Tool result ref: ev:tool_result:call-1" in rendered.text
+    assert "Finish evidence ref:" not in rendered.text
+    assert "finish_evidence=" not in rendered.text
+    assert rendered.leak_ok is True
+
+
+def test_codex_terminal_renderer_omits_finish_evidence_alias_for_failed_command() -> None:
+    result = _result(
+        "exec_command",
+        status="failed",
+        stderr="verifier failed\n",
+        exit_code=1,
+        evidence_refs=("implement-v2-evidence://attempt/verifier_evidence/verifier-1",),
+    )
+
+    rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
+
+    assert "Tool result ref:" not in rendered.text
+    assert "Finish evidence ref:" not in rendered.text
+    assert rendered.leak_ok is True
 
 
 def test_codex_apply_patch_failure_is_bounded_and_sanitized() -> None:

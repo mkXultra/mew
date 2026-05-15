@@ -184,6 +184,9 @@ def _render_codex_terminal(result: ToolResultEnvelope, *, limit: int) -> str:
     ref_footer = _content_ref_footer(result, payload, visible_output=output)
     if ref_footer:
         lines.append(ref_footer)
+    tool_result_ref_footer = _tool_result_ref_footer(result)
+    if tool_result_ref_footer:
+        lines.append(tool_result_ref_footer)
     return _clip("\n".join(lines).rstrip(), limit)
 
 
@@ -334,6 +337,17 @@ def _content_ref_footer(
         or (output_bytes >= 0 and output_bytes > visible_limit)
     )
     return f"Refs: output={ref}" if needs_ref else ""
+
+
+def _tool_result_ref_footer(result: ToolResultEnvelope) -> str:
+    """Expose the compact alias for this result without declaring it sufficient."""
+
+    if result.status != "completed" or result.is_error or not result.evidence_refs:
+        return ""
+    call_id = str(result.provider_call_id or "").strip()
+    if not call_id:
+        return ""
+    return f"Tool result ref: ev:tool_result:{call_id}"
 
 
 def _changed_paths(payload: Mapping[str, object]) -> tuple[str, ...]:
