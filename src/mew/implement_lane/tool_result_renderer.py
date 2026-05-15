@@ -264,7 +264,14 @@ def _command_output_text(result: ToolResultEnvelope, payload: Mapping[str, objec
         if label in {"stdout", "stderr"} and any(part.startswith(f"{label}:") for part in chunks):
             continue
         if label in {"stdout", "stderr"}:
-            chunks.append(f"{label}:\n{_sanitize_visible_text(text)}")
+            full_stream = str(payload.get(label) or "").strip()
+            tail_stream = str(payload.get(f"{label}_tail") or "").strip()
+            stream_text = _head_tail_output_text(
+                full_stream or text,
+                tail_stream if full_stream else "",
+                limit=max(200, limit - len(label) - 2),
+            )
+            chunks.append(f"{label}:\n{stream_text}")
         else:
             chunks.append(_sanitize_visible_text(text))
         if len("\n".join(chunks)) >= limit:
@@ -272,6 +279,42 @@ def _command_output_text(result: ToolResultEnvelope, payload: Mapping[str, objec
     if not chunks:
         chunks.append(str(payload.get("status") or result.status or ""))
     return _clip("\n\n".join(chunks).strip(), limit)
+
+
+def _head_tail_output_text(text: str, tail: str = "", *, limit: int) -> str:
+    """Preserve both early and final terminal facts in a bounded transcript."""
+
+    text = _sanitize_visible_text(str(text or "").strip())
+    tail = _sanitize_visible_text(str(tail or "").strip())
+    limit = max(0, int(limit))
+    if not text:
+        return _clip(tail, limit)
+    if len(text) <= limit and (not tail or tail in text):
+        return text
+    if tail and tail not in text:
+        separator = "\n...\ntail:\n"
+        if len(text) + len(separator) + len(tail) <= limit:
+            return f"{text.rstrip()}{separator}{tail.lstrip()}"
+    marker_template = "\n...[output clipped {omitted} chars]...\n"
+    if limit <= len(marker_template.format(omitted=len(text))):
+        return _clip(text, limit)
+    total_display_chars = len(text) + (0 if not tail or tail in text else len(tail))
+    omitted = total_display_chars
+    head_len = 0
+    tail_len = 0
+    for _ in range(3):
+        marker = marker_template.format(omitted=omitted)
+        body_budget = max(0, limit - len(marker))
+        if tail:
+            tail_len = min(len(tail), max(1, body_budget // 2))
+            head_len = max(1, min(len(text), body_budget - tail_len))
+        else:
+            head_len = max(1, min(len(text), body_budget * 2 // 3))
+            tail_len = max(0, min(len(text) - head_len, body_budget - head_len))
+        omitted = max(0, total_display_chars - head_len - tail_len)
+    marker = marker_template.format(omitted=omitted)
+    tail_text = tail[-tail_len:] if tail else text[-tail_len:] if tail_len else ""
+    return f"{text[:head_len].rstrip()}{marker}{tail_text.lstrip()}"
 
 
 def _content_ref_footer(

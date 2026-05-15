@@ -48,6 +48,57 @@ def test_codex_terminal_renderer_sanitizes_guidance_markers() -> None:
     assert rendered.leak_ok is True
 
 
+def test_codex_terminal_renderer_preserves_stdout_head_when_tail_exists() -> None:
+    result = _result(
+        "exec_command",
+        stdout="first source fact /app/src/main.c\n" + ("middle disassembly\n" * 1000) + "final runtime fact\n",
+        stdout_tail="final runtime fact\n",
+        output_ref="exec://attempt-1/cmd-1/output",
+        output_bytes=18_000,
+        provider_visible_output_chars=1200,
+    )
+
+    rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
+
+    assert "first source fact /app/src/main.c" in rendered.text
+    assert "final runtime fact" in rendered.text
+    assert "output clipped" in rendered.text
+    assert "Refs: output=implement-v2-exec://attempt-1/run-1/output" in rendered.text
+
+
+def test_codex_terminal_renderer_preserves_separate_tail_for_head_clipped_stdout() -> None:
+    result = _result(
+        "exec_command",
+        stdout="first source fact /app/src/main.c\n" + ("head-only probe line\n" * 80),
+        stdout_tail="final verifier fact DG_DrawFrame wrote /tmp/frame.bmp\n",
+        output_ref="exec://attempt-1/cmd-1/output",
+        output_bytes=24_000,
+        provider_visible_output_chars=1200,
+    )
+
+    rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
+
+    assert "first source fact /app/src/main.c" in rendered.text
+    assert "final verifier fact DG_DrawFrame wrote /tmp/frame.bmp" in rendered.text
+    assert "tail:" in rendered.text
+
+
+def test_codex_terminal_renderer_preserves_head_and_tail_without_stdout_tail() -> None:
+    result = _result(
+        "exec_command",
+        stdout="first path /app/doomgeneric/doomgeneric.c\n" + ("middle symbol row\n" * 1000) + "last symbol DG_DrawFrame\n",
+        output_ref="exec://attempt-1/cmd-1/output",
+        output_bytes=18_000,
+        provider_visible_output_chars=1200,
+    )
+
+    rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
+
+    assert "first path /app/doomgeneric/doomgeneric.c" in rendered.text
+    assert "last symbol DG_DrawFrame" in rendered.text
+    assert "output clipped" in rendered.text
+
+
 def test_codex_apply_patch_failure_is_bounded_and_sanitized() -> None:
     result = _result(
         "apply_patch",

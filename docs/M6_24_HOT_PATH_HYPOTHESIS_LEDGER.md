@@ -105,7 +105,7 @@ tuning before a minimal H10 change is designed and measured.
 | H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | measured failed, reverted | Plain Codex-like base instructions worsened first mutation to step 57 after 56 probes; reverted by `e857456` |
 | H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | measured no-change | H7 and H2 artifacts show previous_response_id present, matching prior response ids, delta coverage consistent, and valid pairing; do not change continuity without stronger evidence |
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | measured failed, reverted | H4 made first mutation much later: step 73 after 71 probes; reverted by `84b79e6` |
-| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | measured concrete gap | H7/H2 artifacts show matched provider outputs omit many raw source/binary/path/error/symbol facts; next design a narrow output-visibility repair |
+| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | repair 1 pending measurement | H7/H2 artifacts showed matched provider outputs omit many raw source/binary/path/error/symbol facts; repair 1 preserves terminal head+tail facts under `codex_hot_path` |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | measured hygiene keep | Sidecar visibility was fixed, but first mutation did not move closer to Codex; move to H4 tool-result rendering rather than revising H7 |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
@@ -752,6 +752,52 @@ Focused validation:
 - `uv run ruff check src/mew/implement_lane/output_compaction_audit.py scripts/analyze_output_compaction.py tests/test_output_compaction_audit.py`
   passed.
 
+### EXP-20260515-10: H5 Terminal Head+Tail Visibility Repair
+
+Hypothesis:
+The H5 compaction gap is partly caused by terminal renderer output choosing
+only `stdout_tail` / `stderr_tail` or only the clipped head of `stdout` /
+`stderr`, so the next model turn misses either early source/path facts or final
+runtime/verifier facts.
+
+Change:
+Only the `codex_hot_path` terminal renderer changed. It now renders a bounded
+head+tail stream excerpt for `stdout` / `stderr`; if the full stream is already
+head-clipped and the separate tail carries final facts, both are shown. This is
+not a prompt/tool wording change, not WorkFrame steering, and not a
+`next_action` or threshold policy.
+
+Reference artifacts:
+Use the H5 H7/H2 compaction artifacts from EXP-20260515-9 plus the Codex
+reference trace listed at the top of this document.
+
+Mew artifact:
+Pending next bounded measurement.
+
+Expected signal:
+The model should need fewer rereads of command/source outputs whose early and
+final facts are now visible together. In step-shape terms, repeated probe
+families should decrease or first mutation should move closer to Codex before
+any further behavior change.
+
+Observed signal:
+Pending.
+
+Decision:
+Keep only through the next bounded measurement if the step-shape signal
+improves or stays neutral without new visible steering leakage. Revert or
+revise if it recreates the H4 broad-renderer regression shape.
+
+Focused validation:
+
+- `uv run pytest --no-testmon tests/test_tool_result_renderer.py tests/test_native_tool_harness.py::test_codex_hot_path_exec_command_routes_to_managed_exec tests/test_native_tool_harness.py::test_codex_hot_path_exec_command_yielded_uses_terminal_session_shape tests/test_native_tool_harness.py::test_codex_hot_path_adapter_failures_use_terminal_renderer -q`
+  passed with 14 tests.
+- `uv run ruff check src/mew/implement_lane/tool_result_renderer.py tests/test_tool_result_renderer.py`
+  passed.
+- codex-ultra review session
+  `019e2963-8a57-72b2-85db-778328eea548` approved after the head-clipped
+  stdout plus separate tail case was added.
+
 ## Stop Conditions
 
 Stop polishing a hypothesis and escalate when:
@@ -788,10 +834,13 @@ Follow this execution order. Do not reorder it after context compression:
    continuity behavior: saved H7 and H2 artifacts show matching
    `previous_response_id`, consistent delta coverage, and valid native
    call/output pairing.
-10. EXP-20260515-9 measured H5. Keep the analyzer and design a narrow
+10. EXP-20260515-9 measured H5. Keep the analyzer and use a narrow
     output-visibility repair: matched tool outputs currently omit many raw
     source/binary/path/error/symbol facts from provider-visible
     `function_call_output` text.
-11. Next behavior experiment: targeted H5 output-visibility repair. Do not
-    broaden renderer wording, prompt instructions, continuity behavior,
-    WorkFrame steering, probe thresholds, or time pressure.
+11. EXP-20260515-10 implemented H5 repair 1: `codex_hot_path` terminal output
+    now preserves bounded head+tail facts, including head-clipped stdout plus
+    separate stdout_tail.
+12. Next behavior step: measure H5 repair 1 before making another behavior
+    change. Do not broaden renderer wording, prompt instructions, continuity
+    behavior, WorkFrame steering, probe thresholds, or time pressure.
