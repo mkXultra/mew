@@ -6,6 +6,7 @@ import difflib
 import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 from ..write_tools import delete_file, edit_file, edit_file_hunks, resolve_allowed_write_path, write_file
@@ -280,6 +281,16 @@ class ImplementV2WriteRuntime:
         if denied is not None:
             return denied
         patch_args = _patch_edit_arguments(args)
+        if str(patch_args.get("operation") or "") == "multi_file":
+            result = self._apply_multi_file_patch(patch_args, args, apply=apply, approval=approval)
+            return _write_payload(
+                call,
+                result,
+                apply=apply,
+                approval=approval,
+                artifact_dir=self.artifact_dir,
+                workspace=self.workspace,
+            )
         self._raise_for_governance_path(str(_workspace_path(patch_args["path"], self.workspace)))
         patch_path = str(_workspace_path(patch_args["path"], self.workspace))
         patch_lexical_path = str(_workspace_lexical_path(patch_args["path"], self.workspace))
@@ -301,32 +312,12 @@ class ImplementV2WriteRuntime:
         )
         if quality_failure is not None:
             return quality_failure
-        if patch_operation == "add_file":
-            if Path(patch_lexical_path).exists() or Path(patch_lexical_path).is_symlink():
-                raise ValueError(f"apply_patch add file target already exists: {patch_args['path']}")
-            result = write_file(
-                patch_lexical_path,
-                patch_args.get("content", ""),
-                self.allowed_write_roots,
-                create=True,
-                dry_run=not apply,
-                include_source_artifacts=True,
-            )
-        elif patch_operation == "delete_file":
-            result = delete_file(
-                patch_lexical_path,
-                self.allowed_write_roots,
-                dry_run=not apply,
-                include_source_artifacts=True,
-            )
-        else:
-            result = edit_file_hunks(
-                patch_path,
-                patch_args["edits"],
-                self.allowed_write_roots,
-                dry_run=not apply,
-                include_source_artifacts=True,
-            )
+        result = self._execute_apply_patch_operation(
+            patch_args,
+            patch_path=patch_path,
+            patch_lexical_path=patch_lexical_path,
+            dry_run=not apply,
+        )
         result["operation"] = "apply_patch"
         result["patch_operation"] = patch_operation
         result["patch_format"] = patch_args["format"]
@@ -338,6 +329,113 @@ class ImplementV2WriteRuntime:
             approval=approval,
             artifact_dir=self.artifact_dir,
             workspace=self.workspace,
+        )
+
+    def _apply_multi_file_patch(
+        self,
+        patch_args: dict[str, object],
+        args: dict[str, object],
+        *,
+        apply: bool,
+        approval: dict[str, object] | None,
+    ) -> dict[str, object]:
+        operations = _patch_operations(patch_args)
+        paths_seen: set[Path] = set()
+        path_keys_seen: set[str] = set()
+        for operation_args in operations:
+            raw_path = str(operation_args.get("path") or "")
+            canonical_path = _workspace_path(raw_path, self.workspace)
+            conflicting_path = _conflicting_multi_file_patch_path(
+                canonical_path,
+                paths_seen,
+                existing_keys=path_keys_seen,
+            )
+            if conflicting_path is not None:
+                raise ValueError(
+                    "apply_patch multi-file patch contains duplicate or parent/child target path: "
+                    f"{raw_path} conflicts with {conflicting_path}"
+                )
+            file_parent = _existing_file_valued_parent(canonical_path)
+            if file_parent is not None:
+                raise ValueError(
+                    "apply_patch multi-file patch target has an existing file-valued parent path: "
+                    f"{raw_path} conflicts with {file_parent}"
+                )
+            paths_seen.add(canonical_path)
+            path_keys_seen.add(_multi_file_path_conflict_key(canonical_path))
+            self._raise_for_governance_path(str(canonical_path))
+            patch_path = str(canonical_path)
+            stale = _stale_precondition_failure_payload(
+                patch_path,
+                args,
+                allowed_write_roots=self.allowed_write_roots,
+                create=str(operation_args.get("operation") or "") == "add_file",
+            )
+            if stale is not None:
+                return stale
+            quality_failure = _patch_source_mutation_quality_failure_payload(
+                patch_path,
+                operation_args,
+                operation="apply_patch",
+                apply=apply,
+                approval=approval,
+            )
+            if quality_failure is not None:
+                return quality_failure
+
+        dry_run_results = [
+            self._execute_apply_patch_operation(operation_args, dry_run=True) for operation_args in operations
+        ]
+        operation_results = (
+            [self._execute_apply_patch_operation(operation_args, dry_run=False) for operation_args in operations]
+            if apply
+            else dry_run_results
+        )
+        aggregate = _aggregate_apply_patch_results(
+            patch_args,
+            args,
+            operation_results=operation_results,
+            dry_run_results=dry_run_results,
+            workspace=self.workspace,
+        )
+        aggregate["patch_transport"] = _patch_transport_metadata(args, patch_args=patch_args)
+        return aggregate
+
+    def _execute_apply_patch_operation(
+        self,
+        patch_args: dict[str, object],
+        *,
+        patch_path: str | None = None,
+        patch_lexical_path: str | None = None,
+        dry_run: bool,
+    ) -> dict[str, object]:
+        patch_operation = str(patch_args.get("operation") or "update_file")
+        resolved_path = patch_path or str(_workspace_path(patch_args["path"], self.workspace))
+        lexical_path = patch_lexical_path or str(_workspace_lexical_path(patch_args["path"], self.workspace))
+        if patch_operation == "add_file":
+            if Path(lexical_path).exists() or Path(lexical_path).is_symlink():
+                raise ValueError(f"apply_patch add file target already exists: {patch_args['path']}")
+            return write_file(
+                lexical_path,
+                patch_args.get("content", ""),
+                self.allowed_write_roots,
+                create=True,
+                dry_run=dry_run,
+                include_source_artifacts=True,
+            )
+        if patch_operation == "delete_file":
+            return delete_file(
+                lexical_path,
+                self.allowed_write_roots,
+                dry_run=dry_run,
+                include_source_artifacts=True,
+            )
+        return edit_file_hunks(
+            resolved_path,
+            patch_args["edits"],
+            self.allowed_write_roots,
+            dry_run=dry_run,
+            include_source_artifacts=True,
         )
 
     def _approval_for_call(self, call: ToolCallEnvelope) -> dict[str, object]:
@@ -387,11 +485,11 @@ class ImplementV2WriteRuntime:
         evidence_refs = (mutation_ref,) if payload.get("written") and payload.get("dry_run") is False and mutation_ref else ()
         side_effects = ()
         if payload.get("written") and payload.get("dry_run") is False:
-            side_effects = (
+            side_effects = tuple(
                 {
                     "kind": "file_write",
                     "operation": payload.get("operation") or call.tool_name,
-                    "path": payload.get("path") or "",
+                    "path": side_effect_path,
                     "mutation_ref": mutation_ref,
                     "diff_ref": source_diff_ref,
                     "snapshot_refs": dict(snapshot_refs),
@@ -401,7 +499,8 @@ class ImplementV2WriteRuntime:
                     "approval_id": payload.get("approval_id") or "",
                     "dry_run": payload.get("dry_run"),
                     "written": payload.get("written"),
-                },
+                }
+                for side_effect_path in _side_effect_paths_from_payload(payload)
             )
         return ToolResultEnvelope(
             lane_attempt_id=call.lane_attempt_id,
@@ -415,6 +514,14 @@ class ImplementV2WriteRuntime:
             evidence_refs=evidence_refs,
             side_effects=side_effects,
         )
+
+
+def _side_effect_paths_from_payload(payload: dict[str, object]) -> tuple[str, ...]:
+    explicit_paths = tuple(str(path) for path in payload.get("side_effect_paths") or () if str(path))
+    if explicit_paths:
+        return explicit_paths
+    path = str(payload.get("path") or "")
+    return (path,) if path else ()
 
 
 def _workspace_path(path: object, workspace: Path) -> Path:
@@ -774,11 +881,14 @@ def _write_payload(
     payload = dict(result)
     payload.setdefault("operation", call.tool_name)
     _attach_typed_source_mutation_payload(call, payload, artifact_dir=artifact_dir, workspace=workspace)
-    payload["mew_status"] = "completed"
-    payload["approval_status"] = str((approval or {}).get("status") or ("approved" if apply else "not_required_for_dry_run"))
-    payload["approval_source"] = str((approval or {}).get("source") or ("external_write_approval" if apply else ""))
-    payload["approval_id"] = str((approval or {}).get("approval_id") or "")
-    payload["apply_requested"] = bool(apply)
+    payload.setdefault("mew_status", "completed")
+    payload.setdefault(
+        "approval_status",
+        str((approval or {}).get("status") or ("approved" if apply else "not_required_for_dry_run")),
+    )
+    payload.setdefault("approval_source", str((approval or {}).get("source") or ("external_write_approval" if apply else "")))
+    payload.setdefault("approval_id", str((approval or {}).get("approval_id") or ""))
+    payload.setdefault("apply_requested", bool(apply))
     return payload
 
 
@@ -872,7 +982,8 @@ def _attach_typed_source_mutation_payload(
     path = str(payload.get("path") or "")
     operation = str(payload.get("operation") or call.tool_name)
     changed_path = _source_mutation_display_path(path, workspace=workspace)
-    changed_paths = [changed_path] if changed_path and bool(payload.get("changed")) else []
+    existing_changed_paths = [str(item) for item in payload.get("changed_paths") or () if str(item)]
+    changed_paths = existing_changed_paths or ([changed_path] if changed_path and bool(payload.get("changed")) else [])
     payload["changed_paths"] = list(changed_paths)
     route_ref_base = f"implement-v2-write://{call.lane_attempt_id}/{call.provider_call_id}"
     exact_diff_text = str(payload.pop("source_diff_text", "") or "")
@@ -1092,6 +1203,8 @@ def _patch_edit_arguments(args: dict[str, object]) -> dict[str, object]:
         raise ValueError("apply_patch requires patch text; path/edits structured bypass is not accepted in implement_v2")
     parsed = _parse_minimal_apply_patch(patch_text)
     explicit_path = str(args.get("path") or "").strip()
+    if explicit_path and str(parsed.get("operation") or "") == "multi_file":
+        raise ValueError("apply_patch path argument is not accepted for multi-file patches")
     if explicit_path and explicit_path != str(parsed.get("path") or "").strip():
         raise ValueError("apply_patch path argument must match patch update file")
     return parsed
@@ -1128,7 +1241,7 @@ def _patch_transport_metadata(args: dict[str, object], *, patch_args: dict[str, 
         "transport": transport,
         "operation": "apply_patch",
         "patch_operation": str(patch_args.get("operation") or ""),
-        "paths": [str(patch_args.get("path") or "")],
+        "paths": _patch_transport_paths(patch_args),
         "hash": digest,
         "sha256": digest,
         "line_count": len(patch_text.splitlines()),
@@ -1176,6 +1289,7 @@ def _parse_minimal_apply_patch(patch_text: str) -> dict[str, object]:
     new_parts: list[str] = []
     edits: list[dict[str, str]] = []
     saw_change = False
+    operations: list[dict[str, object]] = []
 
     def flush_edit() -> None:
         if not old_parts and not new_parts:
@@ -1190,28 +1304,67 @@ def _parse_minimal_apply_patch(patch_text: str) -> dict[str, object]:
         old_parts.clear()
         new_parts.clear()
 
+    def finish_file() -> None:
+        nonlocal path, operation, add_parts, edits, saw_change
+        if not path:
+            return
+        flush_edit()
+        if not saw_change:
+            raise ValueError("apply_patch contains no changes")
+        if operation == "add_file":
+            operations.append(
+                {
+                    "path": path,
+                    "operation": operation,
+                    "content": "".join(add_parts),
+                    "format": "add_file_patch_v0",
+                }
+            )
+        elif operation == "delete_file":
+            operations.append(
+                {
+                    "path": path,
+                    "operation": operation,
+                    "format": "delete_file_patch_v0",
+                }
+            )
+        else:
+            if not edits:
+                raise ValueError("apply_patch contains no exact anchored edit hunks")
+            operations.append(
+                {
+                    "path": path,
+                    "operation": operation or "update_file",
+                    "edits": list(edits),
+                    "format": "exact_update_patch_v0",
+                }
+            )
+        path = ""
+        operation = ""
+        add_parts = []
+        edits = []
+        saw_change = False
+
     for raw_line in lines[1:-1]:
         stripped = raw_line.strip()
-        if stripped.startswith("*** Add File:"):
-            if path:
-                raise ValueError("minimal apply_patch v0 supports exactly one file")
-            path = stripped.split(":", 1)[1].strip()
+        header = raw_line.rstrip("\r\n")
+        if header.startswith("*** Add File:"):
+            finish_file()
+            path = header.split(":", 1)[1].strip()
             operation = "add_file"
             continue
-        if stripped.startswith("*** Delete File:"):
-            if path:
-                raise ValueError("minimal apply_patch v0 supports exactly one file")
-            path = stripped.split(":", 1)[1].strip()
+        if header.startswith("*** Delete File:"):
+            finish_file()
+            path = header.split(":", 1)[1].strip()
             operation = "delete_file"
             saw_change = True
             continue
-        if stripped.startswith("*** Update File:"):
-            if path:
-                raise ValueError("minimal apply_patch v0 supports exactly one file")
-            path = stripped.split(":", 1)[1].strip()
+        if header.startswith("*** Update File:"):
+            finish_file()
+            path = header.split(":", 1)[1].strip()
             operation = "update_file"
             continue
-        if stripped.startswith("@@"):
+        if header.startswith("@@"):
             if operation != "update_file":
                 raise ValueError("apply_patch @@ hunks are only valid for update-file patches")
             flush_edit()
@@ -1241,31 +1394,137 @@ def _parse_minimal_apply_patch(patch_text: str) -> dict[str, object]:
             new_parts.append(text)
         elif stripped:
             raise ValueError(f"unsupported apply_patch hunk line: {stripped}")
-    flush_edit()
-    if not path:
+    finish_file()
+    if not operations:
         raise ValueError("apply_patch file header is required")
-    if not saw_change:
-        raise ValueError("apply_patch contains no changes")
-    if operation == "add_file":
-        return {
-            "path": path,
-            "operation": operation,
-            "content": "".join(add_parts),
-            "format": "add_file_patch_v0",
-        }
-    if operation == "delete_file":
-        return {
-            "path": path,
-            "operation": operation,
-            "format": "delete_file_patch_v0",
-        }
-    if not edits:
-        raise ValueError("apply_patch contains no exact anchored edit hunks")
+    if len(operations) == 1:
+        return operations[0]
     return {
-        "path": path,
-        "operation": operation or "update_file",
-        "edits": edits,
-        "format": "exact_update_patch_v0",
+        "path": "",
+        "operation": "multi_file",
+        "operations": operations,
+        "format": "multi_file_patch_v1",
+    }
+
+
+def _patch_operations(patch_args: dict[str, object]) -> list[dict[str, object]]:
+    if str(patch_args.get("operation") or "") == "multi_file":
+        operations = patch_args.get("operations")
+        if not isinstance(operations, list) or not operations:
+            raise ValueError("apply_patch multi-file patch requires at least one file operation")
+        return [dict(operation) for operation in operations if isinstance(operation, dict)]
+    return [patch_args]
+
+
+def _conflicting_multi_file_patch_path(
+    candidate: Path,
+    existing_paths: set[Path],
+    *,
+    existing_keys: set[str],
+) -> Path | None:
+    candidate_key = _multi_file_path_conflict_key(candidate)
+    for existing_key in existing_keys:
+        if (
+            candidate_key == existing_key
+            or candidate_key.startswith(existing_key + "/")
+            or existing_key.startswith(candidate_key + "/")
+        ):
+            return candidate
+    for existing in existing_paths:
+        if (
+            candidate == existing
+            or _paths_are_same_existing_file(candidate, existing)
+            or candidate.is_relative_to(existing)
+            or existing.is_relative_to(candidate)
+        ):
+            return existing
+    return None
+
+
+def _multi_file_path_conflict_key(path: Path) -> str:
+    return unicodedata.normalize("NFC", path.as_posix().rstrip("/")).casefold()
+
+
+def _existing_file_valued_parent(path: Path) -> Path | None:
+    for parent in path.parents:
+        if parent == parent.parent:
+            break
+        if parent.exists() and not parent.is_dir():
+            return parent
+    return None
+
+
+def _paths_are_same_existing_file(left: Path, right: Path) -> bool:
+    try:
+        return left.exists() and right.exists() and left.samefile(right)
+    except OSError:
+        return False
+
+
+def _patch_transport_paths(patch_args: dict[str, object]) -> list[str]:
+    if str(patch_args.get("operation") or "") != "multi_file":
+        return [str(patch_args.get("path") or "")]
+    return [str(operation.get("path") or "") for operation in _patch_operations(patch_args)]
+
+
+def _aggregate_apply_patch_results(
+    patch_args: dict[str, object],
+    args: dict[str, object],
+    *,
+    operation_results: list[dict[str, object]],
+    dry_run_results: list[dict[str, object]],
+    workspace: Path,
+) -> dict[str, object]:
+    changed_paths = [
+        _source_mutation_display_path(str(result.get("path") or ""), workspace=workspace)
+        for result in operation_results
+        if bool(result.get("changed"))
+    ]
+    changed_paths = [path for path in changed_paths if path]
+    diff_stats = {"added": 0, "removed": 0}
+    source_diff_parts: list[str] = []
+    patch_results: list[dict[str, object]] = []
+    for result in operation_results:
+        stats = result.get("diff_stats") if isinstance(result.get("diff_stats"), dict) else {}
+        diff_stats["added"] += int(stats.get("added") or 0)
+        diff_stats["removed"] += int(stats.get("removed") or 0)
+        source_diff = str(result.get("source_diff_text") or "")
+        if source_diff:
+            source_diff_parts.append(source_diff)
+        patch_results.append(
+            {
+                "path": str(result.get("path") or ""),
+                "operation": str(result.get("operation") or ""),
+                "changed": bool(result.get("changed")),
+                "written": bool(result.get("written")),
+                "dry_run": bool(result.get("dry_run")),
+                "diff_stats": dict(stats),
+            }
+        )
+    source_diff_text = (
+        "\n".join(part.rstrip("\n") for part in source_diff_parts if part).strip() + "\n" if source_diff_parts else ""
+    )
+    return {
+        "operation": "apply_patch",
+        "path": "",
+        "patch_operation": "multi_file",
+        "patch_format": str(patch_args.get("format") or "multi_file_patch_v1"),
+        "changed": any(bool(result.get("changed")) for result in operation_results),
+        "written": any(bool(result.get("written")) for result in operation_results),
+        "dry_run": all(bool(result.get("dry_run")) for result in operation_results),
+        "changed_paths": changed_paths,
+        "side_effect_paths": [str(result.get("path") or "") for result in operation_results if bool(result.get("written"))],
+        "patch_file_count": len(operation_results),
+        "patch_results": patch_results,
+        "dry_run_verified": bool(dry_run_results),
+        "source_diff_text": source_diff_text,
+        "source_diff_sha256": hashlib.sha256(source_diff_text.encode("utf-8")).hexdigest() if source_diff_text else "",
+        "source_diff_size": len(source_diff_text),
+        "source_diff_line_count": len(source_diff_text.splitlines()),
+        "source_diff_inline_exact": False,
+        "diff": "",
+        "diff_sha256": hashlib.sha256(_patch_text_from_arguments(args).encode("utf-8")).hexdigest(),
+        "diff_stats": diff_stats,
     }
 
 

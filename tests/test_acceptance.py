@@ -993,6 +993,54 @@ def test_resolve_typed_finish_accepts_command_run_id_alias_for_covering_events()
     assert decision.decision == "allow_complete"
 
 
+def test_resolve_typed_finish_accepts_provider_call_alias_embedded_in_command_run_id():
+    command_run_id = "1:1:implement_v2:native:command:call_FinalVerifier-344e5304"
+    bundle = OracleBundle(
+        id="oracle:bundle:runtime-frame",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="execution_contract",
+            ),
+            OracleObligation(
+                id="oracle:contract:verify:verifier_pass",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="execution_contract",
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.bmp"},
+        contract_id="contract:verify",
+        command_run_id=command_run_id,
+    )
+    verifier_event = EvidenceEvent(
+        id="ev:verifier:final",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:verify"},
+        contract_id="contract:verify",
+        command_run_id=command_run_id,
+    )
+
+    decision = resolve_typed_finish(
+        {"outcome": "completed", "evidence_refs": ["call_FinalVerifier"]},
+        bundle,
+        (artifact_event, verifier_event),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
 def test_finish_continuation_prompt_points_visual_quality_to_task_verifiers():
     prompt = finish_continuation_prompt(
         [

@@ -1505,6 +1505,8 @@ def _finish_ref_aliases_for_event(event: EvidenceEvent) -> tuple[str, ...]:
         alias = _safe_finish_ref_alias(value)
         if alias:
             aliases.append(alias)
+    for alias in _provider_call_aliases_from_command_run_id(event.command_run_id):
+        aliases.append(alias)
     for ref in event.refs:
         if not isinstance(ref, Mapping):
             continue
@@ -1529,6 +1531,23 @@ def _safe_finish_ref_alias(value: object) -> str:
     if not any(char in alias for char in (":", "/", "-", "_")):
         return ""
     return alias
+
+
+def _provider_call_aliases_from_command_run_id(command_run_id: object) -> tuple[str, ...]:
+    text = str(command_run_id or "").strip()
+    if not text:
+        return ()
+    if ":command:" in text:
+        tail = text.rsplit(":command:", 1)[1]
+    elif text.startswith("command:"):
+        tail = text.split("command:", 1)[1]
+    else:
+        return ()
+    aliases = [tail]
+    prefix, separator, suffix = tail.rpartition("-")
+    if separator and prefix and len(suffix) >= 8 and all(char in "0123456789abcdefABCDEF" for char in suffix):
+        aliases.append(prefix)
+    return tuple(dict.fromkeys(alias for alias in aliases if _safe_finish_ref_alias(alias)))
 
 
 def recommend_finish_evidence_refs(

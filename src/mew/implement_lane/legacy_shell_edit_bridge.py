@@ -261,13 +261,28 @@ def _match_shell_invoked_apply_patch(
     return _bridge_match(arguments, str(match.group("body") or ""), reason="quoted_apply_patch_heredoc")
 
 
-def _bridge_match(arguments: dict[str, object], patch_text: str, *, reason: str) -> LegacyShellEditBridgeMatch:
+def _bridge_match(arguments: dict[str, object], patch_text: str, *, reason: str) -> LegacyShellEditBridgeMatch | None:
+    if _patch_target_header_count(patch_text) != 1:
+        return None
     return LegacyShellEditBridgeMatch(
         bridge_id=SHELL_INVOKED_APPLY_PATCH_BRIDGE_ID,
         effective_tool="apply_patch",
         arguments={"patch": patch_text, "apply": True, "dry_run": False},
         command_classification=_bridge_simple_classification(arguments, reason=reason),
     )
+
+
+def _patch_target_header_count(patch_text: str) -> int:
+    count = 0
+    for line in str(patch_text or "").splitlines():
+        header = line.rstrip("\r\n")
+        if (
+            header.startswith("*** Add File:")
+            or header.startswith("*** Update File:")
+            or header.startswith("*** Delete File:")
+        ):
+            count += 1
+    return count
 
 
 def _patch_text_from_legacy_arguments(arguments: dict[str, object]) -> str:
