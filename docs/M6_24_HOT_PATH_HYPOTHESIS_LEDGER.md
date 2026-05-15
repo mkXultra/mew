@@ -104,7 +104,7 @@ tuning before a minimal H10 change is designed and measured.
 | H1 | Provider-visible task shape is wrong: mew leads with sidecar/task JSON rather than a plain task. | Make the hot-path first visible content environment context plus plain user task; move sidecar/task facts out of the leading position. | Earlier target-path mutation; fewer prewrite probes; no native rebuild branch before `vm.js`. | measured partial keep | Task-first shape is present and first mutation now appears, but still too late: mew step 45 after 43 probes vs Codex step 25 after 24 probes |
 | H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | pending observability | TBD |
 | H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | observability first | TBD |
-| H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | pending observability | TBD |
+| H4 | Tool-result rendering adds salience noise. | Render completed/failed command outputs closer to Codex freeform apply_patch shell output: `Exit code`, `Wall time`, optional `Total output lines`, `Output`; keep nonterminal session ids for polling. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | implemented pending live diagnostic | Focused tests, fake-native smoke, and codex-ultra review pass; next run one bounded 10 minute diagnostic |
 | H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | observability first | TBD |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | measured hygiene keep | Sidecar visibility was fixed, but first mutation did not move closer to Codex; move to H4 tool-result rendering rather than revising H7 |
@@ -483,6 +483,75 @@ Focused validation before live diagnostic:
   `tmp/m6_24_h7_provider_visible_salience.md` and
   `tmp/m6_24_h7_step_diff.md`.
 
+### EXP-20260515-6: H4 Codex-Like Command Result Rendering
+
+Hypothesis:
+Completed command outputs still carry mew-specific salience (`Chunk ID`,
+`Process exited`, `Original token count`, `stdout:` / `stderr:` labels) even
+after H1/H7 removed larger provider-visible scaffolding. Codex's freeform
+`apply_patch` path reserializes shell output as concise `Exit code`, `Wall
+time`, optional `Total output lines`, and `Output`, so matching that shape may
+make probe facts easier to convert into a patch.
+
+Change:
+For `codex_hot_path`, completed and failed command-family outputs now render as:
+
+```text
+Exit code: <n>
+Wall time: <seconds> seconds
+Output:
+<combined output>
+```
+
+If the output begins with `Total output lines: N`, the renderer lifts that line
+into its own header like Codex. Aggregated output takes precedence over
+separate stdout/stderr streams to avoid duplicate model-visible content.
+Nonterminal/yielded command outputs intentionally keep `Process running with
+session ID ...` so the model can still poll with `write_stdin`.
+
+Reference artifacts:
+Use the same Codex and Claude Code references as H0/H10/H1/H7.
+
+Mew artifact:
+Pending live diagnostic. Fake-native smoke artifact:
+`tmp/m6_24_h4_renderer_smoke/candidate-codex-hot-path`
+
+Expected signal:
+Provider-visible command outputs should no longer include `Chunk ID`, `Original
+token count`, or stream labels for completed/failed commands. The live 10
+minute diagnostic should preserve the same evidence but reduce repeated
+pre-mutation probe families and move first mutation closer to Codex.
+
+Observed signal:
+Fake-native smoke only:
+
+- candidate command output is now:
+  `Exit code: 0`, `Wall time: ... seconds`, `Output:`, raw output text;
+- no `Chunk ID`, `Original token count`, `stdout:`, or `stderr:` labels on
+  completed/failed command output;
+- nonterminal session-id behavior is covered by focused tests, not by this
+  smoke.
+
+Decision:
+Pending live diagnostic. This is an isolated H4 renderer-only behavior change.
+Do not combine it with tool wording, `next_action`, WorkFrame steering, time
+pressure, probe thresholds, or output-cap changes. If H4 does not improve step
+shape, use the H4 artifact to decide whether H2 base instructions or H5 output
+compaction is the next isolated hypothesis.
+
+Notes:
+Focused validation before live diagnostic:
+
+- `uv run pytest --no-testmon tests/test_tool_result_renderer.py tests/test_native_tool_harness.py -q`
+  passed with 138 tests.
+- `uv run ruff check src/mew/implement_lane/tool_result_renderer.py tests/test_tool_result_renderer.py tests/test_native_tool_harness.py`
+  passed.
+- `git diff --check` passed.
+- `uv run python scripts/run_tool_surface_ab_smoke.py --output-root tmp/m6_24_h4_renderer_smoke --json`
+  produced a comparable fake-native artifact.
+- codex-ultra reviewer session `019e28ef-4818-7323-87c7-702e6c3b6654`
+  returned `STATUS: APPROVE` after re-review.
+
 ## Stop Conditions
 
 Stop polishing a hypothesis and escalate when:
@@ -511,7 +580,8 @@ Follow this execution order. Do not reorder it after context compression:
 6. H7 is implemented, reviewed, committed, and measured. Keep it as resident
    hygiene because provider-visible `compact_sidecar_digest` is now absent and
    replay still works, but do not count it as closing the Codex step gap.
-7. Next isolated experiment: H4 tool-result rendering / output salience. Use
-   the H7 live artifact plus the Codex reference to identify the smallest
-   renderer change. Do not tune `apply_patch`, add next-action steering,
-   restore WorkFrame steering, or add probe thresholds in the H4 experiment.
+7. H4 renderer-only change is implemented and reviewed. Next action: commit
+   H4, then run one bounded live 10 minute diagnostic and analyze the fresh
+   artifact with the same provider-visible salience and Codex step-diff tools.
+   Do not tune `apply_patch`, add next-action steering, restore WorkFrame
+   steering, add time pressure, or add probe thresholds in the H4 experiment.
