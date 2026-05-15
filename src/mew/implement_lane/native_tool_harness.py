@@ -472,6 +472,8 @@ def run_native_implement_v2(
     active_command_closeout_provider_call_id = ""
     finish_gate_block_count = 0
     finish_gate_decision: dict[str, object] = {}
+    no_tool_continuation_count = 0
+    latest_no_tool_continuation: dict[str, object] = {}
     resolver_decisions: list[CompletionResolverDecision] = []
     native_model_budget_block: dict[str, object] | None = None
     start_monotonic = time.monotonic()
@@ -604,6 +606,25 @@ def run_native_implement_v2(
             (item for item in turn_items if item.kind in CALL_ITEM_KINDS),
             key=lambda item: (item.output_index, item.sequence),
         )
+        if not calls and _native_turn_has_assistant_message(turn_items):
+            continuation = _native_no_tool_continuation_item(
+                turn_items,
+                lane_attempt_id=lane_attempt_id,
+                provider=provider.provider,
+                model=provider.model,
+                turn_index=turn_index,
+                sequence=len(items) + 1,
+                latest_resolver_decision=resolver_decisions[-1] if resolver_decisions else None,
+            )
+            items.append(continuation)
+            no_tool_continuation_count += 1
+            latest_no_tool_continuation = {
+                "turn_index": turn_index,
+                "assistant_text": _native_first_assistant_text(turn_items),
+                "continuation": continuation.output_text_or_ref,
+            }
+            finish_summary = finish_summary or "native model returned assistant text without a tool call; continuation requested"
+            continue
         accepted_finish: NativeTranscriptItem | None = None
         terminal_blocked_finish: NativeTranscriptItem | None = None
         output_records: list[NativeTranscriptItem] = []
@@ -774,6 +795,8 @@ def run_native_implement_v2(
         "active_command_closeout_provider_call_id": active_command_closeout_provider_call_id,
         "finish_gate_block_count": finish_gate_block_count,
         "finish_gate_decision": finish_gate_decision,
+        "no_tool_continuation_count": no_tool_continuation_count,
+        "latest_no_tool_continuation": latest_no_tool_continuation,
         "completion_resolver_decision_count": len(resolver_decisions),
         "completion_resolver_latest_decision": resolver_decisions[-1].as_dict() if resolver_decisions else {},
         "pairing": validation.as_dict(),
@@ -4043,6 +4066,56 @@ def _native_output_status(call: NativeTranscriptItem, result: ToolResultEnvelope
         }:
             return "blocked"
     return result.status
+
+
+def _native_turn_has_assistant_message(items: tuple[NativeTranscriptItem, ...]) -> bool:
+    return any(item.kind == "assistant_message" and item.output_text_or_ref.strip() for item in items)
+
+
+def _native_no_tool_continuation_item(
+    items: tuple[NativeTranscriptItem, ...],
+    *,
+    lane_attempt_id: str,
+    provider: str,
+    model: str,
+    turn_index: int,
+    sequence: int,
+    latest_resolver_decision: CompletionResolverDecision | None,
+) -> NativeTranscriptItem:
+    lines = [
+        "Continue with native tool calls.",
+        "Assistant text is not a completion signal for this implement_v2 lane.",
+        "If the task is complete, call finish with fresh verifier/artifact evidence.",
+        "If it is not complete, call a tool to verify or repair from the latest concrete result.",
+    ]
+    if latest_resolver_decision is not None and latest_resolver_decision.lane_status == "blocked_continue":
+        blockers = _bounded_finish_block_items(latest_resolver_decision.blockers, limit=4)
+        missing = _bounded_finish_block_items(
+            (_compact_finish_missing_obligation(item) for item in latest_resolver_decision.missing_obligations),
+            limit=6,
+        )
+        lines.append(f"Previous finish was blocked: {_finish_block_headline(blockers, missing)}.")
+        if missing:
+            lines.append("Missing evidence: " + ", ".join(missing) + ".")
+    assistant_text = _native_first_assistant_text(items)
+    if assistant_text:
+        lines.append(f"Last assistant text was not accepted as completion: {assistant_text}")
+    return NativeTranscriptItem(
+        sequence=sequence,
+        turn_id=f"turn-{turn_index}-continuation",
+        kind="input_message",
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        model=model,
+        output_text_or_ref="\n".join(lines),
+    )
+
+
+def _native_first_assistant_text(items: tuple[NativeTranscriptItem, ...]) -> str:
+    for item in items:
+        if item.kind == "assistant_message":
+            return _finish_block_clip(item.output_text_or_ref, limit=160)
+    return ""
 
 
 def _call_order_key(call: NativeTranscriptItem) -> tuple[int, int]:

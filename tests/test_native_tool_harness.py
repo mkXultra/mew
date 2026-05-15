@@ -2073,6 +2073,145 @@ def test_native_harness_model_json_text_is_not_control(tmp_path: Path) -> None:
     assert result.status == "completed"
 
 
+def test_native_harness_assistant_only_turn_gets_tool_continuation(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [fake_message("Done.", item_id="msg-done")],
+            [fake_finish("finish-after-continuation", {"outcome": "completed", "summary": "done"})],
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    assert result.status == "completed"
+    assert result.metrics["no_tool_continuation_count"] == 1
+    continuation = result.metrics["latest_no_tool_continuation"]["continuation"]
+    assert "Assistant text is not a completion signal" in continuation
+    assert "call finish with fresh verifier/artifact evidence" in continuation
+    assert "Done." in continuation
+    assert provider.requests[1]["input_items"][-1]["content"][0]["text"] == continuation
+    assert [item.kind for item in result.transcript.items[:2]] == ["assistant_message", "input_message"]
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_assistant_only_turn_after_blocked_finish_carries_missing_evidence(tmp_path: Path) -> None:
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "description": "The output should include hello.",
+            "acceptance_constraints": ["The output should include hello."],
+        },
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [fake_finish("finish-blocked", {"outcome": "completed", "summary": "done"})],
+            [fake_message("Done.", item_id="msg-done")],
+        ]
+    )
+
+    result = run_native_implement_v2(lane_input, provider=provider, max_turns=2)
+
+    assert result.status == "blocked"
+    assert result.metrics["no_tool_continuation_count"] == 1
+    continuation = result.metrics["latest_no_tool_continuation"]["continuation"]
+    assert "Previous finish was blocked" in continuation
+    assert "Missing evidence:" in continuation
+    assert "Done." in continuation
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_live_native_assistant_only_turn_sends_continuation_as_previous_response_delta(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    assistant_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+            items=(
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-1",
+                    lane_attempt_id="ws-native:task-native:implement_v2:native",
+                    provider="openai",
+                    model="gpt-5.5",
+                    response_id="resp-1",
+                    provider_item_id="msg-done",
+                    output_index=0,
+                    kind="assistant_message",
+                    output_text_or_ref="Done.",
+                ),
+            ),
+        ),
+        response_id="resp-1",
+        status="completed",
+    )
+    finish_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+            items=(
+                NativeTranscriptItem(
+                    sequence=1,
+                    turn_id="turn-2",
+                    lane_attempt_id="ws-native:task-native:implement_v2:native",
+                    provider="openai",
+                    model="gpt-5.5",
+                    response_id="resp-2",
+                    provider_item_id="item-finish",
+                    output_index=0,
+                    kind="finish_call",
+                    call_id="finish-live",
+                    tool_name="finish",
+                    arguments_json_text='{"outcome":"completed","summary":"done"}',
+                ),
+            ),
+        ),
+        response_id="resp-2",
+        status="completed",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
+        side_effect=[assistant_turn, finish_turn],
+    ) as call:
+        result = run_live_native_implement_v2(
+            _lane_input(tmp_path, artifact_dir=str(artifact_root)),
+            model_auth={"access_token": "x"},
+            base_url="https://example.invalid",
+            timeout=3,
+            max_turns=2,
+        )
+
+    assert result.status == "completed"
+    assert result.metrics["no_tool_continuation_count"] == 1
+    second_descriptor = call.call_args_list[1].kwargs["descriptor"]
+    second_request = second_descriptor["request_body"]
+    assert second_request["previous_response_id"] == "resp-1"
+    assert second_descriptor["previous_response_delta_mode"] == "delta"
+    assert second_descriptor["wire_input_item_count"] == 1
+    assert len(second_request["input"]) == 1
+    continuation = second_request["input"][0]
+    assert continuation["role"] == "user"
+    continuation_text = continuation["content"][0]["text"]
+    assert "Assistant text is not a completion signal" in continuation_text
+    assert "call finish with fresh verifier/artifact evidence" in continuation_text
+    assert "Done." in continuation_text
+    transcript_payload = json.loads((artifact_root / "response_transcript.json").read_text(encoding="utf-8"))
+    transcript = NativeTranscript(
+        lane_attempt_id=str(transcript_payload["lane_attempt_id"]),
+        provider=str(transcript_payload["provider"]),
+        model=str(transcript_payload["model"]),
+        items=tuple(_native_item_from_payload(item) for item in transcript_payload["items"]),
+    )
+    assert [item.kind for item in transcript.items[:3]] == [
+        "assistant_message",
+        "input_message",
+        "finish_call",
+    ]
+    assert validate_native_transcript_pairing(transcript).valid is True
+
+
 def test_phase3_surface_declares_transport_change_yes() -> None:
     assert PHASE3_NATIVE_SURFACE["transport_change"] == "yes"
     assert PHASE3_NATIVE_SURFACE["transport_kind"] == "fake_native"
