@@ -13,6 +13,7 @@ from mew.mew_harbor_runner import (
     combine_work_guidance,
     collect_mew_trial_summary,
     command_cwd_for_task,
+    debug_cleanup_specs_for_task,
     extract_harbor_reward,
     make_jobs_dir,
     observer_detail_missing,
@@ -56,6 +57,16 @@ def test_mew_command_template_enables_implement_v2_and_observer_detail(tmp_path)
     assert "{max_wall_seconds_option}" in template
     assert "--report {report_path}" in template
     assert "--artifacts {artifact_dir}" in template
+
+
+def test_mew_command_template_adds_make_mips_debug_cleanup_only(tmp_path):
+    make_mips_template = build_mew_work_command_template(_config(tmp_path, task_name="make-mips-interpreter"))
+    prove_template = build_mew_work_command_template(_config(tmp_path, task_name="prove-plus-comm"))
+
+    assert "--debug-cleanup '/tmp/frame*.bmp'" in make_mips_template
+    assert "--debug-cleanup" not in prove_template
+    assert debug_cleanup_specs_for_task("terminal-bench/make-mips-interpreter") == ("/tmp/frame*.bmp",)
+    assert debug_cleanup_specs_for_task("prove-plus-comm") == ()
 
 
 def test_run_mode_defaults_have_diagnostic_step_budgets():

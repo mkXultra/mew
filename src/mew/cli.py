@@ -1355,6 +1355,15 @@ def build_parser():
     work_parser.add_argument("--title", default="One-shot mew work task", help="task title for --oneshot")
     work_parser.add_argument("--report", help="write a JSON report for --oneshot")
     work_parser.add_argument("--artifacts", help="artifact directory recorded in the --oneshot report")
+    work_parser.add_argument(
+        "--debug-cleanup",
+        action="append",
+        default=[],
+        help=(
+            "for --oneshot --defer-verify diagnostics, unlink files matching a safe /tmp glob "
+            "before handing off to an external verifier; repeatable"
+        ),
+    )
     work_parser.add_argument("--stop-session", action="store_true", help="request the active native work loop to stop at the next boundary")
     work_parser.add_argument("--stop-reason", help="reason recorded with --stop-session")
     work_parser.add_argument(

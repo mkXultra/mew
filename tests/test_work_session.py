@@ -9913,6 +9913,117 @@ class WorkSessionTests(unittest.TestCase):
         finally:
             frame_path.unlink(missing_ok=True)
 
+    def test_work_oneshot_debug_cleanup_removes_safe_tmp_glob_when_deferred(self):
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="mew-debug-cleanup-") as tmp:
+            root = Path(tmp)
+            frame_a = root / "frame.bmp"
+            frame_b = root / "frame_000000.bmp"
+            keep = root / "keep.txt"
+            frame_a.write_bytes(b"stale-a")
+            frame_b.write_bytes(b"stale-b")
+            keep.write_text("keep", encoding="utf-8")
+            args = SimpleNamespace(defer_verify=True, debug_cleanup=[f"{root}/frame*.bmp"])
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["debug_cleanup_specs"][0]["status"], "matched")
+            self.assertEqual(cleanup["debug_cleanup_specs"][0]["match_count"], 2)
+            self.assertEqual(
+                sorted(item["artifact"] for item in cleanup["artifacts"]),
+                sorted([str(frame_a), str(frame_b)]),
+            )
+            self.assertTrue(all(item["source"] == "debug_cleanup" for item in cleanup["artifacts"]))
+            self.assertFalse(frame_a.exists())
+            self.assertFalse(frame_b.exists())
+            self.assertTrue(keep.exists())
+
+    def test_work_oneshot_debug_cleanup_rejects_unsafe_specs(self):
+        args = SimpleNamespace(
+            defer_verify=True,
+            debug_cleanup=[
+                "/tmp",
+                "/tmp/",
+                "/tmp//mew-frame.bmp",
+                "/var/tmp/mew-frame.bmp",
+                "/tmp/../tmp/mew-frame.bmp",
+                "/tmp/**/frame.bmp",
+            ],
+        )
+
+        cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+        self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+        self.assertEqual(cleanup["artifacts"], [])
+        self.assertEqual({item["status"] for item in cleanup["debug_cleanup_specs"]}, {"rejected"})
+        reasons = " ".join(item["reason"] for item in cleanup["debug_cleanup_specs"])
+        self.assertIn("refuses the /tmp directory itself", reasons)
+        self.assertIn("malformed /tmp// paths", reasons)
+        self.assertIn("only accepts /tmp/ paths", reasons)
+        self.assertIn("parent path segments", reasons)
+        self.assertIn("recursive glob", reasons)
+
+    def test_work_oneshot_debug_cleanup_rejects_directory_match_and_symlink_escape(self):
+        outside_root = Path.cwd().resolve()
+        if str(outside_root).startswith("/tmp/"):
+            self.skipTest("repository cwd is under /tmp; cannot build a stable symlink-escape target")
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="mew-debug-cleanup-") as tmp, tempfile.TemporaryDirectory(
+            dir=outside_root,
+            prefix=".mew-debug-cleanup-outside-",
+        ) as outside_tmp:
+            root = Path(tmp)
+            inner_dir = root / "frame-dir.bmp"
+            inner_dir.mkdir()
+            outside = Path(outside_tmp) / "outside.txt"
+            outside.write_text("outside", encoding="utf-8")
+            escaped_link = root / "frame-escaped.bmp"
+            try:
+                escaped_link.symlink_to(outside)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
+            try:
+                args = SimpleNamespace(defer_verify=True, debug_cleanup=[f"{root}/frame-dir*", f"{root}/frame-escaped*"])
+
+                cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+                self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+                self.assertEqual(cleanup["artifacts"], [])
+                reasons = " ".join(item["reason"] for item in cleanup["debug_cleanup_specs"])
+                self.assertIn("refuses directory match", reasons)
+                self.assertIn("escaped /tmp", reasons)
+                self.assertTrue(inner_dir.exists())
+                self.assertTrue(escaped_link.exists())
+                self.assertTrue(outside.exists())
+            finally:
+                escaped_link.unlink(missing_ok=True)
+
+    def test_work_oneshot_debug_cleanup_rejects_empty_match(self):
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="mew-debug-cleanup-") as tmp:
+            args = SimpleNamespace(defer_verify=True, debug_cleanup=[f"{tmp}/missing*.bmp"])
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"], [])
+            self.assertEqual(cleanup["debug_cleanup_specs"][0]["status"], "rejected")
+            self.assertIn("no files matched", cleanup["debug_cleanup_specs"][0]["reason"])
+
+    def test_work_oneshot_debug_cleanup_skips_without_defer_verify(self):
+        with tempfile.NamedTemporaryFile(dir="/tmp", delete=False, prefix="mew-debug-cleanup-", suffix=".bmp") as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+        try:
+            args = SimpleNamespace(defer_verify=False, debug_cleanup=[str(frame_path)])
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"], [])
+            self.assertEqual(cleanup["debug_cleanup_specs"][0]["status"], "skipped")
+            self.assertTrue(frame_path.exists())
+        finally:
+            frame_path.unlink(missing_ok=True)
+
     def test_work_oneshot_cleanup_deferred_runtime_artifacts_uses_report_steps(self):
         with tempfile.NamedTemporaryFile(dir="/tmp", delete=False, prefix="mew-frame-", suffix=".bmp") as frame:
             frame.write(b"stale")

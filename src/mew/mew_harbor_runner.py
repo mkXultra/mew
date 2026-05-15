@@ -29,6 +29,9 @@ DEFAULT_COMMAND_CWD = "/app"
 TASK_COMMAND_CWD_BY_SLUG = {
     "prove-plus-comm": "/workspace",
 }
+TASK_DEBUG_CLEANUP_SPECS_BY_SLUG = {
+    "make-mips-interpreter": ("/tmp/frame*.bmp",),
+}
 RUN_MODES = ("step-check-10min", "speed-proof", "proof-5")
 _GUIDANCE_PAIR_PATTERN = re.compile(r"(?:^|\s)([A-Za-z0-9_.-]+)\s*=\s*([A-Za-z0-9_.-]+)")
 
@@ -245,6 +248,11 @@ def strip_tool_surface_profile_guidance(guidance: str) -> str:
 
 def build_mew_work_command_template(config: MewHarborRun) -> str:
     guidance = shlex.quote(work_guidance_with_workframe_variant(config.work_guidance, config.workframe_variant))
+    debug_cleanup = " ".join(
+        f"--debug-cleanup {shlex.quote(spec)}"
+        for spec in debug_cleanup_specs_for_task(config.task_name)
+    )
+    debug_cleanup_part = f"{debug_cleanup} " if debug_cleanup else ""
     return (
         "mew work --oneshot "
         "--instruction {instruction_shell} "
@@ -259,6 +267,7 @@ def build_mew_work_command_template(config: MewHarborRun) -> str:
         "--allow-verify "
         "--approval-mode accept-edits "
         "--defer-verify "
+        f"{debug_cleanup_part}"
         "--no-prompt-approval "
         f"--auth {DEFAULT_AUTH_CONTAINER_PATH} "
         "--model-backend codex "
@@ -271,6 +280,11 @@ def build_mew_work_command_template(config: MewHarborRun) -> str:
         "--artifacts {artifact_dir} "
         "--json"
     )
+
+
+def debug_cleanup_specs_for_task(task_name: str) -> tuple[str, ...]:
+    slug = str(task_name or "").removeprefix("terminal-bench/")
+    return TASK_DEBUG_CLEANUP_SPECS_BY_SLUG.get(slug, ())
 
 
 def build_mounts_json(config: MewHarborRun) -> str:

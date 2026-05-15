@@ -5016,8 +5016,119 @@ def _work_oneshot_runtime_artifact_risk_from_implement_v2_manifest(args, *, task
     }
 
 
+_WORK_ONESHOT_DEBUG_CLEANUP_MAX_MATCHES = 64
+
+
+def _work_oneshot_debug_cleanup_specs(args):
+    raw_specs = getattr(args, "debug_cleanup", []) or []
+    if isinstance(raw_specs, str):
+        raw_specs = [raw_specs]
+    return [str(spec or "").strip() for spec in raw_specs if str(spec or "").strip()]
+
+
+def _work_oneshot_debug_cleanup_matches(spec):
+    spec = str(spec or "").strip()
+    if not spec:
+        return [], "empty cleanup spec"
+    if not spec.startswith("/tmp/"):
+        return [], "debug cleanup only accepts /tmp/ paths"
+    if spec in {"/tmp", "/tmp/"}:
+        return [], "debug cleanup refuses the /tmp directory itself"
+    relative = spec[len("/tmp/") :]
+    if not relative or relative == ".":
+        return [], "debug cleanup refuses the /tmp directory itself"
+    if relative.startswith("/"):
+        return [], "debug cleanup refuses malformed /tmp// paths"
+    parts = Path(relative).parts
+    if any(part in {"", ".", ".."} for part in parts):
+        return [], "debug cleanup refuses empty, current, or parent path segments"
+    if "**" in parts:
+        return [], "debug cleanup refuses recursive glob patterns"
+    tmp_root = Path("/tmp").resolve(strict=False)
+    try:
+        matches = sorted(Path("/tmp").glob(relative))
+    except (NotImplementedError, ValueError) as exc:
+        return [], f"debug cleanup rejected invalid glob pattern: {exc}"
+    if not matches:
+        return [], "no files matched debug cleanup spec"
+    if len(matches) > _WORK_ONESHOT_DEBUG_CLEANUP_MAX_MATCHES:
+        return [], (
+            "debug cleanup matched too many files "
+            f"({len(matches)} > {_WORK_ONESHOT_DEBUG_CLEANUP_MAX_MATCHES})"
+        )
+    safe_matches = []
+    for match in matches:
+        try:
+            resolved = match.resolve(strict=False)
+        except OSError:
+            resolved = match
+        if resolved != tmp_root and tmp_root not in resolved.parents:
+            return [], f"debug cleanup match escaped /tmp: {match}"
+        if match.is_dir():
+            return [], f"debug cleanup refuses directory match: {match}"
+        safe_matches.append(match)
+    return safe_matches, ""
+
+
+def _work_oneshot_debug_cleanup_records(args):
+    specs = _work_oneshot_debug_cleanup_specs(args)
+    if not specs:
+        return [], []
+    if not getattr(args, "defer_verify", False):
+        return [], [
+            {
+                "spec": spec,
+                "status": "skipped",
+                "reason": "--debug-cleanup only runs with --defer-verify",
+            }
+            for spec in specs
+        ]
+    artifacts = []
+    spec_records = []
+    seen = set()
+    for spec in specs:
+        matches, error = _work_oneshot_debug_cleanup_matches(spec)
+        if error:
+            spec_records.append({"spec": spec, "status": "rejected", "reason": error})
+            continue
+        spec_records.append(
+            {
+                "spec": spec,
+                "status": "matched",
+                "match_count": len(matches),
+            }
+        )
+        for path in matches:
+            artifact = str(path)
+            if artifact in seen:
+                continue
+            seen.add(artifact)
+            record = {
+                "artifact": artifact,
+                "source": "debug_cleanup",
+                "spec": spec,
+                "status": "",
+            }
+            try:
+                path.unlink(missing_ok=True)
+                record["status"] = "removed"
+            except OSError as exc:
+                record["status"] = "error"
+                record["error"] = str(exc)
+            artifacts.append(record)
+    return artifacts, spec_records
+
+
 def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume, *, task=None, work_report=None):
     if not getattr(args, "defer_verify", False):
+        debug_artifacts, debug_specs = _work_oneshot_debug_cleanup_records(args)
+        if debug_artifacts or debug_specs:
+            return {
+                "kind": "deferred_verify_runtime_artifact_cleanup",
+                "artifacts": debug_artifacts,
+                "debug_cleanup_specs": debug_specs,
+                "reason": "--debug-cleanup is diagnostic-only and requires --defer-verify",
+            }
         return {}
     risk = (resume or {}).get("stale_runtime_artifact_risk") or {}
     if not risk:
@@ -5043,9 +5154,11 @@ def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume, *, task=None,
             record["status"] = "error"
             record["error"] = str(exc)
         artifacts.append(record)
-    if not artifacts:
+    debug_artifacts, debug_specs = _work_oneshot_debug_cleanup_records(args)
+    artifacts.extend(debug_artifacts)
+    if not artifacts and not debug_specs:
         return {}
-    return {
+    cleanup = {
         "kind": "deferred_verify_runtime_artifact_cleanup",
         "artifacts": artifacts,
         "reason": (
@@ -5054,6 +5167,9 @@ def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume, *, task=None,
             "fresh runtime checks are not short-circuited"
         ),
     }
+    if debug_specs:
+        cleanup["debug_cleanup_specs"] = debug_specs
+    return cleanup
 
 
 def _parse_json_object(text):
@@ -5140,7 +5256,8 @@ def cmd_work_oneshot(args):
     if post_run_cleanup:
         resume = dict(resume)
         resume["post_run_cleanup"] = post_run_cleanup
-        if all(item.get("status") == "removed" for item in post_run_cleanup.get("artifacts") or []):
+        cleanup_artifacts = post_run_cleanup.get("artifacts") or []
+        if cleanup_artifacts and all(item.get("status") == "removed" for item in cleanup_artifacts):
             resume["stale_runtime_artifact_risk"] = {}
 
     report = {
