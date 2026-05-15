@@ -102,8 +102,8 @@ tuning before a minimal H10 change is designed and measured.
 |---|---|---|---|---|---|
 | H0 | Hot-path behavior cannot be judged until first-patch readiness and exploration compression are measured. | Observability only: compute first-patch readiness timestamp/basis, readiness-to-mutation latency, accepted implementation constraints, and duplicate exploration after readiness. | We can say whether mew lacks evidence, fails to compress evidence into constraints, or stalls after enough evidence exists. | measured | mew has early evidence but does not compress it into a patch; use H10 next |
 | H1 | Provider-visible task shape is wrong: mew leads with sidecar/task JSON rather than a plain task. | Make the hot-path first visible content environment context plus plain user task; move sidecar/task facts out of the leading position. | Earlier target-path mutation; fewer prewrite probes; no native rebuild branch before `vm.js`. | measured partial keep | Task-first shape is present and first mutation now appears, but still too late: mew step 45 after 43 probes vs Codex step 25 after 24 probes |
-| H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | next isolated experiment | H4 showed renderer shape alone worsens step flow; inspect and minimally align instructions next |
-| H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | observability first | TBD |
+| H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | measured failed, reverted | Plain Codex-like base instructions worsened first mutation to step 57 after 56 probes; reverted by `e857456` |
+| H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | next observability experiment | H1/H7/H4/H2 ruled out visible task shape, sidecar visibility, renderer-only output, and base instruction shape as sufficient fixes |
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | measured failed, reverted | H4 made first mutation much later: step 73 after 71 probes; reverted by `84b79e6` |
 | H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | observability first | TBD |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
@@ -553,6 +553,70 @@ Focused validation before the failed live diagnostic:
 - codex-ultra reviewer session `019e28ef-4818-7323-87c7-702e6c3b6654`
   returned `STATUS: APPROVE`.
 
+### EXP-20260515-7: H2 Plain Codex-Like Base Instructions
+
+Hypothesis:
+The remaining Codex gap may come from mew's visible base/task instructions
+being too unlike Codex, even after task-first input and hidden sidecar
+visibility were fixed.
+
+Change:
+Commit `e106ec6` changed only `codex_hot_path` base instruction rendering:
+the hot path used a short plain coding-agent contract with minimal finish and
+safety guidance, no `[section:...]` wrappers, no Implement V2 labels, no
+provider-native transcript wording, and no unavailable `edit_file` mention.
+
+Reference artifacts:
+Use the same Codex and Claude Code references as H0/H10/H1/H7/H4.
+
+Mew artifact:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-094402/2026-05-15__09-44-03/make-mips-interpreter__Zj8YFQ3`
+
+Expected signal:
+More direct `apply_patch`, fewer evidence/protocol-oriented probes, and first
+mutation closer to Codex.
+
+Observed signal:
+Failed. The provider-visible prompt was cleaner, but the step shape moved away
+from Codex:
+
+- provider-visible salience report:
+  `tmp/m6_24_h2_provider_visible_salience.md`;
+- step-diff report:
+  `tmp/m6_24_h2_step_diff.md`;
+- first request leading shape: `plain_text`;
+- requests with visible compact sidecar digest: 0;
+- scaffolding term occurrences: 0;
+- first request text: 1,213 chars;
+- first mutation: mew step 57 after 56 probes, compared with Codex step 25
+  after 24 probes and H7 step 46 after 45 probes;
+- readiness-to-mutation: mew 53 steps, Codex 22 steps;
+- repeated pre-mutation families: `runtime_verifier`, `symbol_lookup`,
+  `file_read`, `text_search`, and `disassembly`;
+- external reward: 0.
+
+Decision:
+Reverted by `e857456`. Do not reapply plain Codex-like base instructions by
+intuition. H2 produced a cleaner visible instruction surface, but H7 had
+already removed visible sidecar/scaffolding, and H2 made first mutation later
+than H7. The next step should be H3 continuity audit: prove whether
+`previous_response_id` plus delta input gives the model an effective Codex-like
+response-item history before changing more behavior.
+
+Notes:
+Focused validation before the failed live diagnostic:
+
+- `uv run pytest --no-testmon tests/test_native_tool_harness.py tests/test_implement_lane.py -q`
+  passed with 8 focused tests after the profile alias fix.
+- `uv run ruff check src/mew/implement_lane/prompt.py src/mew/implement_lane/native_tool_harness.py tests/test_native_tool_harness.py tests/test_implement_lane.py`
+  passed.
+- `uv run python scripts/run_tool_surface_ab_smoke.py --output-root tmp/m6_24_h2_instruction_smoke_r2 --json`
+  produced a comparable fake-native artifact.
+- `uv run python scripts/check_implement_v2_hot_path.py --artifact tmp/m6_24_h2_instruction_smoke_r2/candidate-codex-hot-path --no-baseline`
+  passed.
+- codex-ultra reviewer session `019e290e-25a5-74d2-9c00-01d912a3447c`
+  approved after the profile alias fix.
+
 ## Stop Conditions
 
 Stop polishing a hypothesis and escalate when:
@@ -583,7 +647,10 @@ Follow this execution order. Do not reorder it after context compression:
    replay still works, but do not count it as closing the Codex step gap.
 7. EXP-20260515-6 measured H4 and reverted it. Do not reapply renderer-only
    shell output changes by intuition.
-8. Next isolated experiment: H2 base/task instructions. Inspect the current
-   `codex_hot_path` visible instructions against the Codex reference, choose
-   the smallest instruction-only change, and keep H2 separate from renderer,
-   tool surface, next-action, WorkFrame, time-pressure, and threshold changes.
+8. EXP-20260515-7 measured H2 and reverted it. Do not reapply plain
+   Codex-like base instructions by intuition.
+9. Next observability experiment: H3 continuity audit. Use saved native
+   provider-request, response-transcript, and response-item artifacts to prove
+   whether `previous_response_id` plus delta input preserves the effective
+   response-item history the model needs. Do not change continuity behavior
+   until the audit identifies a concrete gap.
