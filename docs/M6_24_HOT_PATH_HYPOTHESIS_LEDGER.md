@@ -105,7 +105,7 @@ tuning before a minimal H10 change is designed and measured.
 | H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | measured failed, reverted | Plain Codex-like base instructions worsened first mutation to step 57 after 56 probes; reverted by `e857456` |
 | H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | measured no-change | H7 and H2 artifacts show previous_response_id present, matching prior response ids, delta coverage consistent, and valid pairing; do not change continuity without stronger evidence |
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | measured failed, reverted | H4 made first mutation much later: step 73 after 71 probes; reverted by `84b79e6` |
-| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | next observability experiment | H3 did not reveal a concrete continuity defect; repeated rereads/probes make omitted-output observability the next cheapest check |
+| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | measured concrete gap | H7/H2 artifacts show matched provider outputs omit many raw source/binary/path/error/symbol facts; next design a narrow output-visibility repair |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | measured hygiene keep | Sidecar visibility was fixed, but first mutation did not move closer to Codex; move to H4 tool-result rendering rather than revising H7 |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
@@ -689,6 +689,69 @@ Focused validation:
 - `uv run ruff check src/mew/implement_lane/provider_continuity_audit.py scripts/analyze_provider_continuity.py tests/test_provider_continuity_audit.py`
   passed.
 
+### EXP-20260515-9: H5 Output Compaction Audit
+
+Hypothesis:
+Command/source output compaction may hide synthesis-critical facts from the
+provider-visible transcript. If true, mew can have enough raw evidence in
+sidecars while the model keeps rereading/probing because the actual
+`function_call_output` text only contains a compact tail.
+
+Change:
+Added an artifact-only analyzer: `scripts/analyze_output_compaction.py`. It
+reads `tool_results.jsonl`, `native-provider-requests.json`, and
+`tool_render_outputs.jsonl`, then compares raw saved `stdout`/`stderr` against
+the provider-visible `request_body.input[].output` text actually sent back to
+the model. It reports raw/visible/omitted chars and missing critical facts by
+category: `paths`, `errors`, `symbols`, and `binary_facts`.
+
+No live loop behavior changes.
+
+Generated reports:
+
+- H7:
+  `tmp/m6_24_h5_h7_output_compaction.json` and
+  `tmp/m6_24_h5_h7_output_compaction.md`
+- H2:
+  `tmp/m6_24_h5_h2_output_compaction.json` and
+  `tmp/m6_24_h5_h2_output_compaction.md`
+
+Observed signal:
+
+- H7 artifact:
+  - tool results: 77;
+  - results with provider output: 75;
+  - raw output chars: 283,824;
+  - provider-visible output chars: 63,647;
+  - omitted matched-output chars: 222,303;
+  - matched results with critical fact loss: 41;
+  - lost critical facts: 2,682
+    (`binary_facts=1330`, `paths=731`, `symbols=574`, `errors=47`).
+- H2 artifact:
+  - tool results: 70;
+  - results with provider output: 68;
+  - raw output chars: 209,701;
+  - provider-visible output chars: 51,841;
+  - omitted matched-output chars: 159,643;
+  - matched results with critical fact loss: 39;
+  - lost critical facts: 1,770
+    (`paths=939`, `binary_facts=404`, `symbols=396`, `errors=31`).
+
+Decision:
+H5 found a concrete output-visibility gap. The next behavior work should be a
+narrow output-visibility repair, not broad renderer or prompt tuning. Preserve
+Codex-like tool-result shape, but make synthesis-critical source/binary facts
+from matched outputs visible enough that the model can convert probes into a
+patch without rereading. Do not reintroduce `next_action`, WorkFrame steering,
+probe thresholds, time pressure, or broad command-output rendering changes.
+
+Focused validation:
+
+- `uv run pytest --no-testmon tests/test_output_compaction_audit.py -q`
+  passed with 5 tests.
+- `uv run ruff check src/mew/implement_lane/output_compaction_audit.py scripts/analyze_output_compaction.py tests/test_output_compaction_audit.py`
+  passed.
+
 ## Stop Conditions
 
 Stop polishing a hypothesis and escalate when:
@@ -725,6 +788,10 @@ Follow this execution order. Do not reorder it after context compression:
    continuity behavior: saved H7 and H2 artifacts show matching
    `previous_response_id`, consistent delta coverage, and valid native
    call/output pairing.
-10. Next observability experiment: H5 output compaction audit. Measure whether
-   command/source outputs omit synthesis-critical facts before changing output
-   visibility or adding another behavior patch.
+10. EXP-20260515-9 measured H5. Keep the analyzer and design a narrow
+    output-visibility repair: matched tool outputs currently omit many raw
+    source/binary/path/error/symbol facts from provider-visible
+    `function_call_output` text.
+11. Next behavior experiment: targeted H5 output-visibility repair. Do not
+    broaden renderer wording, prompt instructions, continuity behavior,
+    WorkFrame steering, probe thresholds, or time pressure.

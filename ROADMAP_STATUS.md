@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 and H2 failed/reverted; H3 found no continuity defect; next H5 output compaction audit. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 and H2 failed/reverted; H3 found no continuity defect; H5 found output-visibility gaps; next targeted H5 repair. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,10 +70,10 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_hot_path_h5_output_compaction_audit`.
+`m6_24_hot_path_h5_targeted_output_visibility_repair`.
 
 Current diagnostic mode:
-`h10_failed_reverted__h6_passed__h1_partial_keep__h7_hygiene_keep__h4_failed_reverted__h2_failed_reverted__h3_measured_no_change__h5_next`.
+`h10_failed_reverted__h6_passed__h1_partial_keep__h7_hygiene_keep__h4_failed_reverted__h2_failed_reverted__h3_measured_no_change__h5_measured_gap__repair_next`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
@@ -143,7 +143,14 @@ saved logical input, response item JSONL matched `response_transcript.json`,
 and native call/output pairing was valid. Reasoning is carried by provider
 continuation rather than local replay, but this is an architectural dependency,
 not a demonstrated bug. Do not change continuity behavior without stronger
-evidence. Next: H5 output compaction audit.
+evidence. This led to H5 output compaction audit.
+H5 output compaction audit was added and run on both H7 and H2 artifacts. It
+found a concrete output-visibility gap in matched provider outputs: H7 omitted
+222,303 chars and 2,682 critical source/binary/path/error/symbol facts; H2
+omitted 159,643 chars and 1,770 critical facts. This justifies a narrow
+output-visibility repair. It does not justify broad renderer wording,
+prompt/tool wording, continuity behavior, WorkFrame steering, probe thresholds,
+or time pressure changes.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -292,11 +299,27 @@ Fixed execution order:
      mismatches 0, delta coverage mismatches 0, pairing errors 0;
    - decision: keep analyzer, no continuity behavior change; next H5 output
      compaction audit.
+16. H5 output compaction audit:
+   - analyzer:
+     `scripts/analyze_output_compaction.py`;
+   - H7 reports:
+     `tmp/m6_24_h5_h7_output_compaction.json` and
+     `tmp/m6_24_h5_h7_output_compaction.md`;
+   - H2 reports:
+     `tmp/m6_24_h5_h2_output_compaction.json` and
+     `tmp/m6_24_h5_h2_output_compaction.md`;
+   - H7 result: 41 matched tool outputs with critical fact loss, omitted
+     matched-output chars 222,303, lost critical facts 2,682;
+   - H2 result: 39 matched tool outputs with critical fact loss, omitted
+     matched-output chars 159,643, lost critical facts 1,770;
+   - decision: next targeted H5 output-visibility repair; do not broaden into
+     prompt/tool wording, continuity, WorkFrame, threshold, or time-pressure
+     changes.
 
 Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
 context, but it no longer controls the immediate next action. Do not resume
 `speed_1`, `proof_5`, broad benchmark measurement, or ad hoc tool-output
-wording while H4 is being isolated.
+wording while targeted H5 output visibility is being isolated.
 
 Latest boundary: fake-native A/B smoke, live profile plumbing, conservative
 paired diagnostic runner, task cwd map, and fixed live A/B report comparability
@@ -348,12 +371,11 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: H5 output compaction audit. Use saved artifacts to
-  measure whether command/source output compaction omits synthesis-critical
-  facts and causes repeated rereads/probes. Do not change continuity behavior,
-  prompt/tool wording, renderer shape, `next_action`, WorkFrame steering,
-  time pressure, or probe thresholds before that audit identifies a concrete
-  output-visibility gap.
+- Current next action: targeted H5 output-visibility repair. Use the H5
+  analyzer results to make synthesis-critical source/binary/path/error/symbol
+  facts visible enough in matched provider outputs without broad renderer
+  wording, prompt/tool wording, continuity behavior, `next_action`, WorkFrame
+  steering, time pressure, or probe thresholds.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe
