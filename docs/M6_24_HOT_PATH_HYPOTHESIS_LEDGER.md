@@ -103,9 +103,9 @@ tuning before a minimal H10 change is designed and measured.
 | H0 | Hot-path behavior cannot be judged until first-patch readiness and exploration compression are measured. | Observability only: compute first-patch readiness timestamp/basis, readiness-to-mutation latency, accepted implementation constraints, and duplicate exploration after readiness. | We can say whether mew lacks evidence, fails to compress evidence into constraints, or stalls after enough evidence exists. | measured | mew has early evidence but does not compress it into a patch; use H10 next |
 | H1 | Provider-visible task shape is wrong: mew leads with sidecar/task JSON rather than a plain task. | Make the hot-path first visible content environment context plus plain user task; move sidecar/task facts out of the leading position. | Earlier target-path mutation; fewer prewrite probes; no native rebuild branch before `vm.js`. | measured partial keep | Task-first shape is present and first mutation now appears, but still too late: mew step 45 after 43 probes vs Codex step 25 after 24 probes |
 | H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | measured failed, reverted | Plain Codex-like base instructions worsened first mutation to step 57 after 56 probes; reverted by `e857456` |
-| H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | next observability experiment | H1/H7/H4/H2 ruled out visible task shape, sidecar visibility, renderer-only output, and base instruction shape as sufficient fixes |
+| H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | measured no-change | H7 and H2 artifacts show previous_response_id present, matching prior response ids, delta coverage consistent, and valid pairing; do not change continuity without stronger evidence |
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | measured failed, reverted | H4 made first mutation much later: step 73 after 71 probes; reverted by `84b79e6` |
-| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | observability first | TBD |
+| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | next observability experiment | H3 did not reveal a concrete continuity defect; repeated rereads/probes make omitted-output observability the next cheapest check |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | measured hygiene keep | Sidecar visibility was fixed, but first mutation did not move closer to Codex; move to H4 tool-result rendering rather than revising H7 |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
@@ -617,6 +617,78 @@ Focused validation before the failed live diagnostic:
 - codex-ultra reviewer session `019e290e-25a5-74d2-9c00-01d912a3447c`
   approved after the profile alias fix.
 
+### EXP-20260515-8: H3 Provider Response Continuity Audit
+
+Hypothesis:
+`previous_response_id` may be present but not equivalent enough to Codex's
+effective response-item history. If the model is not actually seeing prior
+reasoning/tool-call/tool-output state through provider continuation, further
+prompt or tool-surface changes would be misleading.
+
+Change:
+Added an artifact-only analyzer:
+`scripts/analyze_provider_continuity.py`. It reads
+`native-provider-requests.json`, `provider-request-inventory.json`,
+`response_transcript.json`, and `response_items.jsonl`, then reports:
+
+- previous-response presence after the first turn;
+- whether each `previous_response_id` matches the prior turn's recorded
+  response id;
+- whether prefix plus wire delta covers the saved logical input;
+- call/output pairing and transcript sequence health;
+- whether reasoning is locally replayed or carried only by provider
+  continuation.
+
+No live loop behavior changes.
+
+Reference artifacts:
+Use H7 as the current kept behavior artifact and H2 as a corroborating recent
+artifact:
+
+- H7:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-084030/2026-05-15__08-40-31/make-mips-interpreter__rzaTQU9`
+- H2:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-094402/2026-05-15__09-44-03/make-mips-interpreter__Zj8YFQ3`
+
+Generated reports:
+
+- `tmp/m6_24_h3_h7_provider_continuity.json`
+- `tmp/m6_24_h3_h7_provider_continuity.md`
+- `tmp/m6_24_h3_provider_continuity.json`
+- `tmp/m6_24_h3_provider_continuity.md`
+
+Expected signal:
+The audit should reveal a concrete continuity gap before any behavior change:
+missing `previous_response_id`, mismatched response id, broken delta coverage,
+or invalid call/output pairing.
+
+Observed signal:
+No concrete continuity bug found in either artifact:
+
+- H7: 76/76 requests after the first used `previous_response_id`;
+  expected previous response mismatches: 0; delta coverage mismatches: 0;
+  pairing error count: 0; response items JSONL count matched transcript count.
+- H2: 80/80 requests after the first used `previous_response_id`;
+  expected previous response mismatches: 0; delta coverage mismatches: 0;
+  pairing error count: 0; response items JSONL count matched transcript count.
+- Both artifacts report `reasoning_items_carried_only_by_provider_continuity`.
+  That is an architectural dependency, not a demonstrated defect.
+
+Decision:
+Keep the analyzer and do not change continuity behavior. H3 does not justify
+disabling `previous_response_id`, switching to full local replay, or replaying
+reasoning items locally. The next cheapest observability experiment is H5:
+measure whether command/source output compaction omits synthesis-critical
+details that cause repeated rereads and late mutation.
+
+Notes:
+Focused validation:
+
+- `uv run pytest --no-testmon tests/test_provider_continuity_audit.py -q`
+  passed with 7 tests.
+- `uv run ruff check src/mew/implement_lane/provider_continuity_audit.py scripts/analyze_provider_continuity.py tests/test_provider_continuity_audit.py`
+  passed.
+
 ## Stop Conditions
 
 Stop polishing a hypothesis and escalate when:
@@ -649,8 +721,10 @@ Follow this execution order. Do not reorder it after context compression:
    shell output changes by intuition.
 8. EXP-20260515-7 measured H2 and reverted it. Do not reapply plain
    Codex-like base instructions by intuition.
-9. Next observability experiment: H3 continuity audit. Use saved native
-   provider-request, response-transcript, and response-item artifacts to prove
-   whether `previous_response_id` plus delta input preserves the effective
-   response-item history the model needs. Do not change continuity behavior
-   until the audit identifies a concrete gap.
+9. EXP-20260515-8 measured H3. Keep the analyzer, but do not change
+   continuity behavior: saved H7 and H2 artifacts show matching
+   `previous_response_id`, consistent delta coverage, and valid native
+   call/output pairing.
+10. Next observability experiment: H5 output compaction audit. Measure whether
+   command/source outputs omit synthesis-critical facts before changing output
+   visibility or adding another behavior patch.
