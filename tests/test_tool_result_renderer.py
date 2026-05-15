@@ -42,47 +42,10 @@ def test_codex_terminal_renderer_sanitizes_guidance_markers() -> None:
     rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
 
     assert rendered.renderer_id == CODEX_TERMINAL_RENDERER_ID
-    assert "Exit code: 1" in rendered.text
-    assert "Wall time:" in rendered.text
-    assert "Chunk ID:" not in rendered.text
-    assert "Original token count:" not in rendered.text
+    assert "Process exited with code 1" in rendered.text
     assert "suggested_next_action" not in rendered.text
     assert "required_next" not in rendered.text
     assert rendered.leak_ok is True
-
-
-def test_codex_terminal_renderer_uses_codex_freeform_shell_shape() -> None:
-    result = _result(
-        "exec_command",
-        status="completed",
-        stdout_tail="ok\n",
-        stderr_tail="warning\n",
-        exit_code=0,
-        duration_seconds=0.125,
-    )
-
-    rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
-
-    assert rendered.text.startswith("Exit code: 0\nWall time: 0.125 seconds\nOutput:\nok")
-    assert "warning" in rendered.text
-    assert "stdout:" not in rendered.text
-    assert "stderr:" not in rendered.text
-    assert "Chunk ID:" not in rendered.text
-    assert "Original token count:" not in rendered.text
-
-
-def test_codex_terminal_renderer_lifts_total_output_header() -> None:
-    result = _result(
-        "exec_command",
-        status="completed",
-        output="Total output lines: 42\n\nline 1\nline 2",
-        exit_code=0,
-    )
-
-    rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
-
-    assert "Total output lines: 42" in rendered.text
-    assert rendered.text.endswith("Output:\nline 1\nline 2")
 
 
 def test_codex_apply_patch_failure_is_bounded_and_sanitized() -> None:

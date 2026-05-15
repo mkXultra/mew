@@ -165,29 +165,19 @@ def _rendered(
 
 def _render_codex_terminal(result: ToolResultEnvelope, *, limit: int) -> str:
     payload = _payload(result)
-    duration = _float(payload.get("duration_seconds"), default=0.0)
-    output = _command_output_text(result, payload, limit=max(200, limit - 240))
-    if _terminal_status(result, payload) not in _NONTERMINAL_STATUSES:
-        lines = [
-            f"Exit code: {_exit_code(result, payload)}",
-            f"Wall time: {duration:.3f} seconds",
-        ]
-        stripped_output, total_lines = _strip_total_output_header(output)
-        if total_lines is not None:
-            lines.append(f"Total output lines: {total_lines}")
-            output = stripped_output
-        lines.append("Output:")
-        lines.append(output)
-        return _clip("\n".join(lines).rstrip(), limit)
-
     command_run_id = str(payload.get("command_run_id") or "").strip()
     chunk_id = _chunk_id(command_run_id or result.provider_call_id or result.mew_tool_call_id)
+    duration = _float(payload.get("duration_seconds"), default=0.0)
+    output = _command_output_text(result, payload, limit=max(200, limit - 240))
     lines = [
         f"Chunk ID: {chunk_id}",
         f"Wall time: {duration:.3f}s",
     ]
-    session_id = command_run_id or str(payload.get("session_id") or result.provider_call_id or "unknown")
-    lines.append(f"Process running with session ID {session_id}")
+    if _terminal_status(result, payload) in _NONTERMINAL_STATUSES:
+        session_id = command_run_id or str(payload.get("session_id") or result.provider_call_id or "unknown")
+        lines.append(f"Process running with session ID {session_id}")
+    else:
+        lines.append(f"Process exited with code {_exit_code(result, payload)}")
     lines.append(f"Original token count: {_token_count(output)}")
     lines.append("Output:")
     lines.append(output)
@@ -259,52 +249,29 @@ def _exit_code(result: ToolResultEnvelope, payload: Mapping[str, object]) -> str
 
 def _command_output_text(result: ToolResultEnvelope, payload: Mapping[str, object], *, limit: int) -> str:
     failed = result.is_error or result.status in {"failed", "invalid", "interrupted"} or _exit_code(result, payload) not in {"0", ""}
-    for key in ("aggregated_output", "output"):
-        value = payload.get(key)
-        text = str(value or "").strip() if value not in (None, "", [], {}) else ""
-        if text:
-            return _clip(_sanitize_visible_text(text), limit)
-    stream_keys = (
-        ("stderr_tail", "stderr", "stdout_tail", "stdout")
+    ordered_keys = (
+        ("stderr_tail", "stderr", "stdout_tail", "stdout", "reason", "message", "error", "summary")
         if failed
-        else ("stdout_tail", "stdout", "stderr_tail", "stderr")
+        else ("stdout_tail", "stdout", "stderr_tail", "stderr", "summary", "reason", "message", "error")
     )
-    fallback_keys = ("reason", "message", "error", "summary") if failed else ("summary", "reason", "message", "error")
     chunks: list[str] = []
-    seen_stream_labels: set[str] = set()
-    for key in stream_keys + fallback_keys:
+    for key in ordered_keys:
         value = payload.get(key)
         text = str(value or "").strip() if value not in (None, "", [], {}) else ""
         if not text:
             continue
         label = key.removesuffix("_tail")
+        if label in {"stdout", "stderr"} and any(part.startswith(f"{label}:") for part in chunks):
+            continue
         if label in {"stdout", "stderr"}:
-            if label in seen_stream_labels:
-                continue
-            seen_stream_labels.add(label)
-        chunks.append(_sanitize_visible_text(text))
+            chunks.append(f"{label}:\n{_sanitize_visible_text(text)}")
+        else:
+            chunks.append(_sanitize_visible_text(text))
         if len("\n".join(chunks)) >= limit:
             break
     if not chunks:
         chunks.append(str(payload.get("status") or result.status or ""))
     return _clip("\n\n".join(chunks).strip(), limit)
-
-
-def _strip_total_output_header(output: str) -> tuple[str, int | None]:
-    text = str(output or "")
-    prefix = "Total output lines: "
-    if not text.startswith(prefix):
-        return text, None
-    first_line, sep, rest = text.partition("\n")
-    if not sep:
-        return text, None
-    try:
-        total_lines = int(first_line.removeprefix(prefix).strip())
-    except ValueError:
-        return text, None
-    if rest.startswith("\n"):
-        rest = rest[1:]
-    return rest, total_lines
 
 
 def _content_ref_footer(
