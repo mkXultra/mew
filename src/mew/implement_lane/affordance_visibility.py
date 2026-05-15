@@ -149,7 +149,12 @@ def json_size_bytes(value: object) -> int:
     return len(json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8"))
 
 
-def scan_forbidden_provider_visible(value: object, *, surface: str = "provider_visible") -> list[dict[str, object]]:
+def scan_forbidden_provider_visible(
+    value: object,
+    *,
+    surface: str = "provider_visible",
+    include_generic_rendered_markers: bool = True,
+) -> list[dict[str, object]]:
     """Return canonical provider-visible field leaks in a JSON-like or text value.
 
     Structural keys fail exactly. Plain text fails for explicit steering field
@@ -190,16 +195,17 @@ def scan_forbidden_provider_visible(value: object, *, surface: str = "provider_v
                             "kind": "text_marker",
                         }
                     )
-            for field, pattern in _GENERIC_RENDERED_PATTERNS.items():
-                if pattern.search(item):
-                    violations.append(
-                        {
-                            "surface": surface,
-                            "field": field,
-                            "path": ".".join(path),
-                            "kind": "rendered_generic_marker",
-                        }
-                    )
+            if include_generic_rendered_markers:
+                for field, pattern in _GENERIC_RENDERED_PATTERNS.items():
+                    if pattern.search(item):
+                        violations.append(
+                            {
+                                "surface": surface,
+                                "field": field,
+                                "path": ".".join(path),
+                                "kind": "rendered_generic_marker",
+                            }
+                        )
 
     visit(value, ())
     return _dedupe_violations(violations)

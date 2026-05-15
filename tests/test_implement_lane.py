@@ -96,6 +96,26 @@ from mew.read_tools import read_file
 from mew.work_lanes import IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, TINY_LANE
 
 
+def test_live_task_description_includes_goal_and_objective(tmp_path: Path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend="codex",
+        model="gpt-5.5",
+        task_contract={
+            "goal": "Build doomgeneric_mips so node vm.js writes /tmp/frame.bmp.",
+            "objective": "After running node vm.js stdout should be printed appropriately.",
+        },
+    )
+
+    description = v2_runtime._live_task_description(lane_input)
+
+    assert "Build doomgeneric_mips" in description
+    assert "stdout should be printed appropriately" in description
+
+
 def test_implementation_runtime_registry_keeps_v1_default_and_v2_explicit() -> None:
     runtimes = list_implement_lane_runtime_views()
 

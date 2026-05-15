@@ -820,14 +820,19 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
             )
         forbidden_violations = scan_forbidden_provider_visible(
             {
-                "input_items": _native_request_input_items(request),
+                "input_items": _native_provider_visible_items_without_output_text(
+                    _native_request_input_items(request)
+                ),
                 "instructions": _native_request_instructions(request),
                 "task_contract": visible_task_payload.get("task_contract") if isinstance(visible_task_payload, Mapping) else {},
                 "compact_sidecar_digest": visible_digest if isinstance(visible_digest, Mapping) else {},
-                "transcript_window": request.get("transcript_window") if isinstance(request.get("transcript_window"), list) else [],
+                "transcript_window": _native_provider_visible_items_without_output_text(
+                    request.get("transcript_window") if isinstance(request.get("transcript_window"), list) else []
+                ),
             },
             surface="native_provider_request",
         )
+        forbidden_violations.extend(_native_output_text_forbidden_violations(request))
         if forbidden_violations:
             forbidden_tokens = fields_from_forbidden_violations(forbidden_violations)
             reason = (
@@ -1279,6 +1284,62 @@ def _native_request_input_items(request: Mapping[str, object]) -> list[dict[str,
         if isinstance(body_input, list):
             return [dict(item) for item in body_input if isinstance(item, Mapping)]
     return []
+
+
+_NATIVE_OUTPUT_ITEM_TYPES = frozenset({"function_call_output", "custom_tool_call_output", "finish_output"})
+
+
+def _native_provider_visible_items_without_output_text(items: object) -> list[dict[str, object]]:
+    sanitized: list[dict[str, object]] = []
+    if not isinstance(items, list):
+        return sanitized
+    for raw_item in items:
+        if not isinstance(raw_item, Mapping):
+            continue
+        copy = dict(raw_item)
+        if _native_provider_visible_item_kind(copy) in _NATIVE_OUTPUT_ITEM_TYPES:
+            copy.pop("output", None)
+            copy.pop("output_text_or_ref", None)
+        sanitized.append(copy)
+    return sanitized
+
+
+def _native_output_text_forbidden_violations(request: Mapping[str, object]) -> list[dict[str, object]]:
+    violations: list[dict[str, object]] = []
+    containers = (
+        ("input_items", _native_request_input_items(request)),
+        (
+            "transcript_window",
+            request.get("transcript_window") if isinstance(request.get("transcript_window"), list) else [],
+        ),
+    )
+    for container_name, items in containers:
+        for index, raw_item in enumerate(items):
+            if not isinstance(raw_item, Mapping):
+                continue
+            item = dict(raw_item)
+            if _native_provider_visible_item_kind(item) not in _NATIVE_OUTPUT_ITEM_TYPES:
+                continue
+            for output_field in ("output", "output_text_or_ref"):
+                output = item.get(output_field)
+                if not isinstance(output, str):
+                    continue
+                for violation in scan_forbidden_provider_visible(
+                    output,
+                    surface="native_provider_request",
+                    include_generic_rendered_markers=False,
+                ):
+                    next_violation = dict(violation)
+                    path = str(next_violation.get("path") or "")
+                    next_violation["path"] = (
+                        f"{container_name}.{index}.{output_field}" + (f".{path}" if path else "")
+                    )
+                    violations.append(next_violation)
+    return violations
+
+
+def _native_provider_visible_item_kind(item: Mapping[str, object]) -> str:
+    return str(item.get("type") or item.get("kind") or "")
 
 
 def _native_request_instructions(request: Mapping[str, object]) -> str:

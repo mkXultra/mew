@@ -1349,7 +1349,10 @@ def _native_finish_supplied_closeout_context(
     refs_tuple = tuple(dict.fromkeys(completion_refs))
     if not refs_tuple:
         return _NativeCloseoutContext()
-    return _NativeCloseoutContext(closeout_refs=refs_tuple, fresh_verifier_refs=refs_tuple)
+    return _NativeCloseoutContext(
+        closeout_refs=refs_tuple,
+        fresh_verifier_refs=refs_tuple,
+    )
 
 
 def _latest_native_source_mutation_result_index(
@@ -2426,6 +2429,8 @@ def _native_task_description(lane_input: ImplementLaneInput) -> str:
     contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
     chunks = [
         str(contract.get("title") or "").strip(),
+        str(contract.get("goal") or "").strip(),
+        str(contract.get("objective") or "").strip(),
         str(contract.get("description") or "").strip(),
         str(contract.get("guidance") or "").strip(),
         str(contract.get("verify_command") or "").strip(),

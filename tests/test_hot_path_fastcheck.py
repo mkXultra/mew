@@ -685,6 +685,98 @@ def test_hot_path_fastcheck_replays_live_provider_request_body_shape(tmp_path):
     assert checks["native_provider_visible_state"]["status"] == "pass"
 
 
+def test_hot_path_fastcheck_allows_task_source_todo_in_function_output(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2, live_shape=True)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    payload["requests"][0]["request_body"]["input"].append(
+        {
+            "type": "function_call_output",
+            "call_id": "call-read",
+            "output": "stdout:\n1117:    // TODO: Implement stat syscall\n",
+        }
+    )
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_provider_visible_state"]["status"] == "pass"
+
+
+def test_hot_path_fastcheck_allows_task_source_todo_in_transcript_output(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    payload["requests"][0]["transcript_window"].append(
+        {
+            "kind": "function_call_output",
+            "call_id": "call-read",
+            "output_text_or_ref": "stdout:\n1117:    // TODO: Implement stat syscall\n",
+        }
+    )
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_provider_visible_state"]["status"] == "pass"
+
+
+def test_hot_path_fastcheck_rejects_specific_steering_in_function_output(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2, live_shape=True)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    payload["requests"][0]["request_body"]["input"].append(
+        {
+            "type": "function_call_output",
+            "call_id": "call-read",
+            "output": "next_action_policy: patch now",
+        }
+    )
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_provider_visible_state"]["status"] == "fail"
+    assert any(
+        violation["reason"] == "legacy_state_leak"
+        for violation in checks["native_provider_visible_state"]["details"]["violations"]
+    )
+
+
+def test_hot_path_fastcheck_rejects_specific_steering_in_transcript_output(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    payload["requests"][0]["transcript_window"].append(
+        {
+            "kind": "custom_tool_call_output",
+            "call_id": "call-read",
+            "output_text_or_ref": "next_action_policy: patch now",
+        }
+    )
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_provider_visible_state"]["status"] == "fail"
+    assert any(
+        violation["reason"] == "legacy_state_leak"
+        for violation in checks["native_provider_visible_state"]["details"]["violations"]
+    )
+
+
 def test_hot_path_fastcheck_requires_previous_response_id_for_multi_turn_live_provider_requests(tmp_path):
     artifact = _write_native_artifact(tmp_path)
     transcript = _read_native_transcript(artifact)

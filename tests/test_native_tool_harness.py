@@ -25,6 +25,7 @@ from mew.implement_lane.native_tool_harness import (
     _finish_gate_missing_obligations,
     _native_final_verifier_closeout_call,
     _native_finish_supplied_closeout_context,
+    _native_task_description,
     run_live_native_implement_v2,
     run_native_implement_v2,
     run_unavailable_native_implement_v2,
@@ -89,6 +90,21 @@ def _compact_sidecar_digest(request: dict[str, object]) -> dict[str, object]:
     if isinstance(hidden_digest, dict):
         return hidden_digest
     return _task_payload(request)["compact_sidecar_digest"]
+
+
+def test_native_task_description_includes_goal_and_objective(tmp_path: Path) -> None:
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "goal": "Build doomgeneric_mips so node vm.js writes /tmp/frame.bmp.",
+            "objective": "After running node vm.js stdout should be printed appropriately.",
+        },
+    )
+
+    description = _native_task_description(lane_input)
+
+    assert "Build doomgeneric_mips" in description
+    assert "stdout should be printed appropriately" in description
 
 
 def _loop_signals(request: dict[str, object]) -> dict[str, object]:

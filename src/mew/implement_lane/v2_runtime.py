@@ -9644,6 +9644,8 @@ def _live_task_description(lane_input: ImplementLaneInput) -> str:
     contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
     chunks = [
         str(contract.get("title") or "").strip(),
+        str(contract.get("goal") or "").strip(),
+        str(contract.get("objective") or "").strip(),
         str(contract.get("description") or "").strip(),
         str(contract.get("guidance") or "").strip(),
         str(contract.get("verify_command") or "").strip(),
