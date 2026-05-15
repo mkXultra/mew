@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep but did not improve first-mutation latency; next isolate H4 tool-result rendering/output salience. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 command-result rendering failed/reverted; next isolate H2 base/task instructions. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,10 +70,10 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_hot_path_h7_sidecar_visibility_experiment`.
+`m6_24_hot_path_h2_instruction_shape_experiment`.
 
 Current diagnostic mode:
-`h10_failed_reverted__h6_passed__h1_partial_keep__h7_hygiene_keep__h4_next`.
+`h10_failed_reverted__h6_passed__h1_partial_keep__h7_hygiene_keep__h4_failed_reverted__h2_next`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
@@ -118,8 +118,15 @@ visible compact sidecar requests and zero scaffolding terms, but it did not
 improve step shape: mew first mutation was step 46 after 45 probes, compared
 with Codex step 25 after 24 probes and H1 step 45 after 43 probes. Keep H7 as
 resident hygiene, not as a performance win. Next isolated experiment: H4
-tool-result rendering / output salience. Do not combine H4 with tool wording,
-`next_action`, WorkFrame steering, time pressure, or probe thresholds.
+tool-result rendering / output salience. H4 changed only completed/failed
+command rendering toward Codex's `Exit code` / `Wall time` / `Output` shape.
+The renderer shape changed as intended, but the live run got worse: mew first
+mutation was step 73 after 71 probes, compared with Codex step 25 after 24
+probes and H7 step 46 after 45 probes. H4 was reverted by `84b79e6`.
+Do not reapply renderer-only command output changes by intuition. Next
+isolated experiment: H2 base/task instruction shape. Do not combine H2 with
+renderer changes, tool wording, `next_action`, WorkFrame steering, time
+pressure, or probe thresholds.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -223,6 +230,21 @@ Fixed execution order:
      probes; H1 was step 45 after 43 probes;
    - decision: keep H7 as resident hygiene, but move to H4 because it did not
      improve the Codex step gap.
+13. H4 command-result rendering diagnostic:
+   - implementation commit: `2861090`
+     (`Align codex hot path command rendering`);
+   - revert commit: `84b79e6`
+     (`Revert "Align codex hot path command rendering"`);
+   - artifact:
+     `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-090940/2026-05-15__09-09-41/make-mips-interpreter__ABqTyhy`;
+   - provider-visible salience:
+     `tmp/m6_24_h4_provider_visible_salience.md`;
+   - step diff:
+     `tmp/m6_24_h4_step_diff.md`;
+   - first mutation: mew step 73 after 71 probes; Codex step 25 after 24
+     probes; H7 was step 46 after 45 probes;
+   - decision: measured failed/reverted; next isolate H2 base/task
+     instructions.
 
 Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
 context, but it no longer controls the immediate next action. Do not resume
@@ -279,11 +301,12 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: start H4 tool-result rendering / output salience as the
-  next isolated experiment. First compare H7 live tool-result rendering against
-  the Codex reference and identify the smallest renderer-only change. Do not
-  tune `apply_patch`, add next-action steering, restore WorkFrame steering, add
-  time pressure, or add threshold control in the same experiment.
+- Current next action: start H2 base/task instruction shape as the next
+  isolated experiment. First compare current `codex_hot_path` visible
+  instructions against Codex reference instructions and choose the smallest
+  instruction-only change. Do not change command-result rendering, tune
+  `apply_patch`, add next-action steering, restore WorkFrame steering, add time
+  pressure, or add threshold control in the same experiment.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe
