@@ -136,7 +136,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
 | `make-doom-for-mips` | 1/5 | recorded/deferred after 0/1 strategy-wall-budget frontier | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217` | no same-shape rerun until a generic frontier-throttling or strategy design is selected and locally proven |
-| `make-mips-interpreter` | 3/5 | active timeout-guard repair after invalid first-turn stalls | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-hard-deadline-make-mips-speed1-20260508-1217` | follow newest `docs/M6_24_DECISION_LEDGER.md` row: commit fail-closed model timeout guard, then rerun the same controlled speed_1 |
+| `make-mips-interpreter` | 3/5 | pass 1/1 after H5/codex_hot_path repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-speed-proof-ts-codex-hot-path-20260515-135942` | close-proof candidate; run `proof-5` only as the explicit next M6.24 close-proof decision |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
 | `polyglot-c-py` | 5/5 | pending | none | run v2 speed_1 |

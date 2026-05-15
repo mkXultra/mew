@@ -883,6 +883,55 @@ Notes:
 - `mew-report.json` recorded empty `resume.stale_runtime_artifact_risk` after
   cleanup.
 
+### EXP-20260515-12: H5 Same-Shape Speed Proof
+
+Hypothesis:
+The H5 repair plus closeout/debug-cleanup handoff should survive the normal
+one-trial speed proof window, not only the 10 minute step-shape diagnostic.
+
+Change:
+No behavior change after EXP-20260515-11. This is a same-shape validation run
+using `--mode speed-proof` and `--tool-surface-profile-id codex_hot_path`.
+
+Reference artifacts:
+Use the Codex and Claude Code reference traces listed at the top of this
+document.
+
+Mew artifact:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-speed-proof-ts-codex-hot-path-20260515-135942/2026-05-15__13-59-43/make-mips-interpreter__YiztSTx`
+
+Expected signal:
+External reward `1.0`, clean `mew work` finish, valid native transcript
+pairing, and Codex-near or better first mutation shape.
+
+Observed signal:
+Passed. Harbor external reward was `1.0` with `1/1` trials, exceptions `0`,
+and total runtime `9m19s`. `work_exit_code=0`, `stop_reason=finish`, native
+pairing was valid with `36` calls and `36` outputs, resolver block count was
+`0`, and provider request inventory was present.
+
+Step shape:
+
+- Codex first mutation: step 25 after 24 probes.
+- mew speed proof first mutation: step 18 after 17 probes.
+- mew first source mutation: `296.605s`.
+- mew first verifier: `486.942s`.
+- same-frontier broad cycle count: `0`.
+
+Decision:
+Keep H5 and mark `make-mips-interpreter` as a current same-shape speed-proof
+pass. This is now eligible for `proof-5` close proof against the frozen Codex
+target `3/5`. Do not run broad measurement before recording the close-proof
+decision.
+
+Notes:
+
+- Measurement command:
+  `uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter --mode speed-proof --tool-surface-profile-id codex_hot_path`.
+- Step-diff output:
+  `tmp/m6_24_make_mips_speed_proof_step_diff.json` and
+  `tmp/m6_24_make_mips_speed_proof_step_diff.md`.
+
 ## Stop Conditions
 
 Stop polishing a hypothesis and escalate when:
@@ -932,7 +981,11 @@ Follow this execution order. Do not reorder it after context compression:
     `make-mips-interpreter` reached Harbor external reward 1.0 with clean
     `mew work` exit, safe `/tmp/frame*.bmp` debug cleanup, verifier 3/3 pass,
     and first mutation step 26 after 25 probes.
-14. Next implementation step: compare the validated step shape, then select
-    the next M6.24 gap. Do not broaden renderer wording, prompt instructions,
-    continuity behavior, WorkFrame steering, probe thresholds, time pressure,
-    or cleanup lifecycle semantics without a new measured hypothesis.
+14. EXP-20260515-12 validated the same-shape speed proof:
+    `make-mips-interpreter` reached 1/1 reward with first mutation step 18
+    after 17 probes.
+15. Next implementation step: run or schedule `make-mips-interpreter`
+    `proof-5` as close proof against Codex target `3/5`. Do not broaden
+    renderer wording, prompt instructions, continuity behavior, WorkFrame
+    steering, probe thresholds, time pressure, or cleanup lifecycle semantics
+    without a new measured hypothesis.

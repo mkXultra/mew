@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 and H2 failed/reverted; H3 found no continuity defect; H5 terminal head+tail repair measured as keep and the current closeout/debug-cleanup handoff is validated. Next is step-shape comparison and next-gap selection, not another H5 behavior change. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 and H2 failed/reverted; H3 found no continuity defect; H5 terminal head+tail repair measured as keep; closeout/debug-cleanup handoff and same-shape `make-mips-interpreter` speed proof are validated. Next is `proof-5` close proof, not another H5 behavior change. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,10 +70,10 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_hot_path_h5_validated_next_gap_selection`.
+`m6_24_hot_path_h5_speed_proof_passed_proof5_next`.
 
 Current diagnostic mode:
-`h10_failed_reverted__h6_passed__h1_partial_keep__h7_hygiene_keep__h4_failed_reverted__h2_failed_reverted__h3_measured_no_change__h5_keep__closeout_cleanup_validated`.
+`h10_failed_reverted__h6_passed__h1_partial_keep__h7_hygiene_keep__h4_failed_reverted__h2_failed_reverted__h3_measured_no_change__h5_keep__closeout_cleanup_validated__speed_proof_passed`.
 
 Current reentry decision:
 H0 is measured. The saved-artifact report shows that mew reaches
@@ -175,6 +175,14 @@ mutation step 26 after 25 probes versus Codex step 25 after 24 probes. Treat
 the H5 closeout/debug-cleanup handoff blocker as closed for this diagnostic.
 Do not implement a broad LLM cleanup planner or artifact lifecycle from this
 single diagnostic hook.
+The same-shape speed proof then passed as well. The 2026-05-15 13:59 JST run at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-speed-proof-ts-codex-hot-path-20260515-135942/2026-05-15__13-59-43/make-mips-interpreter__YiztSTx`
+reached `1/1` reward with exceptions `0`, runtime `9m19s`, `work_exit_code=0`,
+`stop_reason=finish`, valid native pairing (`36` calls / `36` outputs), and
+resolver block count `0`. The speed-proof step diff shows mew first mutation
+step 18 after 17 probes versus Codex step 25 after 24 probes. This makes
+`make-mips-interpreter` a close-proof candidate against frozen Codex target
+`3/5`.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
@@ -407,10 +415,10 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: compare the H5 validated step shape and select the next
-  M6.24 gap. H5 repair 1 and the closeout/debug-cleanup handoff are validated;
-  do not make another H5 behavior change before selecting a new measured
-  hypothesis.
+- Current next action: run `make-mips-interpreter` `proof-5` with
+  `codex_hot_path`. H5 repair 1, closeout/debug-cleanup handoff, and the
+  same-shape `speed-proof` are validated; do not make another H5 behavior
+  change before recording proof-5 pass/fail classification.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe
@@ -718,7 +726,10 @@ Controller docs:
 M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 is still the active M6.24 lane; native responsibility-boundary Phase 4 is green, so implement Phase 5 replay / fastcheck next. Keep NativeTranscript/provider-native paired outputs as source of truth, keep CompletionResolver as the semantic completion authority, and do not jump back to step-shape polish, speed_1, proof_5, or broad measurement before Phase 5 is reviewed and committed.
+selected_lane=implement_v2 / codex_hot_path remains the active M6.24 execution
+shape. H5 terminal head+tail visibility, closeout/debug-cleanup handoff, and
+same-shape make-mips speed proof are green. The next action is
+make-mips-interpreter proof-5 close proof against frozen Codex target 3/5.
 ```
 
 Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
@@ -728,7 +739,8 @@ Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
 passed with exact replay and terminal-bench replay dogfood. This is historical
 pre-WorkFrame measurement evidence. The current decision is no longer
 "build-cython proof_5 now" or "continue the implement_v2 scoped rebaseline";
-the current decision is the native responsibility-boundary Phase 5 above.
+the current decision is the H5 make-mips proof-5 close proof recorded in
+`docs/M6_24_DECISION_LEDGER.md`.
 
 ## Active M6.24 Context
 
@@ -738,12 +750,12 @@ the current decision is the native responsibility-boundary Phase 5 above.
   `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
 - The scoped rebaseline is
   `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`.
-- The active repeated-gap dossier is
-  `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`.
-- Fresh Codex/Claude Code reference traces for the same active gap are recorded
-  in `docs/M6_24_REFERENCE_TRACE_BUILD_CYTHON_EXT_2026-05-05.md`.
-- The current-head remeasurement artifact is
-  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-rebaseline-build-cython-ext-1attempt-20260503-1936/result.json`.
+- The active hot-path hypothesis ledger is
+  `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`.
+- Fresh Codex/Claude Code reference traces for the active make-mips gap are
+  listed in `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`.
+- The current same-shape speed-proof artifact is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-speed-proof-ts-codex-hot-path-20260515-135942/2026-05-15__13-59-43/make-mips-interpreter__YiztSTx`.
 - Previous all-registry and `compile-compcert` records are historical repair
   evidence. They are not the active M6.24 close gate unless a later milestone
   explicitly promotes a BuildOrchestrationLane benchmark.
@@ -769,8 +781,8 @@ M6.24 -> native responsibility-boundary Phase 4 green -> implement Phase 5 repla
 ```
 
 Older scoped-rebaseline, WorkFrame, diagnostic-runner, and native-loop rows
-remain historical evidence. They do not supersede the current H0
-observability-first gate.
+remain historical evidence. They do not supersede the current H5
+`make-mips-interpreter` proof-5 close-proof decision.
 
 The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
 prior-failure repair is replayable and classified, but codex-ultra marked it
