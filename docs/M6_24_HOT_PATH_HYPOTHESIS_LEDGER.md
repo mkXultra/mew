@@ -105,7 +105,7 @@ tuning before a minimal H10 change is designed and measured.
 | H2 | Base instructions differ too much from Codex. | Use Codex-like base coding instructions for `codex_hot_path`, with only minimal mew safety/finish suffix. | More direct `apply_patch`; fewer evidence/protocol-oriented probes. | measured failed, reverted | Plain Codex-like base instructions worsened first mutation to step 57 after 56 probes; reverted by `e857456` |
 | H3 | `previous_response_id` continuity is present but not equivalent enough. | Add continuity audit first; behavior change only if audit proves missing response items or broken prefix continuity. | Audit explains whether model sees prior tool/reasoning state as expected. | measured no-change | H7 and H2 artifacts show previous_response_id present, matching prior response ids, delta coverage consistent, and valid pairing; do not change continuity without stronger evidence |
 | H4 | Tool-result rendering adds salience noise. | Render command outputs closer to Codex: `Exit code`, `Wall time`, `Output`; remove runtime/evidence/token-count prose from model-visible output. | Same probe facts, but faster transition to mutation and fewer repeated probe families. | measured failed, reverted | H4 made first mutation much later: step 73 after 71 probes; reverted by `84b79e6` |
-| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | measured keep; cleanup handoff validated | H5 repair 1 moved mew to Codex-aligned first mutation shape and external reward 1.0; debug cleanup validation removed stale `/tmp/frame*.bmp` before verifier handoff, so the current blocker is closed for this diagnostic |
+| H5 | Output compaction hides synthesis-critical source/binary detail. | Add visible/omitted content metrics first; expand only the specific result families that lost critical facts. | Fewer rereads of same files; more coherent first patch. | closed for make-mips; proof-5 pass | H5 repair 1 moved mew to Codex-aligned first mutation shape and external reward 1.0; debug cleanup validation removed stale `/tmp/frame*.bmp`; same-shape speed proof passed; proof-5 reached `4/5` against Codex target `3/5` |
 | H6 | `apply_patch` affordance is still weak despite visible tool parity. | Run a synthetic artifact-only apply_patch affordance check before changing tool descriptions again. | Model chooses `apply_patch` for a trivial source mutation without extra steering. | measured pass | Not proximate cause; do not tune apply_patch wording before testing prompt/transcript shape |
 | H7 | Visible sidecar scaffolding competes with task facts. | Hide or compress `compact_sidecar_digest` in provider-visible hot path while keeping sidecar artifacts internal. | Less process/proof language in first request; earlier task-directed mutation. | measured hygiene keep | Sidecar visibility was fixed, but first mutation did not move closer to Codex; move to H4 tool-result rendering rather than revising H7 |
 | H8 | Environment affordances nudge mew into native rebuild. | Only after H1/H2/H4 checks, compare branch metrics for native rebuild attempts before target-path mutation. | `gcc`/build attempts disappear without hiding environment tools. | deferred | TBD |
@@ -932,6 +932,42 @@ Notes:
   `tmp/m6_24_make_mips_speed_proof_step_diff.json` and
   `tmp/m6_24_make_mips_speed_proof_step_diff.md`.
 
+### EXP-20260515-13: H5 Proof-5 Close Proof
+
+Hypothesis:
+The H5 repair, closeout/debug-cleanup handoff, and same-shape speed proof
+should hold across a five-trial close proof and reach the frozen Codex target
+for `make-mips-interpreter`.
+
+Change:
+No behavior change after EXP-20260515-12. This is the explicit `proof-5` close
+proof using `--tool-surface-profile-id codex_hot_path`.
+
+Mew artifact:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260515-141331/2026-05-15__14-13-32/result.json`
+
+Expected signal:
+Reach frozen Codex target `3/5`, runner errors `0`, and no repeated new
+structural blocker.
+
+Observed signal:
+Passed. The run finished `5/5` trials with runner errors `0`, mean `0.800`,
+rewards `4/5`, Pass@2/4/5 `1.000`, and total runtime `42m33s`.
+
+Failure classification:
+The single failed trial was `make-mips-interpreter__UiFm5aR`. It implemented
+and ran `vm.js`, but finish closeout accepted a `320x200` 32bpp BMP as valid
+while the external verifier expected a `640x400` frame. Step comparison for
+that failed trial was Codex-near rather than exploration-regressed: Codex first
+mutation was step 25 after 24 probes, and mew first mutation was also step 25
+after 24 probes. Treat this as a future artifact-obligation /
+finish-verifier-planner gap, not as an H5 terminal-output hot-path blocker.
+
+Decision:
+Close H5 for `make-mips-interpreter`. Do not continue H5 prompt/tool/output
+polish based on the single false-finish failure. The next action is to select
+the next measured M6.24 scoped gap.
+
 ## Stop Conditions
 
 Stop polishing a hypothesis and escalate when:
@@ -984,8 +1020,9 @@ Follow this execution order. Do not reorder it after context compression:
 14. EXP-20260515-12 validated the same-shape speed proof:
     `make-mips-interpreter` reached 1/1 reward with first mutation step 18
     after 17 probes.
-15. Next implementation step: run or schedule `make-mips-interpreter`
-    `proof-5` as close proof against Codex target `3/5`. Do not broaden
-    renderer wording, prompt instructions, continuity behavior, WorkFrame
-    steering, probe thresholds, time pressure, or cleanup lifecycle semantics
-    without a new measured hypothesis.
+15. EXP-20260515-13 validated the close proof: `make-mips-interpreter`
+    reached `4/5`, runner errors `0`, exceeding Codex target `3/5`.
+16. Next implementation step: select the next measured M6.24 scoped gap. Do
+    not broaden renderer wording, prompt instructions, continuity behavior,
+    WorkFrame steering, probe thresholds, time pressure, or cleanup lifecycle
+    semantics without a new measured hypothesis.

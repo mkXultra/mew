@@ -354,25 +354,24 @@ that present another same-shape `step-check-10min`, `speed_1`, or `proof_5` as
 the immediate next action.
 
 Latest active-row update, 2026-05-15 JST: H5 terminal head+tail visibility
-repair and the follow-up closeout/debug-cleanup handoff are validated for
-`make-mips-interpreter`, and the same-shape `speed-proof` also passed. The
-latest one-trial speed proof reached Harbor external reward `1.0`,
-`work_exit_code=0`, verifier pass, valid native pairing, resolver block count
-`0`, and first mutation step 18 after 17 probes. The active task is now
-`make-mips-interpreter proof-5` close proof against the frozen Codex target
-`3/5`. Do not make another H5 behavior change, cleanup lifecycle change,
-prompt/tool wording change, WorkFrame steering change, probe-threshold change,
-time-pressure change, or broad measurement before that close-proof result is
-recorded.
+repair, the follow-up closeout/debug-cleanup handoff, the same-shape
+`speed-proof`, and the `make-mips-interpreter proof-5` close proof are
+validated. The five-trial close proof reached `4/5`, mean `0.800`, runner
+errors `0`, and exceeded the frozen Codex target `3/5`. The active task is now
+selecting the next measured M6.24 gap from the scoped task table. Do not make
+another H5 behavior change, cleanup lifecycle change, prompt/tool wording
+change, WorkFrame steering change, probe-threshold change, time-pressure
+change, or broad measurement until that next gap is explicitly selected.
 
 Note: older rows may retain their original status labels for historical search,
 but they are not task-selection authority while
-`h5_speed_proof_passed_proof5_next` is the newest row. Treat
+`h5_make_mips_proof5_closed_next_gap_selection` is the newest row. Treat
 them as repair evidence only unless this row is explicitly closed or
 superseded.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-15 | Close H5 for `make-mips-interpreter` and return to measured M6.24 gap selection. | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260515-141331/2026-05-15__14-13-32/result.json` finished with `5` trials, runner errors `0`, mean `0.800`, rewards `4/5`, and Pass@2/4/5 `1.000`, exceeding frozen Codex target `3/5`. Runtime was `42m33s`. The only failed trial was `make-mips-interpreter__UiFm5aR`: it built and ran `vm.js`, but finish closeout accepted a `320x200` BMP while the external verifier expected `640x400`. The proof-5 run therefore validates the H5 hot-path repair and also records a separate future artifact-obligation / finish-verifier gap. | Mark `make-mips-interpreter` closed for this H5 repair. Select the next measured M6.24 scoped gap. Do not continue H5 polish from the single false-finish failure unless another selected task repeats the same artifact-obligation failure family. | h5_make_mips_proof5_closed_next_gap_selection |
 | 2026-05-15 | Escalate `make-mips-interpreter` to `proof-5` close proof. | The same-shape `speed-proof` at `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-speed-proof-ts-codex-hot-path-20260515-135942/2026-05-15__13-59-43/make-mips-interpreter__YiztSTx` reached external reward `1.0` with exceptions `0`, runtime `9m19s`, `work_exit_code=0`, `stop_reason=finish`, native pairing `36/36` valid, resolver block count `0`, and provider request inventory present. Step-diff output `tmp/m6_24_make_mips_speed_proof_step_diff.md` shows first mutation step 18 after 17 probes versus Codex step 25 after 24 probes, with `same_frontier_broad_cycle_count=0`. | Run `uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter --mode proof-5 --tool-surface-profile-id codex_hot_path`. Close this repair if the result reaches frozen Codex target `3/5` with runner errors 0 and no repeated new structural blocker; otherwise classify the proof failures before another behavior change. | h5_speed_proof_passed_proof5_next |
 | 2026-05-15 | Close the current H5 closeout/debug-cleanup handoff blocker and select the next measured M6.24 gap. | Commit `3bd62da` added diagnostic-only safe `--debug-cleanup` support and Harbor runner injection for `make-mips-interpreter` (`/tmp/frame*.bmp`). The follow-up bounded run at `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-134113/2026-05-15__13-41-14/make-mips-interpreter__rospwBf` reached external reward `1.0`, `work_exit_code=0`, valid native pairing, resolver block count `0`, verifier `3/3` pass, and `post_run_cleanup` removed `/tmp/frame.bmp` plus `/tmp/frame_0000.bmp`. Step-diff output `tmp/m6_24_h5_debug_cleanup_step_diff.md` shows mew first mutation step 26 after 25 probes versus Codex step 25 after 24 probes, with `same_frontier_broad_cycle_count=0`. | Compare the validated H5 step shape, update the H ledger/status, then choose the next single M6.24 hypothesis or gap. Do not implement a general LLM cleanup planner or artifact lifecycle from this diagnostic hook unless a later task produces repeated evidence. | h5_closeout_cleanup_validated_next_gap_selection |
 | 2026-05-12 | Native responsibility-boundary Phase 4 is green; move to Phase 5 replay / fastcheck. | `src/mew/implement_lane/native_tool_harness.py` now runs active-command/final-verifier closeout only during the valid finish path before `CompletionResolver`, passes closeout refs, fresh verifier refs, blockers, missing obligations, unsafe blockers, and budget blockers into `CompletionResolverInput`, and removes the post-loop no-finish/max-turn completion closeout path. Missing verifier command, no permission, and insufficient budget are resolver no-run blockers without tool dispatch; fresh verifier evidence suppresses deterministic closeout. `src/mew/implement_lane/native_boundary_audit.py` tracks the scoped finish-time closeout call site. Validation passed: `uv run pytest --no-testmon tests/test_native_tool_harness.py -q` (`55 passed`); `uv run pytest --no-testmon tests/test_completion_resolver.py tests/test_native_transcript.py tests/test_native_boundary_audit.py tests/test_native_sidecar_projection.py tests/test_native_workframe_projection.py -q` (`37 passed`); `uv run pytest --no-testmon tests/test_implement_lane.py -q` (`469 passed`); `uv run python scripts/check_native_tool_loop_boundary.py --json`; scoped ruff; `git diff --check`. codex-ultra review session `019e1c1d-5ab2-7ca0-8f8f-3c24a41e7906` first requested no-run closeout blockers and test coverage, then returned `STATUS: APPROVE`. | Implement Phase 5 replay / fastcheck: replay native transcript, compact sidecar digest, resolver decisions, and closeout artifacts deterministically; static-gate old required-next/full-state drift; then decide whether exactly one bounded native diagnostic is allowed before `speed_1`/`proof_5`. | native_boundary_phase4_green_phase5_next |
