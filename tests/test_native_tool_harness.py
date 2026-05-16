@@ -3308,7 +3308,8 @@ def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path:
 
     assert result.status == "completed"
     assert provider.planner_requests
-    assert provider.planner_requests[0]["role"] == "independent_finish_verifier_planner"
+    assert provider.planner_requests[0]["role"] == "independent_read_only_finish_verifier_planner"
+    assert "previous_response_id" not in provider.planner_requests[0]
     assert "finish claim" in "\n".join(provider.planner_requests[0]["forbidden"])  # type: ignore[index]
     assert result.metrics["final_verifier_closeout_count"] == 1
     closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
@@ -3802,6 +3803,75 @@ def test_native_harness_finish_verifier_planner_rejects_unsafe_command(
     assert result.status == "blocked"
     assert result.metrics["final_verifier_closeout_count"] == 0
     assert "closeout_verifier_not_run" in result.metrics["completion_resolver_latest_decision"]["blockers"]
+    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+@pytest.mark.parametrize(
+    ("tool_call_shape", "expected_blocker"),
+    (
+        (
+            {"tool_name": "write_file", "arguments": {"path": "vm.js"}},
+            "planner_forbidden_tool:write_file",
+        ),
+        (
+            {"type": "function", "function": {"name": "write_file", "arguments": "{\"path\":\"vm.js\"}"}},
+            "planner_forbidden_tool:write_file",
+        ),
+    ),
+)
+def test_native_harness_finish_verifier_planner_rejects_forbidden_tool_attempt_before_dispatch(
+    tmp_path: Path,
+    tool_call_shape: dict[str, object],
+    expected_blocker: str,
+) -> None:
+    class ForbiddenToolPlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            assert request["read_policy"]["allowed_tools"] == [  # type: ignore[index]
+                "inspect_dir",
+                "read_file",
+                "search_text",
+                "glob",
+            ]
+            return {
+                "command": "test -f vm.js",
+                "tool_calls": [tool_call_shape],
+                "reason": "attempted to repair before verifying",
+            }
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=ForbiddenToolPlanningProvider(),
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 0
+    decision = result.metrics["finish_verifier_planner_latest_decision"]
+    assert decision["status"] == "rejected"
+    assert decision["reject_blockers"] == [expected_blocker]
     assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
     assert validate_native_transcript_pairing(result.transcript).valid is True
 

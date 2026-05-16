@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import shlex
 import time
-from typing import Iterable, Mapping
+from typing import Iterable, Literal, Mapping
 
 from .completion_resolver import (
     CompletionResolver,
@@ -221,6 +221,92 @@ class _FinishVerifierCommandSafetyResult:
     allowed: bool
     reason: str
     blockers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class FinishVerifierPlannerLoopPolicy:
+    enabled: bool
+    max_turns: int = 3
+    max_wall_seconds: float = 30.0
+    max_file_reads: int = 12
+    max_searches: int = 8
+    max_bytes_per_file: int = 20_000
+    max_total_read_bytes: int = 120_000
+    allowed_tools: tuple[str, ...] = ("inspect_dir", "read_file", "search_text", "glob")
+    allowed_roots: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class FinishVerifierPlannerLoopRequest:
+    lane_attempt_id: str
+    turn_id: str
+    finish_call_id: str
+    task_id: str
+    task_description: str
+    task_contract: Mapping[str, object]
+    latest_mutation: Mapping[str, object]
+    recent_tool_results: tuple[Mapping[str, object], ...]
+    candidate_paths: tuple[str, ...]
+    policy: FinishVerifierPlannerLoopPolicy
+    external_verifier_failure: Mapping[str, object] | None = None
+    legacy_request: Mapping[str, object] | None = None
+
+    def as_planner_request(self) -> dict[str, object]:
+        base = dict(self.legacy_request or {})
+        base.update(
+            {
+                "schema_version": 1,
+                "component": "FinishVerifierPlannerLoop",
+                "role": "independent_read_only_finish_verifier_planner",
+                "lane_attempt_id": self.lane_attempt_id,
+                "turn_id": self.turn_id,
+                "finish_call_id": self.finish_call_id,
+                "task": {
+                    "task_id": self.task_id,
+                    "description": self.task_description,
+                    "contract": dict(self.task_contract),
+                    "verify_command_source": (
+                        dict(base.get("task") or {}).get("verify_command_source")
+                        if isinstance(base.get("task"), Mapping)
+                        else ""
+                    ),
+                },
+                "latest_mutation": dict(self.latest_mutation),
+                "recent_tool_results": [dict(item) for item in self.recent_tool_results],
+                "read_policy": {
+                    "allowed_tools": list(self.policy.allowed_tools),
+                    "allowed_roots": list(self.policy.allowed_roots),
+                    "max_turns": self.policy.max_turns,
+                    "max_file_reads": self.policy.max_file_reads,
+                    "max_searches": self.policy.max_searches,
+                    "max_bytes_per_file": self.policy.max_bytes_per_file,
+                    "max_total_read_bytes": self.policy.max_total_read_bytes,
+                    "candidate_paths": list(self.candidate_paths),
+                },
+                "command_policy": {
+                    "available_execution_surface": "run_command",
+                    "allow_shell_execution": True,
+                    "shell_composition_blocked": True,
+                },
+                "output_contract": {
+                    "json_object": True,
+                    "required": ["status", "command", "cwd", "confidence", "rationale"],
+                    "meaning": "one non-mutating command that verifies current task completion",
+                },
+            }
+        )
+        if self.external_verifier_failure:
+            base["external_verifier_failure"] = dict(self.external_verifier_failure)
+        return base
+
+
+@dataclass(frozen=True)
+class FinishVerifierPlannerLoopResult:
+    status: Literal["selected", "no_plan", "rejected", "error", "timed_out"]
+    plan: _NativeFinishVerifierPlan | None
+    record: Mapping[str, object]
+    blockers: tuple[str, ...] = ()
+    reason: str = ""
 
 
 @dataclass
@@ -1163,6 +1249,14 @@ def _safe_float(value: object, *, default: float) -> float:
         return default
 
 
+def _planner_bounded_int(value: object, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
 def _tool_call_envelope_from_native_call(
     call: NativeTranscriptItem,
     arguments: dict[str, object],
@@ -1857,56 +1951,168 @@ def _native_final_verifier_closeout_plan(
         tool_results=tool_results,
     ):
         return _auto_detected_native_final_verifier_command(lane_input)
-    planner = getattr(provider, "plan_finish_verifier_command", None)
-    if not callable(planner):
-        return _auto_detected_native_final_verifier_command(lane_input)
-    request = _finish_verifier_planner_request(lane_input, tool_results)
-    request_hash = _finish_verifier_planner_request_hash(request)
-    try:
-        raw_plan = planner(request)
-    except Exception as exc:
+    loop_request = _finish_verifier_planner_loop_request(
+        lane_input,
+        lane_config=lane_config,
+        tool_results=tool_results,
+    )
+    request_hash = _finish_verifier_planner_request_hash(loop_request.as_planner_request())
+    loop_result = run_finish_verifier_planner_loop(
+        loop_request,
+        planner_provider=provider,
+    )
+    if loop_result.status == "error":
         fallback = _auto_detected_native_final_verifier_command(lane_input)
-        decision = _finish_verifier_planner_decision_record(
-            status="error",
-            request_hash=request_hash,
-            error=str(exc),
-            fallback=fallback,
-        )
+        decision = dict(loop_result.record)
+        decision.setdefault("status", "error")
+        decision.setdefault("request_hash", request_hash)
+        if fallback is not None:
+            decision["fallback"] = _native_finish_verifier_plan_payload(fallback)
+            decision["fallback_source"] = fallback.source
+        else:
+            decision.setdefault("fallback", {})
+            decision.setdefault("fallback_source", "")
         _record_finish_verifier_planner_decision(provider, decision)
         _emit_progress(
             getattr(provider, "progress", None),
-            f"finish_verifier_planner failed: {exc}; "
+            f"finish_verifier_planner failed: {loop_result.reason or 'unknown'}; "
             f"fallback={_native_finish_verifier_plan_source(fallback)}",
         )
         return _native_finish_verifier_plan_with_planner_fallback(fallback, decision)
-    coercion = _coerce_native_finish_verifier_plan_with_diagnostics(raw_plan, request=request)
-    if coercion.plan is not None:
-        _record_finish_verifier_planner_decision(
-            provider,
-            _finish_verifier_planner_decision_record(
-                status="accepted",
-                request_hash=request_hash,
-                raw_plan=raw_plan,
-                plan=coercion.plan,
-            ),
-        )
-        return coercion.plan
+    if loop_result.status == "selected" and loop_result.plan is not None:
+        _record_finish_verifier_planner_decision(provider, loop_result.record)
+        return loop_result.plan
     fallback = _auto_detected_native_final_verifier_command(lane_input)
-    decision = _finish_verifier_planner_decision_record(
-        status=coercion.status or "rejected",
-        request_hash=request_hash,
-        raw_plan=raw_plan,
-        reject_reason=coercion.reject_reason,
-        reject_blockers=coercion.reject_blockers,
-        fallback=fallback,
-    )
+    decision = dict(loop_result.record)
+    decision.setdefault("status", loop_result.status or "rejected")
+    decision.setdefault("request_hash", request_hash)
+    if loop_result.reason:
+        decision.setdefault("reject_reason", loop_result.reason)
+    if loop_result.blockers:
+        decision.setdefault("reject_blockers", list(loop_result.blockers))
+    if fallback is not None:
+        decision["fallback"] = _native_finish_verifier_plan_payload(fallback)
+        decision["fallback_source"] = fallback.source
+    else:
+        decision.setdefault("fallback", {})
+        decision.setdefault("fallback_source", "")
     _record_finish_verifier_planner_decision(provider, decision)
     _emit_progress(
         getattr(provider, "progress", None),
         "finish_verifier_planner rejected plan: "
-        f"{coercion.reject_reason or 'unknown'}; fallback={_native_finish_verifier_plan_source(fallback)}",
+        f"{loop_result.reason or 'unknown'}; fallback={_native_finish_verifier_plan_source(fallback)}",
     )
     return _native_finish_verifier_plan_with_planner_fallback(fallback, decision)
+
+
+def run_finish_verifier_planner_loop(
+    request: FinishVerifierPlannerLoopRequest,
+    *,
+    planner_provider: object,
+    read_dispatcher: object | None = None,
+    artifact_sink: object | None = None,
+) -> FinishVerifierPlannerLoopResult:
+    """Run the v0 finish-verifier planner component.
+
+    Phase 1 deliberately wraps the existing single-shot planner provider behind
+    the component contract. Later phases can replace the provider internals with
+    a multi-turn read-only tool loop without changing the harness boundary.
+    """
+
+    del read_dispatcher, artifact_sink
+    planner_request = request.as_planner_request()
+    request_hash = _finish_verifier_planner_request_hash(planner_request)
+    if not request.policy.enabled:
+        record = _finish_verifier_planner_decision_record(
+            status="no_plan",
+            request_hash=request_hash,
+            reject_reason="finish verifier planner loop is disabled",
+            reject_blockers=("planner_loop_disabled",),
+        )
+        return FinishVerifierPlannerLoopResult(
+            status="no_plan",
+            plan=None,
+            record=record,
+            blockers=("planner_loop_disabled",),
+            reason="finish verifier planner loop is disabled",
+        )
+    planner = getattr(planner_provider, "plan_finish_verifier_command", None)
+    if not callable(planner):
+        record = _finish_verifier_planner_decision_record(
+            status="no_plan",
+            request_hash=request_hash,
+            reject_reason="planner provider has no plan_finish_verifier_command",
+            reject_blockers=("planner_provider_missing",),
+        )
+        return FinishVerifierPlannerLoopResult(
+            status="no_plan",
+            plan=None,
+            record=record,
+            blockers=("planner_provider_missing",),
+            reason="planner provider has no plan_finish_verifier_command",
+        )
+    try:
+        raw_plan = planner(planner_request)
+    except Exception as exc:
+        record = _finish_verifier_planner_decision_record(
+            status="error",
+            request_hash=request_hash,
+            error=str(exc),
+        )
+        return FinishVerifierPlannerLoopResult(
+            status="error",
+            plan=None,
+            record=record,
+            blockers=("planner_provider_error",),
+            reason=str(exc),
+        )
+    forbidden = _finish_verifier_planner_forbidden_tool_attempts(raw_plan, request.policy)
+    if forbidden:
+        record = _finish_verifier_planner_decision_record(
+            status="rejected",
+            request_hash=request_hash,
+            raw_plan=raw_plan,
+            reject_reason="planner attempted forbidden tool",
+            reject_blockers=forbidden,
+        )
+        return FinishVerifierPlannerLoopResult(
+            status="rejected",
+            plan=None,
+            record=record,
+            blockers=forbidden,
+            reason="planner attempted forbidden tool",
+        )
+    coercion = _coerce_native_finish_verifier_plan_with_diagnostics(
+        raw_plan,
+        request=planner_request,
+    )
+    if coercion.plan is None:
+        record = _finish_verifier_planner_decision_record(
+            status=coercion.status or "rejected",
+            request_hash=request_hash,
+            raw_plan=raw_plan,
+            reject_reason=coercion.reject_reason,
+            reject_blockers=coercion.reject_blockers,
+        )
+        return FinishVerifierPlannerLoopResult(
+            status="rejected" if coercion.status != "no_plan" else "no_plan",
+            plan=None,
+            record=record,
+            blockers=coercion.reject_blockers,
+            reason=coercion.reject_reason,
+        )
+    record = _finish_verifier_planner_decision_record(
+        status="accepted",
+        request_hash=request_hash,
+        raw_plan=raw_plan,
+        plan=coercion.plan,
+    )
+    return FinishVerifierPlannerLoopResult(
+        status="selected",
+        plan=coercion.plan,
+        record=record,
+        reason=coercion.plan.reason,
+    )
 
 
 def _native_finish_verifier_planner_can_run(
@@ -1921,6 +2127,117 @@ def _native_finish_verifier_planner_can_run(
     if not tool_results:
         return False
     return callable(getattr(provider, "plan_finish_verifier_command", None))
+
+
+def _finish_verifier_planner_loop_request(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_config: Mapping[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> FinishVerifierPlannerLoopRequest:
+    legacy_request = _finish_verifier_planner_request(lane_input, tool_results)
+    task = legacy_request.get("task") if isinstance(legacy_request.get("task"), Mapping) else {}
+    read_policy = legacy_request.get("read_policy") if isinstance(legacy_request.get("read_policy"), Mapping) else {}
+    allowed_roots = lane_config.get("allowed_read_roots")
+    if not isinstance(allowed_roots, (list, tuple)):
+        allowed_roots = (lane_input.workspace,)
+    return FinishVerifierPlannerLoopRequest(
+        lane_attempt_id=_lane_attempt_id(lane_input),
+        turn_id="finish-verifier-planner",
+        finish_call_id="finish",
+        task_id=str(task.get("task_id") or lane_input.task_id),
+        task_description=str(task.get("description") or _native_task_description(lane_input)),
+        task_contract=dict(task.get("contract") if isinstance(task.get("contract"), Mapping) else lane_input.task_contract),
+        latest_mutation=_latest_mutation_for_finish_verifier_planner(tool_results),
+        recent_tool_results=tuple(
+            item for item in legacy_request.get("recent_tool_results", ()) if isinstance(item, Mapping)
+        ),
+        candidate_paths=tuple(
+            str(item)
+            for item in read_policy.get("candidate_paths", ())
+            if isinstance(item, str) and item.strip()
+        ),
+        policy=FinishVerifierPlannerLoopPolicy(
+            enabled=bool(lane_config.get("experimental_finish_verifier_planner")),
+            max_turns=_planner_bounded_int(lane_config.get("finish_verifier_planner_max_turns"), 3, 1, 8),
+            max_wall_seconds=_safe_float(
+                lane_config.get("finish_verifier_planner_timeout_seconds"),
+                default=30.0,
+            ),
+            allowed_roots=tuple(str(root) for root in allowed_roots if str(root).strip()),
+        ),
+        legacy_request=legacy_request,
+    )
+
+
+def _latest_mutation_for_finish_verifier_planner(
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> dict[str, object]:
+    for result in reversed(tool_results):
+        if result.status != "completed" or result.is_error:
+            continue
+        if result.tool_name not in {"write_file", "edit_file", "apply_patch", "run_command", "exec_command"}:
+            continue
+        payload = _native_result_payload(result)
+        paths: list[str] = []
+        for key in ("path", "target", "file", "output_path"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                paths.append(value)
+        return {
+            "provider_call_id": result.provider_call_id,
+            "tool_name": result.tool_name,
+            "status": result.status,
+            "paths": paths[:8],
+            "summary": result.natural_result_text(limit=500),
+        }
+    return {}
+
+
+def _finish_verifier_planner_forbidden_tool_attempts(
+    value: object,
+    policy: FinishVerifierPlannerLoopPolicy,
+) -> tuple[str, ...]:
+    attempts = _finish_verifier_planner_tool_names(value)
+    if not attempts:
+        return ()
+    allowed = set(policy.allowed_tools)
+    blockers: list[str] = []
+    for tool_name in attempts:
+        if tool_name not in allowed:
+            blockers.append(f"planner_forbidden_tool:{tool_name}")
+    return tuple(dict.fromkeys(blockers))
+
+
+def _finish_verifier_planner_tool_names(value: object) -> tuple[str, ...]:
+    names: list[str] = []
+
+    def visit(item: object) -> None:
+        if isinstance(item, Mapping):
+            candidate = (
+                item.get("tool_name")
+                or item.get("name")
+                or item.get("tool")
+                or item.get("function_name")
+            )
+            if isinstance(candidate, str) and candidate.strip():
+                names.append(candidate.strip())
+            for key in ("tool_calls", "tool_call", "function_call", "calls", "actions"):
+                nested = item.get(key)
+                if isinstance(nested, (list, tuple)):
+                    for child in nested:
+                        visit(child)
+                elif isinstance(nested, Mapping):
+                    visit(nested)
+            function = item.get("function")
+            if isinstance(function, Mapping):
+                visit(function)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return tuple(dict.fromkeys(names))
 
 
 def _coerce_native_finish_verifier_plan(
@@ -2088,6 +2405,11 @@ def _finish_verifier_planner_request_hash(request: Mapping[str, object]) -> str:
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
+def _finish_verifier_planner_value_hash(value: object) -> str:
+    encoded = json.dumps(_json_safe_native(value), ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
 def _finish_verifier_planner_decision_record(
     *,
     status: str,
@@ -2105,6 +2427,7 @@ def _finish_verifier_planner_decision_record(
     }
     if raw_plan is not _RAW_FINISH_VERIFIER_PLAN_MISSING:
         record["raw_plan"] = _json_safe_native(raw_plan)
+        record["raw_plan_hash"] = _finish_verifier_planner_value_hash(raw_plan)
     if plan is not None:
         record["accepted_plan"] = _native_finish_verifier_plan_payload(plan)
     if reject_reason:
