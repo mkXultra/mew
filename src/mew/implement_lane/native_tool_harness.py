@@ -1285,12 +1285,15 @@ def _native_final_verifier_closeout_no_run_context(
             unsafe_blockers=("closeout_verifier_not_permitted",),
             missing_obligations=("strict_verifier_evidence",),
         )
-    if not _configured_native_final_verifier_command(lane_input) and not _native_finish_verifier_planner_can_run(
+    has_configured = bool(_configured_native_final_verifier_command(lane_input))
+    has_planner = _native_finish_verifier_planner_can_run(
         lane_input,
         provider=provider,
         lane_config=lane_config,
         tool_results=tool_results,
-    ):
+    )
+    has_auto = _auto_detected_native_final_verifier_command(lane_input) is not None
+    if not has_configured and not has_planner and not has_auto:
         return _NativeCloseoutContext(
             blockers=("closeout_verifier_command_missing",),
             missing_obligations=("strict_verifier_evidence",),
@@ -1758,12 +1761,58 @@ def _native_final_verifier_tool_name(
     return ""
 
 
+def _canonical_native_verify_command_source(value: object, *, default: str = "") -> str:
+    text = str(value or "").strip().casefold()
+    if text in {"auto", "auto_detected", "auto-detected", "auto_detected_verifier"}:
+        return "auto_detected_verifier"
+    if text in {"explicit", "configured", "configured_verifier", "manual", "user", "cli", "task", "task_contract"}:
+        return "configured_verifier"
+    return default
+
+
+def _native_final_verifier_command_candidate(
+    lane_input: ImplementLaneInput,
+    *,
+    wanted_source: str,
+) -> _NativeFinishVerifierPlan | None:
+    lane_command = str((lane_input.lane_config or {}).get("verify_command") or "").strip()
+    lane_source = _canonical_native_verify_command_source(
+        (lane_input.lane_config or {}).get("verify_command_source"),
+        default="configured_verifier" if lane_command else "",
+    )
+    for source_ref, source in (("lane_config.verify_command", lane_input.lane_config), ("task_contract.verify_command", lane_input.task_contract)):
+        command = str((source or {}).get("verify_command") or "").strip()
+        if not command:
+            continue
+        command_source = _canonical_native_verify_command_source(
+            (source or {}).get("verify_command_source"),
+            default="configured_verifier",
+        )
+        if (
+            source_ref == "task_contract.verify_command"
+            and "verify_command_source" not in (source or {})
+            and lane_command
+            and command == lane_command
+            and lane_source == "auto_detected_verifier"
+        ):
+            command_source = "auto_detected_verifier"
+        if command_source != wanted_source:
+            continue
+        return _NativeFinishVerifierPlan(
+            command=command,
+            source=command_source,
+            raw={"source_ref": source_ref, "verify_command_source": command_source},
+        )
+    return None
+
+
 def _configured_native_final_verifier_command(lane_input: ImplementLaneInput) -> str:
-    for source in (lane_input.lane_config, lane_input.task_contract):
-        command = str(source.get("verify_command") or "").strip()
-        if command:
-            return command
-    return ""
+    candidate = _native_final_verifier_command_candidate(lane_input, wanted_source="configured_verifier")
+    return candidate.command if candidate else ""
+
+
+def _auto_detected_native_final_verifier_command(lane_input: ImplementLaneInput) -> _NativeFinishVerifierPlan | None:
+    return _native_final_verifier_command_candidate(lane_input, wanted_source="auto_detected_verifier")
 
 
 def _native_final_verifier_closeout_plan(
@@ -1773,30 +1822,31 @@ def _native_final_verifier_closeout_plan(
     lane_config: Mapping[str, object],
     tool_results: tuple[ToolResultEnvelope, ...],
 ) -> _NativeFinishVerifierPlan | None:
-    command = _configured_native_final_verifier_command(lane_input)
-    if command:
-        return _NativeFinishVerifierPlan(command=command, source="configured")
+    configured = _native_final_verifier_command_candidate(lane_input, wanted_source="configured_verifier")
+    if configured is not None:
+        return configured
     if not _native_finish_verifier_planner_can_run(
         lane_input,
         provider=provider,
         lane_config=lane_config,
         tool_results=tool_results,
     ):
-        return None
+        return _auto_detected_native_final_verifier_command(lane_input)
     planner = getattr(provider, "plan_finish_verifier_command", None)
     if not callable(planner):
-        return None
+        return _auto_detected_native_final_verifier_command(lane_input)
     request = _finish_verifier_planner_request(lane_input, tool_results)
     try:
         raw_plan = planner(request)
     except Exception as exc:
         _emit_progress(getattr(provider, "progress", None), f"finish_verifier_planner failed: {exc}")
-        return None
+        return _auto_detected_native_final_verifier_command(lane_input)
     plan = _coerce_native_finish_verifier_plan(raw_plan, request=request)
     if plan is None:
         _emit_progress(getattr(provider, "progress", None), "finish_verifier_planner rejected empty or unsafe plan")
-        return None
-    return plan
+    if plan is not None:
+        return plan
+    return _auto_detected_native_final_verifier_command(lane_input)
 
 
 def _native_finish_verifier_planner_can_run(
@@ -1922,6 +1972,11 @@ def _finish_verifier_planner_request(
             "task_id": lane_input.task_id,
             "description": _native_task_description(lane_input),
             "contract": _small_jsonable_mapping(lane_input.task_contract),
+            "verify_command_source": _canonical_native_verify_command_source(
+                (lane_input.lane_config or {}).get("verify_command_source")
+                or (lane_input.task_contract or {}).get("verify_command_source"),
+                default="",
+            ),
         },
         "workspace": ".",
         "recent_tool_results": [
@@ -2711,6 +2766,10 @@ def _finish_closeout_command_from_call(call: NativeTranscriptItem) -> FinishClos
         plan_source = str(plan.get("source") or "").strip()
         if plan_source == "finish_verifier_planner":
             source = plan_source
+        elif plan_source in {"auto_detected", "auto_detected_verifier"}:
+            source = "auto_detected_verifier"
+        elif plan_source in {"configured", "configured_verifier", "explicit"}:
+            source = "configured_verifier"
         reason = str(plan.get("reason") or "")
         confidence = str(plan.get("confidence") or "")
     return FinishCloseoutCommand(

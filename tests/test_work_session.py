@@ -104,6 +104,20 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_work_session_runtime_command_preserves_verify_command_source(self):
+        session = {
+            "default_options": {
+                "allow_verify": True,
+                "verify_command": "node vm.js",
+                "verify_command_source": "auto_detected",
+            }
+        }
+
+        rendered = work_session_module.work_session_runtime_command(session, 7)
+
+        self.assertIn("--verify-command 'node vm.js'", rendered)
+        self.assertIn("--verify-command-source auto_detected", rendered)
+
     PATCH_DRAFT_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "work_loop" / "patch_draft"
 
     def _load_patch_draft_fixture_scenario(self, name):

@@ -1839,6 +1839,8 @@ def work_session_runtime_command(session, task_id, *, follow=False, max_steps=1)
         parts.append("--allow-verify")
     if defaults.get("verify_command"):
         parts.extend(["--verify-command", defaults["verify_command"]])
+        if defaults.get("verify_command_source"):
+            parts.extend(["--verify-command-source", defaults["verify_command_source"]])
     if defaults.get("approval_mode"):
         parts.extend(["--approval-mode", defaults["approval_mode"]])
     if defaults.get("model_timeout") is not None:

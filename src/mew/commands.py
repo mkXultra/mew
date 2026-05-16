@@ -2348,6 +2348,7 @@ def _work_control_options(args, session=None):
         "allow_shell": bool(option("allow_shell", False)),
         "allow_verify": bool(option("allow_verify", False)),
         "verify_command": option("verify_command", ""),
+        "verify_command_source": option("verify_command_source", ""),
         "approval_mode": option("approval_mode", ""),
         "act_mode": option("act_mode"),
         "compact_live": bool(option("compact_live", False)),
@@ -2355,6 +2356,12 @@ def _work_control_options(args, session=None):
         "no_prompt_approval": bool(option("no_prompt_approval", False)),
         "quiet": bool(option("quiet", False)),
     }
+    if getattr(args, "verify_command", None) and not getattr(args, "verify_command_source", ""):
+        options["verify_command_source"] = "explicit"
+    elif options.get("verify_command") and not options.get("verify_command_source"):
+        options["verify_command_source"] = "configured"
+    if not options.get("verify_command"):
+        options["verify_command_source"] = ""
     options["allow_write"] = safe_work_write_roots(options.get("allow_write") or [])
     return options
 
@@ -2415,9 +2422,15 @@ def _work_tool_gate_options(args, session=None):
         "allow_shell": bool(defaults.get("allow_shell") or getattr(args, "allow_shell", False)),
         "allow_verify": bool((not verify_disabled and defaults.get("allow_verify")) or getattr(args, "allow_verify", False)),
         "verify_command": explicit_or_default("verify_command", ""),
+        "verify_command_source": explicit_or_default("verify_command_source", ""),
     }
+    if getattr(args, "verify_command", None) and not getattr(args, "verify_command_source", ""):
+        options["verify_command_source"] = "explicit"
+    elif options.get("verify_command") and not options.get("verify_command_source"):
+        options["verify_command_source"] = "configured"
     if verify_disabled and not getattr(args, "verify_command", ""):
         options["verify_command"] = ""
+        options["verify_command_source"] = ""
     return options
 
 
@@ -2492,6 +2505,7 @@ def remember_work_session_default_options(session, args):
         "allow_shell": False if clear_write_defaults else bool(current.get("allow_shell") or options.get("allow_shell")),
         "allow_verify": False if clear_verify_defaults else bool(current.get("allow_verify") or options.get("allow_verify")),
         "verify_command": "" if clear_verify_defaults else merged_scalar("verify_command"),
+        "verify_command_source": "" if clear_verify_defaults else merged_scalar("verify_command_source"),
         "verify_disabled": verify_disabled,
         "approval_mode": merged_scalar("approval_mode"),
         "act_mode": merged_scalar("act_mode"),
@@ -2627,8 +2641,7 @@ def work_chat_continue_options(session):
         parts.append("--allow-shell")
     if options.get("allow_verify"):
         parts.append("--allow-verify")
-    if options.get("verify_command"):
-        parts.extend(["--verify-command", options["verify_command"]])
+    _extend_verify_command_cli_parts(parts, options)
     if options.get("approval_mode"):
         parts.extend(["--approval-mode", options["approval_mode"]])
     if options.get("act_mode"):
@@ -2642,6 +2655,15 @@ def work_chat_continue_options(session):
     elif options.get("prompt_approval"):
         parts.append("--prompt-approval")
     return shlex.join(parts)
+
+
+def _extend_verify_command_cli_parts(parts, options):
+    if not options.get("verify_command"):
+        return
+    parts.extend(["--verify-command", options["verify_command"]])
+    source = options.get("verify_command_source")
+    if source:
+        parts.extend(["--verify-command-source", source])
 
 
 def _work_live_continue_command(args, task_id, session=None, max_steps=1, follow=False):
@@ -2667,8 +2689,7 @@ def _work_live_continue_command(args, task_id, session=None, max_steps=1, follow
         parts.append("--allow-shell")
     if options.get("allow_verify"):
         parts.append("--allow-verify")
-    if options.get("verify_command"):
-        parts.extend(["--verify-command", options["verify_command"]])
+    _extend_verify_command_cli_parts(parts, options)
     if options.get("approval_mode"):
         parts.extend(["--approval-mode", options["approval_mode"]])
     if options.get("act_mode"):
@@ -3069,8 +3090,7 @@ def _work_session_continue_command(task_id, session=None, max_steps=1, follow=Fa
         parts.append("--allow-shell")
     if options.get("allow_verify"):
         parts.append("--allow-verify")
-    if options.get("verify_command"):
-        parts.extend(["--verify-command", options["verify_command"]])
+    _extend_verify_command_cli_parts(parts, options)
     if options.get("approval_mode"):
         parts.extend(["--approval-mode", options["approval_mode"]])
     if options.get("act_mode"):
@@ -5230,6 +5250,7 @@ def cmd_work_oneshot(args):
         )
         if auto_verify_command:
             work_args.verify_command = auto_verify_command
+            work_args.verify_command_source = "auto_detected"
     work_args.oneshot_verify_source = (
         "auto_detected"
         if auto_verify_command
@@ -5639,7 +5660,9 @@ def positive_float_option(value, flag):
 
 
 def cmd_do(args):
-    verify_command = getattr(args, "verify_command", None) or detect_default_verify_command()
+    explicit_verify_command = getattr(args, "verify_command", None)
+    verify_command = explicit_verify_command or detect_default_verify_command()
+    verify_command_source = "explicit" if explicit_verify_command else ("auto_detected" if verify_command else "")
     allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
     try:
         max_steps = positive_max_steps(getattr(args, "max_steps", None), default=3)
@@ -5671,6 +5694,7 @@ def cmd_do(args):
         allow_shell=False,
         allow_verify=allow_verify,
         verify_command=verify_command if allow_verify else "",
+        verify_command_source=verify_command_source if allow_verify else "",
         verify_cwd=".",
         verify_timeout=getattr(args, "verify_timeout", 300),
         start_session=False,
@@ -5708,8 +5732,12 @@ def code_args_request_default_update(args):
 def code_default_update_args(args, session):
     current = (session or {}).get("default_options") or {}
     verify_command = getattr(args, "verify_command", None)
+    verify_command_source = ""
     if verify_command is None:
         verify_command = current.get("verify_command") or ""
+        verify_command_source = current.get("verify_command_source") or ""
+    else:
+        verify_command_source = getattr(args, "verify_command_source", None) or "explicit"
     allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
     return SimpleNamespace(
         auth=getattr(args, "auth", None),
@@ -5721,6 +5749,7 @@ def code_default_update_args(args, session):
         allow_shell=False,
         allow_verify=allow_verify,
         verify_command=verify_command if allow_verify else "",
+        verify_command_source=verify_command_source if allow_verify else "",
         verify_timeout=getattr(args, "verify_timeout", 300),
         act_mode=None,
         compact_live=bool(getattr(args, "compact_live", False)),
@@ -5745,7 +5774,9 @@ def format_code_task_not_found(task_id):
 def cmd_code(args):
     task_id = getattr(args, "task_id", None)
     if task_id:
-        verify_command = getattr(args, "verify_command", None) or detect_default_verify_command()
+        explicit_verify_command = getattr(args, "verify_command", None)
+        verify_command = explicit_verify_command or detect_default_verify_command()
+        verify_command_source = "explicit" if explicit_verify_command else ("auto_detected" if verify_command else "")
         allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
         start_args = SimpleNamespace(
             task_id=task_id,
@@ -5759,6 +5790,7 @@ def cmd_code(args):
             allow_shell=False,
             allow_verify=allow_verify,
             verify_command=verify_command if allow_verify else "",
+            verify_command_source=verify_command_source if allow_verify else "",
             verify_timeout=getattr(args, "verify_timeout", 300),
             act_mode="deterministic",
             compact_live=bool(getattr(args, "compact_live", False)),
@@ -6462,7 +6494,9 @@ def _auto_detect_work_verify_command(args, options, session, task):
     if not inferred:
         return ""
     options["verify_command"] = inferred
+    options["verify_command_source"] = "auto_detected"
     setattr(args, "verify_command", inferred)
+    setattr(args, "verify_command_source", "auto_detected")
     if session:
         with state_lock():
             state = load_state()
@@ -7578,7 +7612,15 @@ def _work_ai_workspace_roots(roots, workspace):
     return normalized
 
 
-def _work_ai_implement_v2_task_contract(task, *, max_steps, max_wall_seconds, guidance, verify_command):
+def _work_ai_implement_v2_task_contract(
+    task,
+    *,
+    max_steps,
+    max_wall_seconds,
+    guidance,
+    verify_command,
+    verify_command_source="",
+):
     description = (task or {}).get("description") or (task or {}).get("notes") or ""
     return {
         "title": (task or {}).get("title") or "",
@@ -7589,6 +7631,7 @@ def _work_ai_implement_v2_task_contract(task, *, max_steps, max_wall_seconds, gu
         "max_wall_seconds": max_wall_seconds,
         "guidance": _work_guidance_task_contract_guidance(guidance),
         "verify_command": verify_command or "",
+        "verify_command_source": verify_command_source or "",
         "acceptance_constraints": extract_acceptance_constraints(description),
     }
 
@@ -7717,6 +7760,7 @@ def _run_work_ai_implement_v2(
         max_wall_seconds=max_wall_seconds,
         guidance=work_guidance,
         verify_command=getattr(effective_args, "verify_command", None) or "",
+        verify_command_source=getattr(effective_args, "verify_command_source", None) or "",
     )
     task_contract_compiler_enabled = _work_guidance_task_contract_compiler_enabled(work_guidance)
     task_contract_compiler_report = {
@@ -7764,6 +7808,7 @@ def _run_work_ai_implement_v2(
         "allow_shell": bool(effective_args.allow_shell),
         "allow_verify": bool(effective_args.allow_verify),
         "verify_command": getattr(effective_args, "verify_command", None) or "",
+        "verify_command_source": getattr(effective_args, "verify_command_source", None) or "",
         "auto_approve_writes": work_auto_approve_edits_enabled(effective_args),
         "artifact_dir": getattr(effective_args, "oneshot_artifacts", "") or "",
         "max_steps": max_steps,
@@ -18699,6 +18744,7 @@ def _parse_chat_work_ai_args(parts):
         "--allow-read",
         "--allow-write",
         "--verify-command",
+        "--verify-command-source",
         "--verify-timeout",
     }
     value_option_prefixes = tuple(f"{option}=" for option in value_options)
@@ -18728,6 +18774,7 @@ def _parse_chat_work_ai_args(parts):
         "allow_shell": False,
         "allow_verify": False,
         "verify_command": "",
+        "verify_command_source": "",
         "verify_timeout": 300.0,
         "json": False,
     }
@@ -18777,6 +18824,8 @@ def _parse_chat_work_ai_args(parts):
                 args["allow_write"].append(value)
             elif name == "--verify-command":
                 args["verify_command"] = value
+            elif name == "--verify-command-source":
+                args["verify_command_source"] = value
             elif name == "--verify-timeout":
                 try:
                     args["verify_timeout"] = float(value)
@@ -18912,6 +18961,7 @@ def _split_continue_options_and_guidance(rest):
         "--allow-read",
         "--allow-write",
         "--verify-command",
+        "--verify-command-source",
         "--verify-timeout",
     }
     flag_options = {
@@ -18968,6 +19018,7 @@ def _continue_options_should_use_cached_defaults(options):
         "--allow-read",
         "--allow-write",
         "--verify-command",
+        "--verify-command-source",
         "--verify-timeout",
     }
     explicit_target_flags = {

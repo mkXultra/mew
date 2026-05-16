@@ -22,6 +22,71 @@ from mew.errors import MewError
 
 
 class CommandTests(unittest.TestCase):
+    def test_work_control_options_preserve_auto_detected_verify_source(self):
+        args = SimpleNamespace(
+            auth=None,
+            model_backend=None,
+            model=None,
+            base_url=None,
+            model_timeout=None,
+            cwd=None,
+            allow_read=[],
+            allow_write=[],
+            allow_shell=True,
+            allow_verify=True,
+            verify_command="node vm.js",
+            verify_command_source="auto_detected",
+            approval_mode="",
+            act_mode=None,
+            compact_live=False,
+            prompt_approval=False,
+            no_prompt_approval=False,
+            quiet=False,
+        )
+
+        options = commands_module._work_control_options(args)
+
+        self.assertEqual(options["verify_command"], "node vm.js")
+        self.assertEqual(options["verify_command_source"], "auto_detected")
+
+    def test_work_tool_gate_options_marks_explicit_verify_command(self):
+        args = SimpleNamespace(
+            allow_read=[],
+            allow_write=[],
+            allow_shell=True,
+            allow_verify=True,
+            verify_command="pytest -q",
+            verify_command_source="",
+        )
+
+        options = commands_module._work_tool_gate_options(args, session={})
+
+        self.assertEqual(options["verify_command"], "pytest -q")
+        self.assertEqual(options["verify_command_source"], "explicit")
+
+    def test_work_continue_options_emit_verify_command_source(self):
+        session = {
+            "default_options": {
+                "allow_verify": True,
+                "verify_command": "node vm.js",
+                "verify_command_source": "auto_detected",
+            }
+        }
+
+        rendered = commands_module.work_chat_continue_options(session)
+
+        self.assertIn("--verify-command 'node vm.js'", rendered)
+        self.assertIn("--verify-command-source auto_detected", rendered)
+
+    def test_chat_work_ai_args_parse_verify_command_source(self):
+        args, error = commands_module._parse_chat_work_ai_args(
+            ["work", "--allow-verify", "--verify-command", "node vm.js", "--verify-command-source", "auto_detected"]
+        )
+
+        self.assertEqual(error, "")
+        self.assertEqual(args.verify_command, "node vm.js")
+        self.assertEqual(args.verify_command_source, "auto_detected")
+
     def test_mark_batch_turn_replay_non_counted_on_stop(self):
         with tempfile.TemporaryDirectory() as tmp:
             metadata_path = Path(tmp) / "replay_metadata.json"

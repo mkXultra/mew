@@ -3320,6 +3320,187 @@ def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path:
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_planner_precedes_auto_detected_verifier(tmp_path: Path) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        planner_requests: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+            self.planner_requests = []
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_requests.append(dict(request))
+            return {
+                "command": "test -f vm.js",
+                "cwd": ".",
+                "reason": "auto-detected verifier is weak; verify the source artifact directly",
+                "confidence": "high",
+            }
+
+    provider = PlanningProvider()
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="node vm.js",
+            verify_command_source="auto_detected",
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert provider.planner_requests
+    assert provider.planner_requests[0]["task"]["verify_command_source"] == "auto_detected_verifier"  # type: ignore[index]
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
+
+
+def test_native_harness_auto_detected_verifier_is_fallback_when_planner_unavailable(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            verify_command_source="auto_detected",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "auto_detected_verifier"
+    decision = result.metrics["native_finish_gate_latest_decision"]
+    assert decision["closeout"]["command"]["source"] == "auto_detected_verifier"
+
+
+def test_native_harness_auto_detected_verifier_fallback_when_planner_errors(tmp_path: Path) -> None:
+    class FailingPlannerProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            raise RuntimeError("planner unavailable")
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            verify_command_source="auto_detected",
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=FailingPlannerProvider(),
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "auto_detected_verifier"
+
+
+def test_native_harness_explicit_verifier_precedes_planner(tmp_path: Path) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+            self.planner_called = False
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_called = True
+            return {"command": "false", "reason": "should not be used"}
+
+    provider = PlanningProvider()
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            verify_command_source="explicit",
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert provider.planner_called is False
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "configured_verifier"
+
+
 def test_native_harness_finish_verifier_planner_exit_zero_satisfies_acceptance_constraints(tmp_path: Path) -> None:
     class PlanningProvider(NativeFakeProvider):
         def __init__(self) -> None:

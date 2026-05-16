@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from mew.brief import (
+    _work_session_default_option_parts,
     active_roadmap_self_improve_focus,
     build_brief,
     build_brief_data,
@@ -57,6 +58,22 @@ def add_task(
 
 
 class BriefTests(unittest.TestCase):
+    def test_work_session_default_option_parts_preserve_verify_command_source(self):
+        session = {
+            "default_options": {
+                "allow_verify": True,
+                "verify_command": "node vm.js",
+                "verify_command_source": "auto_detected",
+            }
+        }
+
+        parts = _work_session_default_option_parts(session)
+
+        self.assertEqual(
+            parts,
+            ["--allow-verify", "--verify-command", "node vm.js", "--verify-command-source", "auto_detected"],
+        )
+
     def test_next_move_waits_when_idle(self):
         self.assertEqual(next_move(default_state()), "wait for the next user request")
 
