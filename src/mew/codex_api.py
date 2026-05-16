@@ -28,10 +28,6 @@ CODEX_RESPONSES_WEBSOCKET_BETA = "responses_websockets=2026-02-06"
 CODEX_WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
-class CodexTransientTransportError(CodexApiError):
-    """Retryable provider transport failure before a terminal response event."""
-
-
 def find_auth_path(auth_path=None):
     if auth_path:
         path = Path(auth_path).expanduser()
@@ -345,26 +341,11 @@ class CodexResponsesWebSocketSession:
         request_body.setdefault("stream", True)
         request_body = {"type": "response.create", **request_body}
         payload = json.dumps(request_body, ensure_ascii=False, separators=(",", ":"))
-        try:
-            self._send_text(payload, deadline)
-        except (OSError, TimeoutError) as exc:
-            self.close()
-            raise CodexTransientTransportError(
-                f"websocket send failed: {exc}"
-            ) from exc
+        self._send_text(payload, deadline)
 
         events = []
         while True:
-            try:
-                event = self._recv_json_event(deadline)
-            except CodexTransientTransportError:
-                self.close()
-                raise
-            except (OSError, TimeoutError) as exc:
-                self.close()
-                raise CodexTransientTransportError(
-                    f"websocket receive failed: {exc}"
-                ) from exc
+            event = self._recv_json_event(deadline)
             if event is None:
                 continue
             event_type = str(event.get("type") or "")
@@ -486,7 +467,7 @@ class CodexResponsesWebSocketSession:
             return event if isinstance(event, dict) else None
         if opcode == 0x8:
             self.close()
-            raise CodexTransientTransportError("websocket closed before response.completed")
+            raise CodexApiError("websocket closed before response.completed")
         if opcode == 0x9:
             self._send_control_frame(0xA, payload, deadline)
             return None
@@ -607,7 +588,7 @@ def _recv_exact(sock, size):
     while remaining > 0:
         chunk = sock.recv(remaining)
         if not chunk:
-            raise CodexTransientTransportError("websocket closed while reading frame")
+            raise CodexApiError("websocket closed while reading frame")
         chunks.append(chunk)
         remaining -= len(chunk)
     return b"".join(chunks)
