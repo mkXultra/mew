@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import shlex
 import time
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, MutableMapping
 
 from .completion_resolver import (
     CompletionResolver,
@@ -204,6 +204,23 @@ class _NativeFinishVerifierPlan:
     raw: Mapping[str, object] | None = None
 
 
+def _transport_attempts(descriptor: MutableMapping[str, object]) -> list[dict[str, object]]:
+    attempts = descriptor.get("transport_attempts")
+    if isinstance(attempts, list):
+        return attempts  # type: ignore[return-value]
+    descriptor["transport_attempts"] = []
+    return descriptor["transport_attempts"]  # type: ignore[return-value]
+
+
+def _close_websocket_session(session: object | None) -> None:
+    close = getattr(session, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            pass
+
+
 @dataclass
 class NativeCodexResponsesProvider:
     """Live Codex Responses provider for the native implement_v2 harness."""
@@ -224,6 +241,7 @@ class NativeCodexResponsesProvider:
     previous_response_output_items: list[dict[str, object]] = None  # type: ignore[assignment]
     use_websocket: bool = True
     websocket_session: object | None = None
+    websocket_max_attempts: int = 2
 
     def __post_init__(self) -> None:
         if self.requests is None:
@@ -290,7 +308,7 @@ class NativeCodexResponsesProvider:
         descriptor["provider_request_inventory"] = inventory
         descriptor["input_item_count"] = request_descriptor.get("input_item_count")
         descriptor["turn_index"] = request_descriptor.get("turn_index")
-        self.requests.append(dict(descriptor))
+        descriptor["transport_attempts"] = []
         _emit_progress(
             self.progress,
             (
@@ -298,29 +316,21 @@ class NativeCodexResponsesProvider:
                 f"turn={request_descriptor.get('turn_index')} timeout_seconds={self.timeout}"
             ),
         )
+        self.requests.append(descriptor)
         try:
             lane_attempt_id = str(request_descriptor.get("lane_attempt_id") or "")
             turn_id = f"turn-{request_descriptor.get('turn_index')}"
             if self.use_websocket:
-                if self.websocket_session is None:
-                    self.websocket_session = _codex_api.CodexResponsesWebSocketSession(
-                        auth=self.auth,
-                        base_url=self.base_url,
-                        timeout=self.timeout,
-                        conversation_id=lane_attempt_id,
-                    )
                 descriptor["transport_kind"] = "provider_native_websocket"
                 descriptor["native_transport_kind"] = "provider_native_websocket"
-                result = call_codex_native_responses_websocket(
-                    auth=self.auth,
+                result = self._next_websocket_response(
                     descriptor=descriptor,
-                    base_url=self.base_url,
-                    timeout=self.timeout,
                     lane_attempt_id=lane_attempt_id,
                     turn_id=turn_id,
-                    websocket_session=self.websocket_session,
                 )
             else:
+                descriptor["transport_kind"] = "provider_native"
+                descriptor["native_transport_kind"] = "provider_native"
                 result = call_codex_native_responses(
                     auth=self.auth,
                     descriptor=descriptor,
@@ -350,6 +360,78 @@ class NativeCodexResponsesProvider:
                 result.transcript.items
             )
         return result
+
+    def _next_websocket_response(
+        self,
+        *,
+        descriptor: dict[str, object],
+        lane_attempt_id: str,
+        turn_id: str,
+    ) -> NativeResponsesStreamParseResult:
+        max_attempts = max(1, int(self.websocket_max_attempts or 1))
+        attempts = _transport_attempts(descriptor)
+        for attempt_number in range(1, max_attempts + 1):
+            if self.websocket_session is None:
+                self.websocket_session = _codex_api.CodexResponsesWebSocketSession(
+                    auth=self.auth,
+                    base_url=self.base_url,
+                    timeout=self.timeout,
+                    conversation_id=lane_attempt_id,
+                )
+            attempt: dict[str, object] = {
+                "transport": "provider_native_websocket",
+                "attempt": attempt_number,
+                "previous_response_id": descriptor.get("previous_response_id") or "",
+                "previous_response_delta_mode": descriptor.get(
+                    "previous_response_delta_mode"
+                )
+                or "none",
+            }
+            attempts.append(attempt)
+            try:
+                result = call_codex_native_responses_websocket(
+                    auth=self.auth,
+                    descriptor=descriptor,
+                    base_url=self.base_url,
+                    timeout=self.timeout,
+                    lane_attempt_id=lane_attempt_id,
+                    turn_id=turn_id,
+                    websocket_session=self.websocket_session,
+                )
+            except _codex_api.CodexTransientTransportError as exc:
+                attempt.update(
+                    {
+                        "status": "retryable_error",
+                        "error": str(exc),
+                        "failure_class": "transient_provider_transport",
+                    }
+                )
+                descriptor["native_transport_failure_class"] = (
+                    "transient_provider_transport"
+                )
+                descriptor["retryable"] = True
+                _close_websocket_session(self.websocket_session)
+                self.websocket_session = None
+                if attempt_number < max_attempts:
+                    _emit_progress(
+                        self.progress,
+                        (
+                            "native_response retry "
+                            f"turn={descriptor.get('turn_index')} "
+                            f"attempt={attempt_number + 1} "
+                            "reason=transient_provider_transport"
+                        ),
+                    )
+                    continue
+                raise
+            attempt["status"] = "completed"
+            descriptor["retryable"] = False
+            if len(attempts) > 1:
+                descriptor["native_transport_recovered"] = True
+            return result
+        raise _codex_api.CodexTransientTransportError(
+            "websocket retry loop exhausted without response"
+        )
 
     def plan_finish_verifier_command(self, request: Mapping[str, object]) -> Mapping[str, object]:
         """Ask a separate planner session for one finish verifier command.

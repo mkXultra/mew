@@ -5,6 +5,7 @@ import os
 import signal
 import socket
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -93,6 +94,40 @@ class _FakeResponseStream:
         self.raw = _FakeResponseRaw(recorded)
 
 
+class _ClosingRecvSocket:
+    closed = False
+
+    def recv(self, size):
+        return b""
+
+    def close(self):
+        self.closed = True
+
+    def settimeout(self, value):
+        pass
+
+
+class _CloseFrameSocket:
+    def __init__(self):
+        self.closed = False
+        self._chunks = [b"\x88\x00"]
+
+    def recv(self, size):
+        if not self._chunks:
+            return b""
+        chunk = self._chunks.pop(0)
+        if len(chunk) > size:
+            self._chunks.insert(0, chunk[size:])
+            return chunk[:size]
+        return chunk
+
+    def close(self):
+        self.closed = True
+
+    def settimeout(self, value):
+        pass
+
+
 class CodexApiTests(unittest.TestCase):
     def test_codex_websocket_url_matches_responses_endpoint(self):
         self.assertEqual(
@@ -115,6 +150,26 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(headers["OpenAI-Beta"], CODEX_RESPONSES_WEBSOCKET_BETA)
         self.assertEqual(headers["x-client-request-id"], "thread-1")
         self.assertEqual(headers["chatgpt-account-id"], "acct_123")
+
+    def test_websocket_empty_read_is_retryable_transport_error(self):
+        sock = _ClosingRecvSocket()
+
+        with self.assertRaises(codex_api.CodexTransientTransportError):
+            codex_api._recv_exact(sock, 2)
+
+    def test_websocket_close_frame_before_completed_is_retryable_and_closes(self):
+        sock = _CloseFrameSocket()
+        session = codex_api.CodexResponsesWebSocketSession(
+            auth={"access_token": "tok"},
+            base_url="https://example.invalid/api",
+            timeout=1,
+        )
+        session._socket = sock
+
+        with self.assertRaises(codex_api.CodexTransientTransportError):
+            session._recv_json_event(time.time() + 1)
+
+        self.assertTrue(sock.closed)
 
     def test_sse_text_delta_helpers_extract_streaming_text(self):
         raw = "\n".join(
