@@ -160,6 +160,30 @@ def test_codex_hot_path_source_facts_do_not_expose_hidden_source_requirements(tm
     assert "vm.js" not in rendered
 
 
+def test_codex_hot_path_source_facts_do_not_mark_nested_source_basename_missing(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    source_file = tmp_path / "doomgeneric" / "doomgeneric" / "doomgeneric_img.c"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text("void DG_DrawFrame(void) {}\n")
+    raw_task = (
+        "I have provided /app/doomgeneric/, the source code to doom. "
+        "I've also wrote a special doomgeneric_img.c that I want you to use."
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={"description": raw_task},
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    rendered = json.dumps(provider.requests[0]["input_items"], ensure_ascii=False)
+    assert "Provided source/artifact refs from the task: /app/doomgeneric/" in rendered
+    assert "Output or target paths named by the task but not present yet: doomgeneric_img.c" not in rendered
+
+
 def test_native_task_description_includes_goal_and_objective(tmp_path: Path) -> None:
     lane_input = _lane_input(
         tmp_path,

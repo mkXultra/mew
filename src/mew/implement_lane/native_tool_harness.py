@@ -4723,7 +4723,7 @@ def _codex_hot_path_source_facts_text(task_facts: Mapping[str, object]) -> str:
 
     source_paths = _source_fact_path_list(task_facts.get("source_requirement_paths"))
     existing_paths = _source_fact_path_list(task_facts.get("existing_workspace_paths"))
-    missing_paths = _source_fact_path_list(task_facts.get("missing_workspace_paths"))
+    missing_paths = _source_fact_missing_path_list(task_facts.get("missing_workspace_paths"))
     verify_paths = _source_fact_path_list(task_facts.get("verify_command_paths"))
     if not any((source_paths, existing_paths, missing_paths, verify_paths)):
         return ""
@@ -4754,6 +4754,14 @@ def _source_fact_path_list(value: object) -> list[str]:
         if len(result) >= 8:
             break
     return result
+
+
+def _source_fact_missing_path_list(value: object) -> list[str]:
+    return [
+        path
+        for path in _source_fact_path_list(value)
+        if "/" in path or path.startswith("/")
+    ]
 
 
 def _task_paths_from_text(text: object, *, workspace: str | Path | None = None) -> list[str]:
