@@ -676,8 +676,53 @@ def run_native_implement_v2(
                             reason="native active command closeout ran before low-budget provider turn",
                         )
                     )
+                    final_closeout = None
+                    if active_result.status == "completed" and not _native_active_command_run_id(exec_runtime):
+                        final_closeout = _native_final_verifier_closeout(
+                            lane_input,
+                            lane_attempt_id=lane_attempt_id,
+                            provider=provider,
+                            exec_runtime=exec_runtime,
+                            workspace=workspace,
+                            allowed_read_roots=allowed_read_roots,
+                            allowed_write_roots=allowed_write_roots,
+                            lane_config=lane_config,
+                            tool_calls=tuple(tool_calls),
+                            tool_results=tuple(tool_results),
+                            start_monotonic=start_monotonic,
+                        )
+                    if final_closeout is not None:
+                        closeout_call, closeout_result, closeout_latency = final_closeout
+                        final_event = _NativeCloseoutEvent(
+                            kind="final_verifier",
+                            call=closeout_call,
+                            result=closeout_result,
+                            latency=closeout_latency,
+                            reason="native final verifier closeout ran after low-budget active command closeout",
+                        )
+                        append_closeout_event(final_event)
+                        closeout_context = _native_closeout_context_from_result(closeout_call, closeout_result)
+                        native_decision = _native_finish_gate_decision_from_controller_closeout_event(
+                            final_event,
+                            lane_input=lane_input,
+                            lane_config=lane_config,
+                            transcript_items=tuple(items),
+                            closeout_context=closeout_context,
+                        )
+                        finish_gate_decision = native_decision.as_dict()
+                        if native_decision.lane_status == "completed":
+                            status = "completed"
+                            finish_summary = native_decision.reason
+                            break
+                        if native_decision.lane_status == "blocked_return":
+                            status = "blocked"
+                            finish_summary = native_decision.reason
+                            break
+                        status = "blocked"
+                        finish_summary = native_decision.reason
                 status = "blocked"
-                finish_summary = "native wall-clock budget exhausted before next provider turn"
+                if not finish_summary:
+                    finish_summary = "native wall-clock budget exhausted before next provider turn"
                 native_model_budget_block = {
                     "failure_class": "native_model_budget_insufficient",
                     "turn_index": turn_index,
@@ -3656,6 +3701,43 @@ def _native_finish_gate_decision_from_closeout_events(
             )
         ),
         compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
+    )
+    return decide_native_finish_from_closeout(request, closeout)
+
+
+def _native_finish_gate_decision_from_controller_closeout_event(
+    event: _NativeCloseoutEvent,
+    *,
+    lane_input: ImplementLaneInput,
+    lane_config: Mapping[str, object],
+    transcript_items: tuple[NativeTranscriptItem, ...],
+    closeout_context: _NativeCloseoutContext,
+) -> NativeFinishGateDecision:
+    closeout = _native_finish_closeout_result_from_event(event, closeout_context=closeout_context)
+    request = NativeFinishGateRequest(
+        lane_attempt_id=event.call.lane_attempt_id,
+        turn_id=event.call.turn_id,
+        finish_call_id=event.call.call_id,
+        finish_arguments={
+            "outcome": "completed",
+            "summary": "deterministic final verifier closeout",
+            "controller_closeout": True,
+        },
+        task_id=str(lane_input.task_id or ""),
+        task_description=_native_task_description(lane_input),
+        task_contract=dict(lane_input.task_contract),
+        lane_config=dict(lane_config),
+        workspace=str(lane_input.workspace or ""),
+        allowed_read_roots=tuple(str(root) for root in lane_config.get("allowed_read_roots") or ()),
+        allowed_write_roots=tuple(str(root) for root in lane_config.get("allowed_write_roots") or ()),
+        transcript_hash_before_decision=native_transcript_hash(
+            NativeTranscript(
+                lane_attempt_id=event.call.lane_attempt_id,
+                provider=event.call.provider,
+                model=event.call.model,
+                items=transcript_items,
+            )
+        ),
     )
     return decide_native_finish_from_closeout(request, closeout)
 

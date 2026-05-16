@@ -423,7 +423,7 @@ def decide_native_finish_from_closeout(
         reason = closeout.reason or "final verifier closeout command was unsafe"
     elif closeout.status == "completed_nonzero":
         blockers = tuple(dict.fromkeys((*blockers, "closeout_verifier_failed")))
-        reason = closeout.reason or "final verifier closeout exited nonzero"
+        reason = "final verifier closeout exited nonzero"
     elif closeout.status == "runtime_error":
         blockers = tuple(dict.fromkeys((*blockers, "closeout_verifier_runtime_error")))
         reason = closeout.reason or "final verifier closeout runtime error"

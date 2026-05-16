@@ -14,6 +14,7 @@ from mew.implement_lane.native_fake_provider import (
     fake_reasoning,
     model_json_text_non_control_item,
 )
+from mew.implement_lane.hot_path_fastcheck import run_hot_path_fastcheck
 from mew.implement_lane.native_provider_adapter import NativeResponsesStreamParseResult
 from mew.implement_lane.native_tool_harness import (
     NativeCodexResponsesProvider,
@@ -1529,6 +1530,116 @@ def test_native_harness_closes_active_command_before_low_budget_provider_turn(tm
         if item.call_id == "call-active-command-closeout-002" and item.kind.endswith("_output")
     )
     assert closeout_output.status == "completed"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_low_budget_runs_final_verifier_after_active_closeout(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifact"
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-source",
+                    "write_file",
+                    {"path": "generated.py", "content": "print('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_call(
+                    "long-build",
+                    "run_tests",
+                    {
+                        "command": "sleep 0.05; true",
+                        "cwd": ".",
+                        "foreground_budget_seconds": 0,
+                        "timeout": 3,
+                    },
+                    output_index=1,
+                ),
+            ]
+        ]
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness._native_next_model_timeout_seconds",
+        side_effect=[30.0, 20.0],
+    ):
+        result = run_native_implement_v2(
+            _lane_input(
+                tmp_path,
+                allow_verify=True,
+                verify_command="test -f generated.py",
+                final_verifier_closeout_seconds=2,
+                artifact_dir=str(artifact_root),
+            ),
+            provider=provider,
+            artifact_root=artifact_root,
+            max_turns=2,
+        )
+
+    assert result.status == "completed"
+    assert result.finish_summary == "trusted final verifier closeout exited 0"
+    assert result.metrics["active_command_closeout_count"] == 1
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["final_verifier_closeout_reason"] == (
+        "native final verifier closeout ran after low-budget active command closeout"
+    )
+    assert result.metrics["finish_gate_decision"]["result"] == "allow"
+    final_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    final_args = json.loads(final_call.arguments_json_text)
+    assert final_args["command"] == "test -f generated.py"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+    assert not (artifact_root / "native_finish_gate_decisions.jsonl").exists()
+    fastcheck = run_hot_path_fastcheck(artifact_root)
+    checks = {check["name"]: check for check in fastcheck["checks"]}
+    assert checks["native_finish_gate_decisions"]["status"] == "pass"
+
+
+def test_native_harness_low_budget_final_verifier_failure_blocks(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-source",
+                    "write_file",
+                    {"path": "generated.py", "content": "print('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_call(
+                    "long-build",
+                    "run_tests",
+                    {
+                        "command": "sleep 0.05; true",
+                        "cwd": ".",
+                        "foreground_budget_seconds": 0,
+                        "timeout": 3,
+                    },
+                    output_index=1,
+                ),
+            ]
+        ]
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness._native_next_model_timeout_seconds",
+        side_effect=[30.0, 20.0],
+    ):
+        result = run_native_implement_v2(
+            _lane_input(
+                tmp_path,
+                allow_verify=True,
+                verify_command="test -f missing.py",
+                final_verifier_closeout_seconds=2,
+            ),
+            provider=provider,
+            max_turns=2,
+        )
+
+    assert result.status == "blocked"
+    assert result.finish_summary == "final verifier closeout exited nonzero"
+    assert result.metrics["active_command_closeout_count"] == 1
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["finish_gate_decision"]["result"] == "block"
+    assert "closeout_verifier_failed" in result.metrics["finish_gate_decision"]["blockers"]
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
