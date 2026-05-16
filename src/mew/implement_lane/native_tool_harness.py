@@ -23,6 +23,7 @@ from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .native_fake_provider import PHASE3_TRANSPORT_CHANGE, NativeFakeProvider
 from .native_finish_gate import (
     FinishCloseoutCommand,
+    FinishCloseoutCommandValidation,
     NativeFinishCloseoutResult,
     NativeFinishGateDecision,
     NativeFinishGatePolicy,
@@ -255,6 +256,14 @@ class FinishVerifierPlannerLoopRequest:
 
     def as_planner_request(self) -> dict[str, object]:
         base = dict(self.legacy_request or {})
+        requirement_source = dict(base)
+        requirement_source["task"] = {
+            "task_id": self.task_id,
+            "description": self.task_description,
+            "contract": dict(self.task_contract),
+        }
+        if self.external_verifier_failure:
+            requirement_source["external_verifier_failure"] = dict(self.external_verifier_failure)
         base.update(
             {
                 "schema_version": 1,
@@ -289,6 +298,7 @@ class FinishVerifierPlannerLoopRequest:
                     "available_execution_surface": "run_command",
                     "allow_shell_execution": True,
                     "shell_composition_blocked": True,
+                    "observable_requirements": list(_finish_verifier_observable_requirements(requirement_source)),
                 },
                 "output_contract": {
                     "json_object": True,
@@ -1964,13 +1974,18 @@ def _native_final_verifier_closeout_plan(
         planner_provider=provider,
     )
     if loop_result.status == "error":
-        fallback = _auto_detected_native_final_verifier_command(lane_input)
+        fallback, fallback_rejection = _safe_auto_detected_finish_verifier_fallback(
+            lane_input,
+            request=loop_request.as_planner_request(),
+        )
         decision = dict(loop_result.record)
         decision.setdefault("status", "error")
         decision.setdefault("request_hash", request_hash)
         if fallback is not None:
             decision["fallback"] = _native_finish_verifier_plan_payload(fallback)
             decision["fallback_source"] = fallback.source
+        elif fallback_rejection:
+            decision["fallback_rejection"] = dict(fallback_rejection)
         else:
             decision.setdefault("fallback", {})
             decision.setdefault("fallback_source", "")
@@ -1984,7 +1999,10 @@ def _native_final_verifier_closeout_plan(
     if loop_result.status == "selected" and loop_result.plan is not None:
         _record_finish_verifier_planner_decision(provider, loop_result.record)
         return loop_result.plan
-    fallback = _auto_detected_native_final_verifier_command(lane_input)
+    fallback, fallback_rejection = _safe_auto_detected_finish_verifier_fallback(
+        lane_input,
+        request=loop_request.as_planner_request(),
+    )
     decision = dict(loop_result.record)
     decision.setdefault("status", loop_result.status or "rejected")
     decision.setdefault("request_hash", request_hash)
@@ -1995,6 +2013,8 @@ def _native_final_verifier_closeout_plan(
     if fallback is not None:
         decision["fallback"] = _native_finish_verifier_plan_payload(fallback)
         decision["fallback_source"] = fallback.source
+    elif fallback_rejection:
+        decision["fallback_rejection"] = dict(fallback_rejection)
     else:
         decision.setdefault("fallback", {})
         decision.setdefault("fallback_source", "")
@@ -2005,6 +2025,25 @@ def _native_final_verifier_closeout_plan(
         f"{loop_result.reason or 'unknown'}; fallback={_native_finish_verifier_plan_source(fallback)}",
     )
     return _native_finish_verifier_plan_with_planner_fallback(fallback, decision)
+
+
+def _safe_auto_detected_finish_verifier_fallback(
+    lane_input: ImplementLaneInput,
+    *,
+    request: Mapping[str, object],
+) -> tuple[_NativeFinishVerifierPlan | None, Mapping[str, object] | None]:
+    fallback = _auto_detected_native_final_verifier_command(lane_input)
+    if fallback is None:
+        return None, None
+    safety = _finish_verifier_command_safety(fallback.command, request=request)
+    if safety.allowed:
+        return fallback, None
+    return None, {
+        "source": fallback.source,
+        "command": fallback.command,
+        "reason": safety.reason,
+        "blockers": list(safety.blockers),
+    }
 
 
 def run_finish_verifier_planner_loop(
@@ -2144,13 +2183,17 @@ def _finish_verifier_planner_loop_request(
     if not isinstance(allowed_roots, (list, tuple)):
         allowed_roots = (lane_input.workspace,)
     latest_mutation = _latest_mutation_for_finish_verifier_planner(tool_results)
+    task_contract = dict(lane_input.task_contract)
+    legacy_contract = task.get("contract")
+    if isinstance(legacy_contract, Mapping):
+        task_contract.update(dict(legacy_contract))
     return FinishVerifierPlannerLoopRequest(
         lane_attempt_id=_lane_attempt_id(lane_input),
         turn_id="finish-verifier-planner",
         finish_call_id="finish",
         task_id=str(task.get("task_id") or lane_input.task_id),
         task_description=str(task.get("description") or _native_task_description(lane_input)),
-        task_contract=dict(task.get("contract") if isinstance(task.get("contract"), Mapping) else lane_input.task_contract),
+        task_contract=task_contract,
         latest_mutation=latest_mutation,
         recent_tool_results=tuple(
             item for item in legacy_request.get("recent_tool_results", ()) if isinstance(item, Mapping)
@@ -2428,16 +2471,31 @@ _FINISH_VERIFIER_GENERIC_TEST_RE = re.compile(
     r"(?i)(?:^|[\s;&|()])(?:pytest|npm\s+test|pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test|make\s+(?:test|check)|"
     r"prove|coqc|coqchk|mvn\s+test|gradle\s+test|tox|ruff\s+check|python\s+-m\s+pytest)(?:$|[\s;&|()])"
 )
+_FINISH_VERIFIER_STDOUT_REQUIREMENT_RE = re.compile(
+    r"(?i)\b(?:stdout|standard\s+output|terminal\s+output|expected\s+output|print(?:ed)?\s+output)\b"
+)
+_FINISH_VERIFIER_STDERR_REQUIREMENT_RE = re.compile(
+    r"(?i)\b(?:stderr|standard\s+error|error\s+output)\b"
+)
+_FINISH_VERIFIER_IMAGE_REQUIREMENT_RE = re.compile(
+    r"(?i)\b(?:frame|screenshot|image|bitmap)\b|\.(?:bmp|png|jpe?g|ppm|gif|svg)\b"
+)
+_FINISH_VERIFIER_FILE_REQUIREMENT_RE = re.compile(
+    r"(?i)\b(?:expected\s+artifact|artifact\s+path|output\s+file|created\s+file|saved\s+file)\b"
+)
+_FINISH_VERIFIER_ASSERTION_COMMAND_RE = re.compile(
+    r"(?i)(?:^|[\s;&|()])(?:grep|rg|awk|diff|cmp|stat|file|identify|sha(?:1|256)sum|wc)(?:$|[\s;&|()])"
+)
 _FINISH_VERIFIER_SUBJECT_RE = re.compile(
     r"(?<![A-Za-z0-9_./-])(?:[A-Za-z0-9_.@+-]+/)*[A-Za-z0-9_.@+-]+"
     r"\.(?:py|pyx|pxd|js|ts|tsx|jsx|c|h|cc|cpp|hpp|rs|go|java|rb|php|lua|v|vo|ml|mli|sh|json|toml|yaml|yml|"
-    r"txt|md|so|dylib|dll|exe|o|a)(?![A-Za-z0-9_./-])"
+    r"txt|md|so|dylib|dll|exe|o|a|bmp|png|jpe?g|ppm|gif|svg)(?![A-Za-z0-9_./-])"
 )
 _PATH_LIKE_TOKEN_RE = re.compile(
     r"(?:/[\w@+.,:=~%/-]+|[\w@+.,:=~%-]+/[\w@+.,:=~%/-]+|"
     r"(?<![A-Za-z0-9_./-])[\w@+.-]+\."
     r"(?:py|pyx|pxd|js|ts|tsx|jsx|c|h|cc|cpp|hpp|rs|go|java|rb|php|lua|v|vo|ml|mli|sh|json|toml|yaml|yml|"
-    r"txt|md|so|dylib|dll|exe|o|a)(?![A-Za-z0-9_./-]))"
+    r"txt|md|so|dylib|dll|exe|o|a|bmp|png|jpe?g|ppm|gif|svg)(?![A-Za-z0-9_./-]))"
 )
 
 
@@ -2459,11 +2517,29 @@ def _finish_verifier_command_safety(
         FinishCloseoutCommand(command=text, source="finish_verifier_planner"),
         NativeFinishGatePolicy(allowed_sources=("finish_verifier_planner",)),
     )
+    requirements = _finish_verifier_observable_requirements(request)
     if not validation.allowed:
+        mapped_blockers = tuple(_planner_safety_blocker(blocker) for blocker in validation.blockers)
+        if (
+            set(mapped_blockers) == {"finish_verifier_weak_assertion"}
+            and _finish_verifier_command_asserts_observables(text, requirements)
+        ):
+            validation = FinishCloseoutCommandValidation(
+                allowed=True,
+                command=validation.command,
+                reason="nontrivial observable assertion command",
+            )
+        else:
+            return _FinishVerifierCommandSafetyResult(
+                allowed=False,
+                reason=validation.reason,
+                blockers=mapped_blockers,
+            )
+    if requirements and not _finish_verifier_command_asserts_observables(text, requirements):
         return _FinishVerifierCommandSafetyResult(
             allowed=False,
-            reason=validation.reason,
-            blockers=tuple(_planner_safety_blocker(blocker) for blocker in validation.blockers),
+            reason="finish verifier command does not assert required task-visible observables",
+            blockers=("finish_verifier_observable_assertions_missing",),
         )
     if _FINISH_VERIFIER_GENERIC_TEST_RE.search(text):
         return _FinishVerifierCommandSafetyResult(allowed=True, reason="generic test command")
@@ -2476,6 +2552,92 @@ def _finish_verifier_command_safety(
             blockers=("finish_verifier_task_subject_missing",),
         )
     return _FinishVerifierCommandSafetyResult(allowed=True, reason="mentions task subject")
+
+
+def _finish_verifier_observable_requirements(request: Mapping[str, object] | None) -> tuple[str, ...]:
+    if not isinstance(request, Mapping):
+        return ()
+    command_policy = request.get("command_policy")
+    if isinstance(command_policy, Mapping):
+        explicit = command_policy.get("observable_requirements")
+        if isinstance(explicit, (list, tuple)):
+            values = tuple(str(item).strip() for item in explicit if str(item).strip())
+            if values:
+                return tuple(dict.fromkeys(values))
+    requirements: list[str] = []
+    task = request.get("task")
+    task_contract: Mapping[str, object] = {}
+    task_text = ""
+    if isinstance(task, Mapping):
+        task_text = str(task.get("description") or "")
+        contract = task.get("contract")
+        if isinstance(contract, Mapping):
+            task_contract = contract
+    haystack = " ".join(
+        item
+        for item in (
+            task_text,
+            json.dumps(_json_safe_native(task_contract), ensure_ascii=False, sort_keys=True),
+            json.dumps(
+                _json_safe_native(request.get("recent_tool_results") or ()),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            json.dumps(_json_safe_native(request.get("external_verifier_failure") or {}), ensure_ascii=False, sort_keys=True),
+        )
+        if item
+    )
+    if _FINISH_VERIFIER_STDOUT_REQUIREMENT_RE.search(haystack):
+        requirements.append("stdout")
+    if _FINISH_VERIFIER_STDERR_REQUIREMENT_RE.search(haystack):
+        requirements.append("stderr")
+    if _FINISH_VERIFIER_IMAGE_REQUIREMENT_RE.search(haystack):
+        requirements.append("image_artifact")
+    if _FINISH_VERIFIER_FILE_REQUIREMENT_RE.search(haystack):
+        requirements.append("file_artifact")
+    if isinstance(task_contract, Mapping):
+        for key in ("expected_artifact", "expected_artifacts", "artifact", "artifacts"):
+            if task_contract.get(key) not in (None, "", [], (), {}):
+                requirements.append("file_artifact")
+                break
+    return tuple(dict.fromkeys(requirements))
+
+
+def _finish_verifier_command_asserts_observables(command: str, requirements: tuple[str, ...]) -> bool:
+    if not requirements:
+        return _finish_verifier_nontrivial_test_command(command)
+    if _FINISH_VERIFIER_GENERIC_TEST_RE.search(command):
+        return True
+    if _FINISH_VERIFIER_ASSERTION_COMMAND_RE.search(command):
+        return True
+    if _finish_verifier_nontrivial_test_command(command) and any(
+        item in {"file_artifact", "image_artifact"} for item in requirements
+    ):
+        return True
+    return False
+
+
+def _finish_verifier_nontrivial_test_command(command: str) -> bool:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+    if tokens[0] == "[" and tokens[-1:] == ["]"]:
+        tokens = ["test", *tokens[1:-1]]
+    if tokens[0] != "test":
+        return False
+    if len(tokens) < 3:
+        return False
+    expression = tokens[1:]
+    joined = " ".join(expression).strip()
+    if joined in {"1 = 1", "1 == 1"}:
+        return False
+    file_predicates = {"-e", "-f", "-s", "-r", "-x", "-d"}
+    if any(token in file_predicates for token in expression):
+        return any(_PATH_LIKE_TOKEN_RE.search(token) for token in expression if token not in file_predicates)
+    return any(_PATH_LIKE_TOKEN_RE.search(token) for token in expression)
 
 
 def _planner_safety_blocker(blocker: str) -> str:

@@ -3360,7 +3360,7 @@ def test_native_harness_finish_verifier_planner_request_includes_bounded_read_po
 
         def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
             self.planner_requests.append(dict(request))
-            return {"command": "node vm.js", "cwd": ".", "reason": "verify source artifact"}
+            return {"command": "test -f vm.js", "cwd": ".", "reason": "verify source artifact exists"}
 
     provider = PlanningProvider()
 
@@ -3385,6 +3385,10 @@ def test_native_harness_finish_verifier_planner_request_includes_bounded_read_po
     assert request["component"] == "FinishVerifierPlannerLoop"
     assert request["read_policy"]["max_turns"] == 2  # type: ignore[index]
     assert request["read_policy"]["allowed_roots"] == [str(tmp_path)]  # type: ignore[index]
+    assert set(request["command_policy"]["observable_requirements"]) >= {  # type: ignore[index]
+        "file_artifact",
+        "image_artifact",
+    }
     candidate_paths = request["read_policy"]["candidate_paths"]  # type: ignore[index]
     assert any(str(path).endswith("/vm.js") or str(path) == "vm.js" for path in candidate_paths)
     assert "src/main.c" in candidate_paths
@@ -3396,6 +3400,235 @@ def test_native_harness_finish_verifier_planner_request_includes_bounded_read_po
     assert "example.com" not in candidate_paths
     assert not any(str(path).startswith(str(tmp_path)) for path in candidate_paths)
     assert "external_verifier_failure" not in request
+
+
+def test_native_harness_finish_verifier_planner_rejects_plain_run_for_observable_task(
+    tmp_path: Path,
+) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        planner_requests: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+            self.planner_requests = []
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_requests.append(dict(request))
+            return {
+                "command": "node vm.js",
+                "cwd": ".",
+                "reason": "run the producer",
+                "confidence": "high",
+            }
+
+    provider = PlanningProvider()
+    artifact_root = tmp_path / "artifacts"
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            task_contract={
+                "description": "Run the VM, print output, and save a frame image.",
+                "expected_artifacts": [{"path": "/tmp/frame.bmp"}],
+            },
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+        artifact_root=artifact_root,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 0
+    request = provider.planner_requests[0]
+    assert set(request["command_policy"]["observable_requirements"]) >= {  # type: ignore[index]
+        "stdout",
+        "file_artifact",
+        "image_artifact",
+    }
+    decision = result.metrics["finish_verifier_planner_latest_decision"]
+    assert decision["status"] == "rejected"
+    assert decision["reject_blockers"] == ["finish_verifier_observable_assertions_missing"]
+    rows = [
+        json.loads(line)
+        for line in (artifact_root / "finish_verifier_planner_decisions.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert rows[-1]["raw_plan"]["command"] == "node vm.js"
+    assert rows[-1]["reject_blockers"] == ["finish_verifier_observable_assertions_missing"]
+    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+
+
+def test_native_harness_observable_planner_rejection_blocks_same_auto_fallback(
+    tmp_path: Path,
+) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            return {"command": "node vm.js", "reason": "plain producer run"}
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            task_contract={
+                "description": "The program must print expected stdout and save a frame image.",
+                "expected_artifacts": [{"path": "frame.bmp"}],
+            },
+            allow_verify=True,
+            verify_command="node vm.js",
+            verify_command_source="auto_detected",
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=PlanningProvider(),
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 0
+    decision = result.metrics["finish_verifier_planner_latest_decision"]
+    assert decision["reject_blockers"] == ["finish_verifier_observable_assertions_missing"]
+    assert decision["fallback_source"] == ""
+    assert decision["fallback_rejection"]["blockers"] == ["finish_verifier_observable_assertions_missing"]
+    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+
+
+def test_native_harness_finish_verifier_planner_accepts_relative_image_artifact_assertion(
+    tmp_path: Path,
+) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "frame.bmp", "content": "bitmap", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            return {"command": "test -f frame.bmp", "reason": "verify image artifact exists"}
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            task_contract={
+                "description": "Save the rendered frame image.",
+                "expected_artifacts": [{"path": "frame.bmp"}],
+            },
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=PlanningProvider(),
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f frame.bmp"
+    assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
+
+
+def test_native_harness_finish_verifier_planner_derives_observables_from_recent_tool_results(
+    tmp_path: Path,
+) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        planner_requests: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "probe-1",
+                                "run_command",
+                                {
+                                    "argv": [sys.executable, "-c", "print('missing expected frame output on stdout')"],
+                                    "cwd": ".",
+                                },
+                                output_index=0,
+                            ),
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=1,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+                        ]
+                    ]
+                ).responses
+            )
+            self.planner_requests = []
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_requests.append(dict(request))
+            return {"command": "node vm.js", "reason": "plain producer run"}
+
+    provider = PlanningProvider()
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            task_contract={"description": "Create vm.js for the runtime task."},
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    request = provider.planner_requests[0]
+    assert set(request["command_policy"]["observable_requirements"]) >= {"stdout", "image_artifact"}  # type: ignore[index]
+    assert result.metrics["finish_verifier_planner_latest_decision"]["reject_blockers"] == [
+        "finish_verifier_observable_assertions_missing"
+    ]
 
 
 def test_native_harness_planner_precedes_auto_detected_verifier(tmp_path: Path) -> None:
