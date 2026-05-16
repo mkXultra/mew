@@ -23460,6 +23460,119 @@ def test_implement_v2_apply_patch_ambiguous_match_returns_matching_windows(tmp_p
     assert target.read_text(encoding="utf-8") == "same();\nalpha();\nsame();\nbeta();\n"
 
 
+def test_implement_v2_multi_file_apply_patch_ambiguous_match_returns_target_windows(tmp_path) -> None:
+    header = tmp_path / "worker.h"
+    source = tmp_path / "worker.c"
+    header.write_text("int alpha;\n", encoding="utf-8")
+    source.write_text("same();\nalpha();\nsame();\nbeta();\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: worker.h\n"
+        "@@\n"
+        "-int alpha;\n"
+        "+int beta;\n"
+        "*** Update File: worker.c\n"
+        "@@\n"
+        "-same();\n"
+        "+different();\n"
+        "*** End Patch\n"
+    )
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-multi", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "multi-file patch ambiguous recovery"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_class"] == "patch_anchor_mismatch"
+    assert payload["failure_subclass"] == "patch_ambiguous_anchor"
+    assert payload["path"].endswith("worker.c")
+    assert payload["patch_anchor_windows"][0]["path"].endswith("worker.c")
+    assert payload["patch_anchor_windows"][0]["operation_index"] == 2
+    assert len(payload["patch_anchor_windows"][0]["matching_existing_windows"]) == 2
+    assert payload["suggested_recovery_calls"][0]["path"].endswith("worker.c")
+    assert header.read_text(encoding="utf-8") == "int alpha;\n"
+    assert source.read_text(encoding="utf-8") == "same();\nalpha();\nsame();\nbeta();\n"
+
+
+def test_implement_v2_multi_file_apply_patch_exact_miss_uses_failing_operation_only(tmp_path) -> None:
+    header = tmp_path / "worker.h"
+    source = tmp_path / "worker.c"
+    header.write_text("int alpha;\n", encoding="utf-8")
+    source.write_text("function actualCall() {\n  return rareWidget;\n}\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: worker.h\n"
+        "@@\n"
+        "-int alpha;\n"
+        "+int beta;\n"
+        "*** Update File: worker.c\n"
+        "@@\n"
+        "-function missingCall() {\n"
+        "-  return rareWidget;\n"
+        "-}\n"
+        "+function replacementCall() {\n"
+        "+  return rareWidget;\n"
+        "+}\n"
+        "*** End Patch\n"
+    )
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-multi", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "multi-file patch exact miss recovery"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_class"] == "patch_anchor_mismatch"
+    assert payload["failure_subclass"] == "patch_exact_match_miss"
+    assert payload["path"].endswith("worker.c")
+    assert "worker.h" not in payload.get("paths", [])
+    assert payload["patch_anchor_windows"][0]["path"].endswith("worker.c")
+    assert payload["patch_anchor_windows"][0]["operation_index"] == 2
+    assert "actualCall" in payload["patch_anchor_windows"][0]["nearest_existing_windows"][0]["text"]
+    assert payload["suggested_recovery_calls"][0]["path"].endswith("worker.c")
+    assert header.read_text(encoding="utf-8") == "int alpha;\n"
+    assert source.read_text(encoding="utf-8").startswith("function actualCall")
+
+
+def test_implement_v2_multi_file_apply_patch_path_policy_failure_not_parse_error(tmp_path) -> None:
+    safe = tmp_path / "safe.txt"
+    safe.write_text("safe\n", encoding="utf-8")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: safe.txt\n"
+        "@@\n"
+        "-safe\n"
+        "+safer\n"
+        f"*** Add File: {outside}\n"
+        "+outside\n"
+        "*** End Patch\n"
+    )
+
+    result = run_fake_write_implement_v2(
+        _write_lane_input(tmp_path),
+        provider_calls=(
+            {"provider_call_id": "call-multi", "tool_name": "apply_patch", "arguments": {"patch": patch}},
+        ),
+        finish_arguments={"outcome": "analysis_ready", "summary": "multi-file path policy"},
+    )
+    payload = result.updated_lane_state["proof_manifest"]["tool_results"][0]["content"][0]
+
+    assert payload["failure_class"] == "path_policy_failure"
+    assert payload["failure_subclass"] == "write_path_policy_rejected"
+    assert "outside allowed write roots" in payload["reason"]
+    assert payload["suggested_tool"] == "apply_patch"
+    assert safe.read_text(encoding="utf-8") == "safe\n"
+    assert not outside.exists()
+
+
 def test_implement_v2_apply_patch_parse_failure_pairs_error(tmp_path) -> None:
     result = run_fake_write_implement_v2(
         _write_lane_input(tmp_path),

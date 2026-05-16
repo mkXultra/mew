@@ -156,6 +156,57 @@ def test_codex_apply_patch_failure_is_bounded_and_sanitized() -> None:
     assert rendered.leak_ok is True
 
 
+def test_codex_apply_patch_failure_renders_factual_anchor_context() -> None:
+    result = _result(
+        "apply_patch",
+        status="failed",
+        reason="edit hunk #1 old text matched 2 times; include more surrounding context",
+        path="/app/worker.c",
+        suggested_next_action="do not leak controller guidance",
+        required_next="do not leak required next",
+        patch_anchor_windows=[
+            {
+                "path": "/app/worker.c",
+                "matching_existing_windows": [
+                    {
+                        "line_start": 10,
+                        "line_end": 12,
+                        "text": "same();\nalpha();\n",
+                    },
+                    {
+                        "line_start": 30,
+                        "line_end": 32,
+                        "text": "same();\nbeta();\n",
+                    },
+                ],
+            }
+        ],
+    )
+
+    rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
+
+    assert rendered.text.startswith("apply_patch failed:")
+    assert "current match: /app/worker.c:10-12" in rendered.text
+    assert "same();" in rendered.text
+    assert "suggested_next_action" not in rendered.text
+    assert "required_next" not in rendered.text
+    assert rendered.leak_ok is True
+
+
+def test_codex_apply_patch_failure_sanitizes_raw_unsupported_hunk_line() -> None:
+    result = _result(
+        "apply_patch",
+        status="failed",
+        reason="apply_patch operation #2 (worker.c) failed: unsupported apply_patch hunk line: -secret raw patch",
+    )
+
+    rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
+
+    assert "unsupported apply_patch hunk line" in rendered.text
+    assert "secret raw patch" not in rendered.text
+    assert rendered.leak_ok is True
+
+
 def test_codex_finish_renderer_hides_resolver_internals() -> None:
     accepted = _result(
         "finish",

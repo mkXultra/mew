@@ -810,6 +810,44 @@ def test_codex_hot_path_malformed_apply_patch_uses_patch_failure_renderer(tmp_pa
     assert "suggested_next_action" not in output.output_text_or_ref
 
 
+def test_codex_hot_path_multi_file_apply_patch_failure_renders_anchor_context(tmp_path: Path) -> None:
+    (tmp_path / "worker.h").write_text("int alpha;\n", encoding="utf-8")
+    (tmp_path / "worker.c").write_text("same();\nalpha();\nsame();\nbeta();\n", encoding="utf-8")
+    patch_text = "\n".join(
+        [
+            "*** Begin Patch",
+            "*** Update File: worker.h",
+            "@@",
+            "-int alpha;",
+            "+int beta;",
+            "*** Update File: worker.c",
+            "@@",
+            "-same();",
+            "+different();",
+            "*** End Patch",
+        ]
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_call("patch-ambiguous", "apply_patch", {"patch": patch_text, "apply": True}, output_index=0)]]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        max_turns=1,
+    )
+
+    output = next(
+        item for item in result.transcript.items if item.call_id == "patch-ambiguous" and item.kind.endswith("_output")
+    )
+    assert output.status == "failed"
+    assert output.output_text_or_ref.startswith("apply_patch failed:")
+    assert "current match:" in output.output_text_or_ref
+    assert "worker.c:" in output.output_text_or_ref
+    assert "same();" in output.output_text_or_ref
+    assert "suggested_next_action" not in output.output_text_or_ref
+
+
 def test_codex_hot_path_synthetic_cancel_output_uses_profile_renderer(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [

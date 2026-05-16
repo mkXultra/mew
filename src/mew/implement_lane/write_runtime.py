@@ -222,22 +222,14 @@ class ImplementV2WriteRuntime:
             patch_args = _patch_edit_arguments(dict(call.arguments))
         except ValueError:
             return _apply_patch_parse_recovery_payload(call, reason=reason)
-        if str(patch_args.get("operation") or "") != "update_file":
-            return {}
-        path = _workspace_path(patch_args.get("path") or "", self.workspace)
-        edits = patch_args.get("edits") if isinstance(patch_args.get("edits"), list) else []
+        operations = _patch_operations(patch_args)
         hunk_index = _hunk_index_from_reason(reason)
-        selected_edits = (
-            [edits[hunk_index - 1]]
-            if hunk_index is not None and 0 < hunk_index <= len(edits)
-            else [edit for edit in edits if isinstance(edit, dict)]
-        )
+        operation_index_hint = _apply_patch_operation_index_from_reason(reason)
         failure_subclass = "patch_ambiguous_anchor" if anchor_ambiguous else "patch_exact_match_miss"
         payload: dict[str, object] = {
             "failure_class": "patch_anchor_mismatch",
             "failure_subclass": failure_subclass,
             "recoverable": True,
-            "path": str(path),
             "patch_transport": _patch_transport_metadata(dict(call.arguments), patch_args=patch_args),
             "suggested_tool": "read_file/apply_patch/edit_file",
             "suggested_next_action": (
@@ -245,32 +237,66 @@ class ImplementV2WriteRuntime:
                 "run the first suggested_recovery_calls read_file window instead of reading the whole file"
             ),
         }
-        try:
-            current = _read_text_prefix(path, _EDIT_RECOVERY_FILE_CHAR_CAP)
-        except OSError:
-            return payload
         windows: list[dict[str, object]] = []
-        for offset, edit in enumerate(selected_edits):
-            if not isinstance(edit, dict):
+        recovery_calls: list[dict[str, object]] = []
+        candidate_paths: list[str] = []
+        for operation_index, operation_args in enumerate(operations, start=1):
+            if operation_index_hint is not None and operation_index != operation_index_hint:
                 continue
-            old_text = str(edit.get("old") or "")
-            if not old_text:
+            if str(operation_args.get("operation") or "") != "update_file":
                 continue
-            index = hunk_index if hunk_index is not None else offset + 1
-            item: dict[str, object] = {
-                "hunk_index": index,
-                "old_string_preview": _clip_text(old_text, 240),
-            }
-            if anchor_ambiguous:
-                item["matching_existing_windows"] = _matching_existing_windows(current, old_text)
-            else:
-                item["nearest_existing_windows"] = _nearest_existing_windows(current, old_text)
-            windows.append(item)
+            path = _workspace_path(operation_args.get("path") or "", self.workspace)
+            edits = operation_args.get("edits") if isinstance(operation_args.get("edits"), list) else []
+            selected_edits = (
+                [edits[hunk_index - 1]]
+                if hunk_index is not None and 0 < hunk_index <= len(edits)
+                else [edit for edit in edits if isinstance(edit, dict)]
+            )
+            try:
+                current = _read_text_prefix(path, _EDIT_RECOVERY_FILE_CHAR_CAP)
+            except OSError:
+                continue
+            path_windows: list[dict[str, object]] = []
+            for offset, edit in enumerate(selected_edits):
+                if not isinstance(edit, dict):
+                    continue
+                old_text = str(edit.get("old") or "")
+                if not old_text:
+                    continue
+                index = hunk_index if hunk_index is not None else offset + 1
+                item: dict[str, object] = {
+                    "hunk_index": index,
+                    "old_string_preview": _clip_text(old_text, 240),
+                    "path": str(path),
+                    "operation_index": operation_index,
+                }
+                if anchor_ambiguous:
+                    matching_windows = _matching_existing_windows(current, old_text)
+                    if len(matching_windows) <= 1:
+                        continue
+                    item["matching_existing_windows"] = matching_windows
+                else:
+                    nearest_windows = _nearest_existing_windows(current, old_text)
+                    if not nearest_windows:
+                        continue
+                    item["nearest_existing_windows"] = nearest_windows
+                path_windows.append(item)
+                windows.append(item)
+                if len(windows) >= 3:
+                    break
+            if path_windows:
+                candidate_paths.append(str(path))
+                recovery_calls.extend(_suggested_patch_recovery_calls(path, path_windows))
             if len(windows) >= 3:
                 break
+        if len(candidate_paths) == 1:
+            payload["path"] = candidate_paths[0]
+        elif candidate_paths:
+            payload["paths"] = candidate_paths
         if windows:
             payload["patch_anchor_windows"] = windows
-            payload["suggested_recovery_calls"] = _suggested_patch_recovery_calls(path, windows)
+        if recovery_calls:
+            payload["suggested_recovery_calls"] = recovery_calls[:3]
         return payload
 
     def _apply_patch(self, call: ToolCallEnvelope) -> dict[str, object]:
@@ -383,11 +409,14 @@ class ImplementV2WriteRuntime:
             if quality_failure is not None:
                 return quality_failure
 
-        dry_run_results = [
-            self._execute_apply_patch_operation(operation_args, dry_run=True) for operation_args in operations
-        ]
+        dry_run_results: list[dict[str, object]] = []
+        for operation_index, operation_args in enumerate(operations, start=1):
+            try:
+                dry_run_results.append(self._execute_apply_patch_operation(operation_args, dry_run=True))
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise ValueError(_apply_patch_operation_failure_message(operation_index, operation_args, exc)) from exc
         operation_results = (
-            [self._execute_apply_patch_operation(operation_args, dry_run=False) for operation_args in operations]
+            self._execute_apply_patch_operations(operations)
             if apply
             else dry_run_results
         )
@@ -400,6 +429,15 @@ class ImplementV2WriteRuntime:
         )
         aggregate["patch_transport"] = _patch_transport_metadata(args, patch_args=patch_args)
         return aggregate
+
+    def _execute_apply_patch_operations(self, operations: list[dict[str, object]]) -> list[dict[str, object]]:
+        results: list[dict[str, object]] = []
+        for operation_index, operation_args in enumerate(operations, start=1):
+            try:
+                results.append(self._execute_apply_patch_operation(operation_args, dry_run=False))
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise ValueError(_apply_patch_operation_failure_message(operation_index, operation_args, exc)) from exc
+        return results
 
     def _execute_apply_patch_operation(
         self,
@@ -694,6 +732,21 @@ def _hunk_index_from_reason(reason: str) -> int | None:
         return int(match.group(1))
     except ValueError:
         return None
+
+
+def _apply_patch_operation_index_from_reason(reason: str) -> int | None:
+    match = re.search(r"apply_patch operation #(\d+)", reason)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _apply_patch_operation_failure_message(index: int, operation_args: dict[str, object], exc: BaseException) -> str:
+    path = str(operation_args.get("path") or "").strip() or "<unknown>"
+    return f"apply_patch operation #{index} ({path}) failed: {exc}"
 
 
 def _edit_mismatch_anchors(old_text: str) -> list[str]:
@@ -1250,7 +1303,7 @@ def _patch_transport_metadata(args: dict[str, object], *, patch_args: dict[str, 
 
 def _apply_patch_parse_recovery_payload(call: ToolCallEnvelope, *, reason: str) -> dict[str, object]:
     text = str(reason or "")
-    if "apply_patch" not in text:
+    if not _is_apply_patch_parse_failure_reason(text):
         return {}
     payload: dict[str, object] = {
         "failure_class": "patch_parse_error",
@@ -1274,6 +1327,25 @@ def _apply_patch_parse_recovery_payload(call: ToolCallEnvelope, *, reason: str) 
             "line_count": len(patch_text.splitlines()),
         }
     return payload
+
+
+def _is_apply_patch_parse_failure_reason(reason: str) -> bool:
+    markers = (
+        "apply_patch requires patch text",
+        "apply_patch input must start",
+        "apply_patch input must end",
+        "apply_patch patch_lines",
+        "apply_patch path argument",
+        "apply_patch hunk must",
+        "apply_patch contains no",
+        "unsupported apply_patch hunk line",
+        "apply_patch file header is required",
+        "apply_patch add-file body",
+        "apply_patch delete-file patch",
+        "apply_patch @@ hunks",
+        "apply_patch multi-file patch requires",
+    )
+    return any(marker in reason for marker in markers)
 
 
 def _parse_minimal_apply_patch(patch_text: str) -> dict[str, object]:

@@ -183,8 +183,10 @@ def _render_codex_terminal(result: ToolResultEnvelope, *, limit: int) -> str:
 def _render_codex_apply_patch(result: ToolResultEnvelope, *, limit: int) -> str:
     payload = _payload(result)
     if result.is_error or result.status not in {"completed"}:
-        reason = _first_text(payload, "reason", "message", "error", "summary") or result.status
-        return _clip(f"apply_patch failed: {reason}", limit)
+        reason = _safe_apply_patch_failure_reason(_first_text(payload, "reason", "message", "error", "summary") or result.status)
+        lines = [f"apply_patch failed: {reason}"]
+        lines.extend(_apply_patch_failure_context_lines(payload))
+        return _clip("\n".join(lines), limit)
     paths = _changed_paths(payload)
     if not paths:
         path = str(payload.get("path") or "").strip()
@@ -200,6 +202,56 @@ def _render_codex_apply_patch(result: ToolResultEnvelope, *, limit: int) -> str:
     if diffstat:
         lines.append(diffstat)
     return _clip("\n".join(lines), limit)
+
+
+def _safe_apply_patch_failure_reason(reason: str) -> str:
+    marker = "unsupported apply_patch hunk line:"
+    if marker not in reason:
+        return reason
+    prefix, _marker, _raw_line = reason.partition(marker)
+    return f"{prefix}{marker.removesuffix(':')}".strip()
+
+
+def _apply_patch_failure_context_lines(payload: Mapping[str, object]) -> list[str]:
+    lines: list[str] = []
+    for item in _apply_patch_anchor_items(payload)[:2]:
+        path = _first_text(item, "path") or _first_text(payload, "path")
+        if not path:
+            paths = payload.get("paths")
+            if isinstance(paths, list) and paths:
+                path = str(paths[0])
+        label = "current match"
+        windows = item.get("matching_existing_windows")
+        if not isinstance(windows, list) or not windows:
+            windows = item.get("nearest_existing_windows")
+            label = "nearest current context"
+        if not isinstance(windows, list):
+            continue
+        for window in [window for window in windows if isinstance(window, dict)][:2]:
+            location = _format_patch_window_location(path, window)
+            if location:
+                lines.append(f"{label}: {location}")
+            snippet = _first_text(window, "text")
+            if snippet:
+                lines.append(_clip(snippet, 700))
+    return lines
+
+
+def _apply_patch_anchor_items(payload: Mapping[str, object]) -> list[Mapping[str, object]]:
+    windows = payload.get("patch_anchor_windows")
+    if not isinstance(windows, list):
+        return []
+    return [item for item in windows if isinstance(item, Mapping)]
+
+
+def _format_patch_window_location(path: str, window: Mapping[str, object]) -> str:
+    line_start = window.get("line_start")
+    line_end = window.get("line_end")
+    if isinstance(line_start, int) and isinstance(line_end, int):
+        return f"{path}:{line_start}-{line_end}" if path else f"line {line_start}-{line_end}"
+    if path:
+        return path
+    return ""
 
 
 def _render_codex_finish(result: ToolResultEnvelope, *, limit: int) -> str:
