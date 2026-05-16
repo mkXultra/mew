@@ -3644,6 +3644,57 @@ def test_native_harness_records_null_planner_plan_before_auto_fallback(tmp_path:
     assert rows[-1]["fallback_source"] == "auto_detected_verifier"
 
 
+def test_native_harness_null_planner_without_auto_fallback_blocks_without_dispatch(tmp_path: Path) -> None:
+    class NullPlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> None:
+            return None
+
+    artifact_root = tmp_path / "artifacts"
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=NullPlanningProvider(),
+        max_turns=1,
+        artifact_root=artifact_root,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 0
+    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_continue"
+    assert "closeout_verifier_not_run" in result.metrics["completion_resolver_latest_decision"]["blockers"]
+    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    rows = [
+        json.loads(line)
+        for line in (artifact_root / "finish_verifier_planner_decisions.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert rows[-1]["raw_plan"] is None
+    assert rows[-1]["fallback_source"] == ""
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_native_harness_explicit_verifier_precedes_planner(tmp_path: Path) -> None:
     class PlanningProvider(NativeFakeProvider):
         def __init__(self) -> None:
@@ -3743,6 +3794,55 @@ def test_native_harness_finish_verifier_planner_exit_zero_satisfies_acceptance_c
     assert result.metrics["completion_resolver_decision_count"] == 0
     assert result.metrics["native_finish_gate_latest_decision"]["lane_status"] == "completed"
     assert result.metrics["native_finish_gate_latest_decision"]["result"] == "allow"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_finish_verifier_planner_nonzero_blocks_completion(tmp_path: Path) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "process.exit(1)\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "command": "node vm.js",
+                "cwd": ".",
+                "reason": "verify the runtime artifact exits cleanly",
+                "confidence": "high",
+            }
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=PlanningProvider(),
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_continue"
+    assert "closeout_verifier_failed" in result.metrics["completion_resolver_latest_decision"]["blockers"]
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "node vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
