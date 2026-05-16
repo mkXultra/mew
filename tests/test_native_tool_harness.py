@@ -3321,6 +3321,83 @@ def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path:
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_finish_verifier_planner_request_includes_bounded_read_policy_and_candidate_paths(
+    tmp_path: Path,
+) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        planner_requests: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "probe-1",
+                                "run_command",
+                                {
+                                    "argv": [
+                                        sys.executable,
+                                        "-c",
+                                        "print('Python 3.11.5 example.com README vm.js src/main.c docs/readme.md')",
+                                    ],
+                                    "cwd": ".",
+                                },
+                                output_index=0,
+                            ),
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=1,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+                        ]
+                    ]
+                ).responses
+            )
+            self.planner_requests = []
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_requests.append(dict(request))
+            return {"command": "test -f vm.js", "cwd": ".", "reason": "verify source artifact"}
+
+    provider = PlanningProvider()
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            task_contract={
+                "description": "Build Doom and make node vm.js write /tmp/frame.bmp.",
+                "expected_artifacts": [{"path": "/tmp/frame.bmp"}, {"path": "Makefile"}],
+            },
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+            finish_verifier_planner_max_turns=2,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    request = provider.planner_requests[0]
+    assert request["component"] == "FinishVerifierPlannerLoop"
+    assert request["read_policy"]["max_turns"] == 2  # type: ignore[index]
+    assert request["read_policy"]["allowed_roots"] == [str(tmp_path)]  # type: ignore[index]
+    candidate_paths = request["read_policy"]["candidate_paths"]  # type: ignore[index]
+    assert any(str(path).endswith("/vm.js") or str(path) == "vm.js" for path in candidate_paths)
+    assert "src/main.c" in candidate_paths
+    assert "docs/readme.md" in candidate_paths
+    assert "/tmp/frame.bmp" in candidate_paths
+    assert "Makefile" in candidate_paths
+    assert "README" not in candidate_paths
+    assert "3.11.5" not in candidate_paths
+    assert "example.com" not in candidate_paths
+    assert not any(str(path).startswith(str(tmp_path)) for path in candidate_paths)
+    assert "external_verifier_failure" not in request
+
+
 def test_native_harness_planner_precedes_auto_detected_verifier(tmp_path: Path) -> None:
     class PlanningProvider(NativeFakeProvider):
         planner_requests: list[dict[str, object]]

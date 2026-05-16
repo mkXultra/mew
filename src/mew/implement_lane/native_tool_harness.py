@@ -2141,6 +2141,7 @@ def _finish_verifier_planner_loop_request(
     allowed_roots = lane_config.get("allowed_read_roots")
     if not isinstance(allowed_roots, (list, tuple)):
         allowed_roots = (lane_input.workspace,)
+    latest_mutation = _latest_mutation_for_finish_verifier_planner(tool_results)
     return FinishVerifierPlannerLoopRequest(
         lane_attempt_id=_lane_attempt_id(lane_input),
         turn_id="finish-verifier-planner",
@@ -2148,14 +2149,15 @@ def _finish_verifier_planner_loop_request(
         task_id=str(task.get("task_id") or lane_input.task_id),
         task_description=str(task.get("description") or _native_task_description(lane_input)),
         task_contract=dict(task.get("contract") if isinstance(task.get("contract"), Mapping) else lane_input.task_contract),
-        latest_mutation=_latest_mutation_for_finish_verifier_planner(tool_results),
+        latest_mutation=latest_mutation,
         recent_tool_results=tuple(
             item for item in legacy_request.get("recent_tool_results", ()) if isinstance(item, Mapping)
         ),
-        candidate_paths=tuple(
-            str(item)
-            for item in read_policy.get("candidate_paths", ())
-            if isinstance(item, str) and item.strip()
+        candidate_paths=_finish_verifier_planner_candidate_paths(
+            lane_input,
+            latest_mutation=latest_mutation,
+            legacy_read_policy=read_policy,
+            tool_results=tool_results,
         ),
         policy=FinishVerifierPlannerLoopPolicy(
             enabled=bool(lane_config.get("experimental_finish_verifier_planner")),
@@ -2192,6 +2194,130 @@ def _latest_mutation_for_finish_verifier_planner(
             "summary": result.natural_result_text(limit=500),
         }
     return {}
+
+
+def _finish_verifier_planner_candidate_paths(
+    lane_input: ImplementLaneInput,
+    *,
+    latest_mutation: Mapping[str, object],
+    legacy_read_policy: Mapping[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> tuple[str, ...]:
+    workspace = Path(str(lane_input.workspace or ".")).expanduser().resolve(strict=False)
+    paths: list[str] = []
+    _extend_unique_paths(paths, legacy_read_policy.get("candidate_paths"), workspace=workspace, structured=True)
+    _extend_unique_paths(paths, latest_mutation.get("paths"), workspace=workspace, structured=True)
+    _extend_unique_paths(
+        paths,
+        _task_contract_candidate_paths(lane_input.task_contract, workspace=workspace),
+        workspace=workspace,
+        structured=True,
+    )
+    for result in reversed(tool_results[-8:]):
+        if result.status != "completed" or result.is_error:
+            continue
+        payload = _native_result_payload(result)
+        _extend_unique_paths(
+            paths,
+            _payload_candidate_paths(payload, workspace=workspace),
+            workspace=workspace,
+            structured=True,
+        )
+    return tuple(paths[:24])
+
+
+def _task_contract_candidate_paths(task_contract: object, *, workspace: Path) -> tuple[str, ...]:
+    if not isinstance(task_contract, Mapping):
+        return ()
+    paths: list[str] = []
+    for key in ("expected_artifact", "expected_artifacts", "artifact", "artifacts"):
+        _extend_unique_paths(paths, task_contract.get(key), workspace=workspace, structured=True)
+    for key in ("verify_command", "description", "guidance"):
+        _extend_unique_paths(paths, task_contract.get(key), workspace=workspace, structured=False)
+    return tuple(paths)
+
+
+def _payload_candidate_paths(payload: Mapping[str, object], *, workspace: Path) -> tuple[str, ...]:
+    paths: list[str] = []
+    for key in ("changed_paths", "path", "target", "file", "output_path"):
+        _extend_unique_paths(paths, payload.get(key), workspace=workspace, structured=True)
+    typed = payload.get("typed_source_mutation") if isinstance(payload.get("typed_source_mutation"), Mapping) else {}
+    _extend_unique_paths(paths, typed.get("changed_paths"), workspace=workspace, structured=True)
+    card = payload.get("mutation_output_card") if isinstance(payload.get("mutation_output_card"), Mapping) else {}
+    _extend_unique_paths(paths, card.get("changed_paths"), workspace=workspace, structured=True)
+    for key in (
+        "cwd",
+        "command",
+        "stdout",
+        "stderr",
+        "stdout_tail",
+        "stderr_tail",
+    ):
+        _extend_unique_paths(paths, payload.get(key), workspace=workspace, structured=False)
+    return tuple(paths)
+
+
+def _extract_paths_from_value(value: object, *, workspace: Path, structured: bool) -> tuple[str, ...]:
+    found: list[str] = []
+
+    def visit(item: object) -> None:
+        if isinstance(item, Mapping):
+            for key in ("path", "target", "file", "output_path", "name", "command", "cmd"):
+                visit(item.get(key))
+            return
+        if isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+            return
+        if not isinstance(item, str):
+            return
+        if structured:
+            cleaned = _normalize_finish_verifier_candidate_path(item, workspace=workspace, structured=True)
+            if cleaned:
+                found.append(cleaned)
+            return
+        for match in _PATH_LIKE_TOKEN_RE.findall(item):
+            cleaned = _normalize_finish_verifier_candidate_path(match, workspace=workspace, structured=False)
+            if cleaned:
+                found.append(cleaned)
+
+    visit(value)
+    return tuple(dict.fromkeys(found))
+
+
+def _extend_unique_paths(paths: list[str], value: object, *, workspace: Path, structured: bool = False) -> None:
+    for path in _extract_paths_from_value(value, workspace=workspace, structured=structured):
+        if path not in paths:
+            paths.append(path)
+
+
+def _normalize_finish_verifier_candidate_path(path: str, *, workspace: Path, structured: bool) -> str:
+    path = path.strip().strip("'\"`.,:;()[]{}")
+    if not path or len(path) > 240:
+        return ""
+    if path in {".", "..", "/", "/tmp", "/app"}:
+        return ""
+    if path.startswith(("http://", "https://", "file://")):
+        return ""
+    if "\x00" in path or "\n" in path or "\r" in path:
+        return ""
+    normalized = path
+    candidate = Path(path).expanduser()
+    if candidate.is_absolute():
+        try:
+            resolved = candidate.resolve(strict=False)
+            normalized = resolved.relative_to(workspace).as_posix()
+        except ValueError:
+            normalized = candidate.as_posix()
+    else:
+        normalized = Path(path).as_posix()
+    if normalized in {".", "..", "/", "/tmp", "/app"}:
+        return ""
+    if normalized.startswith("../") or normalized == "..":
+        return ""
+    if structured:
+        return normalized
+    return normalized if any(char in normalized for char in ("/", ".")) or normalized.startswith("/tmp/") else ""
 
 
 def _finish_verifier_planner_forbidden_tool_attempts(
@@ -2304,6 +2430,12 @@ _FINISH_VERIFIER_SUBJECT_RE = re.compile(
     r"(?<![A-Za-z0-9_./-])(?:[A-Za-z0-9_.@+-]+/)*[A-Za-z0-9_.@+-]+"
     r"\.(?:py|pyx|pxd|js|ts|tsx|jsx|c|h|cc|cpp|hpp|rs|go|java|rb|php|lua|v|vo|ml|mli|sh|json|toml|yaml|yml|"
     r"txt|md|so|dylib|dll|exe|o|a)(?![A-Za-z0-9_./-])"
+)
+_PATH_LIKE_TOKEN_RE = re.compile(
+    r"(?:/[\w@+.,:=~%/-]+|[\w@+.,:=~%-]+/[\w@+.,:=~%/-]+|"
+    r"(?<![A-Za-z0-9_./-])[\w@+.-]+\."
+    r"(?:py|pyx|pxd|js|ts|tsx|jsx|c|h|cc|cpp|hpp|rs|go|java|rb|php|lua|v|vo|ml|mli|sh|json|toml|yaml|yml|"
+    r"txt|md|so|dylib|dll|exe|o|a)(?![A-Za-z0-9_./-]))"
 )
 
 
