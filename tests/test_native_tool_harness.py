@@ -97,7 +97,11 @@ def test_codex_hot_path_provider_input_uses_raw_task_without_task_contract(tmp_p
     provider = NativeFakeProvider.from_item_batches(
         [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
     )
-    raw_task = "Use the provided Doom source tree and build the MIPS runnable artifact."
+    (tmp_path / "doomgeneric").mkdir()
+    raw_task = (
+        "I have provided doomgeneric/, the corresponding Doom source code. "
+        "Build the MIPS runnable artifact."
+    )
     lane_input = _lane_input(
         tmp_path,
         task_contract={
@@ -115,11 +119,45 @@ def test_codex_hot_path_provider_input_uses_raw_task_without_task_contract(tmp_p
 
     input_items = provider.requests[0]["input_items"]
     assert input_items[0]["content"][0]["text"] == raw_task  # type: ignore[index]
+    assert input_items[1]["content"][0]["text"] == (  # type: ignore[index]
+        "Task source facts:\n"
+        "- Provided source/artifact refs from the task: doomgeneric/\n"
+        "- Existing workspace paths named by the task: doomgeneric\n"
+        "- The task text identifies the refs above as provided inputs."
+    )
     rendered = json.dumps(input_items, ensure_ascii=False)
     assert "task_contract" not in rendered
     assert "completion_criteria" not in rendered
     assert "expected_artifacts" not in rendered
     assert "Hidden compiled objective" not in rendered
+
+
+def test_codex_hot_path_source_facts_do_not_expose_hidden_source_requirements(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    raw_task = "Use the provided source tree and build the runnable artifact."
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "description": raw_task,
+            "source_requirements": [{"path": "secret-root/doomgeneric", "reason": "hidden compiler fact"}],
+            "compiled_task_contract": {
+                "source_requirements": [{"path": "other-secret/source", "reason": "hidden compiler fact"}],
+            },
+            "verify_command": "node vm.js",
+        },
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    input_items = provider.requests[0]["input_items"]
+    assert len(input_items) == 1
+    rendered = json.dumps(input_items, ensure_ascii=False)
+    assert "secret-root" not in rendered
+    assert "other-secret" not in rendered
+    assert "vm.js" not in rendered
 
 
 def test_native_task_description_includes_goal_and_objective(tmp_path: Path) -> None:
@@ -3551,6 +3589,7 @@ def test_native_harness_finish_verifier_planner_request_includes_bounded_read_po
             task_contract={
                 "description": "Build Doom and make node vm.js write /tmp/frame.bmp.",
                 "expected_artifacts": [{"path": "/tmp/frame.bmp"}, {"path": "Makefile"}],
+                "source_requirements": [{"path": "doomgeneric/doomgeneric.c", "reason": "provided source"}],
             },
             allow_verify=True,
             experimental_finish_verifier_planner=True,
@@ -3574,6 +3613,7 @@ def test_native_harness_finish_verifier_planner_request_includes_bounded_read_po
     assert any(str(path).endswith("/vm.js") or str(path) == "vm.js" for path in candidate_paths)
     assert "src/main.c" in candidate_paths
     assert "docs/readme.md" in candidate_paths
+    assert "doomgeneric/doomgeneric.c" in candidate_paths
     assert "/tmp/frame.bmp" in candidate_paths
     assert "Makefile" in candidate_paths
     assert "README" not in candidate_paths

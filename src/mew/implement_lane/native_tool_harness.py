@@ -88,7 +88,11 @@ from .v2_runtime import (
 )
 from .. import codex_api as _codex_api
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
-from ..acceptance import acceptance_done_gate_decision
+from ..acceptance import (
+    acceptance_done_gate_decision,
+    implementation_contract_source_requirements,
+    implementation_source_ref_matches_text,
+)
 from ..config import DEFAULT_CODEX_REASONING_EFFORT
 from ..prompt_sections import render_prompt_sections
 
@@ -2345,8 +2349,10 @@ def _task_contract_candidate_paths(task_contract: object, *, workspace: Path) ->
     if not isinstance(task_contract, Mapping):
         return ()
     paths: list[str] = []
-    for key in ("expected_artifact", "expected_artifacts", "artifact", "artifacts"):
+    for key in ("expected_artifact", "expected_artifacts", "artifact", "artifacts", "source_requirements"):
         _extend_unique_paths(paths, task_contract.get(key), workspace=workspace, structured=True)
+    compiled = _mapping_from_request_descriptor(task_contract.get("compiled_task_contract"))
+    _extend_unique_paths(paths, compiled.get("source_requirements"), workspace=workspace, structured=True)
     for key in ("verify_command", "description", "guidance"):
         _extend_unique_paths(paths, task_contract.get(key), workspace=workspace, structured=False)
     return tuple(paths)
@@ -4490,20 +4496,39 @@ def _responses_input_items(
     *,
     compact_sidecar_digest: Mapping[str, object],
 ) -> list[dict[str, object]]:
-    task_facts = _provider_visible_task_facts(lane_input)
     if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
+        raw_task = _raw_task_provider_visible_text(lane_input)
+        task_facts = _provider_visible_task_facts(
+            lane_input,
+            text_sources=(raw_task,),
+            include_contract_source_requirements=False,
+            include_verify_command_paths=False,
+        )
         items: list[dict[str, object]] = [
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "input_text",
-                        "text": _raw_task_provider_visible_text(lane_input),
+                        "text": raw_task,
                     }
                 ],
             }
         ]
+        if source_capsule := _codex_hot_path_source_facts_text(task_facts):
+            items.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": source_capsule,
+                        }
+                    ],
+                }
+            )
     else:
+        task_facts = _provider_visible_task_facts(lane_input)
         task_payload = {
             "task_contract": dict(lane_input.task_contract),
             "task_facts": task_facts,
@@ -4613,22 +4638,36 @@ def _task_contract_objective_text(contract: Mapping[str, object]) -> str:
     return ""
 
 
-def _provider_visible_task_facts(lane_input: ImplementLaneInput) -> dict[str, object]:
+def _provider_visible_task_facts(
+    lane_input: ImplementLaneInput,
+    *,
+    text_sources: Iterable[object] | None = None,
+    include_contract_source_requirements: bool = True,
+    include_verify_command_paths: bool = True,
+) -> dict[str, object]:
     """Return factual task/path context without prescribing the next action."""
 
     contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
     verify_command = str(contract.get("verify_command") or "").strip()
-    text_sources = [
-        verify_command,
-        str(contract.get("description") or ""),
-        str(contract.get("title") or ""),
-        str(contract.get("guidance") or ""),
-    ]
-    constraints = contract.get("acceptance_constraints")
-    if isinstance(constraints, list):
-        text_sources.extend(str(item or "") for item in constraints)
+    if text_sources is None:
+        text_sources = [
+            verify_command,
+            str(contract.get("description") or ""),
+            str(contract.get("title") or ""),
+            str(contract.get("guidance") or ""),
+        ]
+        constraints = contract.get("acceptance_constraints")
+        if isinstance(constraints, list):
+            text_sources.extend(str(item or "") for item in constraints)
+    else:
+        text_sources = list(text_sources)
 
-    verify_paths = _task_paths_from_text(verify_command, workspace=lane_input.workspace)
+    source_requirements = _provider_visible_source_requirements(
+        contract,
+        text_sources=text_sources,
+        include_contract_source_requirements=include_contract_source_requirements,
+    )
+    verify_paths = _task_paths_from_text(verify_command, workspace=lane_input.workspace) if include_verify_command_paths else []
     mentioned_paths = _dedupe_task_paths(
         path for source in text_sources for path in _task_paths_from_text(source, workspace=lane_input.workspace)
     )
@@ -4643,12 +4682,78 @@ def _provider_visible_task_facts(lane_input: ImplementLaneInput) -> dict[str, ob
         if _task_path_is_safe_relative(path) and not (Path(lane_input.workspace) / path).exists()
     ]
     facts = {
+        "source_requirement_paths": [item["path"] for item in source_requirements],
         "verify_command_paths": verify_paths,
         "mentioned_workspace_paths": mentioned_paths,
         "existing_workspace_paths": existing_paths,
         "missing_workspace_paths": missing_paths,
     }
     return {key: value for key, value in facts.items() if value}
+
+
+def _provider_visible_source_requirements(
+    contract: Mapping[str, object],
+    *,
+    text_sources: Iterable[object],
+    include_contract_source_requirements: bool = True,
+) -> list[dict[str, str]]:
+    """Return source refs grounded in the provider-visible raw task text."""
+
+    raw_text = "\n".join(str(source or "") for source in text_sources if str(source or "").strip())
+    requirements = list(implementation_contract_source_requirements(raw_text))
+    if not include_contract_source_requirements:
+        return requirements[:6]
+    compiled = _mapping_from_request_descriptor(contract.get("compiled_task_contract"))
+    for container in (contract.get("source_requirements"), compiled.get("source_requirements")):
+        for item in container if isinstance(container, list) else ():
+            source_req = item if isinstance(item, Mapping) else {}
+            path = str(source_req.get("path") or "").strip()
+            if not path or not implementation_source_ref_matches_text(path, raw_text):
+                continue
+            if any(existing.get("path") == path for existing in requirements):
+                continue
+            requirements.append({"path": path, "sentence": str(source_req.get("reason") or "")})
+            if len(requirements) >= 6:
+                return requirements
+    return requirements[:6]
+
+
+def _codex_hot_path_source_facts_text(task_facts: Mapping[str, object]) -> str:
+    """Render a compact factual source capsule without exposing task_contract."""
+
+    source_paths = _source_fact_path_list(task_facts.get("source_requirement_paths"))
+    existing_paths = _source_fact_path_list(task_facts.get("existing_workspace_paths"))
+    missing_paths = _source_fact_path_list(task_facts.get("missing_workspace_paths"))
+    verify_paths = _source_fact_path_list(task_facts.get("verify_command_paths"))
+    if not any((source_paths, existing_paths, missing_paths, verify_paths)):
+        return ""
+    lines = ["Task source facts:"]
+    if source_paths:
+        lines.append(f"- Provided source/artifact refs from the task: {', '.join(source_paths)}")
+    if existing_paths:
+        lines.append(f"- Existing workspace paths named by the task: {', '.join(existing_paths)}")
+    if missing_paths:
+        lines.append(f"- Output or target paths named by the task but not present yet: {', '.join(missing_paths)}")
+    if verify_paths:
+        lines.append(f"- Verifier command paths named by the task: {', '.join(verify_paths)}")
+    if source_paths or existing_paths:
+        lines.append(
+            "- The task text identifies the refs above as provided inputs."
+        )
+    return "\n".join(lines)
+
+
+def _source_fact_path_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text)
+        if len(result) >= 8:
+            break
+    return result
 
 
 def _task_paths_from_text(text: object, *, workspace: str | Path | None = None) -> list[str]:
