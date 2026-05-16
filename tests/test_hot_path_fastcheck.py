@@ -457,9 +457,17 @@ def _write_native_finish_artifact(tmp_path: Path) -> Path:
     return artifact
 
 
-def _write_native_finish_gate_artifact(tmp_path: Path, *, projection_warning: bool = False) -> Path:
+def _write_native_finish_gate_artifact(
+    tmp_path: Path,
+    *,
+    projection_warning: bool = False,
+    finish_verifier_plan: dict[str, object] | None = None,
+) -> Path:
     artifact = tmp_path / ("native-finish-gate-warning-artifact" if projection_warning else "native-finish-gate-artifact")
     lane_attempt_id = "native-fastcheck:finish-gate"
+    closeout_arguments = {"command": "node vm.js", "command_intent": "finish_verifier"}
+    if finish_verifier_plan is not None:
+        closeout_arguments["finish_verifier_plan"] = finish_verifier_plan
     items = (
         NativeTranscriptItem(
             sequence=1,
@@ -504,7 +512,7 @@ def _write_native_finish_gate_artifact(tmp_path: Path, *, projection_warning: bo
             kind="function_call",
             call_id="call-final-verifier-closeout-001",
             tool_name="exec_command",
-            arguments_json_text='{"command":"node vm.js","command_intent":"finish_verifier"}',
+            arguments_json_text=json.dumps(closeout_arguments, ensure_ascii=False, sort_keys=True),
         ),
         NativeTranscriptItem(
             sequence=5,
@@ -574,6 +582,32 @@ def _write_native_finish_gate_artifact(tmp_path: Path, *, projection_warning: bo
     write_native_finish_gate_artifacts(artifact, [decision], proof_manifest_path=paths["proof_manifest"])
     write_native_evidence_observation(artifact, transcript, proof_manifest_path=paths["proof_manifest"])
     return artifact
+
+
+def _write_finish_verifier_planner_decisions(artifact: Path, rows: list[dict[str, object]]) -> None:
+    decision_path = artifact / "finish_verifier_planner_decisions.jsonl"
+    decision_path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    manifest_path = artifact / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    digest = "sha256:" + hashlib.sha256(decision_path.read_bytes()).hexdigest()
+    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    metrics["finish_verifier_planner_decisions"] = {
+        "artifact_ref": decision_path.name,
+        "artifact_sha256": digest,
+        "decision_count": len(rows),
+        "accepted_count": sum(1 for row in rows if row.get("status") == "accepted"),
+        "rejected_count": sum(1 for row in rows if row.get("status") == "rejected"),
+        "error_count": sum(1 for row in rows if row.get("status") == "error"),
+        "no_plan_count": sum(1 for row in rows if row.get("status") == "no_plan"),
+        "fallback_count": sum(1 for row in rows if row.get("fallback_source")),
+    }
+    manifest["finish_verifier_planner_decisions_ref"] = decision_path.name
+    manifest["finish_verifier_planner_decisions_sha256"] = digest
+    manifest["metrics"] = metrics
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _write_read_only_native_artifact(tmp_path: Path) -> Path:
@@ -1220,6 +1254,171 @@ def test_hot_path_fastcheck_rejects_native_finish_gate_decision_hash_drift(tmp_p
     assert result["status"] == "fail"
     assert checks["native_finish_gate_decisions"]["status"] == "fail"
     assert checks["native_finish_gate_decisions"]["details"]["sha_matches"] is False
+
+
+def test_hot_path_fastcheck_accepts_finish_verifier_planner_decision_sidecar(tmp_path):
+    artifact = _write_native_finish_gate_artifact(tmp_path)
+    _write_finish_verifier_planner_decisions(
+        artifact,
+        [
+            {
+                "status": "no_plan",
+                "request_hash": "sha256:request",
+                "raw_plan": None,
+                "raw_plan_hash": "sha256:raw-plan",
+                "reject_reason": "planner returned no plan",
+                "reject_blockers": ["planner_plan_not_mapping"],
+                "fallback": {},
+                "fallback_source": "",
+            }
+        ],
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "pass"
+    assert checks["finish_verifier_planner_decisions"]["status"] == "pass"
+    assert checks["finish_verifier_planner_decisions"]["details"]["row_count"] == 1
+
+
+def test_hot_path_fastcheck_accepts_visible_planner_rejection_fallback_provenance(tmp_path):
+    artifact = _write_native_finish_gate_artifact(
+        tmp_path,
+        finish_verifier_plan={
+            "source": "auto_detected_verifier",
+            "provenance": {
+                "fallback_after_finish_verifier_planner": {
+                    "status": "rejected",
+                    "fallback_source": "auto_detected_verifier",
+                    "reject_reason": "finish verifier command is a no-op success",
+                    "reject_blockers": ["finish_verifier_noop_success"],
+                }
+            },
+        },
+    )
+    _write_finish_verifier_planner_decisions(
+        artifact,
+        [
+            {
+                "status": "rejected",
+                "request_hash": "sha256:request",
+                "raw_plan": {"command": "true"},
+                "raw_plan_hash": "sha256:raw-plan",
+                "reject_reason": "finish verifier command is a no-op success",
+                "reject_blockers": ["finish_verifier_noop_success"],
+                "fallback": {"command": "node vm.js", "source": "auto_detected_verifier"},
+                "fallback_source": "auto_detected_verifier",
+            }
+        ],
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "pass"
+    assert checks["finish_verifier_planner_decisions"]["status"] == "pass"
+
+
+def test_hot_path_fastcheck_rejects_hidden_auto_fallback_after_planner_rejection(tmp_path):
+    artifact = _write_native_finish_gate_artifact(tmp_path)
+    _write_finish_verifier_planner_decisions(
+        artifact,
+        [
+            {
+                "status": "rejected",
+                "request_hash": "sha256:request",
+                "raw_plan": {"command": "true"},
+                "raw_plan_hash": "sha256:raw-plan",
+                "reject_reason": "finish verifier command is a no-op success",
+                "reject_blockers": ["finish_verifier_noop_success"],
+                "fallback": {"command": "node vm.js", "source": "auto_detected_verifier"},
+                "fallback_source": "auto_detected_verifier",
+            }
+        ],
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["finish_verifier_planner_decisions"]["status"] == "fail"
+    assert checks["finish_verifier_planner_decisions"]["details"]["fallback_rows_hidden"] == [
+        {"status": "rejected", "fallback_source": "auto_detected_verifier"}
+    ]
+
+
+def test_hot_path_fastcheck_rejects_status_only_planner_fallback_provenance(tmp_path):
+    artifact = _write_native_finish_gate_artifact(
+        tmp_path,
+        finish_verifier_plan={
+            "source": "auto_detected_verifier",
+            "provenance": {
+                "fallback_after_finish_verifier_planner": {
+                    "status": "rejected",
+                    "fallback_source": "auto_detected_verifier",
+                }
+            },
+        },
+    )
+    _write_finish_verifier_planner_decisions(
+        artifact,
+        [
+            {
+                "status": "rejected",
+                "request_hash": "sha256:request",
+                "raw_plan": {"command": "true"},
+                "raw_plan_hash": "sha256:raw-plan",
+                "reject_reason": "finish verifier command is a no-op success",
+                "reject_blockers": ["finish_verifier_noop_success"],
+                "fallback": {"command": "node vm.js", "source": "auto_detected_verifier"},
+                "fallback_source": "auto_detected_verifier",
+            }
+        ],
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["finish_verifier_planner_decisions"]["status"] == "fail"
+    assert checks["finish_verifier_planner_decisions"]["details"]["fallback_rows_hidden"] == [
+        {"status": "rejected", "fallback_source": "auto_detected_verifier"}
+    ]
+
+
+def test_hot_path_fastcheck_rejects_finish_verifier_planner_metric_drift(tmp_path):
+    artifact = _write_native_finish_gate_artifact(
+        tmp_path,
+        finish_verifier_plan={"source": "finish_verifier_planner"},
+    )
+    _write_finish_verifier_planner_decisions(
+        artifact,
+        [
+            {
+                "status": "accepted",
+                "request_hash": "sha256:request",
+                "raw_plan": {"command": "node vm.js"},
+                "raw_plan_hash": "sha256:raw-plan",
+                "accepted_plan": {"command": "node vm.js"},
+            }
+        ],
+    )
+    manifest_path = artifact / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["metrics"]["finish_verifier_planner_decisions"]["artifact_sha256"] = "sha256:stale"
+    manifest["metrics"]["finish_verifier_planner_decisions"]["accepted_count"] = 0
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["finish_verifier_planner_decisions"]["status"] == "fail"
+    assert checks["finish_verifier_planner_decisions"]["details"]["metric_artifact_sha256_matches"] is False
+    assert checks["finish_verifier_planner_decisions"]["details"]["metric_status_count_mismatches"] == {
+        "accepted_count": {"expected": 1, "observed": 0}
+    }
 
 
 def test_hot_path_fastcheck_rejects_resolver_fallback_when_trusted_closeout_pass_needs_native_sidecar(tmp_path):

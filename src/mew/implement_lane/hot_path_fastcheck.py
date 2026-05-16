@@ -39,7 +39,13 @@ from .native_tool_harness import _native_call_is_verifier, _native_loop_control_
 from .completion_resolver import COMPLETION_RESOLVER_DECISIONS_FILE
 from .native_sidecar_projection import build_compact_native_sidecar_digest
 from .native_finish_gate import NATIVE_FINISH_GATE_DECISIONS_FILE
-from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID, OUTPUT_ITEM_KINDS, NativeTranscript, NativeTranscriptItem
+from .native_transcript import (
+    CALL_ITEM_KINDS,
+    IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+    OUTPUT_ITEM_KINDS,
+    NativeTranscript,
+    NativeTranscriptItem,
+)
 from .native_transcript import native_function_call_argument_metrics, native_transcript_hash, validate_native_transcript_pairing
 from .tool_lab import resolve_implement_v2_manifest_path
 from .types import search_text_output_has_line_anchor
@@ -60,6 +66,7 @@ from .workframe_variants import (
 )
 
 HOT_PATH_FASTCHECK_SCHEMA_VERSION = 1
+FINISH_VERIFIER_PLANNER_DECISIONS_FILE = "finish_verifier_planner_decisions.jsonl"
 DEFAULT_HOT_PATH_BASELINE_PATH = (
     Path(__file__).resolve().parents[3] / "docs" / "M6_24_HOT_PATH_PHASE0_BASELINE.json"
 )
@@ -294,6 +301,13 @@ def _run_native_hot_path_fastcheck(
             )
         )
         checks.append(
+            _check_finish_verifier_planner_decisions(
+                manifest_path=manifest_path,
+                manifest=manifest,
+                transcript=transcript,
+            )
+        )
+        checks.append(
             _check_native_resolver_decisions(
                 manifest_path=manifest_path,
                 manifest=manifest,
@@ -316,6 +330,7 @@ def _run_native_hot_path_fastcheck(
                 _check("native_provider_visible_state", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_previous_response_id", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_finish_gate_decisions", False, "native transcript is unreadable", {"skipped": True}),
+                _check("finish_verifier_planner_decisions", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_resolver_decisions", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_evidence_observation", False, "native transcript is unreadable", {"skipped": True}),
             ]
@@ -1153,6 +1168,172 @@ def _check_native_finish_gate_decisions(
             ),
             "load_error": error,
         },
+    )
+
+
+def _check_finish_verifier_planner_decisions(
+    *,
+    manifest_path: Path,
+    manifest: Mapping[str, object],
+    transcript: NativeTranscript,
+) -> HotPathCheck:
+    decision_ref = str(manifest.get("finish_verifier_planner_decisions_ref") or "").strip()
+    decision_sha = str(manifest.get("finish_verifier_planner_decisions_sha256") or "").strip()
+    metrics = _safe_mapping(_safe_mapping(manifest.get("metrics")).get("finish_verifier_planner_decisions"))
+    if not decision_ref:
+        ok = not metrics or _nonnegative_int(metrics.get("decision_count")) == 0
+        return _check(
+            "finish_verifier_planner_decisions",
+            ok,
+            "no finish-verifier planner decision artifact required for this transcript"
+            if ok
+            else "finish-verifier planner metrics exist without a decision artifact",
+            {
+                "finish_verifier_planner_decisions_ref": "",
+                "metrics_present": bool(metrics),
+                "metric_decision_count": _nonnegative_int(metrics.get("decision_count")),
+            },
+        )
+
+    decision_path = (manifest_path.parent / decision_ref).resolve(strict=False)
+    rows, error = _load_jsonl_objects(decision_path)
+    actual_sha = _file_sha256(decision_path) if decision_path.is_file() else ""
+    status_values = [str(row.get("status") or "").strip() for row in rows]
+    valid_statuses = {"accepted", "rejected", "error", "no_plan"}
+    expected_status_counts = {
+        "accepted_count": sum(1 for status in status_values if status == "accepted"),
+        "rejected_count": sum(1 for status in status_values if status == "rejected"),
+        "error_count": sum(1 for status in status_values if status == "error"),
+        "no_plan_count": sum(1 for status in status_values if status == "no_plan"),
+        "fallback_count": sum(1 for row in rows if str(row.get("fallback_source") or "").strip()),
+    }
+    metric_count_mismatches = {
+        key: {"expected": expected, "observed": _nonnegative_int(metrics.get(key))}
+        for key, expected in expected_status_counts.items()
+        if key in metrics and _nonnegative_int(metrics.get(key)) != expected
+    }
+    planner_calls = _native_finish_verifier_plan_calls(transcript)
+    accepted_rows = [row for row in rows if row.get("status") == "accepted"]
+    fallback_rows = [row for row in rows if str(row.get("fallback_source") or "").strip()]
+    accepted_commands_missing_from_transcript = [
+        command
+        for row in accepted_rows
+        if (command := str(_safe_mapping(row.get("accepted_plan")).get("command") or "").strip())
+        and not _planner_call_exists(planner_calls, source="finish_verifier_planner", command=command)
+    ]
+    fallback_rows_hidden = [
+        {
+            "status": str(row.get("status") or "").strip(),
+            "fallback_source": str(row.get("fallback_source") or "").strip(),
+        }
+        for row in fallback_rows
+        if not _planner_fallback_is_visible(row, planner_calls)
+    ]
+    raw_plan_hash_missing = [
+        index for index, row in enumerate(rows) if "raw_plan" in row and not str(row.get("raw_plan_hash") or "").strip()
+    ]
+    checks = {
+        "path_exists": decision_path.is_file(),
+        "expected_filename": decision_path.name == FINISH_VERIFIER_PLANNER_DECISIONS_FILE,
+        "sha_matches": bool(decision_sha) and decision_sha == actual_sha,
+        "rows_present": bool(rows),
+        "load_error_empty": not error,
+        "statuses_known": all(status in valid_statuses for status in status_values),
+        "metric_decision_count_matches": not metrics or _nonnegative_int(metrics.get("decision_count")) == len(rows),
+        "metric_artifact_ref_matches": not metrics or str(metrics.get("artifact_ref") or "").strip() == decision_ref,
+        "metric_artifact_sha256_matches": not metrics
+        or str(metrics.get("artifact_sha256") or "").strip() == actual_sha,
+        "metric_status_counts_match": not metric_count_mismatches,
+        "raw_plan_hashes_present": not raw_plan_hash_missing,
+        "accepted_rows_have_commands": all(
+            str(_safe_mapping(row.get("accepted_plan")).get("command") or "").strip() for row in accepted_rows
+        ),
+        "accepted_commands_visible_in_transcript": not accepted_commands_missing_from_transcript,
+        "fallback_rows_make_planner_status_visible": not fallback_rows_hidden,
+    }
+    ok = all(checks.values())
+    return _check(
+        "finish_verifier_planner_decisions",
+        ok,
+        "finish-verifier planner decisions replay from sidecar artifact and manifest hash"
+        if ok
+        else "finish-verifier planner decision sidecar is missing, stale, or hidden by fallback",
+        {
+            **checks,
+            "finish_verifier_planner_decisions_ref": decision_ref,
+            "finish_verifier_planner_decisions_sha256": decision_sha,
+            "actual_sha256": actual_sha,
+            "row_count": len(rows),
+            "statuses": status_values,
+            "metric_decision_count": _nonnegative_int(metrics.get("decision_count")),
+            "metric_artifact_ref": str(metrics.get("artifact_ref") or "").strip(),
+            "metric_artifact_sha256": str(metrics.get("artifact_sha256") or "").strip(),
+            "metric_status_count_mismatches": metric_count_mismatches,
+            "accepted_commands_missing_from_transcript": accepted_commands_missing_from_transcript,
+            "fallback_rows_hidden": fallback_rows_hidden,
+            "raw_plan_hash_missing_row_indexes": raw_plan_hash_missing,
+            "load_error": error,
+        },
+    )
+
+
+def _native_finish_verifier_plan_calls(transcript: NativeTranscript) -> tuple[dict[str, object], ...]:
+    calls: list[dict[str, object]] = []
+    for item in transcript.items:
+        if item.kind not in CALL_ITEM_KINDS or "final-verifier-closeout" not in item.call_id:
+            continue
+        try:
+            arguments = json.loads(item.arguments_json_text or "{}")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(arguments, dict):
+            continue
+        plan = _safe_mapping(arguments.get("finish_verifier_plan"))
+        provenance = _safe_mapping(plan.get("provenance"))
+        fallback = _safe_mapping(provenance.get("fallback_after_finish_verifier_planner"))
+        calls.append(
+            {
+                "command": str(arguments.get("command") or arguments.get("cmd") or "").strip(),
+                "source": str(plan.get("source") or "").strip(),
+                "fallback_status": str(fallback.get("status") or "").strip(),
+                "fallback_source": str(fallback.get("fallback_source") or "").strip(),
+                "fallback_reject_reason": str(fallback.get("reject_reason") or "").strip(),
+                "fallback_error": str(fallback.get("error") or "").strip(),
+                "fallback_reject_blockers": list(_string_list(fallback.get("reject_blockers"))),
+            }
+        )
+    return tuple(calls)
+
+
+def _planner_call_exists(
+    planner_calls: tuple[dict[str, object], ...],
+    *,
+    source: str,
+    command: str,
+) -> bool:
+    return any(call.get("source") == source and call.get("command") == command for call in planner_calls)
+
+
+def _planner_fallback_is_visible(
+    row: Mapping[str, object],
+    planner_calls: tuple[dict[str, object], ...],
+) -> bool:
+    status = str(row.get("status") or "").strip()
+    fallback_source = str(row.get("fallback_source") or "").strip()
+    if status == "accepted" or not fallback_source:
+        return False
+    reject_reason = str(row.get("reject_reason") or "").strip()
+    error = str(row.get("error") or "").strip()
+    reject_blockers = sorted(_string_list(row.get("reject_blockers")))
+    if not (reject_reason or error or reject_blockers):
+        return False
+    return any(
+        call.get("source") == fallback_source
+        and call.get("fallback_status") == status
+        and call.get("fallback_reject_reason") == reject_reason
+        and call.get("fallback_error") == error
+        and sorted(_string_list(call.get("fallback_reject_blockers"))) == reject_blockers
+        for call in planner_calls
     )
 
 
