@@ -3287,7 +3287,7 @@ def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path:
         def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
             self.planner_requests.append(dict(request))
             return {
-                "command": "test -f vm.js",
+                "command": "node vm.js",
                 "cwd": ".",
                 "reason": "verify the file created by the implementation",
                 "confidence": "high",
@@ -3314,7 +3314,7 @@ def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path:
     assert result.metrics["final_verifier_closeout_count"] == 1
     closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
     closeout_args = json.loads(closeout_call.arguments_json_text)
-    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["command"] == "node vm.js"
     assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
     assert closeout_args["finish_verifier_plan"]["separate_agent"] is True
     assert closeout_args["execution_contract"]["acceptance_kind"] == "external_verifier"
@@ -3360,7 +3360,7 @@ def test_native_harness_finish_verifier_planner_request_includes_bounded_read_po
 
         def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
             self.planner_requests.append(dict(request))
-            return {"command": "test -f vm.js", "cwd": ".", "reason": "verify source artifact"}
+            return {"command": "node vm.js", "cwd": ".", "reason": "verify source artifact"}
 
     provider = PlanningProvider()
 
@@ -3423,7 +3423,7 @@ def test_native_harness_planner_precedes_auto_detected_verifier(tmp_path: Path) 
         def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
             self.planner_requests.append(dict(request))
             return {
-                "command": "test -f vm.js",
+                "command": "node vm.js",
                 "cwd": ".",
                 "reason": "auto-detected verifier is weak; verify the source artifact directly",
                 "confidence": "high",
@@ -3449,7 +3449,7 @@ def test_native_harness_planner_precedes_auto_detected_verifier(tmp_path: Path) 
     assert provider.planner_requests[0]["task"]["verify_command_source"] == "auto_detected_verifier"  # type: ignore[index]
     closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
     closeout_args = json.loads(closeout_call.arguments_json_text)
-    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["command"] == "node vm.js"
     assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
 
 
@@ -3716,7 +3716,7 @@ def test_native_harness_finish_verifier_planner_exit_zero_satisfies_acceptance_c
 
         def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
             return {
-                "command": "test -f vm.js",
+                "command": "node vm.js",
                 "cwd": ".",
                 "reason": "verify the implemented task artifact independently",
                 "confidence": "high",

@@ -25,8 +25,10 @@ from .native_finish_gate import (
     FinishCloseoutCommand,
     NativeFinishCloseoutResult,
     NativeFinishGateDecision,
+    NativeFinishGatePolicy,
     NativeFinishGateRequest,
     decide_native_finish_from_closeout,
+    validate_closeout_command,
     write_native_finish_gate_artifacts,
 )
 from .native_provider_adapter import (
@@ -2453,53 +2455,15 @@ def _finish_verifier_command_safety(
     request: Mapping[str, object] | None = None,
 ) -> _FinishVerifierCommandSafetyResult:
     text = str(command or "").strip()
-    if not text:
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=text, source="finish_verifier_planner"),
+        NativeFinishGatePolicy(allowed_sources=("finish_verifier_planner",)),
+    )
+    if not validation.allowed:
         return _FinishVerifierCommandSafetyResult(
             allowed=False,
-            reason="finish verifier command is empty",
-            blockers=("finish_verifier_command_empty",),
-        )
-    if "\n" in text or "\r" in text:
-        return _FinishVerifierCommandSafetyResult(
-            allowed=False,
-            reason="finish verifier command contains a newline",
-            blockers=("finish_verifier_command_newline",),
-        )
-    if _FINISH_VERIFIER_NOOP_COMMAND_RE.fullmatch(text):
-        return _FinishVerifierCommandSafetyResult(
-            allowed=False,
-            reason="finish verifier command is a no-op success",
-            blockers=("finish_verifier_noop_success",),
-        )
-    if _FINISH_VERIFIER_SELF_ACCEPTANCE_RE.search(text):
-        return _FinishVerifierCommandSafetyResult(
-            allowed=False,
-            reason="finish verifier command checks a self-acceptance marker",
-            blockers=("finish_verifier_self_acceptance_marker",),
-        )
-    if re.search(r"(?i)(?:^|[;&|]\s*)(?:echo|printf)\b", text):
-        return _FinishVerifierCommandSafetyResult(
-            allowed=False,
-            reason="finish verifier command only emits text",
-            blockers=("finish_verifier_echo_or_printf",),
-        )
-    if "|" in text or ";" in text:
-        return _FinishVerifierCommandSafetyResult(
-            allowed=False,
-            reason="finish verifier command uses shell sequencing or pipes",
-            blockers=("finish_verifier_shell_composition",),
-        )
-    if re.search(r"(?<!&)&(?!&)", text):
-        return _FinishVerifierCommandSafetyResult(
-            allowed=False,
-            reason="finish verifier command backgrounds a process",
-            blockers=("finish_verifier_background_process",),
-        )
-    if _FINISH_VERIFIER_MUTATION_RE.search(text):
-        return _FinishVerifierCommandSafetyResult(
-            allowed=False,
-            reason="finish verifier command appears to mutate files",
-            blockers=("finish_verifier_mutating_command",),
+            reason=validation.reason,
+            blockers=tuple(_planner_safety_blocker(blocker) for blocker in validation.blockers),
         )
     if _FINISH_VERIFIER_GENERIC_TEST_RE.search(text):
         return _FinishVerifierCommandSafetyResult(allowed=True, reason="generic test command")
@@ -2512,6 +2476,27 @@ def _finish_verifier_command_safety(
             blockers=("finish_verifier_task_subject_missing",),
         )
     return _FinishVerifierCommandSafetyResult(allowed=True, reason="mentions task subject")
+
+
+def _planner_safety_blocker(blocker: str) -> str:
+    return {
+        "closeout_verifier_command_missing": "finish_verifier_command_empty",
+        "closeout_command_empty": "finish_verifier_command_empty",
+        "closeout_command_noop_success": "finish_verifier_noop_success",
+        "closeout_command_self_acceptance": "finish_verifier_self_acceptance_marker",
+        "closeout_command_weak_assertion": "finish_verifier_weak_assertion",
+        "closeout_command_inline_program": "finish_verifier_inline_evaluator",
+        "closeout_command_shell_disallowed": "finish_verifier_shell_disallowed",
+        "closeout_command_source_mutation": "finish_verifier_mutating_command",
+        "closeout_command_package_install": "finish_verifier_package_install",
+        "closeout_command_network": "finish_verifier_network",
+        "closeout_command_privileged": "finish_verifier_privileged",
+        "closeout_command_background": "finish_verifier_background_process",
+        "closeout_command_redirection": "finish_verifier_redirection",
+        "closeout_command_chain": "finish_verifier_shell_composition",
+        "closeout_command_secret": "finish_verifier_secret",
+        "closeout_command_multiline": "finish_verifier_command_newline",
+    }.get(blocker, blocker)
 
 
 def _record_finish_verifier_planner_decision(provider: object, record: Mapping[str, object]) -> None:

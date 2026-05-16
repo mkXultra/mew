@@ -152,6 +152,7 @@ def test_validate_closeout_command_rejects_mutating_and_unsafe_planner_commands(
         "sudo node vm.js": "closeout_command_privileged",
         "node vm.js || true": "closeout_command_chain",
         "node vm.js &": "closeout_command_background",
+        "pytest\ntrue": "closeout_command_multiline",
         "OPENAI_API_KEY=secret node vm.js": "closeout_command_secret",
         "python -c 'print(\"acceptance: pass\")'": "closeout_command_self_acceptance",
         "node -e 'process.exit(0)'": "closeout_command_inline_program",

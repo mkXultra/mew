@@ -547,6 +547,8 @@ _SECRET_MARKERS = (
 
 
 def _unsafe_command_blockers(command: str, *, allow_shell: bool) -> tuple[str, ...]:
+    if "\n" in command or "\r" in command:
+        return ("closeout_command_multiline",)
     normalized = " ".join(command.strip().split())
     blockers: list[str] = []
     if normalized in _NOOP_COMMANDS:
