@@ -2053,8 +2053,9 @@ def test_native_harness_exec_command_source_grounding_allows_finish_closeout(tmp
     assert (tmp_path / "frame.bmp").read_text(encoding="utf-8") == "FRAME_QUALITY_OK\n"
     assert result.metrics["final_verifier_closeout_count"] == 1
     assert result.metrics["finish_gate_block_count"] == 0
-    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "completed"
-    assert result.metrics["completion_resolver_latest_decision"]["result"] == "allow"
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    assert result.metrics["native_finish_gate_latest_decision"]["lane_status"] == "completed"
+    assert result.metrics["native_finish_gate_latest_decision"]["result"] == "allow"
     finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
     assert finish_output.status == "completed"
     assert validate_native_transcript_pairing(result.transcript).valid is True
@@ -3368,12 +3369,13 @@ def test_native_harness_finish_verifier_planner_exit_zero_satisfies_acceptance_c
     assert result.status == "completed"
     assert result.metrics["final_verifier_closeout_count"] == 1
     assert result.metrics["finish_gate_block_count"] == 0
-    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "completed"
-    assert result.metrics["completion_resolver_latest_decision"]["result"] == "allow"
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    assert result.metrics["native_finish_gate_latest_decision"]["lane_status"] == "completed"
+    assert result.metrics["native_finish_gate_latest_decision"]["result"] == "allow"
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
-def test_native_harness_configured_verifier_exit_zero_does_not_satisfy_acceptance_constraints(tmp_path: Path) -> None:
+def test_native_harness_configured_verifier_exit_zero_is_native_finish_authority(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -3403,12 +3405,13 @@ def test_native_harness_configured_verifier_exit_zero_does_not_satisfy_acceptanc
         max_turns=1,
     )
 
-    assert result.status == "blocked"
+    assert result.status == "completed"
     assert result.metrics["final_verifier_closeout_count"] == 1
-    assert result.metrics["finish_gate_block_count"] == 1
-    decision = result.metrics["completion_resolver_latest_decision"]
-    assert decision["lane_status"] == "blocked_continue"
-    assert "acceptance_constraints_unchecked" in decision["blockers"]
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    decision = result.metrics["native_finish_gate_latest_decision"]
+    assert decision["lane_status"] == "completed"
+    assert decision["result"] == "allow"
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 

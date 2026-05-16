@@ -35,8 +35,8 @@ def test_native_finish_gate_policy_defaults_are_diagnostic_sidecar_only() -> Non
     assert policy.policy_version == NATIVE_FINISH_GATE_POLICY_VERSION
     assert policy.allowed_sources == (
         "configured_verifier",
-        "auto_detected_verifier",
         "finish_verifier_planner",
+        "auto_detected_verifier",
     )
     assert policy.typed_evidence_mode == "diagnostic_sidecar"
     assert policy.oracle_obligation_mode == "diagnostic_sidecar"
@@ -45,7 +45,7 @@ def test_native_finish_gate_policy_defaults_are_diagnostic_sidecar_only() -> Non
     assert "oracle_obligations_block_hot_closeout" not in policy.as_dict()
 
 
-def test_select_closeout_command_prefers_configured_then_auto_then_planner() -> None:
+def test_select_closeout_command_prefers_configured_then_planner_then_auto() -> None:
     configured = FinishCloseoutCommand(
         command="node vm.js",
         source="configured_verifier",
@@ -75,11 +75,15 @@ def test_select_closeout_command_prefers_configured_then_auto_then_planner() -> 
     assert select_closeout_command(
         request,
         NativeFinishGatePolicy(allowed_sources=("auto_detected_verifier", "finish_verifier_planner")),
-    ) == auto
+    ) == planner
     assert select_closeout_command(
         request,
         NativeFinishGatePolicy(allowed_sources=("finish_verifier_planner",)),
     ) == planner
+    assert select_closeout_command(
+        request,
+        NativeFinishGatePolicy(allowed_sources=("auto_detected_verifier",)),
+    ) == auto
 
 
 def test_select_closeout_command_skips_empty_or_disallowed_candidates() -> None:

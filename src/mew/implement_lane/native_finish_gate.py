@@ -46,8 +46,8 @@ TypedEvidenceProjectionStatus = Literal["not_attempted", "passed", "warning", "f
 
 DEFAULT_ALLOWED_SOURCES: tuple[FinishVerifierSource, ...] = (
     "configured_verifier",
-    "auto_detected_verifier",
     "finish_verifier_planner",
+    "auto_detected_verifier",
 )
 
 
@@ -267,7 +267,7 @@ def select_closeout_command(
 
     active_policy = policy or NativeFinishGatePolicy()
     allowed = set(active_policy.allowed_sources)
-    for command in (request.configured_command, request.auto_detected_command, request.planner_command):
+    for command in (request.configured_command, request.planner_command, request.auto_detected_command):
         if command is None:
             continue
         if command.source not in allowed:

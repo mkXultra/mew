@@ -205,8 +205,8 @@ class NativeFinishGatePolicy:
     policy_version: str = "native-finish-gate-v1"
     allowed_sources: tuple[FinishVerifierSource, ...] = (
         "configured_verifier",
-        "auto_detected_verifier",
         "finish_verifier_planner",
+        "auto_detected_verifier",
     )
     min_closeout_seconds: float = 5.0
     default_closeout_seconds: float = 60.0
@@ -333,19 +333,19 @@ Allowed command sources are closed and auditable.
    - The command is controller/task supplied, not model supplied.
    - The command string and source key are recorded as `source_ref`.
 
-2. Auto-detected verifier.
+2. `finish_verifier_planner`.
+   - Comes from the separate planner session described in
+     `docs/DESIGN_2026-05-15_M6_24_FINISH_VERIFIER_PLANNER.md`.
+   - The planner proposes one command. The native finish gate still validates
+     and executes it. Planner rationale is never acceptance evidence.
+
+3. Auto-detected verifier.
    - Comes from deterministic task/run metadata, such as the Terminal-Bench
      auto verifier recorded as `auto_verify_command: node vm.js`.
    - The detector must be deterministic and must write why it selected the
      command.
    - It must not infer a verifier from finish prose, assistant text, or an
      arbitrary prior command that happened to pass.
-
-3. `finish_verifier_planner`.
-   - Comes from the separate planner session described in
-     `docs/DESIGN_2026-05-15_M6_24_FINISH_VERIFIER_PLANNER.md`.
-   - The planner proposes one command. The native finish gate still validates
-     and executes it. Planner rationale is never acceptance evidence.
 
 Rejected commands include:
 
@@ -359,6 +359,10 @@ Rejected commands include:
 - arbitrary successful commands such as `test -s /app/vm.js` unless they came
   from an allowed source and are itself the configured verifier, which should be
   rare and explicit.
+- `recent_successful_verifier`-style inference from prior shell commands. If a
+  previous command should be reused, a planner or deterministic configured
+  verifier path must explicitly select a safe closeout command instead of
+  regex/token-matching task completion from the prior transcript.
 
 This provenance rule is why the design does not bless the 4zcjzxq internal
 acceptance path: that run's accepted `320x200` evidence was model-crafted

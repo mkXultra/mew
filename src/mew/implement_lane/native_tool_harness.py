@@ -2070,6 +2070,7 @@ def _native_final_verifier_closeout_call(
             "reason": plan.reason,
             "confidence": plan.confidence,
             "separate_agent": plan.source == "finish_verifier_planner",
+            **({"provenance": dict(plan.raw)} if plan.raw else {}),
         },
         "execution_contract": {
             "role": "verify",
@@ -2175,6 +2176,10 @@ def _native_result_has_source_mutation(
         if kind == "file_write" and _native_path_in_roots(effect.get("path"), source_mutation_roots):
             return True
         if kind in {"source_tree_mutation", "source_tree_delta"}:
+            record = effect.get("record")
+            if isinstance(record, dict) and record.get("changed_count"):
+                return True
+        if kind == "process_source_observation":
             record = effect.get("record")
             if isinstance(record, dict) and record.get("changed_count"):
                 return True
@@ -2703,8 +2708,9 @@ def _finish_closeout_command_from_call(call: NativeTranscriptItem) -> FinishClos
     reason = ""
     confidence = ""
     if isinstance(plan, Mapping):
-        if str(plan.get("source") or "").strip() == "finish_verifier_planner":
-            source = "finish_verifier_planner"
+        plan_source = str(plan.get("source") or "").strip()
+        if plan_source == "finish_verifier_planner":
+            source = plan_source
         reason = str(plan.get("reason") or "")
         confidence = str(plan.get("confidence") or "")
     return FinishCloseoutCommand(
