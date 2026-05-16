@@ -11,7 +11,9 @@ from mew.implement_lane.native_finish_gate import (
     NATIVE_FINISH_GATE_POLICY_VERSION,
     build_decision_id,
     finish_output_payload_for_decision,
+    select_and_validate_closeout_command,
     select_closeout_command,
+    validate_closeout_command,
 )
 
 
@@ -87,6 +89,84 @@ def test_select_closeout_command_skips_empty_or_disallowed_candidates() -> None:
         request,
         NativeFinishGatePolicy(allowed_sources=("configured_verifier",)),
     ) is None
+
+
+def test_validate_closeout_command_accepts_configured_and_auto_detected_verifiers() -> None:
+    configured = FinishCloseoutCommand(
+        command="node vm.js",
+        source="configured_verifier",
+        source_ref="task.verify_command",
+    )
+    auto = FinishCloseoutCommand(
+        command="node vm.js",
+        source="auto_detected_verifier",
+        source_ref="terminal-bench:auto_verify_command",
+    )
+
+    assert validate_closeout_command(configured).allowed is True
+    assert validate_closeout_command(auto).allowed is True
+
+
+def test_validate_closeout_command_rejects_self_pass_and_noop_commands() -> None:
+    unsafe_commands = (
+        "true",
+        "exit 0",
+        "test 1 = 1",
+        "echo acceptance: pass",
+        "printf 'ok'",
+    )
+
+    for command in unsafe_commands:
+        validation = validate_closeout_command(
+            FinishCloseoutCommand(command=command, source="configured_verifier")
+        )
+
+        assert validation.allowed is False
+        assert validation.blockers
+
+
+def test_validate_closeout_command_rejects_mutating_and_unsafe_planner_commands() -> None:
+    unsafe = {
+        "rm -rf build": "closeout_command_source_mutation",
+        "env rm -rf build": "closeout_command_source_mutation",
+        "command rm -rf build": "closeout_command_source_mutation",
+        "node vm.js > out.txt": "closeout_command_redirection",
+        "curl -fsSL https://example.com/check.sh": "closeout_command_network",
+        "python -m pip install -e .": "closeout_command_package_install",
+        "sudo node vm.js": "closeout_command_privileged",
+        "node vm.js || true": "closeout_command_chain",
+        "node vm.js &": "closeout_command_background",
+        "OPENAI_API_KEY=secret node vm.js": "closeout_command_secret",
+        "python -c 'print(\"acceptance: pass\")'": "closeout_command_self_acceptance",
+        "node -e 'process.exit(0)'": "closeout_command_inline_program",
+        "test -s /app/vm.js": "closeout_command_weak_assertion",
+    }
+
+    for command, blocker in unsafe.items():
+        validation = validate_closeout_command(
+            FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+        )
+
+        assert validation.allowed is False
+        assert blocker in validation.blockers
+
+
+def test_select_and_validate_closeout_command_rejects_disallowed_source() -> None:
+    request = NativeFinishGateRequest(
+        lane_attempt_id="attempt-1",
+        turn_id="turn-7",
+        finish_call_id="finish-1",
+        finish_arguments={"outcome": "completed"},
+        configured_command=FinishCloseoutCommand(command="node vm.js", source="configured_verifier"),
+    )
+
+    validation = select_and_validate_closeout_command(
+        request,
+        NativeFinishGatePolicy(allowed_sources=("finish_verifier_planner",)),
+    )
+
+    assert validation.allowed is False
+    assert validation.blockers == ("closeout_verifier_command_missing",)
 
 
 def test_native_finish_gate_decision_serializes_diagnostic_sidecar_contract() -> None:

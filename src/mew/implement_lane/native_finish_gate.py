@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
+import shlex
 from typing import Literal, Mapping
 
 
@@ -83,6 +84,26 @@ class NativeFinishGatePolicy:
             "typed_evidence_mode": self.typed_evidence_mode,
             "oracle_obligation_mode": self.oracle_obligation_mode,
         }
+
+
+@dataclass(frozen=True)
+class FinishCloseoutCommandValidation:
+    """Validation result for a selected final-verifier command."""
+
+    allowed: bool
+    command: FinishCloseoutCommand | None = None
+    blockers: tuple[str, ...] = ()
+    reason: str = ""
+
+    def as_dict(self) -> dict[str, object]:
+        return _drop_empty(
+            {
+                "allowed": self.allowed,
+                "command": self.command.as_dict() if self.command else {},
+                "blockers": list(self.blockers),
+                "reason": self.reason,
+            }
+        )
 
 
 @dataclass(frozen=True)
@@ -252,6 +273,67 @@ def select_closeout_command(
     return None
 
 
+def validate_closeout_command(
+    command: FinishCloseoutCommand | None,
+    policy: NativeFinishGatePolicy | None = None,
+) -> FinishCloseoutCommandValidation:
+    """Validate a final-verifier command before dispatch.
+
+    This validator is intentionally conservative.  Later phases may replace the
+    string checks with parser metadata, but Phase 2 must already prevent obvious
+    self-approval, mutation, privilege, network, and daemon-style commands from
+    becoming the trusted hot closeout source.
+    """
+
+    active_policy = policy or NativeFinishGatePolicy()
+    if command is None:
+        return FinishCloseoutCommandValidation(
+            allowed=False,
+            command=None,
+            blockers=("closeout_verifier_command_missing",),
+            reason="no final verifier closeout command was selected",
+        )
+    normalized = command.normalized_command()
+    if not normalized:
+        return FinishCloseoutCommandValidation(
+            allowed=False,
+            command=command,
+            blockers=("closeout_command_empty",),
+            reason="final verifier closeout command is empty",
+        )
+    if command.source not in set(active_policy.allowed_sources):
+        return FinishCloseoutCommandValidation(
+            allowed=False,
+            command=command,
+            blockers=("closeout_command_source_disallowed",),
+            reason=f"command source {command.source!r} is not allowed by policy",
+        )
+
+    blockers = _unsafe_command_blockers(normalized, allow_shell=active_policy.allow_shell)
+    if blockers:
+        return FinishCloseoutCommandValidation(
+            allowed=False,
+            command=command,
+            blockers=blockers,
+            reason="final verifier closeout command failed safety validation",
+        )
+    return FinishCloseoutCommandValidation(
+        allowed=True,
+        command=command,
+        reason="final verifier closeout command passed provenance validation",
+    )
+
+
+def select_and_validate_closeout_command(
+    request: NativeFinishGateRequest,
+    policy: NativeFinishGatePolicy | None = None,
+) -> FinishCloseoutCommandValidation:
+    """Select the highest-precedence command and validate it."""
+
+    active_policy = policy or NativeFinishGatePolicy()
+    return validate_closeout_command(select_closeout_command(request, active_policy), active_policy)
+
+
 def finish_output_payload_for_decision(decision: NativeFinishGateDecision) -> dict[str, object]:
     """Build the bounded payload paired with the provider-native finish call."""
 
@@ -296,6 +378,178 @@ def build_decision_id(*, lane_attempt_id: str, turn_id: str, finish_call_id: str
         ).encode("utf-8")
     ).hexdigest()[:16]
     return f"native-finish-gate:{turn_id}:{finish_call_id}:{digest}"
+
+
+_NOOP_COMMANDS = frozenset(
+    {
+        ":",
+        "true",
+        "/bin/true",
+        "exit 0",
+        "test 1 = 1",
+        "test 1 == 1",
+        "[ 1 = 1 ]",
+        "[[ 1 == 1 ]]",
+    }
+)
+_SHELL_TOKENS = frozenset({"bash", "sh", "zsh", "/bin/bash", "/bin/sh", "/bin/zsh"})
+_SELF_ACCEPTANCE_TOKENS = frozenset({"echo", "printf"})
+_WEAK_ASSERTION_TOKENS = frozenset({"test", "[", "[["})
+_INLINE_EVALUATOR_TOKENS = frozenset({"node", "python", "python3", "ruby"})
+_WRAPPER_TOKENS = frozenset({"command", "env"})
+_SOURCE_MUTATION_TOKENS = frozenset(
+    {
+        "chmod",
+        "chown",
+        "cp",
+        "install",
+        "ln",
+        "mkdir",
+        "mv",
+        "rm",
+        "rsync",
+        "sed",
+        "tee",
+        "touch",
+        "truncate",
+    }
+)
+_PACKAGE_INSTALL_TOKENS = frozenset({"apt", "apt-get", "brew", "dnf", "npm", "pip", "pip3", "pnpm", "yarn"})
+_NETWORK_TOKENS = frozenset({"curl", "git", "hg", "scp", "ssh", "svn", "wget"})
+_BACKGROUND_TOKENS = frozenset({"daemon", "nohup"})
+_PRIVILEGED_TOKENS = frozenset({"doas", "sudo", "su"})
+_SECRET_MARKERS = (
+    "API_KEY",
+    "AUTH_TOKEN",
+    "BEARER",
+    "PASSWORD",
+    "SECRET",
+    "TOKEN",
+)
+
+
+def _unsafe_command_blockers(command: str, *, allow_shell: bool) -> tuple[str, ...]:
+    normalized = " ".join(command.strip().split())
+    blockers: list[str] = []
+    if normalized in _NOOP_COMMANDS:
+        blockers.append("closeout_command_noop_success")
+
+    tokens = _split_command_tokens(normalized)
+    semantic_tokens = _semantic_tokens(tokens)
+    first = _basename(semantic_tokens[0]) if semantic_tokens else ""
+    if first in _SELF_ACCEPTANCE_TOKENS:
+        blockers.append("closeout_command_self_acceptance")
+    if first in _WEAK_ASSERTION_TOKENS:
+        blockers.append("closeout_command_weak_assertion")
+    if first in _INLINE_EVALUATOR_TOKENS and any(token in {"-c", "-e"} for token in semantic_tokens):
+        blockers.append("closeout_command_inline_program")
+    if first in _SHELL_TOKENS and not allow_shell:
+        blockers.append("closeout_command_shell_disallowed")
+    semantic_basenames = {_basename(token) for token in semantic_tokens}
+    if semantic_basenames & _SOURCE_MUTATION_TOKENS:
+        blockers.append("closeout_command_source_mutation")
+    if semantic_basenames & _PACKAGE_INSTALL_TOKENS and "install" in semantic_tokens:
+        blockers.append("closeout_command_package_install")
+    if semantic_basenames & _NETWORK_TOKENS:
+        blockers.append("closeout_command_network")
+    if semantic_basenames & _PRIVILEGED_TOKENS:
+        blockers.append("closeout_command_privileged")
+    if semantic_basenames & _BACKGROUND_TOKENS:
+        blockers.append("closeout_command_background")
+
+    if _contains_unquoted_control(command, (">", "<")):
+        blockers.append("closeout_command_redirection")
+    if _contains_chain_operator(command):
+        blockers.append("closeout_command_chain")
+    if _contains_background_operator(command):
+        blockers.append("closeout_command_background")
+    if any(marker in command.upper() for marker in _SECRET_MARKERS):
+        blockers.append("closeout_command_secret")
+    if _contains_self_pass_marker(command):
+        blockers.append("closeout_command_self_acceptance")
+    return tuple(dict.fromkeys(blockers))
+
+
+def _split_command_tokens(command: str) -> tuple[str, ...]:
+    try:
+        return tuple(shlex.split(command))
+    except ValueError:
+        return ()
+
+
+def _basename(token: str) -> str:
+    return token.rsplit("/", 1)[-1] if token else ""
+
+
+def _semantic_tokens(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    remaining = list(tokens)
+    while remaining:
+        first = _basename(remaining[0])
+        if first == "env":
+            remaining.pop(0)
+            while remaining and _looks_like_assignment(remaining[0]):
+                remaining.pop(0)
+            continue
+        if first == "command":
+            remaining.pop(0)
+            continue
+        if _looks_like_assignment(remaining[0]):
+            remaining.pop(0)
+            continue
+        break
+    return tuple(remaining)
+
+
+def _looks_like_assignment(token: str) -> bool:
+    if "=" not in token or token.startswith("="):
+        return False
+    name = token.split("=", 1)[0]
+    return name.replace("_", "").isalnum()
+
+
+def _contains_self_pass_marker(command: str) -> bool:
+    normalized = command.lower().replace(" ", "")
+    return any(
+        marker in normalized
+        for marker in (
+            "acceptance:pass",
+            "process.exit(0)",
+            "sys.exit(0)",
+            "exit(0)",
+        )
+    )
+
+
+def _contains_chain_operator(command: str) -> bool:
+    return any(marker in command for marker in ("&&", "||", ";", "|"))
+
+
+def _contains_unquoted_control(command: str, controls: tuple[str, ...]) -> bool:
+    in_single = False
+    in_double = False
+    escaped = False
+    for char in command:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if char == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if not in_single and not in_double and char in controls:
+            return True
+    return False
+
+
+def _contains_background_operator(command: str) -> bool:
+    if "&&" in command:
+        command = command.replace("&&", "")
+    return _contains_unquoted_control(command, ("&",))
 
 
 def _drop_empty(payload: Mapping[str, object]) -> dict[str, object]:
