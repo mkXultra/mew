@@ -1256,6 +1256,24 @@ def _normalize_runtime_contract(
     declared_tool_name: str = "",
 ):
     raw_value = value if isinstance(value, dict) else {}
+    if command_intent == "finish_verifier":
+        minimal = {
+            **raw_value,
+            "id": str(raw_value.get("id") or fallback_id),
+            "role": "verify",
+            "stage": "verification",
+            "purpose": "verification",
+            "proof_role": str(raw_value.get("proof_role") or "verifier"),
+            "acceptance_kind": str(raw_value.get("acceptance_kind") or "external_verifier"),
+            "expected_exit": raw_value.get("expected_exit") or {"mode": "zero"},
+            "expected_artifacts": [],
+            "verifier_required": True,
+        }
+        return normalize_execution_contract(
+            minimal,
+            task_contract=None,
+            frontier_state=None,
+        )
     if _intent_downgrades_artifact_contract(command_intent):
         return normalize_execution_contract(
             {
@@ -1397,7 +1415,7 @@ def _uncheckable_artifact_reason(
         return ""
     raw_path = str(artifact.path or artifact.target.get("path") or "").strip()
     if not raw_path:
-        return ""
+        return f"artifact {artifact.id} has no path target"
     candidate = Path(raw_path).expanduser()
     if not candidate.is_absolute():
         candidate = workspace / candidate

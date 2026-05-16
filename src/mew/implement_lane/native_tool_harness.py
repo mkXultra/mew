@@ -2035,7 +2035,7 @@ def _native_final_verifier_closeout_call(
         "use_shell": True,
         "timeout": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
         "foreground_budget_seconds": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
-        "command_intent": "verifier",
+        "command_intent": "finish_verifier",
         "finish_verifier_plan": {
             "source": plan.source,
             "reason": plan.reason,
@@ -2043,8 +2043,8 @@ def _native_final_verifier_closeout_call(
             "separate_agent": plan.source == "finish_verifier_planner",
         },
         "execution_contract": {
-            "role": "runtime",
-            "stage": "final-verifier",
+            "role": "verify",
+            "stage": "verification",
             "purpose": "verify the latest source mutation before native closeout",
             "proof_role": "verifier",
             "acceptance_kind": "external_verifier",

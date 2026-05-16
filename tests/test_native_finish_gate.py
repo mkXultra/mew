@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from mew.implement_lane import (
     FinishCloseoutCommand,
@@ -6,6 +7,10 @@ from mew.implement_lane import (
     NativeFinishGateDecision,
     NativeFinishGatePolicy,
     NativeFinishGateRequest,
+)
+from mew.implement_lane.native_tool_harness import (
+    _NativeFinishVerifierPlan,
+    _native_final_verifier_closeout_call,
 )
 from mew.implement_lane.native_finish_gate import (
     NATIVE_FINISH_GATE_POLICY_VERSION,
@@ -15,6 +20,12 @@ from mew.implement_lane.native_finish_gate import (
     select_closeout_command,
     validate_closeout_command,
 )
+from mew.implement_lane.types import ImplementLaneInput
+from mew.implement_lane.exec_runtime import (
+    _drop_uncheckable_expected_artifacts,
+    _normalize_runtime_contract,
+)
+from mew.implement_lane.execution_evidence import normalize_execution_contract
 
 
 def test_native_finish_gate_policy_defaults_are_diagnostic_sidecar_only() -> None:
@@ -255,3 +266,131 @@ def test_finish_output_payload_is_bounded_and_finish_call_paired() -> None:
         "closeout_timed_out": False,
         "typed_evidence_projection_status": "not_attempted",
     }
+
+
+def test_finish_verifier_runtime_contract_does_not_import_task_artifact_obligations() -> None:
+    contract = _normalize_runtime_contract(
+        {
+            "id": "contract:final-verifier",
+            "role": "runtime",
+            "stage": "final-verifier",
+            "proof_role": "verifier",
+            "acceptance_kind": "external_verifier",
+            "expected_exit": 0,
+        },
+        task_contract={
+            "expected_artifacts": [
+                {
+                    "id": "rendered_frames",
+                    "kind": "file",
+                    "required": True,
+                }
+            ]
+        },
+        frontier_state={
+            "final_artifact": {
+                "id": "model_declared_artifact",
+                "kind": "file",
+                "path": "/tmp/model-output",
+            }
+        },
+        fallback_id="contract:fallback",
+        command_intent="finish_verifier",
+        declared_tool_name="run_command",
+    )
+
+    assert contract.id == "contract:final-verifier"
+    assert contract.proof_role == "verifier"
+    assert contract.acceptance_kind == "external_verifier"
+    assert contract.expected_artifacts == ()
+
+
+def test_native_final_verifier_closeout_call_uses_minimal_finish_verifier_intent(tmp_path) -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace=str(tmp_path),
+        lane="implement_v2",
+        task_contract={
+            "expected_artifacts": [
+                {
+                    "id": "rendered_frames",
+                    "kind": "file",
+                    "required": True,
+                }
+            ]
+        },
+        lane_config={"mode": "full", "allow_verify": True, "allow_shell": True},
+    )
+    call = _native_final_verifier_closeout_call(
+        lane_input,
+        lane_attempt_id="attempt-1",
+        provider=SimpleNamespace(provider="fake-native", model="fake-model"),
+        turn_index=3,
+        lane_config=lane_input.lane_config,
+        plan=_NativeFinishVerifierPlan(command="node vm.js", source="configured"),
+        timeout_seconds=30.0,
+        pending_mutation={"provider_call_id": "call-write-1", "path": "vm.js"},
+    )
+
+    arguments = json.loads(call.arguments_json_text)
+    contract = _normalize_runtime_contract(
+        arguments["execution_contract"],
+        task_contract=lane_input.task_contract,
+        frontier_state={
+            "final_artifact": {
+                "id": "frontier_artifact",
+                "kind": "file",
+                "path": str(tmp_path / "frontier.out"),
+            }
+        },
+        fallback_id="contract:fallback",
+        command_intent=arguments["command_intent"],
+        declared_tool_name=call.tool_name,
+    )
+
+    assert arguments["command_intent"] == "finish_verifier"
+    assert contract.stage == "verification"
+    assert contract.expected_artifacts == ()
+
+
+def test_pathless_expected_artifact_is_unchecked_before_artifact_checks(tmp_path) -> None:
+    contract = normalize_execution_contract(
+        {
+            "id": "contract:bad-artifact",
+            "role": "runtime",
+            "stage": "final-verifier",
+            "proof_role": "verifier",
+            "acceptance_kind": "external_verifier",
+            "expected_artifacts": [
+                {
+                    "id": "rendered_frames",
+                    "kind": "file",
+                    "required": True,
+                }
+            ],
+        },
+        task_contract=None,
+        frontier_state=None,
+    )
+
+    checked, unchecked = _drop_uncheckable_expected_artifacts(
+        contract,
+        workspace=tmp_path,
+        allowed_roots=(tmp_path,),
+    )
+
+    assert checked.expected_artifacts == ()
+    assert unchecked == (
+        {
+            "id": "rendered_frames",
+            "path": "",
+            "kind": "file",
+            "source": "model_declared",
+            "reason": "artifact rendered_frames has no path target",
+            "required_next_action": (
+                "The command may still run, but mew cannot perform internal artifact checks for this path. "
+                "Use a shell-level verifier assertion or write/check an artifact inside the allowed roots."
+            ),
+        },
+    )
