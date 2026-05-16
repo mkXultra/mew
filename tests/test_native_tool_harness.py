@@ -123,7 +123,10 @@ def test_codex_hot_path_provider_input_uses_raw_task_without_task_contract(tmp_p
         "Task source facts:\n"
         "- Provided source/artifact refs from the task: doomgeneric/\n"
         "- Existing workspace paths named by the task: doomgeneric\n"
-        "- The task text identifies the refs above as provided inputs."
+        "- The task text identifies the refs above as provided inputs.\n"
+        "- Source-use obligation inferred from the task text: treat the provided refs above as required "
+        "inputs; build, modify, or verify through them. Do not replace or bypass them with a standalone "
+        "synthetic artifact unless the task explicitly permits it."
     )
     rendered = json.dumps(input_items, ensure_ascii=False)
     assert "task_contract" not in rendered
@@ -181,7 +184,55 @@ def test_codex_hot_path_source_facts_do_not_mark_nested_source_basename_missing(
 
     rendered = json.dumps(provider.requests[0]["input_items"], ensure_ascii=False)
     assert "Provided source/artifact refs from the task: /app/doomgeneric/" in rendered
+    assert "Existing workspace paths named by the task: doomgeneric/doomgeneric/doomgeneric_img.c" in rendered
     assert "Output or target paths named by the task but not present yet: doomgeneric_img.c" not in rendered
+
+
+def test_codex_hot_path_source_facts_do_not_add_source_obligation_without_source_refs(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    raw_task = "Create src/hello.c and make it print hello."
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={"description": raw_task},
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    rendered = json.dumps(provider.requests[0]["input_items"], ensure_ascii=False)
+    assert "Output or target paths named by the task but not present yet: src/hello.c" in rendered
+    assert "Source-use obligation inferred from the task text" not in rendered
+
+
+def test_codex_hot_path_source_facts_skip_nested_symlink_outside_workspace(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    outside = tmp_path.parent / "outside-doomgeneric-img.c"
+    outside.write_text("void outside(void) {}\n")
+    source_root = tmp_path / "doomgeneric" / "doomgeneric"
+    source_root.mkdir(parents=True)
+    try:
+        (source_root / "doomgeneric_img.c").symlink_to(outside)
+    except OSError:
+        pytest.skip("symlinks are not supported in this environment")
+    raw_task = (
+        "I have provided doomgeneric/, the corresponding Doom source code. "
+        "Use doomgeneric_img.c when building the runnable artifact."
+    )
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={"description": raw_task},
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    rendered = json.dumps(provider.requests[0]["input_items"], ensure_ascii=False)
+    assert "outside-doomgeneric-img.c" not in rendered
+    assert "doomgeneric/doomgeneric/doomgeneric_img.c" not in rendered
 
 
 def test_native_task_description_includes_goal_and_objective(tmp_path: Path) -> None:
