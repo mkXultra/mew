@@ -3059,6 +3059,7 @@ def test_native_harness_repair_control_suppressed_after_failed_verifier_write(tm
 
 
 def test_native_harness_runs_finish_time_final_verifier_closeout_after_latest_source_mutation(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts-finish-closeout"
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -3081,6 +3082,7 @@ def test_native_harness_runs_finish_time_final_verifier_closeout_after_latest_so
             final_verifier_closeout_seconds=3,
         ),
         provider=provider,
+        artifact_root=artifact_root,
         max_turns=1,
     )
 
@@ -3102,6 +3104,18 @@ def test_native_harness_runs_finish_time_final_verifier_closeout_after_latest_so
     )
     assert closeout_output.status == "completed"
     assert validate_native_transcript_pairing(result.transcript).valid is True
+    decision_rows = [
+        json.loads(line)
+        for line in (artifact_root / "native_finish_gate_decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert decision_rows[0]["finish_call_id"] == "finish-1"
+    assert decision_rows[0]["result"] == "allow"
+    assert decision_rows[0]["closeout_refs"]
+    assert decision_rows[0]["transcript_hash_before_decision"]
+    manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["native_finish_gate_decisions_ref"] == "native_finish_gate_decisions.jsonl"
+    assert manifest["native_finish_gate_decisions_sha256"].startswith("sha256:")
+    assert manifest["metrics"]["native_finish_gate_decisions"]["decision_count"] == 1
 
 
 def test_native_harness_trusted_closeout_exit_zero_overrides_typed_evidence_blockers(tmp_path: Path) -> None:

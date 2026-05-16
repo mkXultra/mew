@@ -26,6 +26,7 @@ from .native_finish_gate import (
     NativeFinishGateDecision,
     NativeFinishGateRequest,
     decide_native_finish_from_closeout,
+    write_native_finish_gate_artifacts,
 )
 from .native_provider_adapter import (
     NativeResponsesStreamParseResult,
@@ -839,6 +840,7 @@ def run_native_implement_v2(
             provider=provider,
             status=status,
             resolver_decisions=tuple(resolver_decisions),
+            native_finish_gate_decisions=tuple(native_finish_gate_decisions),
         )
         proof_artifacts = tuple(str(path) for path in paths.values())
     return NativeImplementV2HarnessResult(
@@ -4386,6 +4388,7 @@ def _write_native_artifacts(
     status: str = "",
     error: str = "",
     resolver_decisions: tuple[CompletionResolverDecision, ...] = (),
+    native_finish_gate_decisions: tuple[NativeFinishGateDecision, ...] = (),
 ) -> dict[str, Path]:
     paths = write_native_transcript_artifacts(root, transcript)
     paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
@@ -4405,6 +4408,14 @@ def _write_native_artifacts(
             write_completion_resolver_artifacts(
                 root,
                 resolver_decisions,
+                proof_manifest_path=paths.get("proof_manifest"),
+            )
+        )
+    if native_finish_gate_decisions:
+        paths.update(
+            write_native_finish_gate_artifacts(
+                root,
+                native_finish_gate_decisions,
                 proof_manifest_path=paths.get("proof_manifest"),
             )
         )

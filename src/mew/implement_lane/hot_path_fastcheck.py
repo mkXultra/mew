@@ -38,7 +38,8 @@ from .affordance_visibility import (
 from .native_tool_harness import _native_call_is_verifier, _native_loop_control_state
 from .completion_resolver import COMPLETION_RESOLVER_DECISIONS_FILE
 from .native_sidecar_projection import build_compact_native_sidecar_digest
-from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID, NativeTranscript, NativeTranscriptItem
+from .native_finish_gate import NATIVE_FINISH_GATE_DECISIONS_FILE
+from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID, OUTPUT_ITEM_KINDS, NativeTranscript, NativeTranscriptItem
 from .native_transcript import native_function_call_argument_metrics, native_transcript_hash, validate_native_transcript_pairing
 from .tool_lab import resolve_implement_v2_manifest_path
 from .types import search_text_output_has_line_anchor
@@ -286,6 +287,13 @@ def _run_native_hot_path_fastcheck(
         checks.append(_check_native_provider_visible_state(provider_requests))
         checks.append(_check_native_previous_response_id(provider_requests))
         checks.append(
+            _check_native_finish_gate_decisions(
+                manifest_path=manifest_path,
+                manifest=manifest,
+                transcript=transcript,
+            )
+        )
+        checks.append(
             _check_native_resolver_decisions(
                 manifest_path=manifest_path,
                 manifest=manifest,
@@ -307,6 +315,7 @@ def _run_native_hot_path_fastcheck(
                 _check("native_compact_digest_replay", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_provider_visible_state", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_previous_response_id", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_finish_gate_decisions", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_resolver_decisions", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_evidence_observation", False, "native transcript is unreadable", {"skipped": True}),
             ]
@@ -999,6 +1008,154 @@ def _check_native_previous_response_id(provider_requests: tuple[dict[str, object
     )
 
 
+def _check_native_finish_gate_decisions(
+    *,
+    manifest_path: Path,
+    manifest: Mapping[str, object],
+    transcript: NativeTranscript,
+) -> HotPathCheck:
+    valid_finish_call_ids = _native_valid_finish_call_ids(transcript)
+    decision_ref = str(manifest.get("native_finish_gate_decisions_ref") or "").strip()
+    decision_sha = str(manifest.get("native_finish_gate_decisions_sha256") or "").strip()
+    if not decision_ref:
+        has_resolver_fallback = bool(str(manifest.get("resolver_decisions_ref") or "").strip())
+        has_trusted_closeout_pass = _native_has_completed_final_verifier_closeout(transcript)
+        ok = not valid_finish_call_ids or (has_resolver_fallback and not has_trusted_closeout_pass)
+        return _check(
+            "native_finish_gate_decisions",
+            ok,
+            "no native finish-gate decision artifact required for this transcript"
+            if ok
+            else "finish claim exists without native finish-gate decision artifact",
+            {
+                "finish_call_ids": sorted(valid_finish_call_ids),
+                "native_finish_gate_decisions_ref": "",
+                "resolver_fallback_present": has_resolver_fallback,
+                "trusted_final_verifier_closeout_pass_present": has_trusted_closeout_pass,
+            },
+        )
+    decision_path = (manifest_path.parent / decision_ref).resolve(strict=False)
+    rows, error = _load_jsonl_objects(decision_path)
+    actual_sha = _file_sha256(decision_path) if decision_path.is_file() else ""
+    row_finish_ids = {
+        str(row.get("finish_call_id") or "").strip()
+        for row in rows
+        if str(row.get("finish_call_id") or "").strip()
+    }
+    row_finish_id_values = [str(row.get("finish_call_id") or "").strip() for row in rows]
+    allow_rows = [row for row in rows if row.get("result") == "allow"]
+    allow_completed_finish_ids = {
+        str(row.get("finish_call_id") or "").strip()
+        for row in rows
+        if row.get("result") == "allow"
+        and row.get("lane_status") == "completed"
+        and str(row.get("finish_call_id") or "").strip()
+    }
+    trusted_closeout_pass_finish_ids = _native_trusted_closeout_pass_finish_ids(transcript)
+    expected_closeout_refs = _native_final_verifier_closeout_refs(transcript)
+    expected_unexpected_source_mutation_block_finish_ids = {
+        finish_id
+        for row in rows
+        if (finish_id := str(row.get("finish_call_id") or "").strip()) in trusted_closeout_pass_finish_ids
+        and _native_decision_is_expected_unexpected_source_mutation_block(row)
+        and _native_decision_closeout_refs_match_transcript(row, expected_refs=expected_closeout_refs)
+    }
+    trusted_closeout_pass_finish_ids_requiring_allow = (
+        trusted_closeout_pass_finish_ids - expected_unexpected_source_mutation_block_finish_ids
+    )
+    matching_trusted_closeout_pass_finish_ids = {
+        finish_id
+        for row in rows
+        if (finish_id := str(row.get("finish_call_id") or "").strip())
+        in trusted_closeout_pass_finish_ids_requiring_allow
+        and row.get("result") == "allow"
+        and row.get("lane_status") == "completed"
+        and _native_decision_closeout_refs_match_transcript(row, expected_refs=expected_closeout_refs)
+    }
+    row_decision_ids = [str(row.get("decision_id") or "").strip() for row in rows]
+    expected_transcript_hashes = _native_finish_decision_transcript_hashes(transcript)
+    row_transcript_hashes = {
+        str(row.get("transcript_hash_before_decision") or "").strip()
+        for row in rows
+        if str(row.get("transcript_hash_before_decision") or "").strip()
+    }
+    row_hash_mismatches = [
+        {
+            "finish_call_id": finish_id,
+            "expected": expected_transcript_hashes.get(finish_id, ""),
+            "observed": str(row.get("transcript_hash_before_decision") or "").strip(),
+        }
+        for row in rows
+        if (finish_id := str(row.get("finish_call_id") or "").strip())
+        and expected_transcript_hashes.get(finish_id)
+        and str(row.get("transcript_hash_before_decision") or "").strip() not in expected_transcript_hashes[finish_id]
+    ]
+    closeout_ref_rows = [
+        row
+        for row in allow_rows
+        if _native_decision_closeout_refs_match_transcript(row, expected_refs=expected_closeout_refs)
+    ]
+    checks = {
+        "path_exists": decision_path.is_file(),
+        "sha_matches": bool(decision_sha) and decision_sha == actual_sha,
+        "rows_present": bool(rows),
+        "row_finish_ids_present": all(row_finish_id_values),
+        "row_finish_ids_valid": all(finish_id in valid_finish_call_ids for finish_id in row_finish_id_values if finish_id),
+        "trusted_closeout_pass_rows_allow_completed": trusted_closeout_pass_finish_ids_requiring_allow.issubset(
+            allow_completed_finish_ids
+        ),
+        "trusted_closeout_pass_rows_have_matching_closeout_refs": trusted_closeout_pass_finish_ids_requiring_allow.issubset(
+            matching_trusted_closeout_pass_finish_ids
+        ),
+        "finish_calls_subset": row_finish_ids.issubset(valid_finish_call_ids),
+        "decision_count_within_finish_count": len(rows) <= len(valid_finish_call_ids),
+        "decision_ids_present": all(row_decision_ids),
+        "decision_ids_unique": len(row_decision_ids) == len(set(row_decision_ids)),
+        "allow_rows_have_matching_closeout_refs": len(closeout_ref_rows) == len(allow_rows),
+        "transcript_hashes_present": len(row_transcript_hashes) == len(rows),
+        "transcript_hashes_match_pre_finish_prefix": not row_hash_mismatches,
+        "expected_filename": decision_path.name == NATIVE_FINISH_GATE_DECISIONS_FILE,
+    }
+    ok = all(checks.values())
+    return _check(
+        "native_finish_gate_decisions",
+        ok,
+        "native finish-gate decisions replay from sidecar artifact and manifest hash"
+        if ok
+        else "native finish-gate decision sidecar artifact is missing, stale, or not aligned with finish transcript",
+        {
+            **checks,
+            "native_finish_gate_decisions_ref": decision_ref,
+            "native_finish_gate_decisions_sha256": decision_sha,
+            "actual_sha256": actual_sha,
+            "row_count": len(rows),
+            "finish_call_ids": sorted(valid_finish_call_ids),
+            "row_finish_call_ids": sorted(row_finish_ids),
+            "row_finish_call_id_values": row_finish_id_values,
+            "trusted_closeout_pass_finish_ids": sorted(trusted_closeout_pass_finish_ids),
+            "trusted_closeout_pass_finish_ids_requiring_allow": sorted(trusted_closeout_pass_finish_ids_requiring_allow),
+            "expected_unexpected_source_mutation_block_finish_ids": sorted(
+                expected_unexpected_source_mutation_block_finish_ids
+            ),
+            "allow_completed_finish_ids": sorted(allow_completed_finish_ids),
+            "matching_trusted_closeout_pass_finish_ids": sorted(matching_trusted_closeout_pass_finish_ids),
+            "decision_ids": row_decision_ids,
+            "allow_count": len(allow_rows),
+            "matching_closeout_ref_allow_count": len(closeout_ref_rows),
+            "expected_closeout_refs": sorted(expected_closeout_refs),
+            "expected_transcript_hashes": {key: sorted(value) for key, value in expected_transcript_hashes.items()},
+            "row_transcript_hashes": sorted(row_transcript_hashes),
+            "row_hash_mismatches": row_hash_mismatches[:10],
+            "projection_warning_count": sum(
+                1
+                for row in rows
+                if str(_safe_mapping(row.get("closeout")).get("typed_evidence_projection_status") or "") == "warning"
+            ),
+            "load_error": error,
+        },
+    )
+
+
 def _check_native_resolver_decisions(
     *,
     manifest_path: Path,
@@ -1014,7 +1171,8 @@ def _check_native_resolver_decisions(
     decision_ref = str(manifest.get("resolver_decisions_ref") or "").strip()
     decision_sha = str(manifest.get("resolver_decisions_sha256") or "").strip()
     if not decision_ref:
-        ok = not valid_finish_call_ids
+        has_native_finish_gate_decisions = bool(str(manifest.get("native_finish_gate_decisions_ref") or "").strip())
+        ok = not valid_finish_call_ids or has_native_finish_gate_decisions
         return _check(
             "native_resolver_decisions",
             ok,
@@ -1024,6 +1182,7 @@ def _check_native_resolver_decisions(
             {
                 "finish_call_ids": sorted(valid_finish_call_ids),
                 "resolver_decisions_ref": "",
+                "native_finish_gate_decisions_present": has_native_finish_gate_decisions,
             },
         )
     decision_path = (manifest_path.parent / decision_ref).resolve(strict=False)
@@ -1087,6 +1246,111 @@ def _native_valid_finish_call_ids(transcript: NativeTranscript) -> set[str]:
             continue
         valid.add(item.call_id)
     return valid
+
+
+def _native_finish_decision_transcript_hashes(transcript: NativeTranscript) -> dict[str, set[str]]:
+    hashes: dict[str, set[str]] = {}
+    for index, item in enumerate(transcript.items):
+        if item.kind != "finish_output" or not item.call_id:
+            continue
+        full_prefix = NativeTranscript(
+            lane_attempt_id=transcript.lane_attempt_id,
+            provider=transcript.provider,
+            model=transcript.model,
+            items=tuple(transcript.items[:index]),
+        )
+        decision_time_prefix = NativeTranscript(
+            lane_attempt_id=transcript.lane_attempt_id,
+            provider=transcript.provider,
+            model=transcript.model,
+            items=tuple(
+                prefix_item
+                for prefix_item in transcript.items[:index]
+                if not (
+                    prefix_item.turn_id == item.turn_id
+                    and prefix_item.kind in OUTPUT_ITEM_KINDS
+                    and "final-verifier-closeout" not in prefix_item.call_id
+                )
+            ),
+        )
+        hashes[item.call_id] = {
+            native_transcript_hash(full_prefix),
+            native_transcript_hash(decision_time_prefix),
+        }
+    return hashes
+
+
+def _native_has_completed_final_verifier_closeout(transcript: NativeTranscript) -> bool:
+    return any(
+        item.kind in OUTPUT_ITEM_KINDS
+        and "final-verifier-closeout" in item.call_id
+        and item.status == "completed"
+        and not item.is_error
+        for item in transcript.items
+    )
+
+
+def _native_final_verifier_closeout_refs(transcript: NativeTranscript) -> set[str]:
+    refs: set[str] = set()
+    for item in transcript.items:
+        if item.kind not in OUTPUT_ITEM_KINDS or "final-verifier-closeout" not in item.call_id:
+            continue
+        refs.update(_string_list(item.evidence_refs))
+        refs.update(_string_list(item.content_refs))
+        refs.update(_string_list(item.sidecar_refs))
+    return refs
+
+
+def _native_trusted_closeout_pass_finish_ids(transcript: NativeTranscript) -> set[str]:
+    finish_call_indices = {
+        item.call_id: index
+        for index, item in enumerate(transcript.items)
+        if item.kind == "finish_call" and item.call_id
+    }
+    trusted: set[str] = set()
+    for output_index, item in enumerate(transcript.items):
+        if item.kind != "finish_output" or not item.call_id or item.status != "completed" or item.is_error:
+            continue
+        start_index = finish_call_indices.get(item.call_id, -1)
+        if start_index < 0:
+            continue
+        if any(
+            candidate.kind in OUTPUT_ITEM_KINDS
+            and "final-verifier-closeout" in candidate.call_id
+            and candidate.status == "completed"
+            and not candidate.is_error
+            for candidate in transcript.items[start_index:output_index]
+        ):
+            trusted.add(item.call_id)
+    return trusted
+
+
+def _native_decision_is_expected_unexpected_source_mutation_block(row: Mapping[str, object]) -> bool:
+    closeout = _safe_mapping(row.get("closeout"))
+    blockers = set(_string_list(row.get("blockers")))
+    blockers.update(_string_list(closeout.get("blockers")))
+    exit_code = closeout.get("exit_code")
+    return (
+        row.get("result") == "block"
+        and row.get("lane_status") == "blocked_continue"
+        and closeout.get("status") == "completed_zero"
+        and (exit_code == 0 or exit_code == "0")
+        and bool(closeout.get("observed_unexpected_source_mutation"))
+        and "closeout_unexpected_source_mutation" in blockers
+    )
+
+
+def _native_decision_closeout_refs_match_transcript(
+    row: Mapping[str, object],
+    *,
+    expected_refs: set[str],
+) -> bool:
+    refs = set(_string_list(row.get("closeout_refs")))
+    if not refs:
+        return False
+    if expected_refs:
+        return bool(refs & expected_refs)
+    return any("final-verifier" in ref or "verifier" in ref for ref in refs)
 
 
 def _check_native_evidence_observation(
@@ -2679,6 +2943,14 @@ def _counts(values: Iterable[str]) -> dict[str, int]:
 
 def _safe_mapping(value: object) -> dict[str, object]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _string_list(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,) if value.strip() else ()
+    if not isinstance(value, (list, tuple, set)):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
 
 
 def _nonnegative_int(value: object) -> int:

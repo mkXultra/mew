@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
+from pathlib import Path
 import shlex
 from typing import Literal, Mapping
 
@@ -222,6 +223,8 @@ class NativeFinishGateDecision:
     evidence_refs: tuple[str, ...] = ()
     closeout_refs: tuple[str, ...] = ()
     observer_refs: tuple[str, ...] = ()
+    transcript_hash_before_decision: str = ""
+    compact_sidecar_digest_hash: str = ""
     transcript_items_to_append: tuple[object, ...] = ()
     finish_output_payload: Mapping[str, object] = field(default_factory=dict)
     diagnostic_resolver_record: Mapping[str, object] = field(default_factory=dict)
@@ -245,6 +248,8 @@ class NativeFinishGateDecision:
             "evidence_refs": list(self.evidence_refs),
             "closeout_refs": list(self.closeout_refs),
             "observer_refs": list(self.observer_refs),
+            "transcript_hash_before_decision": self.transcript_hash_before_decision,
+            "compact_sidecar_digest_hash": self.compact_sidecar_digest_hash,
             "transcript_items_to_append": [_json_safe(item) for item in self.transcript_items_to_append],
             "diagnostic_resolver_record": dict(self.diagnostic_resolver_record),
             "reason": self.reason,
@@ -353,6 +358,8 @@ def finish_output_payload_for_decision(decision: NativeFinishGateDecision) -> di
             "evidence_refs": list(decision.evidence_refs),
             "closeout_refs": list(decision.closeout_refs),
             "observer_refs": list(decision.observer_refs),
+            "transcript_hash_before_decision": decision.transcript_hash_before_decision,
+            "compact_sidecar_digest_hash": decision.compact_sidecar_digest_hash,
             "closeout_status": decision.closeout.status,
             "closeout_exit_code": decision.closeout.exit_code,
             "closeout_timed_out": decision.closeout.timed_out,
@@ -435,8 +442,42 @@ def decide_native_finish_from_closeout(
         evidence_refs=closeout.evidence_refs,
         closeout_refs=closeout.closeout_refs,
         observer_refs=closeout.observer_refs,
+        transcript_hash_before_decision=request.transcript_hash_before_decision,
+        compact_sidecar_digest_hash=request.compact_sidecar_digest_hash,
         reason=reason,
     )
+
+
+def write_native_finish_gate_artifacts(
+    root: str | Path,
+    decisions: tuple[NativeFinishGateDecision, ...] | list[NativeFinishGateDecision],
+    *,
+    proof_manifest_path: str | Path | None = None,
+) -> dict[str, Path]:
+    """Write native finish-gate decisions and mirror their ref/hash into manifest."""
+
+    artifact_root = Path(root)
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    decision_path = artifact_root / NATIVE_FINISH_GATE_DECISIONS_FILE
+    records = [decision.as_dict(include_finish_output_payload=False) for decision in decisions]
+    _write_jsonl(decision_path, records)
+    digest = _file_sha256(decision_path)
+    if proof_manifest_path is not None:
+        _patch_proof_manifest(
+            Path(proof_manifest_path),
+            decision_path=decision_path,
+            digest=digest,
+            records=records,
+        )
+    return {"native_finish_gate_decisions": decision_path}
+
+
+def native_finish_gate_manifest_fields(path: str | Path) -> dict[str, object]:
+    decision_path = Path(path)
+    return {
+        "native_finish_gate_decisions_ref": decision_path.name,
+        "native_finish_gate_decisions_sha256": _file_sha256(decision_path),
+    }
 
 
 def build_decision_id(*, lane_attempt_id: str, turn_id: str, finish_call_id: str, policy_version: str) -> str:
@@ -649,3 +690,84 @@ def _json_safe(value: object) -> object:
     if callable(as_dict):
         return _json_safe(as_dict())
     return repr(value)
+
+
+def _patch_proof_manifest(
+    path: Path,
+    *,
+    decision_path: Path,
+    digest: str,
+    records: list[Mapping[str, object]],
+) -> None:
+    payload: dict[str, object] = {}
+    if path.exists():
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            payload = loaded
+    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    summary = _decision_summary(records)
+    payload["native_finish_gate_decisions_ref"] = decision_path.name
+    payload["native_finish_gate_decisions_sha256"] = digest
+    metrics["native_finish_gate_decisions"] = {
+        "artifact_ref": decision_path.name,
+        "artifact_sha256": digest,
+        **summary,
+    }
+    payload["metrics"] = metrics
+    _write_json(path, payload)
+
+
+def _decision_summary(records: list[Mapping[str, object]]) -> dict[str, object]:
+    return {
+        "decision_count": len(records),
+        "allow_count": sum(1 for record in records if record.get("result") == "allow"),
+        "block_count": sum(1 for record in records if record.get("result") == "block"),
+        "completed_count": sum(1 for record in records if record.get("lane_status") == "completed"),
+        "closeout_ref_count": sum(len(_strings(record.get("closeout_refs"))) for record in records),
+        "observer_ref_count": sum(len(_strings(record.get("observer_refs"))) for record in records),
+        "typed_evidence_warning_count": sum(
+            1
+            for record in records
+            if _text(_mapping(record.get("closeout")).get("typed_evidence_projection_status")) == "warning"
+        ),
+        "unexpected_source_mutation_block_count": sum(
+            1 for record in records if "closeout_unexpected_source_mutation" in _strings(record.get("blockers"))
+        ),
+    }
+
+
+def _write_json(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+
+def _write_jsonl(path: Path, rows: list[Mapping[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+
+def _file_sha256(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _strings(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,) if value.strip() else ()
+    if not isinstance(value, (list, tuple, set)):
+        return ()
+    return tuple(str(item).strip() for item in value if str(item).strip())
+
+
+def _text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
