@@ -2100,7 +2100,11 @@ def _safe_auto_detected_finish_verifier_fallback(
     fallback = _auto_detected_native_final_verifier_command(lane_input)
     if fallback is None:
         return None, None
-    safety = _finish_verifier_command_safety(fallback.command, request=request)
+    safety = _finish_verifier_command_safety(
+        fallback.command,
+        request=request,
+        require_observable_assertions=True,
+    )
     if safety.allowed:
         return fallback, None
     return None, {
@@ -2498,7 +2502,11 @@ def _coerce_native_finish_verifier_plan_with_diagnostics(
             reject_blockers=("planner_plan_not_mapping",),
         )
     command = str(value.get("command") or value.get("cmd") or "").strip()
-    safety = _finish_verifier_command_safety(command, request=request)
+    safety = _finish_verifier_command_safety(
+        command,
+        request=request,
+        require_observable_assertions=False,
+    )
     if not safety.allowed:
         return _NativeFinishVerifierPlanCoercion(
             plan=None,
@@ -2577,6 +2585,7 @@ def _finish_verifier_command_safety(
     command: object,
     *,
     request: Mapping[str, object] | None = None,
+    require_observable_assertions: bool = True,
 ) -> _FinishVerifierCommandSafetyResult:
     text = str(command or "").strip()
     validation = validate_closeout_command(
@@ -2601,7 +2610,11 @@ def _finish_verifier_command_safety(
                 reason=validation.reason,
                 blockers=mapped_blockers,
             )
-    if requirements and not _finish_verifier_command_asserts_observables(text, requirements):
+    if (
+        require_observable_assertions
+        and requirements
+        and not _finish_verifier_command_asserts_observables(text, requirements)
+    ):
         return _FinishVerifierCommandSafetyResult(
             allowed=False,
             reason="finish verifier command does not assert required task-visible observables",

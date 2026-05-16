@@ -3583,7 +3583,7 @@ def test_native_harness_finish_verifier_planner_request_includes_bounded_read_po
     assert "external_verifier_failure" not in request
 
 
-def test_native_harness_finish_verifier_planner_rejects_plain_run_for_observable_task(
+def test_native_harness_finish_verifier_planner_accepts_plain_run_for_observable_task(
     tmp_path: Path,
 ) -> None:
     class PlanningProvider(NativeFakeProvider):
@@ -3635,8 +3635,8 @@ def test_native_harness_finish_verifier_planner_rejects_plain_run_for_observable
         artifact_root=artifact_root,
     )
 
-    assert result.status == "blocked"
-    assert result.metrics["final_verifier_closeout_count"] == 0
+    assert result.status == "completed"
+    assert result.metrics["final_verifier_closeout_count"] == 1
     request = provider.planner_requests[0]
     assert set(request["command_policy"]["observable_requirements"]) >= {  # type: ignore[index]
         "stdout",
@@ -3644,8 +3644,8 @@ def test_native_harness_finish_verifier_planner_rejects_plain_run_for_observable
         "image_artifact",
     }
     decision = result.metrics["finish_verifier_planner_latest_decision"]
-    assert decision["status"] == "rejected"
-    assert decision["reject_blockers"] == ["finish_verifier_observable_assertions_missing"]
+    assert decision["status"] == "accepted"
+    assert decision["raw_plan"]["command"] == "node vm.js"
     rows = [
         json.loads(line)
         for line in (artifact_root / "finish_verifier_planner_decisions.jsonl")
@@ -3653,11 +3653,11 @@ def test_native_harness_finish_verifier_planner_rejects_plain_run_for_observable
         .splitlines()
     ]
     assert rows[-1]["raw_plan"]["command"] == "node vm.js"
-    assert rows[-1]["reject_blockers"] == ["finish_verifier_observable_assertions_missing"]
-    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    assert rows[-1]["status"] == "accepted"
+    assert any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
 
 
-def test_native_harness_observable_planner_rejection_blocks_same_auto_fallback(
+def test_native_harness_observable_planner_precedes_same_auto_fallback(
     tmp_path: Path,
 ) -> None:
     class PlanningProvider(NativeFakeProvider):
@@ -3698,13 +3698,14 @@ def test_native_harness_observable_planner_rejection_blocks_same_auto_fallback(
         max_turns=1,
     )
 
-    assert result.status == "blocked"
-    assert result.metrics["final_verifier_closeout_count"] == 0
+    assert result.status == "completed"
+    assert result.metrics["final_verifier_closeout_count"] == 1
     decision = result.metrics["finish_verifier_planner_latest_decision"]
-    assert decision["reject_blockers"] == ["finish_verifier_observable_assertions_missing"]
-    assert decision["fallback_source"] == ""
-    assert decision["fallback_rejection"]["blockers"] == ["finish_verifier_observable_assertions_missing"]
-    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    assert decision["status"] == "accepted"
+    assert decision["raw_plan"]["command"] == "node vm.js"
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
 
 
 def test_native_harness_finish_verifier_planner_accepts_relative_image_artifact_assertion(
@@ -3804,12 +3805,11 @@ def test_native_harness_finish_verifier_planner_derives_observables_from_recent_
         max_turns=1,
     )
 
-    assert result.status == "blocked"
+    assert result.status == "completed"
     request = provider.planner_requests[0]
     assert set(request["command_policy"]["observable_requirements"]) >= {"stdout", "image_artifact"}  # type: ignore[index]
-    assert result.metrics["finish_verifier_planner_latest_decision"]["reject_blockers"] == [
-        "finish_verifier_observable_assertions_missing"
-    ]
+    assert result.metrics["finish_verifier_planner_latest_decision"]["status"] == "accepted"
+    assert result.metrics["finish_verifier_planner_latest_decision"]["raw_plan"]["command"] == "node vm.js"
 
 
 def test_native_harness_planner_precedes_auto_detected_verifier(tmp_path: Path) -> None:
