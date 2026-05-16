@@ -3823,9 +3823,16 @@ def test_native_harness_auto_detected_verifier_fallback_when_planner_rejects_pla
     rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
     assert rows[-1]["raw_plan"]["command"] == "true"
     assert rows[-1]["reject_blockers"] == ["finish_verifier_noop_success"]
+    request_path = artifact_root / "finish_verifier_planner_requests.jsonl"
+    request_rows = [json.loads(line) for line in request_path.read_text(encoding="utf-8").splitlines()]
+    assert request_rows[-1]["request_hash"] == rows[-1]["request_hash"]
+    assert request_rows[-1]["request"]["component"] == "FinishVerifierPlannerLoop"
+    assert result.metrics["finish_verifier_planner_request_count"] == 1
     manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
     assert manifest["finish_verifier_planner_decisions_ref"] == "finish_verifier_planner_decisions.jsonl"
+    assert manifest["finish_verifier_planner_requests_ref"] == "finish_verifier_planner_requests.jsonl"
     assert manifest["metrics"]["finish_verifier_planner_decisions"]["rejected_count"] == 1
+    assert manifest["metrics"]["finish_verifier_planner_requests"]["request_count"] == 1
 
 
 def test_native_harness_records_null_planner_plan_before_auto_fallback(tmp_path: Path) -> None:
