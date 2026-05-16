@@ -193,6 +193,14 @@ runtime `42m33s`, exceeding the target `3/5`. The single failed trial
 future artifact-obligation / finish-verifier gap, not an H5 hot-path blocker.
 Do not continue H5 behavior polish from that single failure before selecting
 the next measured M6.24 gap.
+The 2026-05-16 same-shape rerun at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260516-192445/2026-05-16__19-24-45/result.json`
+also counts as OK for M6.24 scoring: it reached `4/5`, mean `0.800`, and
+Pass@2/4/5 `1.000`. Its only failed trial was provider transport continuity
+(`websocket error status=400 code=previous_response_not_found`) before any
+edit, not task-solving or finish-gate behavior. WebSocket retry/fallback work
+is out of this scoring slice, so do not reopen H5 or transport work from that
+miss.
 The `make-doom-for-mips` task-requirement / finish-gate diagnostic validated
 `task_contract_compiler` default-on: the provider-visible task included typed
 completion criteria, expected artifacts, verifier obligations, source
@@ -439,10 +447,11 @@ Latest Codex-like hot-path validation:
   verifier. Classification:
   `missing_mutation_affordance / first_write_latency`, not provider-visible
   steering regression.
-- Current next action: run `make-mips-interpreter` `proof-5` with
-  `codex_hot_path`. H5 repair 1, closeout/debug-cleanup handoff, and the
-  same-shape `speed-proof` are validated; do not make another H5 behavior
-  change before recording proof-5 pass/fail classification.
+- Current next action: `make-mips-interpreter` `proof-5` with
+  `codex_hot_path` is accepted for M6.24 scoring. The latest `4/5` miss was
+  provider WebSocket/`previous_response_id` transport, not task-solving. Do not
+  make another H5 behavior, finish-gate, prompt/tool, or WebSocket retry change
+  from that miss; continue with the next selected M6.24 gap.
 - The analyzer command shape is:
   `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
 - Do not restore live `next_action`, `required_next`, `first_write_due`, probe
