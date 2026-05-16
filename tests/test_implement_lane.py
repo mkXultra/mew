@@ -18,6 +18,7 @@ from mew.implement_lane import (
     ImplementLaneInput,
     ImplementLaneProofManifest,
     ImplementLaneResult,
+    ImplementLaneToolSpec,
     ImplementLaneTranscriptEvent,
     ToolCallEnvelope,
     ToolResultEnvelope,
@@ -6055,7 +6056,7 @@ def test_implement_v2_prompt_sections_include_compact_coding_contract() -> None:
     assert section.cache_policy == "cacheable"
     assert section.stability == "static"
     assert "Inspect only enough context to choose a minimal runnable candidate" in section.content
-    assert "Make source changes with apply_patch or edit_file" in section.content
+    assert "modify existing source with apply_patch or edit_file" in section.content
     assert "Use run_command or run_tests to build, run, and verify" in section.content
     assert "create the smallest runnable version early" in section.content
     assert "verify command names a missing source or artifact path" in section.content
@@ -11386,6 +11387,104 @@ def test_implement_v2_prompt_metrics_are_memory_light_by_default() -> None:
     assert by_id["implement_v2_coding_contract"]["cache_hint"] == "cacheable_prefix"
 
 
+def test_codex_hot_path_prompt_metrics_hide_task_contract_section() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={
+            "description": "Use raw task text.",
+            "completion_criteria": ["Hidden finish-gate-only criterion"],
+            "expected_artifacts": [{"id": "out", "path": "/app/out"}],
+        },
+        lane_config={"mode": "full", "tool_surface_profile_id": "codex_hot_path"},
+    )
+
+    metrics = implement_v2_prompt_section_metrics(lane_input)
+    by_id = {section["id"]: section for section in metrics["sections"]}
+
+    assert "implement_v2_task_contract" not in by_id
+    assert "implement_v2_environment_context" in by_id
+    coding_contract = next(
+        section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_coding_contract"
+    ).content
+    environment_context = next(
+        section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_environment_context"
+    )
+    assert "minimal runnable candidate" not in coding_contract
+    assert "missing source or artifact path" not in coding_contract
+    assert "task_facts." not in coding_contract
+    assert "fabricating replacement artifacts" in coding_contract
+    assert "Use apply_patch for source changes." in coding_contract
+    assert "Use exec_command for builds, tests, probes, package-manager setup, and verification." in coding_contract
+    assert "edit_file" not in coding_contract
+    assert "write_file" not in coding_contract
+    assert "run_command or run_tests" not in coding_contract
+    assert environment_context.cache_policy == "session"
+    assert environment_context.stability == "semi_static"
+    assert "disposable benchmark or container environment" in environment_context.content
+    assert "installing missing build, test, or toolchain packages is allowed" in environment_context.content
+    assert "missing compiler or toolchain support as a setup/build problem" in environment_context.content
+    assert "fabricating a replacement artifact" in environment_context.content
+    rendered = json.dumps(metrics, ensure_ascii=False)
+    assert "Hidden finish-gate-only criterion" not in rendered
+
+
+def test_codex_hot_path_prompt_metrics_accept_tool_profile_alias() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={
+            "description": "Use raw task text.",
+            "completion_criteria": ["Hidden alias criterion"],
+        },
+        lane_config={"mode": "full", "tool_profile": "codex_hot_path"},
+    )
+
+    metrics = implement_v2_prompt_section_metrics(lane_input)
+    by_id = {section["id"]: section for section in metrics["sections"]}
+    coding_contract = next(
+        section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_coding_contract"
+    ).content
+
+    assert "implement_v2_task_contract" not in by_id
+    assert "implement_v2_environment_context" in by_id
+    assert "minimal runnable candidate" not in coding_contract
+    assert "Use apply_patch for source changes." in coding_contract
+    assert "Hidden alias criterion" not in json.dumps(metrics, ensure_ascii=False)
+
+
+def test_codex_hot_path_prompt_uses_actual_tool_surface_names() -> None:
+    lane_input = ImplementLaneInput(
+        work_session_id="ws-1",
+        task_id="task-1",
+        workspace="/tmp/work",
+        lane=IMPLEMENT_V2_LANE,
+        task_contract={"description": "Use raw task text."},
+        lane_config={"mode": "full", "tool_surface_profile_id": "codex_hot_path"},
+    )
+    codex_like_specs = (
+        ImplementLaneToolSpec(name="apply_patch", access="write", description="Patch files."),
+        ImplementLaneToolSpec(name="exec_command", access="execute", description="Run shell commands."),
+        ImplementLaneToolSpec(name="write_stdin", access="execute", description="Continue commands."),
+        ImplementLaneToolSpec(name="finish", access="finish", description="Finish the task."),
+    )
+
+    coding_contract = next(
+        section
+        for section in build_implement_v2_prompt_sections(lane_input, tool_specs=codex_like_specs)
+        if section.id == "implement_v2_coding_contract"
+    ).content
+
+    assert "Use apply_patch for source changes." in coding_contract
+    assert "edit_file" not in coding_contract
+    assert "write_file" not in coding_contract
+    assert "Use exec_command for builds, tests, probes, package-manager setup, and verification." in coding_contract
+
+
 def test_implement_v2_prompt_metrics_include_workframe_phase1_inventory() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",
@@ -13751,6 +13850,31 @@ def test_implement_v2_shell_apply_patch_bridge_success_routes_typed_mutation(tmp
     assert payload["source_diff_ref"]
     assert payload["typed_evidence_refs"] == tool_result["evidence_refs"]
     assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "print('new')\n"
+
+
+def test_implement_v2_shell_apply_patch_bridge_context_line_header_like_is_not_ambiguous(tmp_path) -> None:
+    (tmp_path / "sample.py").write_text("before\n*** Update File: other.py\nafter\n", encoding="utf-8")
+    (tmp_path / "other.py").write_text("after\n", encoding="utf-8")
+    patch = (
+        "*** Begin Patch\n"
+        "*** Update File: sample.py\n"
+        "@@\n"
+        " before\n"
+        " *** Update File: other.py\n"
+        "-after\n"
+        "+done\n"
+        "*** End Patch\n"
+    )
+    command = f"apply_patch <<'PATCH'\n{patch}PATCH"
+
+    result = _run_shell_apply_patch_bridge(tmp_path, command)
+    tool_result = result.updated_lane_state["proof_manifest"]["tool_results"][0]
+    payload = tool_result["content"][0]
+
+    assert tool_result["status"] == "completed"
+    assert payload["tool_route"] == "legacy_shell_edit_bridge"
+    assert (tmp_path / "sample.py").read_text(encoding="utf-8") == "before\n*** Update File: other.py\ndone\n"
+    assert (tmp_path / "other.py").read_text(encoding="utf-8") == "after\n"
 
 
 def test_implement_v2_shell_apply_patch_bridge_manifest_has_only_bootstrap_entry() -> None:

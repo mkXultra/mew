@@ -92,6 +92,35 @@ def _compact_sidecar_digest(request: dict[str, object]) -> dict[str, object]:
     return _task_payload(request)["compact_sidecar_digest"]
 
 
+def test_codex_hot_path_provider_input_uses_raw_task_without_task_contract(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    raw_task = "Use the provided Doom source tree and build the MIPS runnable artifact."
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={
+            "title": "Synthetic title should not steer the model",
+            "description": raw_task,
+            "objective": "Hidden compiled objective",
+            "completion_criteria": ["Hidden completion criterion"],
+            "expected_artifacts": [{"id": "doom", "kind": "binary", "path": "/app/doomgeneric_mips"}],
+            "verify_command": "node vm.js",
+        },
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    input_items = provider.requests[0]["input_items"]
+    assert input_items[0]["content"][0]["text"] == raw_task  # type: ignore[index]
+    rendered = json.dumps(input_items, ensure_ascii=False)
+    assert "task_contract" not in rendered
+    assert "completion_criteria" not in rendered
+    assert "expected_artifacts" not in rendered
+    assert "Hidden compiled objective" not in rendered
+
+
 def test_native_task_description_includes_goal_and_objective(tmp_path: Path) -> None:
     lane_input = _lane_input(
         tmp_path,

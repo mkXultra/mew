@@ -3386,32 +3386,45 @@ def _responses_input_items(
     compact_sidecar_digest: Mapping[str, object],
 ) -> list[dict[str, object]]:
     task_facts = _provider_visible_task_facts(lane_input)
-    task_payload = {
-        "task_contract": dict(lane_input.task_contract),
-        "task_facts": task_facts,
-        "workspace": lane_input.workspace,
-        "lane": lane_input.lane,
-    }
-    items: list[dict[str, object]] = [
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": _task_first_provider_visible_text(lane_input, task_facts=task_facts),
-                }
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": json.dumps(task_payload, ensure_ascii=False),
-                }
-            ],
+    if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
+        items: list[dict[str, object]] = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": _raw_task_provider_visible_text(lane_input),
+                    }
+                ],
+            }
+        ]
+    else:
+        task_payload = {
+            "task_contract": dict(lane_input.task_contract),
+            "task_facts": task_facts,
+            "workspace": lane_input.workspace,
+            "lane": lane_input.lane,
         }
-    ]
+        items = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": _task_first_provider_visible_text(lane_input, task_facts=task_facts),
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": json.dumps(task_payload, ensure_ascii=False),
+                    }
+                ],
+            }
+        ]
     for item in transcript_items:
         converted = _responses_input_item_from_transcript_item(
             _provider_visible_native_item(item, lane_input=lane_input),
@@ -3419,6 +3432,15 @@ def _responses_input_items(
         if converted:
             items.append(converted)
     return items
+
+
+def _raw_task_provider_visible_text(lane_input: ImplementLaneInput) -> str:
+    contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
+    for key in ("description", "prompt", "task", "objective", "goal", "title"):
+        value = contract.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "Complete the requested coding task in the current workspace."
 
 
 def _task_first_provider_visible_text(
