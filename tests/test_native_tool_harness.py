@@ -3452,6 +3452,118 @@ def test_native_harness_auto_detected_verifier_fallback_when_planner_errors(tmp_
     closeout_args = json.loads(closeout_call.arguments_json_text)
     assert closeout_args["command"] == "test -f vm.js"
     assert closeout_args["finish_verifier_plan"]["source"] == "auto_detected_verifier"
+    assert closeout_args["finish_verifier_plan"]["provenance"]["fallback_after_finish_verifier_planner"]["status"] == "error"
+    planner_decision = result.metrics["finish_verifier_planner_latest_decision"]
+    assert planner_decision["status"] == "error"
+    assert planner_decision["fallback_source"] == "auto_detected_verifier"
+    assert planner_decision["error"] == "planner unavailable"
+
+
+def test_native_harness_auto_detected_verifier_fallback_when_planner_rejects_plan(tmp_path: Path) -> None:
+    class UnsafePlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            return {"command": "true", "reason": "unsafe no-op verifier"}
+
+    artifact_root = tmp_path / "artifacts"
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            verify_command_source="auto_detected",
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=UnsafePlanningProvider(),
+        max_turns=1,
+        artifact_root=artifact_root,
+    )
+
+    assert result.status == "completed"
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "auto_detected_verifier"
+    fallback = closeout_args["finish_verifier_plan"]["provenance"]["fallback_after_finish_verifier_planner"]
+    assert fallback["status"] == "rejected"
+    assert fallback["reject_blockers"] == ["finish_verifier_noop_success"]
+    assert result.metrics["finish_verifier_planner_decision_count"] == 1
+    planner_decision = result.metrics["finish_verifier_planner_latest_decision"]
+    assert planner_decision["status"] == "rejected"
+    assert planner_decision["fallback_source"] == "auto_detected_verifier"
+    decision_path = artifact_root / "finish_verifier_planner_decisions.jsonl"
+    rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
+    assert rows[-1]["raw_plan"]["command"] == "true"
+    assert rows[-1]["reject_blockers"] == ["finish_verifier_noop_success"]
+    manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["finish_verifier_planner_decisions_ref"] == "finish_verifier_planner_decisions.jsonl"
+    assert manifest["metrics"]["finish_verifier_planner_decisions"]["rejected_count"] == 1
+
+
+def test_native_harness_records_null_planner_plan_before_auto_fallback(tmp_path: Path) -> None:
+    class NullPlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> None:
+            return None
+
+    artifact_root = tmp_path / "artifacts"
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            verify_command_source="auto_detected",
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=NullPlanningProvider(),
+        max_turns=1,
+        artifact_root=artifact_root,
+    )
+
+    assert result.status == "completed"
+    rows = [
+        json.loads(line)
+        for line in (artifact_root / "finish_verifier_planner_decisions.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert rows[-1]["raw_plan"] is None
+    assert rows[-1]["reject_blockers"] == ["planner_plan_not_mapping"]
+    assert rows[-1]["fallback_source"] == "auto_detected_verifier"
 
 
 def test_native_harness_explicit_verifier_precedes_planner(tmp_path: Path) -> None:

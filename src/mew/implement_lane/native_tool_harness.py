@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -114,6 +115,9 @@ _CONTROL_FAILURE_SUMMARY_LIMIT = 700
 _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
 _NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
 _NATIVE_MODEL_TIMEOUT_MIN_SECONDS = 30.0
+_FINISH_VERIFIER_PLANNER_DECISIONS_ATTR = "_mew_finish_verifier_planner_decisions"
+_FINISH_VERIFIER_PLANNER_DECISIONS_FILE = "finish_verifier_planner_decisions.jsonl"
+_RAW_FINISH_VERIFIER_PLAN_MISSING = object()
 _SOURCE_MUTATION_COMMAND_INTENTS = frozenset(
     {"implement", "implementation", "write", "edit", "mutation", "source_mutation"}
 )
@@ -202,6 +206,21 @@ class _NativeFinishVerifierPlan:
     reason: str = ""
     confidence: str = ""
     raw: Mapping[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class _NativeFinishVerifierPlanCoercion:
+    plan: _NativeFinishVerifierPlan | None
+    status: str
+    reject_reason: str = ""
+    reject_blockers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _FinishVerifierCommandSafetyResult:
+    allowed: bool
+    reason: str
+    blockers: tuple[str, ...] = ()
 
 
 @dataclass
@@ -799,6 +818,7 @@ def run_native_implement_v2(
     if not validation.valid:
         raise InvalidNativeTranscriptError(f"invalid native transcript: {', '.join(validation.errors)}")
 
+    finish_verifier_planner_decisions = _provider_finish_verifier_planner_decisions(provider)
     metrics = {
         **_native_surface_for_provider(provider),
         "status": status,
@@ -827,6 +847,10 @@ def run_native_implement_v2(
         "native_finish_gate_latest_decision": (
             native_finish_gate_decisions[-1].as_dict() if native_finish_gate_decisions else {}
         ),
+        "finish_verifier_planner_decision_count": len(finish_verifier_planner_decisions),
+        "finish_verifier_planner_latest_decision": (
+            dict(finish_verifier_planner_decisions[-1]) if finish_verifier_planner_decisions else {}
+        ),
         "pairing": validation.as_dict(),
     }
     if native_model_budget_block is not None:
@@ -841,6 +865,7 @@ def run_native_implement_v2(
             status=status,
             resolver_decisions=tuple(resolver_decisions),
             native_finish_gate_decisions=tuple(native_finish_gate_decisions),
+            finish_verifier_planner_decisions=tuple(finish_verifier_planner_decisions),
         )
         proof_artifacts = tuple(str(path) for path in paths.values())
     return NativeImplementV2HarnessResult(
@@ -1836,17 +1861,52 @@ def _native_final_verifier_closeout_plan(
     if not callable(planner):
         return _auto_detected_native_final_verifier_command(lane_input)
     request = _finish_verifier_planner_request(lane_input, tool_results)
+    request_hash = _finish_verifier_planner_request_hash(request)
     try:
         raw_plan = planner(request)
     except Exception as exc:
-        _emit_progress(getattr(provider, "progress", None), f"finish_verifier_planner failed: {exc}")
-        return _auto_detected_native_final_verifier_command(lane_input)
-    plan = _coerce_native_finish_verifier_plan(raw_plan, request=request)
-    if plan is None:
-        _emit_progress(getattr(provider, "progress", None), "finish_verifier_planner rejected empty or unsafe plan")
-    if plan is not None:
-        return plan
-    return _auto_detected_native_final_verifier_command(lane_input)
+        fallback = _auto_detected_native_final_verifier_command(lane_input)
+        decision = _finish_verifier_planner_decision_record(
+            status="error",
+            request_hash=request_hash,
+            error=str(exc),
+            fallback=fallback,
+        )
+        _record_finish_verifier_planner_decision(provider, decision)
+        _emit_progress(
+            getattr(provider, "progress", None),
+            f"finish_verifier_planner failed: {exc}; "
+            f"fallback={_native_finish_verifier_plan_source(fallback)}",
+        )
+        return _native_finish_verifier_plan_with_planner_fallback(fallback, decision)
+    coercion = _coerce_native_finish_verifier_plan_with_diagnostics(raw_plan, request=request)
+    if coercion.plan is not None:
+        _record_finish_verifier_planner_decision(
+            provider,
+            _finish_verifier_planner_decision_record(
+                status="accepted",
+                request_hash=request_hash,
+                raw_plan=raw_plan,
+                plan=coercion.plan,
+            ),
+        )
+        return coercion.plan
+    fallback = _auto_detected_native_final_verifier_command(lane_input)
+    decision = _finish_verifier_planner_decision_record(
+        status=coercion.status or "rejected",
+        request_hash=request_hash,
+        raw_plan=raw_plan,
+        reject_reason=coercion.reject_reason,
+        reject_blockers=coercion.reject_blockers,
+        fallback=fallback,
+    )
+    _record_finish_verifier_planner_decision(provider, decision)
+    _emit_progress(
+        getattr(provider, "progress", None),
+        "finish_verifier_planner rejected plan: "
+        f"{coercion.reject_reason or 'unknown'}; fallback={_native_finish_verifier_plan_source(fallback)}",
+    )
+    return _native_finish_verifier_plan_with_planner_fallback(fallback, decision)
 
 
 def _native_finish_verifier_planner_can_run(
@@ -1868,21 +1928,43 @@ def _coerce_native_finish_verifier_plan(
     *,
     request: Mapping[str, object] | None = None,
 ) -> _NativeFinishVerifierPlan | None:
+    return _coerce_native_finish_verifier_plan_with_diagnostics(value, request=request).plan
+
+
+def _coerce_native_finish_verifier_plan_with_diagnostics(
+    value: object,
+    *,
+    request: Mapping[str, object] | None = None,
+) -> _NativeFinishVerifierPlanCoercion:
     if not isinstance(value, Mapping):
-        return None
+        return _NativeFinishVerifierPlanCoercion(
+            plan=None,
+            status="rejected",
+            reject_reason="planner output was not a JSON object",
+            reject_blockers=("planner_plan_not_mapping",),
+        )
     command = str(value.get("command") or value.get("cmd") or "").strip()
-    if not _finish_verifier_command_safe(command, request=request):
-        return None
+    safety = _finish_verifier_command_safety(command, request=request)
+    if not safety.allowed:
+        return _NativeFinishVerifierPlanCoercion(
+            plan=None,
+            status="rejected",
+            reject_reason=safety.reason,
+            reject_blockers=safety.blockers,
+        )
     cwd = str(value.get("cwd") or ".").strip() or "."
     if "\x00" in cwd or "\n" in cwd or cwd.startswith("/"):
         cwd = "."
-    return _NativeFinishVerifierPlan(
-        command=command,
-        cwd=cwd,
-        source="finish_verifier_planner",
-        reason=str(value.get("reason") or value.get("rationale") or "").strip(),
-        confidence=str(value.get("confidence") or "").strip(),
-        raw=dict(value),
+    return _NativeFinishVerifierPlanCoercion(
+        plan=_NativeFinishVerifierPlan(
+            command=command,
+            cwd=cwd,
+            source="finish_verifier_planner",
+            reason=str(value.get("reason") or value.get("rationale") or "").strip(),
+            confidence=str(value.get("confidence") or "").strip(),
+            raw=dict(value),
+        ),
+        status="accepted",
     )
 
 
@@ -1913,30 +1995,219 @@ def _finish_verifier_command_safe(
     *,
     request: Mapping[str, object] | None = None,
 ) -> bool:
+    return _finish_verifier_command_safety(command, request=request).allowed
+
+
+def _finish_verifier_command_safety(
+    command: object,
+    *,
+    request: Mapping[str, object] | None = None,
+) -> _FinishVerifierCommandSafetyResult:
     text = str(command or "").strip()
     if not text:
-        return False
+        return _FinishVerifierCommandSafetyResult(
+            allowed=False,
+            reason="finish verifier command is empty",
+            blockers=("finish_verifier_command_empty",),
+        )
     if "\n" in text or "\r" in text:
-        return False
+        return _FinishVerifierCommandSafetyResult(
+            allowed=False,
+            reason="finish verifier command contains a newline",
+            blockers=("finish_verifier_command_newline",),
+        )
     if _FINISH_VERIFIER_NOOP_COMMAND_RE.fullmatch(text):
-        return False
+        return _FinishVerifierCommandSafetyResult(
+            allowed=False,
+            reason="finish verifier command is a no-op success",
+            blockers=("finish_verifier_noop_success",),
+        )
     if _FINISH_VERIFIER_SELF_ACCEPTANCE_RE.search(text):
-        return False
+        return _FinishVerifierCommandSafetyResult(
+            allowed=False,
+            reason="finish verifier command checks a self-acceptance marker",
+            blockers=("finish_verifier_self_acceptance_marker",),
+        )
     if re.search(r"(?i)(?:^|[;&|]\s*)(?:echo|printf)\b", text):
-        return False
+        return _FinishVerifierCommandSafetyResult(
+            allowed=False,
+            reason="finish verifier command only emits text",
+            blockers=("finish_verifier_echo_or_printf",),
+        )
     if "|" in text or ";" in text:
-        return False
+        return _FinishVerifierCommandSafetyResult(
+            allowed=False,
+            reason="finish verifier command uses shell sequencing or pipes",
+            blockers=("finish_verifier_shell_composition",),
+        )
     if re.search(r"(?<!&)&(?!&)", text):
-        return False
+        return _FinishVerifierCommandSafetyResult(
+            allowed=False,
+            reason="finish verifier command backgrounds a process",
+            blockers=("finish_verifier_background_process",),
+        )
     if _FINISH_VERIFIER_MUTATION_RE.search(text):
-        return False
+        return _FinishVerifierCommandSafetyResult(
+            allowed=False,
+            reason="finish verifier command appears to mutate files",
+            blockers=("finish_verifier_mutating_command",),
+        )
     if _FINISH_VERIFIER_GENERIC_TEST_RE.search(text):
-        return True
+        return _FinishVerifierCommandSafetyResult(allowed=True, reason="generic test command")
     if request is None:
-        return True
+        return _FinishVerifierCommandSafetyResult(allowed=True, reason="no request subject to check")
     if not _finish_verifier_command_mentions_task_subject(text, request):
-        return False
-    return True
+        return _FinishVerifierCommandSafetyResult(
+            allowed=False,
+            reason="finish verifier command does not mention a task subject",
+            blockers=("finish_verifier_task_subject_missing",),
+        )
+    return _FinishVerifierCommandSafetyResult(allowed=True, reason="mentions task subject")
+
+
+def _record_finish_verifier_planner_decision(provider: object, record: Mapping[str, object]) -> None:
+    existing = getattr(provider, _FINISH_VERIFIER_PLANNER_DECISIONS_ATTR, None)
+    if not isinstance(existing, list):
+        existing = []
+        try:
+            setattr(provider, _FINISH_VERIFIER_PLANNER_DECISIONS_ATTR, existing)
+        except Exception:
+            return
+    existing.append(dict(record))
+
+
+def _provider_finish_verifier_planner_decisions(provider: object) -> tuple[Mapping[str, object], ...]:
+    existing = getattr(provider, _FINISH_VERIFIER_PLANNER_DECISIONS_ATTR, ())
+    if not isinstance(existing, list):
+        return ()
+    return tuple(item for item in existing if isinstance(item, Mapping))
+
+
+def _finish_verifier_planner_request_hash(request: Mapping[str, object]) -> str:
+    encoded = json.dumps(dict(request), ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _finish_verifier_planner_decision_record(
+    *,
+    status: str,
+    request_hash: str,
+    raw_plan: object = _RAW_FINISH_VERIFIER_PLAN_MISSING,
+    plan: _NativeFinishVerifierPlan | None = None,
+    reject_reason: str = "",
+    reject_blockers: tuple[str, ...] = (),
+    fallback: _NativeFinishVerifierPlan | None = None,
+    error: str = "",
+) -> dict[str, object]:
+    record: dict[str, object] = {
+        "status": status,
+        "request_hash": request_hash,
+    }
+    if raw_plan is not _RAW_FINISH_VERIFIER_PLAN_MISSING:
+        record["raw_plan"] = _json_safe_native(raw_plan)
+    if plan is not None:
+        record["accepted_plan"] = _native_finish_verifier_plan_payload(plan)
+    if reject_reason:
+        record["reject_reason"] = reject_reason
+    if reject_blockers:
+        record["reject_blockers"] = list(reject_blockers)
+    if error:
+        record["error"] = error
+    if fallback is not None:
+        record["fallback"] = _native_finish_verifier_plan_payload(fallback)
+        record["fallback_source"] = fallback.source
+    else:
+        record["fallback"] = {}
+        record["fallback_source"] = ""
+    return record
+
+
+def _native_finish_verifier_plan_with_planner_fallback(
+    plan: _NativeFinishVerifierPlan | None,
+    planner_decision: Mapping[str, object],
+) -> _NativeFinishVerifierPlan | None:
+    if plan is None:
+        return None
+    raw = dict(plan.raw or {})
+    raw["fallback_after_finish_verifier_planner"] = {
+        key: value
+        for key, value in planner_decision.items()
+        if key
+        in {
+            "status",
+            "request_hash",
+            "raw_plan",
+            "reject_reason",
+            "reject_blockers",
+            "error",
+            "fallback_source",
+        }
+    }
+    return replace(plan, raw=raw)
+
+
+def _native_finish_verifier_plan_source(plan: _NativeFinishVerifierPlan | None) -> str:
+    return plan.source if plan is not None else "none"
+
+
+def _native_finish_verifier_plan_payload(plan: _NativeFinishVerifierPlan) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "command": plan.command,
+        "cwd": plan.cwd,
+        "source": plan.source,
+        "reason": plan.reason,
+        "confidence": plan.confidence,
+    }
+    if plan.raw:
+        payload["raw"] = _json_safe_native(dict(plan.raw))
+    return {key: value for key, value in payload.items() if value not in ("", {}, [], ())}
+
+
+def _json_safe_native(value: object) -> object:
+    try:
+        json.dumps(value, sort_keys=True, default=str)
+    except TypeError:
+        return repr(value)
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe_native(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_native(item) for item in value]
+    return value
+
+
+def _patch_proof_manifest_with_finish_verifier_planner_decisions(
+    manifest_path: Path,
+    *,
+    decision_path: Path,
+    records: tuple[Mapping[str, object], ...],
+) -> None:
+    manifest: dict[str, object] = {}
+    if manifest_path.exists():
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            manifest = loaded
+    digest = _file_sha256_native(decision_path)
+    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    manifest["finish_verifier_planner_decisions_ref"] = decision_path.name
+    manifest["finish_verifier_planner_decisions_sha256"] = digest
+    metrics["finish_verifier_planner_decisions"] = {
+        "artifact_ref": decision_path.name,
+        "artifact_sha256": digest,
+        "decision_count": len(records),
+        "accepted_count": sum(1 for record in records if record.get("status") == "accepted"),
+        "rejected_count": sum(1 for record in records if record.get("status") == "rejected"),
+        "error_count": sum(1 for record in records if record.get("status") == "error"),
+        "fallback_count": sum(1 for record in records if record.get("fallback_source")),
+    }
+    manifest["metrics"] = metrics
+    manifest_path.write_text(
+        json.dumps(_json_safe_native(manifest), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _file_sha256_native(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _finish_verifier_command_mentions_task_subject(command: str, request: Mapping[str, object]) -> bool:
@@ -4476,6 +4747,7 @@ def _write_native_artifacts(
     error: str = "",
     resolver_decisions: tuple[CompletionResolverDecision, ...] = (),
     native_finish_gate_decisions: tuple[NativeFinishGateDecision, ...] = (),
+    finish_verifier_planner_decisions: tuple[Mapping[str, object], ...] = (),
 ) -> dict[str, Path]:
     paths = write_native_transcript_artifacts(root, transcript)
     paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
@@ -4506,6 +4778,22 @@ def _write_native_artifacts(
                 proof_manifest_path=paths.get("proof_manifest"),
             )
         )
+    if finish_verifier_planner_decisions:
+        planner_decisions_path = root / _FINISH_VERIFIER_PLANNER_DECISIONS_FILE
+        planner_decisions_path.write_text(
+            "".join(
+                json.dumps(_json_safe_native(dict(record)), ensure_ascii=False, sort_keys=True) + "\n"
+                for record in finish_verifier_planner_decisions
+            ),
+            encoding="utf-8",
+        )
+        paths["finish_verifier_planner_decisions"] = planner_decisions_path
+        if paths.get("proof_manifest") is not None:
+            _patch_proof_manifest_with_finish_verifier_planner_decisions(
+                paths["proof_manifest"],
+                decision_path=planner_decisions_path,
+                records=finish_verifier_planner_decisions,
+            )
     paths.update(
         write_native_evidence_observation(
             root,
