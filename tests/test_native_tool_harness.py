@@ -3262,6 +3262,38 @@ def test_native_harness_finish_after_mutation_without_verifier_command_blocks_wi
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_model_verifier_without_trusted_verifier_source_still_blocks(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_call(
+                    "verify-1",
+                    "run_command",
+                    {"command": "test -f vm.js", "cwd": ".", "command_intent": "verifier"},
+                    output_index=1,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path, allow_verify=True), provider=provider, max_turns=1)
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 0
+    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_continue"
+    assert "closeout_verifier_command_missing" in result.metrics["completion_resolver_latest_decision"]["blockers"]
+    assert "strict_verifier_evidence" in result.metrics["completion_resolver_latest_decision"]["missing_obligations"]
+    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path: Path) -> None:
     class PlanningProvider(NativeFakeProvider):
         planner_requests: list[dict[str, object]]
@@ -4126,6 +4158,111 @@ def test_native_harness_configured_verifier_exit_zero_is_native_finish_authority
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_reruns_trusted_closeout_after_model_verifier_command(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('booted')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_call(
+                    "model-verify-1",
+                    "exec_command",
+                    {"cmd": "true", "cwd": ".", "command_intent": "verify"},
+                    output_index=1,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "configured_verifier"
+    assert closeout_args["execution_contract"]["latest_source_mutation_provider_call_id"] == "write-1"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_finish_verifier_planner_runs_after_model_verifier_command(tmp_path: Path) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        planner_requests: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('booted')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_call(
+                                "model-verify-1",
+                                "exec_command",
+                                {"cmd": "true", "cwd": ".", "command_intent": "verify"},
+                                output_index=1,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+                        ]
+                    ]
+                ).responses
+            )
+            self.planner_requests = []
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_requests.append(dict(request))
+            return {
+                "command": "test -f vm.js",
+                "cwd": ".",
+                "reason": "verify the implemented runtime artifact independently",
+                "confidence": "high",
+            }
+
+    provider = PlanningProvider()
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert provider.planner_requests
+    assert result.metrics["finish_verifier_planner_request_count"] == 1
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_codex_hot_path_finish_verifier_planner_uses_exec_command_surface(tmp_path: Path) -> None:
     lane_input = _lane_input(
         tmp_path,
@@ -4328,6 +4465,47 @@ def test_native_harness_finish_time_final_verifier_no_permission_blocks_return_w
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_later_model_verifier_does_not_bypass_closeout_permission_block(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_call(
+                    "verify-1",
+                    "run_command",
+                    {"command": "test -f vm.js", "cwd": ".", "command_intent": "verifier"},
+                    output_index=1,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_shell=False,
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 0
+    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_return"
+    assert "closeout_verifier_not_permitted" in result.metrics["completion_resolver_latest_decision"]["blockers"]
+    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_native_harness_finish_time_final_verifier_budget_blocks_return_without_dispatch(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
@@ -4362,7 +4540,7 @@ def test_native_harness_finish_time_final_verifier_budget_blocks_return_without_
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
-def test_native_harness_suppresses_final_verifier_closeout_after_later_verifier(tmp_path: Path) -> None:
+def test_native_harness_reruns_final_verifier_closeout_after_later_verifier(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -4390,9 +4568,54 @@ def test_native_harness_suppresses_final_verifier_closeout_after_later_verifier(
     )
 
     assert result.status == "completed"
-    assert result.metrics["final_verifier_closeout_count"] == 0
-    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "completed"
-    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f vm.js"
+    assert closeout_args["finish_verifier_plan"]["source"] == "configured_verifier"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_prior_model_verifier_does_not_override_failed_trusted_closeout(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_call(
+                    "verify-1",
+                    "run_command",
+                    {"command": "test -f vm.js", "cwd": ".", "command_intent": "verifier"},
+                    output_index=1,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f missing-output.bin",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_continue"
+    assert "closeout_verifier_failed" in result.metrics["completion_resolver_latest_decision"]["blockers"]
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f missing-output.bin"
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
@@ -4593,9 +4816,11 @@ def test_native_harness_finalizes_active_verifier_before_deterministic_closeout(
     assert result.status == "completed"
     assert result.metrics["active_command_closeout_count"] == 1
     assert result.metrics["active_command_closeout_provider_call_id"] == "call-active-command-closeout-002"
-    assert result.metrics["final_verifier_closeout_count"] == 0
-    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "completed"
-    assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["command"] == "test -f vm.js"
     active_output = next(
         item
         for item in result.transcript.items

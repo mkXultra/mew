@@ -1363,7 +1363,12 @@ def _run_native_finish_time_closeouts(
         tuple(scoped_results),
         source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
     )
-    if not pending_mutation:
+    latest_mutation = pending_mutation or _latest_native_source_mutation(
+        tuple(scoped_calls),
+        tuple(scoped_results),
+        source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
+    )
+    if not latest_mutation:
         return tuple(events), context
     no_run_context = _native_final_verifier_closeout_no_run_context(
         lane_input,
@@ -1387,6 +1392,7 @@ def _run_native_finish_time_closeouts(
         tool_calls=tuple(scoped_calls),
         tool_results=tuple(scoped_results),
         start_monotonic=start_monotonic,
+        pending_mutation=latest_mutation,
     )
     if closeout is None:
         return tuple(events), context.merge(
@@ -1803,13 +1809,22 @@ def _native_final_verifier_closeout(
     tool_calls: tuple[NativeTranscriptItem, ...],
     tool_results: tuple[ToolResultEnvelope, ...],
     start_monotonic: float,
+    pending_mutation: Mapping[str, object] | None = None,
 ) -> tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]] | None:
-    pending_mutation = _latest_native_source_mutation_without_later_verifier(
-        tool_calls,
-        tool_results,
-        source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
-    )
-    if not pending_mutation:
+    effective_mutation = dict(pending_mutation or {})
+    if not effective_mutation:
+        effective_mutation = _latest_native_source_mutation_without_later_verifier(
+            tool_calls,
+            tool_results,
+            source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
+        )
+    if not effective_mutation:
+        effective_mutation = _latest_native_source_mutation(
+            tool_calls,
+            tool_results,
+            source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
+        )
+    if not effective_mutation:
         return None
     if not _native_final_verifier_closeout_allowed(lane_input, lane_config=lane_config):
         return None
@@ -1833,7 +1848,7 @@ def _native_final_verifier_closeout(
         lane_config=lane_config,
         plan=plan,
         timeout_seconds=budget,
-        pending_mutation=pending_mutation,
+        pending_mutation=effective_mutation,
     )
     latency_start = time.monotonic()
     result = _execute_native_call(
@@ -3084,7 +3099,11 @@ def _latest_native_source_mutation_without_later_verifier(
     *,
     source_mutation_roots: tuple[str, ...],
 ) -> dict[str, object]:
-    latest_mutation: dict[str, object] = {}
+    latest_mutation = _latest_native_source_mutation(
+        tool_calls,
+        tool_results,
+        source_mutation_roots=source_mutation_roots,
+    )
     latest_verifier_index = 0
     verifier_command_run_ids: set[str] = set()
     for index, (call, result) in enumerate(zip(tool_calls, tool_results), start=1):
@@ -3094,6 +3113,22 @@ def _latest_native_source_mutation_without_later_verifier(
                 verifier_command_run_ids.add(command_run_id)
         if _native_result_is_terminal_verifier(call, result, verifier_command_run_ids=verifier_command_run_ids):
             latest_verifier_index = index
+    if not latest_mutation:
+        return {}
+    latest_mutation["latest_verifier_index"] = latest_verifier_index
+    if int(latest_mutation.get("result_index") or 0) <= latest_verifier_index:
+        return {}
+    return latest_mutation
+
+
+def _latest_native_source_mutation(
+    tool_calls: tuple[NativeTranscriptItem, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    source_mutation_roots: tuple[str, ...],
+) -> dict[str, object]:
+    latest_mutation: dict[str, object] = {}
+    for index, (call, result) in enumerate(zip(tool_calls, tool_results), start=1):
         if result.status == "completed" and _native_result_has_source_mutation(
             result,
             source_mutation_roots=source_mutation_roots,
@@ -3104,12 +3139,7 @@ def _latest_native_source_mutation_without_later_verifier(
                 "tool_name": call.tool_name or result.tool_name,
                 "path": _native_write_result_path(result),
                 "turn_index": _turn_number(call.turn_id),
-                "latest_verifier_index": latest_verifier_index,
             }
-    if not latest_mutation:
-        return {}
-    if int(latest_mutation.get("result_index") or 0) <= latest_verifier_index:
-        return {}
     return latest_mutation
 
 
