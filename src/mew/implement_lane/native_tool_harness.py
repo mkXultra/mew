@@ -20,6 +20,13 @@ from .completion_resolver import (
 )
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .native_fake_provider import PHASE3_TRANSPORT_CHANGE, NativeFakeProvider
+from .native_finish_gate import (
+    FinishCloseoutCommand,
+    NativeFinishCloseoutResult,
+    NativeFinishGateDecision,
+    NativeFinishGateRequest,
+    decide_native_finish_from_closeout,
+)
 from .native_provider_adapter import (
     NativeResponsesStreamParseResult,
     apply_previous_response_delta,
@@ -475,6 +482,7 @@ def run_native_implement_v2(
     no_tool_continuation_count = 0
     latest_no_tool_continuation: dict[str, object] = {}
     resolver_decisions: list[CompletionResolverDecision] = []
+    native_finish_gate_decisions: list[NativeFinishGateDecision] = []
     native_model_budget_block: dict[str, object] | None = None
     start_monotonic = time.monotonic()
     status = "blocked"
@@ -698,19 +706,34 @@ def run_native_implement_v2(
                 )
                 for closeout_event in closeout_events:
                     append_closeout_event(closeout_event)
-                decision = resolver.resolve(
-                    _completion_resolver_input_from_finish(
-                        call,
-                        result,
-                        lane_input=lane_input,
-                        transcript_items=tuple(items),
-                        request_descriptor=request_descriptor,
-                        prior_tool_results=tuple(tool_results),
-                        closeout_context=closeout_context,
-                    )
+                native_decision = _native_finish_gate_decision_from_closeout_events(
+                    call,
+                    result,
+                    lane_input=lane_input,
+                    lane_config=lane_config,
+                    transcript_items=tuple(items),
+                    request_descriptor=request_descriptor,
+                    closeout_events=closeout_events,
+                    closeout_context=closeout_context,
                 )
-                resolver_decisions.append(decision)
-                result = _finish_result_with_resolver_decision(result, decision)
+                if native_decision is not None:
+                    native_finish_gate_decisions.append(native_decision)
+                    finish_gate_decision = native_decision.as_dict()
+                    result = _finish_result_with_native_finish_gate_decision(result, native_decision)
+                else:
+                    decision = resolver.resolve(
+                        _completion_resolver_input_from_finish(
+                            call,
+                            result,
+                            lane_input=lane_input,
+                            transcript_items=tuple(items),
+                            request_descriptor=request_descriptor,
+                            prior_tool_results=tuple(tool_results),
+                            closeout_context=closeout_context,
+                        )
+                    )
+                    resolver_decisions.append(decision)
+                    result = _finish_result_with_resolver_decision(result, decision)
                 result = with_tool_route_decision(_finish_tool_call_envelope(call, _arguments(call)[0]), result)
             latency_finished = time.monotonic()
             output = _native_output_from_result(
@@ -751,14 +774,14 @@ def run_native_implement_v2(
             if call.kind == "finish_call" and _native_finish_gate_blocked(result):
                 finish_gate_block_count += 1
                 finish_gate_decision = _native_finish_gate_decision_payload(result)
-            if call.kind == "finish_call" and _native_finish_resolver_lane_status(result) == "completed":
+            if call.kind == "finish_call" and _native_finish_authority_lane_status(result) == "completed":
                 accepted_finish = call
                 status = "completed"
                 finish_summary = _finish_summary(call)
-            elif call.kind == "finish_call" and _native_finish_resolver_lane_status(result) == "blocked_return":
+            elif call.kind == "finish_call" and _native_finish_authority_lane_status(result) == "blocked_return":
                 terminal_blocked_finish = call
                 status = "blocked"
-                finish_summary = _native_finish_resolver_reason(result)
+                finish_summary = _native_finish_authority_reason(result)
 
         for output in output_records:
             items.append(replace(output, sequence=len(items) + 1))
@@ -799,6 +822,10 @@ def run_native_implement_v2(
         "latest_no_tool_continuation": latest_no_tool_continuation,
         "completion_resolver_decision_count": len(resolver_decisions),
         "completion_resolver_latest_decision": resolver_decisions[-1].as_dict() if resolver_decisions else {},
+        "native_finish_gate_decision_count": len(native_finish_gate_decisions),
+        "native_finish_gate_latest_decision": (
+            native_finish_gate_decisions[-1].as_dict() if native_finish_gate_decisions else {}
+        ),
         "pairing": validation.as_dict(),
     }
     if native_model_budget_block is not None:
@@ -2577,6 +2604,212 @@ def _completion_resolver_input_from_finish(
     )
 
 
+def _native_finish_gate_decision_from_closeout_events(
+    call: NativeTranscriptItem,
+    result: ToolResultEnvelope,
+    *,
+    lane_input: ImplementLaneInput,
+    lane_config: Mapping[str, object],
+    transcript_items: tuple[NativeTranscriptItem, ...],
+    request_descriptor: Mapping[str, object],
+    closeout_events: tuple[_NativeCloseoutEvent, ...],
+    closeout_context: _NativeCloseoutContext,
+) -> NativeFinishGateDecision | None:
+    if result.tool_name != "finish":
+        return None
+    arguments, error = _arguments(call)
+    if error:
+        return None
+    if _native_finish_outcome(arguments) != "completed" or arguments.get("task_done") is False:
+        return None
+    final_event = next((event for event in reversed(closeout_events) if event.kind == "final_verifier"), None)
+    if final_event is None:
+        return None
+    closeout = _native_finish_closeout_result_from_event(final_event, closeout_context=closeout_context)
+    if closeout.status != "completed_zero":
+        return None
+    request = NativeFinishGateRequest(
+        lane_attempt_id=call.lane_attempt_id,
+        turn_id=call.turn_id,
+        finish_call_id=call.call_id,
+        finish_arguments=dict(arguments),
+        task_id=str(lane_input.task_id or ""),
+        task_description=_native_task_description(lane_input),
+        task_contract=dict(lane_input.task_contract),
+        lane_config=dict(lane_config),
+        workspace=str(lane_input.workspace or ""),
+        allowed_read_roots=tuple(str(root) for root in lane_config.get("allowed_read_roots") or ()),
+        allowed_write_roots=tuple(str(root) for root in lane_config.get("allowed_write_roots") or ()),
+        transcript_hash_before_decision=native_transcript_hash(
+            NativeTranscript(
+                lane_attempt_id=call.lane_attempt_id,
+                provider=call.provider,
+                model=call.model,
+                items=transcript_items,
+            )
+        ),
+        compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
+    )
+    return decide_native_finish_from_closeout(request, closeout)
+
+
+def _native_finish_closeout_result_from_event(
+    event: _NativeCloseoutEvent,
+    *,
+    closeout_context: _NativeCloseoutContext,
+) -> NativeFinishCloseoutResult:
+    payload = _native_result_payload(event.result)
+    exit_code = _native_exit_code(payload)
+    timed_out = _native_result_timed_out(event.result, payload)
+    if event.result.status == "completed" and not event.result.is_error and exit_code == 0 and not timed_out:
+        status = "completed_zero"
+    elif timed_out:
+        status = "timed_out"
+    elif event.result.status in {"completed", "failed"} and exit_code not in (None, 0):
+        status = "completed_nonzero"
+    elif event.result.status in {"yielded", "running"}:
+        status = "active_command_running"
+    else:
+        status = "runtime_error"
+    return NativeFinishCloseoutResult(
+        command=_finish_closeout_command_from_call(event.call),
+        call_item=event.call,
+        output_item=None,
+        tool_result=event.result,
+        status=status,
+        exit_code=exit_code,
+        timed_out=timed_out,
+        observed_unexpected_source_mutation=_native_closeout_observed_source_mutation(event.result),
+        typed_evidence_projection_status="warning" if _native_closeout_projection_warnings(event.result) else "passed",
+        evidence_refs=tuple(event.result.evidence_refs),
+        closeout_refs=tuple(closeout_context.closeout_refs),
+        warnings=_native_closeout_projection_warnings(event.result),
+        reason=event.reason,
+    )
+
+
+def _finish_closeout_command_from_call(call: NativeTranscriptItem) -> FinishCloseoutCommand | None:
+    arguments, error = _arguments(call)
+    if error:
+        return None
+    command = str(arguments.get("command") or "").strip()
+    if not command:
+        return None
+    plan = arguments.get("finish_verifier_plan")
+    source = "configured_verifier"
+    source_ref = "native_final_verifier_closeout"
+    reason = ""
+    confidence = ""
+    if isinstance(plan, Mapping):
+        if str(plan.get("source") or "").strip() == "finish_verifier_planner":
+            source = "finish_verifier_planner"
+        reason = str(plan.get("reason") or "")
+        confidence = str(plan.get("confidence") or "")
+    return FinishCloseoutCommand(
+        command=command,
+        cwd=str(arguments.get("cwd") or "."),
+        source=source,  # type: ignore[arg-type]
+        source_ref=source_ref,
+        reason=reason,
+        confidence=confidence,
+        raw=dict(arguments),
+    )
+
+
+def _native_exit_code(payload: Mapping[str, object]) -> int | None:
+    value = payload.get("exit_code")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _native_result_timed_out(result: ToolResultEnvelope, payload: Mapping[str, object]) -> bool:
+    if payload.get("timed_out") is True:
+        return True
+    status = str(payload.get("status") or result.status or "").strip().casefold()
+    return status in {"timeout", "timed_out"}
+
+
+def _native_closeout_projection_warnings(result: ToolResultEnvelope) -> tuple[str, ...]:
+    payload = _native_result_payload(result)
+    warnings: list[str] = []
+    unchecked = payload.get("unchecked_expected_artifacts")
+    if isinstance(unchecked, list) and unchecked:
+        warnings.append("unchecked_expected_artifacts")
+    if payload.get("typed_evidence_projection_status") in {"warning", "failed"}:
+        warnings.append("typed_evidence_projection_warning")
+    return tuple(dict.fromkeys(warnings))
+
+
+def _native_closeout_observed_source_mutation(result: ToolResultEnvelope) -> bool:
+    payload = _native_result_payload(result)
+    if payload.get("observed_source_side_effect") is True:
+        return True
+    observations = payload.get("process_source_observations")
+    if isinstance(observations, list):
+        for observation in observations:
+            if isinstance(observation, Mapping) and _positive_intish(observation.get("changed_count")):
+                return True
+    for effect in result.side_effects:
+        if str(effect.get("kind") or "") in {"source_tree_mutation", "source_tree_delta"}:
+            record = effect.get("record")
+            if isinstance(record, Mapping) and _positive_intish(record.get("changed_count")):
+                return True
+    return False
+
+
+def _positive_intish(value: object) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        return int(value or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _finish_result_with_native_finish_gate_decision(
+    result: ToolResultEnvelope,
+    decision: NativeFinishGateDecision,
+) -> ToolResultEnvelope:
+    payload = dict(result.content[0]) if result.content and isinstance(result.content[0], dict) else {}
+    payload["native_finish_gate_decision"] = decision.as_dict()
+    payload["native_finish_gate_decision_id"] = decision.decision_id
+    payload["lane_status"] = decision.lane_status
+    if decision.result == "allow":
+        payload.pop("finish_gate", None)
+        payload.pop("blockers", None)
+        payload.pop("missing_obligations", None)
+        payload["summary"] = payload.get("summary") or decision.reason
+        payload["outcome"] = "completed"
+        return replace(
+            result,
+            status="completed",
+            is_error=False,
+            content=(payload,),
+            evidence_refs=tuple(
+                dict.fromkeys((*result.evidence_refs, *decision.evidence_refs, *decision.closeout_refs))
+            ),
+        )
+    payload["summary"] = decision.reason
+    payload["outcome"] = decision.lane_status
+    payload["blockers"] = list(decision.blockers)
+    payload["missing_obligations"] = list(decision.missing_obligations)
+    return replace(
+        result,
+        status="invalid",
+        is_error=True,
+        content=(payload,),
+        evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *decision.evidence_refs))),
+    )
+
+
 def _finish_result_with_resolver_decision(
     result: ToolResultEnvelope,
     decision: CompletionResolverDecision,
@@ -2708,6 +2941,28 @@ def _native_finish_resolver_lane_status(result: ToolResultEnvelope) -> str:
 
 def _native_finish_resolver_reason(result: ToolResultEnvelope) -> str:
     return str(_native_finish_resolver_decision_payload(result).get("reason") or "").strip()
+
+
+def _native_finish_gate_authority_decision_payload(result: ToolResultEnvelope) -> dict[str, object]:
+    if result.tool_name != "finish":
+        return {}
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    decision = payload.get("native_finish_gate_decision")
+    return dict(decision) if isinstance(decision, dict) else {}
+
+
+def _native_finish_authority_lane_status(result: ToolResultEnvelope) -> str:
+    native_decision = _native_finish_gate_authority_decision_payload(result)
+    if native_decision:
+        return str(native_decision.get("lane_status") or "").strip()
+    return _native_finish_resolver_lane_status(result)
+
+
+def _native_finish_authority_reason(result: ToolResultEnvelope) -> str:
+    native_decision = _native_finish_gate_authority_decision_payload(result)
+    if native_decision:
+        return str(native_decision.get("reason") or "").strip()
+    return _native_finish_resolver_reason(result)
 
 
 def _request_compact_sidecar_digest_hash(request_descriptor: Mapping[str, object]) -> str:

@@ -362,6 +362,83 @@ def finish_output_payload_for_decision(decision: NativeFinishGateDecision) -> di
     )
 
 
+def decide_native_finish_from_closeout(
+    request: NativeFinishGateRequest,
+    closeout: NativeFinishCloseoutResult,
+    policy: NativeFinishGatePolicy | None = None,
+) -> NativeFinishGateDecision:
+    """Return the authoritative native finish decision for a closeout result.
+
+    A trusted final verifier closeout that exits 0 is the hot completion
+    authority.  Typed evidence and oracle projection warnings stay observable
+    on the closeout result, but they do not become blockers here.
+    """
+
+    active_policy = policy or NativeFinishGatePolicy()
+    decision_id = build_decision_id(
+        lane_attempt_id=request.lane_attempt_id,
+        turn_id=request.turn_id,
+        finish_call_id=request.finish_call_id,
+        policy_version=active_policy.policy_version,
+    )
+    blockers = tuple(dict.fromkeys(closeout.blockers))
+    missing: tuple[str, ...] = ()
+    lane_status: FinishGateStatus = "blocked_continue"
+    result: FinishGateResult = "block"
+    reason = closeout.reason or "final verifier closeout did not allow completion"
+
+    if closeout.status == "completed_zero" and not closeout.timed_out:
+        if active_policy.require_no_unexpected_source_mutation and closeout.observed_unexpected_source_mutation:
+            blockers = tuple(dict.fromkeys((*blockers, "closeout_unexpected_source_mutation")))
+            reason = "trusted final verifier passed but closeout mutated source unexpectedly"
+        else:
+            blockers = ()
+            lane_status = "completed"
+            result = "allow"
+            reason = "trusted final verifier closeout exited 0"
+    elif closeout.status == "missing_command":
+        blockers = tuple(dict.fromkeys((*blockers, "closeout_verifier_command_missing")))
+        missing = ("final_verifier_closeout",)
+        reason = closeout.reason or "final verifier closeout command is missing"
+    elif closeout.status == "budget_insufficient":
+        lane_status = "blocked_return"
+        blockers = tuple(dict.fromkeys((*blockers, "closeout_verifier_budget_insufficient")))
+        missing = ("final_verifier_closeout",)
+        reason = closeout.reason or "insufficient budget for final verifier closeout"
+    elif closeout.status == "timed_out" or closeout.timed_out:
+        blockers = tuple(dict.fromkeys((*blockers, "closeout_verifier_timeout")))
+        reason = closeout.reason or "final verifier closeout timed out"
+    elif closeout.status == "active_command_running":
+        blockers = tuple(dict.fromkeys((*blockers, "active_command_running")))
+        reason = closeout.reason or "active command is still running before final verifier closeout"
+    elif closeout.status == "unsafe":
+        blockers = tuple(dict.fromkeys((*blockers, "closeout_verifier_command_unsafe")))
+        reason = closeout.reason or "final verifier closeout command was unsafe"
+    elif closeout.status == "completed_nonzero":
+        blockers = tuple(dict.fromkeys((*blockers, "closeout_verifier_failed")))
+        reason = closeout.reason or "final verifier closeout exited nonzero"
+    elif closeout.status == "runtime_error":
+        blockers = tuple(dict.fromkeys((*blockers, "closeout_verifier_runtime_error")))
+        reason = closeout.reason or "final verifier closeout runtime error"
+
+    return NativeFinishGateDecision(
+        decision_id=decision_id,
+        policy_version=active_policy.policy_version,
+        lane_attempt_id=request.lane_attempt_id,
+        turn_id=request.turn_id,
+        finish_call_id=request.finish_call_id,
+        lane_status=lane_status,
+        result=result,
+        closeout=closeout,
+        blockers=blockers,
+        missing_obligations=missing,
+        evidence_refs=closeout.evidence_refs,
+        closeout_refs=closeout.closeout_refs,
+        observer_refs=closeout.observer_refs,
+        reason=reason,
+    )
+
+
 def build_decision_id(*, lane_attempt_id: str, turn_id: str, finish_call_id: str, policy_version: str) -> str:
     """Return a deterministic decision id for sidecar/replay records."""
 

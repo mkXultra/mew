@@ -15,6 +15,7 @@ from mew.implement_lane.native_tool_harness import (
 from mew.implement_lane.native_finish_gate import (
     NATIVE_FINISH_GATE_POLICY_VERSION,
     build_decision_id,
+    decide_native_finish_from_closeout,
     finish_output_payload_for_decision,
     select_and_validate_closeout_command,
     select_closeout_command,
@@ -266,6 +267,60 @@ def test_finish_output_payload_is_bounded_and_finish_call_paired() -> None:
         "closeout_timed_out": False,
         "typed_evidence_projection_status": "not_attempted",
     }
+
+
+def test_native_finish_closeout_exit_zero_allows_despite_projection_warnings() -> None:
+    request = NativeFinishGateRequest(
+        lane_attempt_id="attempt-1",
+        turn_id="turn-9",
+        finish_call_id="finish-1",
+        finish_arguments={"outcome": "completed", "summary": "done"},
+    )
+    closeout = NativeFinishCloseoutResult(
+        command=None,
+        call_item=None,
+        output_item=None,
+        tool_result=None,
+        status="completed_zero",
+        exit_code=0,
+        typed_evidence_projection_status="warning",
+        evidence_refs=("ev:typed:diagnostic",),
+        closeout_refs=("implement-v2-exec://attempt/final-verifier/terminal",),
+        warnings=("invalid_typed_evidence_ref", "oracle:task_contract:compiled:verifier_pass"),
+    )
+
+    decision = decide_native_finish_from_closeout(request, closeout)
+
+    assert decision.result == "allow"
+    assert decision.lane_status == "completed"
+    assert decision.blockers == ()
+    assert decision.missing_obligations == ()
+    assert decision.closeout_refs == ("implement-v2-exec://attempt/final-verifier/terminal",)
+
+
+def test_native_finish_closeout_exit_zero_blocks_unexpected_source_mutation() -> None:
+    request = NativeFinishGateRequest(
+        lane_attempt_id="attempt-1",
+        turn_id="turn-9",
+        finish_call_id="finish-1",
+        finish_arguments={"outcome": "completed", "summary": "done"},
+    )
+    closeout = NativeFinishCloseoutResult(
+        command=None,
+        call_item=None,
+        output_item=None,
+        tool_result=None,
+        status="completed_zero",
+        exit_code=0,
+        observed_unexpected_source_mutation=True,
+        closeout_refs=("implement-v2-exec://attempt/final-verifier/terminal",),
+    )
+
+    decision = decide_native_finish_from_closeout(request, closeout)
+
+    assert decision.result == "block"
+    assert decision.lane_status == "blocked_continue"
+    assert "closeout_unexpected_source_mutation" in decision.blockers
 
 
 def test_finish_verifier_runtime_contract_does_not_import_task_artifact_obligations() -> None:

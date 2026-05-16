@@ -3087,18 +3087,71 @@ def test_native_harness_runs_finish_time_final_verifier_closeout_after_latest_so
     assert result.status == "completed"
     assert result.metrics["final_verifier_closeout_count"] == 1
     assert result.metrics["final_verifier_closeout_provider_call_id"] == "call-final-verifier-closeout-002"
-    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "completed"
-    assert result.metrics["completion_resolver_latest_decision"]["closeout_refs"]
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    assert result.metrics["native_finish_gate_latest_decision"]["lane_status"] == "completed"
+    assert result.metrics["native_finish_gate_latest_decision"]["closeout_refs"]
     closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
     closeout_args = json.loads(closeout_call.arguments_json_text)
     assert closeout_args["command"] == "test -f vm.js"
-    assert closeout_args["execution_contract"]["stage"] == "final-verifier"
+    assert closeout_args["command_intent"] == "finish_verifier"
+    assert closeout_args["execution_contract"]["stage"] == "verification"
     closeout_output = next(
         item
         for item in result.transcript.items
         if item.call_id == "call-final-verifier-closeout-002" and item.kind.endswith("_output")
     )
     assert closeout_output.status == "completed"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_trusted_closeout_exit_zero_overrides_typed_evidence_blockers(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+            ]
+        ]
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness._native_finish_gate_decision",
+        return_value={
+            "decision": "block_continue",
+            "blockers": [{"code": "invalid_typed_evidence_ref"}],
+            "missing_obligations": [
+                {"id": "strict_verifier_evidence", "kind": "verifier_pass"},
+                {"id": "oracle:task_contract:compiled:verifier_pass", "kind": "verifier_pass"},
+            ],
+            "continuation_prompt": "legacy typed evidence resolver would continue",
+        },
+    ):
+        result = run_native_implement_v2(
+            _lane_input(
+                tmp_path,
+                allow_verify=True,
+                verify_command="test -f vm.js",
+                final_verifier_closeout_seconds=3,
+            ),
+            provider=provider,
+            max_turns=1,
+        )
+
+    assert result.status == "completed"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["finish_gate_block_count"] == 0
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    decision = result.metrics["native_finish_gate_latest_decision"]
+    assert decision["lane_status"] == "completed"
+    assert decision["result"] == "allow"
+    assert decision["closeout_refs"]
+    finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
+    assert "invalid_typed_evidence_ref" not in finish_output.output_text_or_ref
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
@@ -3556,7 +3609,7 @@ def test_native_harness_failed_finish_time_final_verifier_closeout_blocks_resolv
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
-def test_native_harness_semantic_finish_time_final_verifier_closeout_blocks_resolver(tmp_path: Path) -> None:
+def test_native_harness_semantic_finish_time_final_verifier_exit_zero_is_external_oracle_risk(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -3582,9 +3635,10 @@ def test_native_harness_semantic_finish_time_final_verifier_closeout_blocks_reso
         max_turns=1,
     )
 
-    assert result.status == "blocked"
+    assert result.status == "completed"
     assert result.metrics["final_verifier_closeout_count"] == 1
-    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_continue"
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    assert result.metrics["native_finish_gate_latest_decision"]["lane_status"] == "completed"
     closeout_output = next(
         item
         for item in result.transcript.items
@@ -4378,8 +4432,43 @@ def test_native_harness_final_verifier_closeout_detects_write_file_source_mutati
     assert result.status == "completed"
     assert result.metrics["first_write_latency"]["call_id"] == "generate-source"
     assert result.metrics["final_verifier_closeout_count"] == 1
-    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "completed"
+    assert result.metrics["native_finish_gate_latest_decision"]["lane_status"] == "completed"
     assert any(item.call_id == "call-final-verifier-closeout-002" for item in result.transcript.items)
+
+
+def test_native_harness_final_verifier_closeout_source_mutation_blocks_native_gate(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="python -c 'from pathlib import Path; Path(\"vm.js\").write_text(\"mutated\\\\n\")'",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["completion_resolver_decision_count"] == 0
+    decision = result.metrics["native_finish_gate_latest_decision"]
+    assert decision["lane_status"] == "blocked_continue"
+    assert "closeout_unexpected_source_mutation" in decision["blockers"]
+    assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
 def _native_item_from_payload(payload: dict[str, object]) -> NativeTranscriptItem:
