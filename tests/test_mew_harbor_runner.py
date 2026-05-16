@@ -19,6 +19,7 @@ from mew.mew_harbor_runner import (
     observer_detail_missing,
     step_budget_preempted,
     strip_tool_surface_profile_guidance,
+    summarize_external_verifier_failure,
     summarize_latest_run,
     work_guidance_with_workframe_variant,
 )
@@ -94,6 +95,72 @@ def test_parser_accepts_repeated_work_guidance_fragments():
     )
 
     assert args.work_guidance == ["selected_lane=implement_v2", "m6_24_step_shape_check=true"]
+
+
+def test_parser_accepts_finish_verifier_external_failure_artifact(tmp_path):
+    artifact = tmp_path / "run"
+    args = build_parser().parse_args(
+        [
+            "make-doom-for-mips",
+            "--finish-verifier-external-failure-artifact",
+            str(artifact),
+            "--dry-run",
+        ]
+    )
+
+    assert args.finish_verifier_external_failure_artifact == artifact
+
+
+def test_summarize_external_verifier_failure_extracts_stdout_and_sampling(tmp_path):
+    artifact = tmp_path / "run"
+    verifier = artifact / "verifier"
+    verifier.mkdir(parents=True)
+    (verifier / "test-stdout.txt").write_text(
+        """
+______________________________ test_vm_execution ______________________________
+    File "/app/tests/test_outputs.py", line 42, in test_vm_execution
+    expected_text = b"I_InitGraphics: DOOM screen size: w x h: 320 x 200"
+    frame_path = Path("/tmp/frame.bmp")
+    while not frame_path.exists():
+        time.sleep(0.1)
+    time.sleep(1)
+    process.terminate()
+FAILED ../tests/test_outputs.py::test_vm_execution - AssertionError
+""",
+        encoding="utf-8",
+    )
+
+    summary = summarize_external_verifier_failure(artifact)
+
+    assert summary["failed_tests"] == ["test_vm_execution"]
+    assert summary["expected_stdout_substrings"] == ["I_InitGraphics: DOOM screen size: w x h: 320 x 200"]
+    assert summary["artifact_paths"] == ["/tmp/frame.bmp"]
+    assert summary["sampling_semantics"] == {
+        "checks_stdout": True,
+        "post_artifact_sleep_seconds": 1.0,
+        "terminates_process_after_sampling": True,
+        "waits_for_artifact_path": True,
+    }
+
+
+def test_summarize_external_verifier_failure_does_not_treat_traceback_path_as_artifact(tmp_path):
+    artifact = tmp_path / "run"
+    verifier = artifact / "verifier"
+    verifier.mkdir(parents=True)
+    (verifier / "test-stdout.txt").write_text(
+        """
+______________________________ test_vm_execution ______________________________
+    File "/app/tests/test_outputs.py", line 42, in test_vm_execution
+    expected_text = b"I_InitGraphics: DOOM screen size: w x h: 320 x 200"
+FAILED ../tests/test_outputs.py::test_vm_execution - AssertionError
+""",
+        encoding="utf-8",
+    )
+
+    summary = summarize_external_verifier_failure(artifact)
+
+    assert summary["expected_stdout_substrings"] == ["I_InitGraphics: DOOM screen size: w x h: 320 x 200"]
+    assert summary["artifact_paths"] == []
 
 
 def test_parser_accepts_tool_surface_profile_id():

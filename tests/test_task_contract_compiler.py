@@ -1,3 +1,5 @@
+import json
+
 from mew.task_contract_compiler import (
     apply_compiled_task_contract,
     build_task_contract_compiler_prompt,
@@ -126,6 +128,48 @@ def test_task_contract_compiler_is_default_enabled_with_legacy_opt_in():
     )
     assert "task_contract_compiler" not in sanitized
     assert "selected_lane" in sanitized
+
+
+def test_task_contract_guidance_strips_finish_verifier_external_failure_json():
+    sanitized = _work_guidance_task_contract_guidance(
+        json.dumps(
+            {
+                "selected_lane": "implement_v2",
+                "finish_verifier_external_failure": {"test_stdout_tail": "hidden oracle output"},
+                "lane_config": {
+                    "external_verifier_failure": {"test_stdout_tail": "nested hidden oracle output"},
+                    "finish_verifier_planner": True,
+                },
+            }
+        )
+    )
+
+    assert "hidden oracle output" not in sanitized
+    assert "finish_verifier_external_failure" not in sanitized
+    assert "external_verifier_failure" not in sanitized
+    assert json.loads(sanitized) == {"selected_lane": "implement_v2"}
+
+
+def test_task_contract_guidance_strips_finish_verifier_external_failure_string_options():
+    sanitized = _work_guidance_task_contract_guidance(
+        "selected_lane=implement_v2 "
+        "finish_verifier_external_failure=hidden-oracle-output "
+        "external_verifier_failure='nested hidden oracle output' "
+        "finish_verifier_planner=true"
+    )
+
+    assert sanitized == "selected_lane=implement_v2"
+
+
+def test_task_contract_guidance_strips_finish_verifier_external_failure_brace_options():
+    sanitized = _work_guidance_task_contract_guidance(
+        'selected_lane=implement_v2 '
+        'external_verifier_failure={"test_stdout_tail":"nested hidden oracle output"} '
+        'finish_verifier_external_failure={"test_stdout_tail":"more hidden oracle output"} '
+        'finish_verifier_planner=true'
+    )
+
+    assert sanitized == "selected_lane=implement_v2"
 
 
 def test_task_contract_compiler_failure_uses_typed_fallback_not_legacy_gate():

@@ -7487,6 +7487,8 @@ def _work_guidance_task_contract_guidance(guidance):
         "experimental_finish_verifier_planner",
         "finish_verifier_planner",
         "finish_verifier_planner_model",
+        "finish_verifier_external_failure",
+        "external_verifier_failure",
         "task_contract_compiler",
         "task_contract_compiler_mode",
         "task_contract_compiler_model",
@@ -7507,6 +7509,8 @@ def _work_guidance_task_contract_guidance(guidance):
         lane_config.pop("experimental_finish_verifier_planner", None)
         lane_config.pop("finish_verifier_planner", None)
         lane_config.pop("finish_verifier_planner_model", None)
+        lane_config.pop("finish_verifier_external_failure", None)
+        lane_config.pop("external_verifier_failure", None)
         lane_config.pop("task_contract_compiler", None)
         lane_config.pop("task_contract_compiler_mode", None)
         lane_config.pop("task_contract_compiler_model", None)
@@ -7532,6 +7536,8 @@ def _strip_internal_work_guidance_options(guidance):
         "experimental_finish_verifier_planner",
         "finish_verifier_planner",
         "finish_verifier_planner_model",
+        "finish_verifier_external_failure",
+        "external_verifier_failure",
         "task_contract_compiler",
         "task_contract_compiler_mode",
         "task_contract_compiler_model",
@@ -7540,8 +7546,65 @@ def _strip_internal_work_guidance_options(guidance):
         "legacy_task_contract",
         "task_contract_legacy",
     ):
-        text = re.sub(rf"(?:^|\s){re.escape(name)}\s*=\s*[A-Za-z0-9_.-]+", " ", text)
+        text = _strip_work_guidance_assignment(text, name)
     return " ".join(text.split())
+
+
+def _strip_work_guidance_assignment(text, name):
+    pattern = re.compile(rf"(?:^|\s){re.escape(name)}\s*=")
+    while True:
+        match = pattern.search(text)
+        if not match:
+            return text
+        end = _work_guidance_assignment_end(text, match.end())
+        text = f"{text[: match.start()]} {text[end:]}"
+
+
+def _work_guidance_assignment_end(text, index):
+    length = len(text)
+    while index < length and text[index].isspace():
+        index += 1
+    if index >= length:
+        return index
+    quote = text[index] if text[index] in {"'", '"'} else ""
+    if quote:
+        index += 1
+        while index < length:
+            if text[index] == "\\":
+                index += 2
+                continue
+            if text[index] == quote:
+                return index + 1
+            index += 1
+        return length
+    opener = text[index]
+    closer = {"{": "}", "[": "]"}.get(opener)
+    if closer:
+        depth = 0
+        quote = ""
+        while index < length:
+            char = text[index]
+            if quote:
+                if char == "\\":
+                    index += 2
+                    continue
+                if char == quote:
+                    quote = ""
+                index += 1
+                continue
+            if char in {"'", '"'}:
+                quote = char
+            elif char == opener:
+                depth += 1
+            elif char == closer:
+                depth -= 1
+                if depth <= 0:
+                    return index + 1
+            index += 1
+        return length
+    while index < length and not text[index].isspace():
+        index += 1
+    return index
 
 
 def _work_session_active_work_todo(session):
@@ -7688,7 +7751,7 @@ def _run_work_ai_implement_v2(
             {"summary": "running implement_v2 lane"},
             {"summary": "running implement_v2 lane"},
             {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE},
-            guidance=getattr(effective_args, "work_guidance", None) or "",
+            guidance=_work_guidance_task_contract_guidance(getattr(effective_args, "work_guidance", None) or ""),
         )
         planning_turn["model_metrics"] = {**implement_v2_runtime_metrics, "status": "running"}
         planning_turn_id = planning_turn.get("id")
@@ -7836,6 +7899,13 @@ def _run_work_ai_implement_v2(
     )
     if finish_verifier_planner_model:
         lane_config["finish_verifier_planner_model"] = finish_verifier_planner_model
+    finish_verifier_external_failure = _work_guidance_dict_option(
+        getattr(effective_args, "work_guidance", None),
+        "finish_verifier_external_failure",
+        "external_verifier_failure",
+    )
+    if finish_verifier_external_failure:
+        lane_config["finish_verifier_external_failure"] = finish_verifier_external_failure
     if tool_surface_profile_id:
         lane_config["tool_surface_profile_id"] = tool_surface_profile_id
     if tool_surface_profile_options:
