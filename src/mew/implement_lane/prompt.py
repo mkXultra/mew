@@ -102,7 +102,7 @@ def build_implement_v2_prompt_sections(
     elif {"run_command", "run_tests"} & tool_names:
         verify_sentence = "Use run_command or run_tests to build, run, and verify. "
     else:
-        verify_sentence = "Use available observations as fresh evidence. "
+        verify_sentence = "Use available observations to support the final response. "
     if codex_hot_path:
         coding_contract_content = (
             "Inspect the repository, task-provided files, and recent tool results only as needed. "
@@ -111,7 +111,7 @@ def build_implement_v2_prompt_sections(
             "Prefer modifying or connecting provided source over fabricating replacement artifacts "
             "unless the task explicitly asks for a standalone replacement. "
             "Repair from the latest concrete failure shown in the transcript. "
-            "Finish only with fresh evidence from the tools."
+            "When no further tool action is useful, provide a concise final response."
         )
         environment_context_section = PromptSection(
             id="implement_v2_environment_context",
@@ -145,7 +145,7 @@ def build_implement_v2_prompt_sections(
             "Treat task_facts.existing_workspace_paths as provided inputs or references, not replacement deliverables; "
             "do not rebuild or substitute provided artifacts unless the task explicitly asks for that rebuild. "
             "Repair from the latest concrete failure shown in the transcript. "
-            "Finish only with fresh evidence from the tools."
+            "When no further tool action is useful, provide a concise final response."
         )
         environment_context_section = None
     sections = [
@@ -156,7 +156,7 @@ def build_implement_v2_prompt_sections(
             content=(
                 "You are implementing in a repository through native tool calls. "
                 "Use the provider-native transcript as the live history, preserve "
-                "paired tool results, and finish only with fresh tool evidence."
+                "paired tool results, and continue until the requested implementation is complete."
             ),
             stability=STABILITY_STATIC,
             cache_policy=CACHE_POLICY_CACHEABLE,
