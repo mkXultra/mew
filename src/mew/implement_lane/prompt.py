@@ -7,24 +7,16 @@ import re
 
 from ..prompt_sections import (
     CACHE_POLICY_CACHEABLE,
-    CACHE_POLICY_SESSION,
     STABILITY_DYNAMIC,
-    STABILITY_SEMI_STATIC,
-    STABILITY_STATIC,
     PromptSection,
     prompt_section_metrics,
 )
-from .tool_policy import (
-    ImplementLaneToolSpec,
-    is_hard_runtime_artifact_task,
-    list_v2_tool_specs_for_mode,
-    list_v2_tool_specs_for_task,
+from .tool_profiles.prompt_contracts import (
+    prompt_contract_id_for_profile,
+    prompt_sections_for_tool_surface,
 )
-from .tool_registry import (
-    CODEX_HOT_PATH_PROFILE_ID,
-    build_tool_surface_snapshot,
-    tool_surface_profile_id,
-)
+from .tool_registry import build_tool_surface_snapshot, tool_surface_profile_id
+from .tool_specs import ImplementLaneToolSpec
 from .types import ImplementLaneInput
 from .affordance_visibility import CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS
 from .workframe import WorkFrameInputs
@@ -68,141 +60,25 @@ def build_implement_v2_prompt_sections(
 ) -> list[PromptSection]:
     """Build provider-neutral v2 prompt sections without provider cache transport."""
 
-    mode = str(lane_input.lane_config.get("mode") or "read_only")
-    codex_hot_path = tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID
+    profile_id = tool_surface_profile_id(lane_input.lane_config)
+    prompt_contract_id = prompt_contract_id_for_profile(profile_id)
     if tool_specs is not None:
         specs = tool_specs
-    elif codex_hot_path:
-        specs = build_tool_surface_snapshot(
-            lane_config=lane_input.lane_config,
+    else:
+        snapshot = build_tool_surface_snapshot(
+            lane_config=_prompt_tool_surface_lane_config(lane_input.lane_config),
             task_contract=lane_input.task_contract,
-        ).tool_specs
-    else:
-        specs = list_v2_tool_specs_for_task(mode, task_contract=lane_input.task_contract)
-    tool_names = {spec.name for spec in specs}
-    available_mutation_tools = tuple(tool for tool in ("apply_patch", "edit_file") if tool in tool_names)
-    if codex_hot_path and available_mutation_tools:
-        if len(available_mutation_tools) == 1:
-            mutation_sentence = f"Use {available_mutation_tools[0]} for source changes. "
-        else:
-            mutation_sentence = f"Use {' or '.join(available_mutation_tools)} for source changes. "
-        if "write_file" in tool_names:
-            mutation_sentence += "Use write_file only for genuinely new files required by the task. "
-    elif {"apply_patch", "edit_file"} & tool_names and "write_file" in tool_names:
-        mutation_sentence = (
-            "Create complete new files with write_file when the target path is missing; "
-            "modify existing source with apply_patch or edit_file. "
         )
-    elif {"apply_patch", "edit_file"} & tool_names:
-        mutation_sentence = "Make source changes with apply_patch or edit_file. "
-    else:
-        mutation_sentence = "Use the available read-only tools to inspect repository state. "
-    if codex_hot_path and "exec_command" in tool_names:
-        verify_sentence = "Use exec_command for builds, tests, probes, package-manager setup, and verification. "
-    elif {"run_command", "run_tests"} & tool_names:
-        verify_sentence = "Use run_command or run_tests to build, run, and verify. "
-    else:
-        verify_sentence = "Use available observations to support the final response. "
-    if codex_hot_path:
-        coding_contract_content = (
-            "Inspect the repository, task-provided files, and recent tool results only as needed. "
-            f"{mutation_sentence}"
-            f"{verify_sentence}"
-            "Prefer modifying or connecting provided source over fabricating replacement artifacts "
-            "unless the task explicitly asks for a standalone replacement. "
-            "Repair from the latest concrete failure shown in the transcript. "
-            "When no further tool action is useful, provide a concise final response."
+        specs = snapshot.tool_specs
+        prompt_contract_id = snapshot.prompt_contract_id
+    return list(
+        prompt_sections_for_tool_surface(
+            profile_id=profile_id,
+            prompt_contract_id=prompt_contract_id,
+            tool_specs=specs,
+            task_contract_content=_stable_json(_model_visible_task_contract(lane_input.task_contract)),
         )
-        environment_context_section = PromptSection(
-            id="implement_v2_environment_context",
-            version="v0",
-            title="Implement V2 Environment Context",
-            content=(
-                "You are working through bounded shell tools in the task workspace. "
-                "When the task runtime is a disposable benchmark or container environment "
-                "and network/package-manager access is available, installing missing "
-                "build, test, or toolchain packages is allowed when needed. Treat missing "
-                "compiler or toolchain support as a setup/build problem to solve before "
-                "replacing a requested source-based implementation. If package installation "
-                "is unavailable or denied, use the concrete failure evidence instead of "
-                "fabricating a replacement artifact."
-            ),
-            stability=STABILITY_SEMI_STATIC,
-            cache_policy=CACHE_POLICY_SESSION,
-            profile="implement_v2",
-        )
-    else:
-        coding_contract_content = (
-            "Inspect only enough context to choose a minimal runnable candidate. "
-            f"{mutation_sentence}"
-            f"{verify_sentence}"
-            "When the task asks for a new file or artifact and the target path is known, "
-            "create the smallest runnable version early, then run it and repair from concrete failures. "
-            "If the task or verify command names a missing source or artifact path, "
-            "treat that as the target path and create the smallest runnable file before extended reverse engineering. "
-            "If task_facts.missing_workspace_paths is present, use those factual missing paths as target-path context; "
-            "prefer a minimal runnable artifact at the named path over extended archaeology. "
-            "Treat task_facts.existing_workspace_paths as provided inputs or references, not replacement deliverables; "
-            "do not rebuild or substitute provided artifacts unless the task explicitly asks for that rebuild. "
-            "Repair from the latest concrete failure shown in the transcript. "
-            "When no further tool action is useful, provide a concise final response."
-        )
-        environment_context_section = None
-    sections = [
-        PromptSection(
-            id="implement_v2_lane_base",
-            version="v0",
-            title="Implement V2 Lane Base",
-            content=(
-                "You are implementing in a repository through native tool calls. "
-                "Use the provider-native transcript as the live history, preserve "
-                "paired tool results, and continue until the requested implementation is complete."
-            ),
-            stability=STABILITY_STATIC,
-            cache_policy=CACHE_POLICY_CACHEABLE,
-            profile="implement_v2",
-        ),
-        PromptSection(
-            id="implement_v2_tool_contract",
-            version="v0",
-            title="Implement V2 Tool Contract",
-            content=(
-                "Every provider tool call must receive exactly one paired tool result. "
-                "Unknown, invalid, denied, interrupted, or failed calls still receive "
-                "model-visible results. Running/yielded command states are content "
-                "inside normal tool results, not provider protocol states."
-            ),
-            stability=STABILITY_STATIC,
-            cache_policy=CACHE_POLICY_CACHEABLE,
-            profile="implement_v2",
-        ),
-        PromptSection(
-            id="implement_v2_coding_contract",
-            version="v2",
-            title="Implement V2 Coding Contract",
-            content=coding_contract_content,
-            stability=STABILITY_STATIC,
-            cache_policy=CACHE_POLICY_CACHEABLE,
-            profile="implement_v2",
-        ),
-    ]
-    if environment_context_section is not None:
-        sections.append(environment_context_section)
-    if not codex_hot_path:
-        sections.extend(
-            [
-                PromptSection(
-                    id="implement_v2_task_contract",
-                    version="v0",
-                    title="Implement V2 Task Contract",
-                    content=_stable_json(_model_visible_task_contract(lane_input.task_contract)),
-                    stability=STABILITY_SEMI_STATIC,
-                    cache_policy=CACHE_POLICY_SESSION,
-                    profile="implement_v2",
-                ),
-            ]
-        )
-    return sections
+    )
 
 
 def implement_v2_prompt_section_metrics(lane_input: ImplementLaneInput) -> dict[str, object]:
@@ -474,11 +350,23 @@ def _workframe_baseline_metrics(
     *,
     provider_tool_names: tuple[str, ...] = (),
 ) -> dict[str, object]:
-    mode = str(lane_input.lane_config.get("mode") or "read_only")
-    names = list(provider_tool_names) if provider_tool_names else [spec.name for spec in list_v2_tool_specs_for_mode(mode)]
+    if provider_tool_names:
+        names = list(provider_tool_names)
+    else:
+        snapshot = build_tool_surface_snapshot(
+            lane_config=_prompt_tool_surface_lane_config(lane_input.lane_config),
+            task_contract=lane_input.task_contract,
+        )
+        names = list(snapshot.provider_tool_names)
     return {
         "provider_tool_names": names,
     }
+
+
+def _prompt_tool_surface_lane_config(lane_config: dict[str, object]) -> dict[str, object]:
+    config = dict(lane_config)
+    config.setdefault("mode", "read_only")
+    return config
 
 
 def _compact_workframe_trace(value: object) -> dict[str, object]:
@@ -1507,5 +1395,4 @@ __all__ = [
     "ORDINARY_RESIDENT_SUMMARY_SURFACE",
     "RESIDENT_SIDECAR_STATE_SURFACE",
     "is_deep_probe_hard_runtime_task",
-    "is_hard_runtime_artifact_task",
 ]

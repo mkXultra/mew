@@ -14,9 +14,14 @@ import re
 from .native_tool_schema import stable_json_hash
 from .tool_profiles.codex_hot_path import (
     CODEX_HOT_PATH_PROFILE_ID,
+    CODEX_HOT_PATH_PROMPT_CONTRACT_ID,
     codex_hot_path_tool_specs,
 )
-from .tool_profiles.mew_legacy import MEW_LEGACY_PROFILE_ID, mew_legacy_tool_specs_for_task
+from .tool_profiles.mew_legacy import (
+    MEW_LEGACY_PROFILE_ID,
+    MEW_LEGACY_PROMPT_CONTRACT_ID,
+    mew_legacy_tool_specs_for_task,
+)
 from .tool_specs import ImplementLaneToolSpec
 
 DEFAULT_TOOL_SURFACE_PROFILE_ID = MEW_LEGACY_PROFILE_ID
@@ -213,7 +218,7 @@ def build_tool_surface_snapshot(
     profile = ToolSurfaceProfile(
         profile_id=MEW_LEGACY_PROFILE_ID,
         profile_version="v1",
-        prompt_contract_id="mew_legacy_prompt_v1",
+        prompt_contract_id=MEW_LEGACY_PROMPT_CONTRACT_ID,
         render_policy_id="mew_legacy_result_cards_v1",
         default_parallel_tool_calls=True,
         interactive_stdin=False,
@@ -263,7 +268,7 @@ def _codex_hot_path_snapshot(
     profile = ToolSurfaceProfile(
         profile_id=CODEX_HOT_PATH_PROFILE_ID,
         profile_version="v1",
-        prompt_contract_id="codex_hot_path_prompt_v1",
+        prompt_contract_id=CODEX_HOT_PATH_PROMPT_CONTRACT_ID,
         render_policy_id="codex_hot_path_result_text_v1",
         default_parallel_tool_calls=True,
         interactive_stdin=False,

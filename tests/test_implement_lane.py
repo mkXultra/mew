@@ -11431,6 +11431,26 @@ def test_codex_hot_path_prompt_metrics_hide_task_contract_section() -> None:
     assert "Hidden finish-gate-only criterion" not in rendered
 
 
+def test_phase6b_prompt_contracts_are_profile_owned() -> None:
+    prompt_source = Path("src/mew/implement_lane/prompt.py").read_text(encoding="utf-8")
+    codex_profile = Path("src/mew/implement_lane/tool_profiles/codex_hot_path.py").read_text(
+        encoding="utf-8"
+    )
+    legacy_profile = Path("src/mew/implement_lane/tool_profiles/mew_legacy.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "tool_policy" not in prompt_source
+    assert "CODEX_HOT_PATH_PROFILE_ID" not in prompt_source
+    assert "MEW_LEGACY_PROFILE_ID" not in prompt_source
+    assert "tool_names =" not in prompt_source
+    assert "prompt_sections_for_tool_surface" in prompt_source
+    assert "Use exec_command for builds, tests, probes, package-manager setup, and verification." in codex_profile
+    assert "Use exec_command for builds, tests, probes, package-manager setup, and verification." not in prompt_source
+    assert "Inspect only enough context to choose a minimal runnable candidate." in legacy_profile
+    assert "Inspect only enough context to choose a minimal runnable candidate." not in prompt_source
+
+
 def test_codex_hot_path_prompt_metrics_accept_tool_profile_alias() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-1",

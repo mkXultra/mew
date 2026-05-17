@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from ...prompt_sections import (
+    CACHE_POLICY_CACHEABLE,
+    CACHE_POLICY_SESSION,
+    STABILITY_SEMI_STATIC,
+    STABILITY_STATIC,
+    PromptSection,
+)
 from ..tool_specs import ImplementLaneToolSpec
 
 CODEX_HOT_PATH_PROFILE_ID = "codex_hot_path"
+CODEX_HOT_PATH_PROMPT_CONTRACT_ID = "codex_hot_path_prompt_v1"
 
 _CODEX_APPLY_PATCH_SPEC = ImplementLaneToolSpec(
     name="apply_patch",
@@ -53,7 +61,105 @@ def codex_hot_path_tool_specs(*, enable_list_dir: bool) -> tuple[ImplementLaneTo
     return tuple(specs)
 
 
+def codex_hot_path_prompt_sections(
+    *,
+    tool_specs: tuple[ImplementLaneToolSpec, ...],
+) -> tuple[PromptSection, ...]:
+    """Return the Codex-like provider-visible prompt contract."""
+
+    tool_names = {spec.name for spec in tool_specs}
+    available_mutation_tools = tuple(tool for tool in ("apply_patch", "edit_file") if tool in tool_names)
+    if available_mutation_tools:
+        if len(available_mutation_tools) == 1:
+            mutation_sentence = f"Use {available_mutation_tools[0]} for source changes. "
+        else:
+            mutation_sentence = f"Use {' or '.join(available_mutation_tools)} for source changes. "
+        if "write_file" in tool_names:
+            mutation_sentence += "Use write_file only for genuinely new files required by the task. "
+    else:
+        mutation_sentence = "Use the available read-only tools to inspect repository state. "
+    if "exec_command" in tool_names:
+        verify_sentence = "Use exec_command for builds, tests, probes, package-manager setup, and verification. "
+    else:
+        verify_sentence = "Use available observations to support the final response. "
+    coding_contract_content = (
+        "Inspect the repository, task-provided files, and recent tool results only as needed. "
+        f"{mutation_sentence}"
+        f"{verify_sentence}"
+        "Prefer modifying or connecting provided source over fabricating replacement artifacts "
+        "unless the task explicitly asks for a standalone replacement. "
+        "Repair from the latest concrete failure shown in the transcript. "
+        "When no further tool action is useful, provide a concise final response."
+    )
+    return (
+        _lane_base_section(),
+        _tool_contract_section(),
+        PromptSection(
+            id="implement_v2_coding_contract",
+            version="v2",
+            title="Implement V2 Coding Contract",
+            content=coding_contract_content,
+            stability=STABILITY_STATIC,
+            cache_policy=CACHE_POLICY_CACHEABLE,
+            profile="implement_v2",
+        ),
+        PromptSection(
+            id="implement_v2_environment_context",
+            version="v0",
+            title="Implement V2 Environment Context",
+            content=(
+                "You are working through bounded shell tools in the task workspace. "
+                "When the task runtime is a disposable benchmark or container environment "
+                "and network/package-manager access is available, installing missing "
+                "build, test, or toolchain packages is allowed when needed. Treat missing "
+                "compiler or toolchain support as a setup/build problem to solve before "
+                "replacing a requested source-based implementation. If package installation "
+                "is unavailable or denied, use the concrete failure evidence instead of "
+                "fabricating a replacement artifact."
+            ),
+            stability=STABILITY_SEMI_STATIC,
+            cache_policy=CACHE_POLICY_SESSION,
+            profile="implement_v2",
+        ),
+    )
+
+
+def _lane_base_section() -> PromptSection:
+    return PromptSection(
+        id="implement_v2_lane_base",
+        version="v0",
+        title="Implement V2 Lane Base",
+        content=(
+            "You are implementing in a repository through native tool calls. "
+            "Use the provider-native transcript as the live history, preserve "
+            "paired tool results, and continue until the requested implementation is complete."
+        ),
+        stability=STABILITY_STATIC,
+        cache_policy=CACHE_POLICY_CACHEABLE,
+        profile="implement_v2",
+    )
+
+
+def _tool_contract_section() -> PromptSection:
+    return PromptSection(
+        id="implement_v2_tool_contract",
+        version="v0",
+        title="Implement V2 Tool Contract",
+        content=(
+            "Every provider tool call must receive exactly one paired tool result. "
+            "Unknown, invalid, denied, interrupted, or failed calls still receive "
+            "model-visible results. Running/yielded command states are content "
+            "inside normal tool results, not provider protocol states."
+        ),
+        stability=STABILITY_STATIC,
+        cache_policy=CACHE_POLICY_CACHEABLE,
+        profile="implement_v2",
+    )
+
+
 __all__ = [
     "CODEX_HOT_PATH_PROFILE_ID",
+    "CODEX_HOT_PATH_PROMPT_CONTRACT_ID",
+    "codex_hot_path_prompt_sections",
     "codex_hot_path_tool_specs",
 ]

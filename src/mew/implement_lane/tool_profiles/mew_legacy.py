@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from ...prompt_sections import (
+    CACHE_POLICY_CACHEABLE,
+    CACHE_POLICY_SESSION,
+    STABILITY_SEMI_STATIC,
+    STABILITY_STATIC,
+    PromptSection,
+)
 from ..tool_specs import ImplementLaneToolSpec
 
 MEW_LEGACY_PROFILE_ID = "mew_legacy"
+MEW_LEGACY_PROMPT_CONTRACT_ID = "mew_legacy_prompt_v1"
 
 MEW_LEGACY_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
     ImplementLaneToolSpec(
@@ -136,9 +144,104 @@ def mew_legacy_tool_specs_for_task(
     return mew_legacy_tool_specs_for_mode(mode)
 
 
+def mew_legacy_prompt_sections(
+    *,
+    tool_specs: tuple[ImplementLaneToolSpec, ...],
+    task_contract_content: str,
+) -> tuple[PromptSection, ...]:
+    """Return the legacy provider-visible prompt contract."""
+
+    tool_names = {spec.name for spec in tool_specs}
+    if {"apply_patch", "edit_file"} & tool_names and "write_file" in tool_names:
+        mutation_sentence = (
+            "Create complete new files with write_file when the target path is missing; "
+            "modify existing source with apply_patch or edit_file. "
+        )
+    elif {"apply_patch", "edit_file"} & tool_names:
+        mutation_sentence = "Make source changes with apply_patch or edit_file. "
+    else:
+        mutation_sentence = "Use the available read-only tools to inspect repository state. "
+    if {"run_command", "run_tests"} & tool_names:
+        verify_sentence = "Use run_command or run_tests to build, run, and verify. "
+    else:
+        verify_sentence = "Use available observations to support the final response. "
+    coding_contract_content = (
+        "Inspect only enough context to choose a minimal runnable candidate. "
+        f"{mutation_sentence}"
+        f"{verify_sentence}"
+        "When the task asks for a new file or artifact and the target path is known, "
+        "create the smallest runnable version early, then run it and repair from concrete failures. "
+        "If the task or verify command names a missing source or artifact path, "
+        "treat that as the target path and create the smallest runnable file before extended reverse engineering. "
+        "If task_facts.missing_workspace_paths is present, use those factual missing paths as target-path context; "
+        "prefer a minimal runnable artifact at the named path over extended archaeology. "
+        "Treat task_facts.existing_workspace_paths as provided inputs or references, not replacement deliverables; "
+        "do not rebuild or substitute provided artifacts unless the task explicitly asks for that rebuild. "
+        "Repair from the latest concrete failure shown in the transcript. "
+        "When no further tool action is useful, provide a concise final response."
+    )
+    return (
+        _lane_base_section(),
+        _tool_contract_section(),
+        PromptSection(
+            id="implement_v2_coding_contract",
+            version="v2",
+            title="Implement V2 Coding Contract",
+            content=coding_contract_content,
+            stability=STABILITY_STATIC,
+            cache_policy=CACHE_POLICY_CACHEABLE,
+            profile="implement_v2",
+        ),
+        PromptSection(
+            id="implement_v2_task_contract",
+            version="v0",
+            title="Implement V2 Task Contract",
+            content=task_contract_content,
+            stability=STABILITY_SEMI_STATIC,
+            cache_policy=CACHE_POLICY_SESSION,
+            profile="implement_v2",
+        ),
+    )
+
+
+def _lane_base_section() -> PromptSection:
+    return PromptSection(
+        id="implement_v2_lane_base",
+        version="v0",
+        title="Implement V2 Lane Base",
+        content=(
+            "You are implementing in a repository through native tool calls. "
+            "Use the provider-native transcript as the live history, preserve "
+            "paired tool results, and continue until the requested implementation is complete."
+        ),
+        stability=STABILITY_STATIC,
+        cache_policy=CACHE_POLICY_CACHEABLE,
+        profile="implement_v2",
+    )
+
+
+def _tool_contract_section() -> PromptSection:
+    return PromptSection(
+        id="implement_v2_tool_contract",
+        version="v0",
+        title="Implement V2 Tool Contract",
+        content=(
+            "Every provider tool call must receive exactly one paired tool result. "
+            "Unknown, invalid, denied, interrupted, or failed calls still receive "
+            "model-visible results. Running/yielded command states are content "
+            "inside normal tool results, not provider protocol states."
+        ),
+        stability=STABILITY_STATIC,
+        cache_policy=CACHE_POLICY_CACHEABLE,
+        profile="implement_v2",
+    )
+
+
 __all__ = [
     "MEW_LEGACY_PROFILE_ID",
+    "MEW_LEGACY_PROMPT_CONTRACT_ID",
     "MEW_LEGACY_TOOL_SPECS",
+    "mew_legacy_prompt_sections",
     "mew_legacy_tool_specs_for_mode",
     "mew_legacy_tool_specs_for_task",
 ]
