@@ -88,11 +88,7 @@ from .v2_runtime import (
 )
 from .. import codex_api as _codex_api
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
-from ..acceptance import (
-    acceptance_done_gate_decision,
-    implementation_contract_source_requirements,
-    implementation_source_ref_matches_text,
-)
+from ..acceptance import acceptance_done_gate_decision
 from ..config import DEFAULT_CODEX_REASONING_EFFORT
 from ..prompt_sections import render_prompt_sections
 
@@ -141,8 +137,6 @@ _TASK_PATH_TOKEN_RE = re.compile(
     r"wasm|bin|out|so|dylib|exe|png|ppm|bmp|jpg|jpeg|gif|svg))"
     r"(?![\w.-])"
 )
-_SOURCE_FACT_NESTED_MATCH_MAX_DEPTH = 8
-_SOURCE_FACT_NESTED_MATCH_MAX_DIRS = 256
 _SEMANTIC_VERIFIER_FAILURE_PATTERNS = (
     re.compile(r"\bvm\s+(?:finished|stopped)\s+exit=(?!0\b)\d+\b", re.IGNORECASE),
     re.compile(r"\bmissing\s+expected\s+(?:artifact|frame|output)\b", re.IGNORECASE),
@@ -2355,10 +2349,8 @@ def _task_contract_candidate_paths(task_contract: object, *, workspace: Path) ->
     if not isinstance(task_contract, Mapping):
         return ()
     paths: list[str] = []
-    for key in ("expected_artifact", "expected_artifacts", "artifact", "artifacts", "source_requirements"):
+    for key in ("expected_artifact", "expected_artifacts", "artifact", "artifacts"):
         _extend_unique_paths(paths, task_contract.get(key), workspace=workspace, structured=True)
-    compiled = _mapping_from_request_descriptor(task_contract.get("compiled_task_contract"))
-    _extend_unique_paths(paths, compiled.get("source_requirements"), workspace=workspace, structured=True)
     for key in ("verify_command", "description", "guidance"):
         _extend_unique_paths(paths, task_contract.get(key), workspace=workspace, structured=False)
     return tuple(paths)
@@ -4779,39 +4771,20 @@ def _responses_input_items(
     *,
     compact_sidecar_digest: Mapping[str, object],
 ) -> list[dict[str, object]]:
+    task_facts = _provider_visible_task_facts(lane_input)
     if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
-        raw_task = _raw_task_provider_visible_text(lane_input)
-        task_facts = _provider_visible_task_facts(
-            lane_input,
-            text_sources=(raw_task,),
-            include_contract_source_requirements=False,
-            include_verify_command_paths=False,
-        )
         items: list[dict[str, object]] = [
             {
                 "role": "user",
                 "content": [
                     {
                         "type": "input_text",
-                        "text": raw_task,
+                        "text": _raw_task_provider_visible_text(lane_input),
                     }
                 ],
             }
         ]
-        if source_capsule := _codex_hot_path_source_facts_text(task_facts):
-            items.append(
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": source_capsule,
-                        }
-                    ],
-                }
-            )
     else:
-        task_facts = _provider_visible_task_facts(lane_input)
         task_payload = {
             "task_contract": dict(lane_input.task_contract),
             "task_facts": task_facts,
@@ -4921,237 +4894,42 @@ def _task_contract_objective_text(contract: Mapping[str, object]) -> str:
     return ""
 
 
-def _provider_visible_task_facts(
-    lane_input: ImplementLaneInput,
-    *,
-    text_sources: Iterable[object] | None = None,
-    include_contract_source_requirements: bool = True,
-    include_verify_command_paths: bool = True,
-) -> dict[str, object]:
+def _provider_visible_task_facts(lane_input: ImplementLaneInput) -> dict[str, object]:
     """Return factual task/path context without prescribing the next action."""
 
     contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
     verify_command = str(contract.get("verify_command") or "").strip()
-    if text_sources is None:
-        text_sources = [
-            verify_command,
-            str(contract.get("description") or ""),
-            str(contract.get("title") or ""),
-            str(contract.get("guidance") or ""),
-        ]
-        constraints = contract.get("acceptance_constraints")
-        if isinstance(constraints, list):
-            text_sources.extend(str(item or "") for item in constraints)
-    else:
-        text_sources = list(text_sources)
+    text_sources = [
+        verify_command,
+        str(contract.get("description") or ""),
+        str(contract.get("title") or ""),
+        str(contract.get("guidance") or ""),
+    ]
+    constraints = contract.get("acceptance_constraints")
+    if isinstance(constraints, list):
+        text_sources.extend(str(item or "") for item in constraints)
 
-    source_requirements = _provider_visible_source_requirements(
-        contract,
-        text_sources=text_sources,
-        include_contract_source_requirements=include_contract_source_requirements,
-    )
-    verify_paths = _task_paths_from_text(verify_command, workspace=lane_input.workspace) if include_verify_command_paths else []
+    verify_paths = _task_paths_from_text(verify_command, workspace=lane_input.workspace)
     mentioned_paths = _dedupe_task_paths(
         path for source in text_sources for path in _task_paths_from_text(source, workspace=lane_input.workspace)
     )
-    existing_paths, resolved_nested_tokens = _provider_visible_existing_workspace_paths(
-        mentioned_paths,
-        source_requirements,
-        workspace=Path(lane_input.workspace),
-    )
+    existing_paths = [
+        path
+        for path in mentioned_paths
+        if _task_path_has_safe_segments(path) and (Path(lane_input.workspace) / path).exists()
+    ]
     missing_paths = [
         path
         for path in mentioned_paths
         if _task_path_is_safe_relative(path) and not (Path(lane_input.workspace) / path).exists()
-        and path not in resolved_nested_tokens
     ]
     facts = {
-        "source_requirement_paths": [item["path"] for item in source_requirements],
         "verify_command_paths": verify_paths,
         "mentioned_workspace_paths": mentioned_paths,
         "existing_workspace_paths": existing_paths,
         "missing_workspace_paths": missing_paths,
     }
     return {key: value for key, value in facts.items() if value}
-
-
-def _provider_visible_source_requirements(
-    contract: Mapping[str, object],
-    *,
-    text_sources: Iterable[object],
-    include_contract_source_requirements: bool = True,
-) -> list[dict[str, str]]:
-    """Return source refs grounded in the provider-visible raw task text."""
-
-    raw_text = "\n".join(str(source or "") for source in text_sources if str(source or "").strip())
-    requirements = list(implementation_contract_source_requirements(raw_text))
-    if not include_contract_source_requirements:
-        return requirements[:6]
-    compiled = _mapping_from_request_descriptor(contract.get("compiled_task_contract"))
-    for container in (contract.get("source_requirements"), compiled.get("source_requirements")):
-        for item in container if isinstance(container, list) else ():
-            source_req = item if isinstance(item, Mapping) else {}
-            path = str(source_req.get("path") or "").strip()
-            if not path or not implementation_source_ref_matches_text(path, raw_text):
-                continue
-            if any(existing.get("path") == path for existing in requirements):
-                continue
-            requirements.append({"path": path, "sentence": str(source_req.get("reason") or "")})
-            if len(requirements) >= 6:
-                return requirements
-    return requirements[:6]
-
-
-def _codex_hot_path_source_facts_text(task_facts: Mapping[str, object]) -> str:
-    """Render compact raw-task source context without exposing task_contract."""
-
-    source_paths = _source_fact_path_list(task_facts.get("source_requirement_paths"))
-    existing_paths = _source_fact_path_list(task_facts.get("existing_workspace_paths"))
-    missing_paths = _source_fact_missing_path_list(task_facts.get("missing_workspace_paths"))
-    verify_paths = _source_fact_path_list(task_facts.get("verify_command_paths"))
-    if not any((source_paths, existing_paths, missing_paths, verify_paths)):
-        return ""
-    lines = ["Task source facts:"]
-    if source_paths:
-        lines.append(f"- Provided source/artifact refs from the task: {', '.join(source_paths)}")
-    if existing_paths:
-        lines.append(f"- Existing workspace paths named by the task: {', '.join(existing_paths)}")
-    if missing_paths:
-        lines.append(f"- Output or target paths named by the task but not present yet: {', '.join(missing_paths)}")
-    if verify_paths:
-        lines.append(f"- Verifier command paths named by the task: {', '.join(verify_paths)}")
-    if source_paths or existing_paths:
-        lines.append(
-            "- The task text identifies the refs above as provided inputs."
-        )
-    if source_paths:
-        lines.append(
-            "- Source-use obligation inferred from the task text: treat the provided refs above as required "
-            "inputs; build, modify, or verify through them. Do not replace or bypass them with a standalone "
-            "synthetic artifact unless the task explicitly permits it."
-        )
-    return "\n".join(lines)
-
-
-def _source_fact_path_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    result: list[str] = []
-    for item in value:
-        text = str(item or "").strip()
-        if text and text not in result:
-            result.append(text)
-        if len(result) >= 8:
-            break
-    return result
-
-
-def _source_fact_missing_path_list(value: object) -> list[str]:
-    return [
-        path
-        for path in _source_fact_path_list(value)
-        if "/" in path or path.startswith("/")
-    ]
-
-
-def _provider_visible_existing_workspace_paths(
-    mentioned_paths: Iterable[object],
-    source_requirements: Iterable[Mapping[str, str]],
-    *,
-    workspace: Path,
-) -> tuple[list[str], set[str]]:
-    workspace = workspace.expanduser().resolve(strict=False)
-    existing: list[str] = []
-    resolved_nested_tokens: set[str] = set()
-    normalized_mentions = _dedupe_task_paths(mentioned_paths)
-    for path in normalized_mentions:
-        if _task_path_has_safe_segments(path) and (workspace / path).exists():
-            existing.append(path)
-
-    source_roots = _source_fact_existing_source_roots(source_requirements, workspace=workspace)
-    for path in normalized_mentions:
-        if not _task_path_is_safe_relative(path) or "/" in path or (workspace / path).exists():
-            continue
-        matches = _source_fact_nested_matches(path, source_roots, workspace=workspace)
-        if not matches:
-            continue
-        resolved_nested_tokens.add(path)
-        for match in matches:
-            if match not in existing:
-                existing.append(match)
-            if len(existing) >= 12:
-                return existing, resolved_nested_tokens
-    return existing[:12], resolved_nested_tokens
-
-
-def _source_fact_existing_source_roots(
-    source_requirements: Iterable[Mapping[str, str]],
-    *,
-    workspace: Path,
-) -> tuple[Path, ...]:
-    roots: list[Path] = []
-    for requirement in source_requirements:
-        raw_path = str(requirement.get("path") or "").strip()
-        if not raw_path:
-            continue
-        candidates: list[Path] = []
-        source_path = Path(raw_path.rstrip("/"))
-        if source_path.is_absolute():
-            try:
-                candidates.append(workspace / source_path.resolve(strict=False).relative_to(workspace))
-            except ValueError:
-                if raw_path.startswith("/app/"):
-                    candidates.append(workspace / raw_path.removeprefix("/app/").rstrip("/"))
-        else:
-            candidates.append(workspace / raw_path)
-        for candidate in candidates:
-            try:
-                resolved = candidate.expanduser().resolve(strict=False)
-                resolved.relative_to(workspace)
-            except ValueError:
-                continue
-            if resolved.exists() and resolved.is_dir() and resolved not in roots:
-                roots.append(resolved)
-            if len(roots) >= 6:
-                return tuple(roots)
-    return tuple(roots)
-
-
-def _source_fact_nested_matches(token: str, source_roots: Iterable[Path], *, workspace: Path) -> list[str]:
-    name = Path(token).name
-    if not name or name in {".", ".."}:
-        return []
-    matches: list[str] = []
-    for root in source_roots:
-        visited_dirs = 0
-        for dirpath, dirnames, filenames in os.walk(root):
-            visited_dirs += 1
-            if visited_dirs > _SOURCE_FACT_NESTED_MATCH_MAX_DIRS:
-                break
-            dirnames.sort()
-            filenames.sort()
-            current_dir = Path(dirpath)
-            try:
-                depth = len(current_dir.relative_to(root).parts)
-            except ValueError:
-                dirnames[:] = []
-                continue
-            if depth >= _SOURCE_FACT_NESTED_MATCH_MAX_DEPTH:
-                dirnames[:] = []
-            if name not in filenames:
-                continue
-            match = current_dir / name
-            try:
-                if not match.is_file():
-                    continue
-                rel = match.resolve(strict=False).relative_to(workspace).as_posix()
-            except (OSError, ValueError):
-                continue
-            if rel not in matches:
-                matches.append(rel)
-            if len(matches) >= 4:
-                return matches
-    return matches
 
 
 def _task_paths_from_text(text: object, *, workspace: str | Path | None = None) -> list[str]:
