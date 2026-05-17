@@ -43,7 +43,7 @@ def test_apply_patch_affordance_descriptor_uses_codex_hot_path_tools() -> None:
     tools = request["tools"]  # type: ignore[index]
     names = [tool.get("name") for tool in tools]  # type: ignore[union-attr]
 
-    assert names == ["apply_patch", "exec_command", "write_stdin", "finish"]
+    assert names == ["apply_patch", "exec_command", "write_stdin"]
     assert descriptor["tool_surface_profile_id"] == "codex_hot_path"
     assert "previous_response_id" not in request  # type: ignore[operator]
 

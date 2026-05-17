@@ -258,7 +258,7 @@ def _codex_hot_path_snapshot(
 ) -> ToolSurfaceSnapshot:
     profile = ToolSurfaceProfile(
         profile_id=CODEX_HOT_PATH_PROFILE_ID,
-        profile_version="v0",
+        profile_version="v1",
         prompt_contract_id="codex_hot_path_prompt_v1",
         render_policy_id="codex_hot_path_result_text_v1",
         default_parallel_tool_calls=True,
@@ -318,7 +318,6 @@ def _codex_hot_path_specs(*, enable_list_dir: bool) -> tuple[ImplementLaneToolSp
                 "Interactive stdin is disabled in this profile version."
             ),
         ),
-        legacy_by_name["finish"],
     ]
     if enable_list_dir:
         specs.insert(

@@ -40,6 +40,8 @@ def _lane_input(
             "auto_approve_writes": True,
             "artifact_dir": str(artifact_root),
             "tool_surface_profile_id": profile_id,
+            "verify_command": _verify_command(),
+            "verify_command_source": "configured_verifier",
         },
     )
 
@@ -152,7 +154,7 @@ def test_tool_surface_ab_report_compares_profiles_on_same_snapshot(tmp_path: Pat
     candidate = by_profile[CODEX_HOT_PATH_PROFILE_ID]
     assert baseline["ab_role"] == "baseline"
     assert candidate["ab_role"] == "candidate"
-    assert candidate["provider_tool_names"] == ["apply_patch", "exec_command", "write_stdin", "finish"]
+    assert candidate["provider_tool_names"] == ["apply_patch", "exec_command", "write_stdin"]
     assert set(candidate["renderer_ids"]) == {
         CODEX_APPLY_PATCH_RENDERER_ID,
         CODEX_FINISH_RENDERER_ID,

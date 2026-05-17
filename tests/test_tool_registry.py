@@ -136,8 +136,8 @@ def test_codex_hot_path_profile_exposes_codex_like_tools_only() -> None:
         "apply_patch",
         "exec_command",
         "write_stdin",
-        "finish",
     )
+    assert "finish" not in snapshot.provider_tool_names
     assert "run_command" not in snapshot.provider_tool_names
     assert "read_file" not in snapshot.provider_tool_names
     route_by_name = {entry.provider_name: entry.as_dict() for entry in snapshot.entries}

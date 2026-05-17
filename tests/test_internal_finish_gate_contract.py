@@ -4,6 +4,10 @@ from mew.implement_lane.internal_finish_gate_contract import (
     scan_tool_surface_metadata_for_finish_leaks,
     validate_done_candidate_record,
 )
+from mew.implement_lane.native_tool_schema import (
+    lower_implement_lane_tool_specs,
+    provider_tool_specs,
+)
 from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID, build_tool_surface_snapshot
 
 
@@ -96,7 +100,7 @@ def test_provider_tool_descriptor_key_named_finish_fails_gate() -> None:
     )
 
 
-def test_current_codex_hot_path_snapshot_still_leaks_finish_until_phase_1() -> None:
+def test_codex_hot_path_snapshot_has_no_provider_visible_finish_after_phase_1() -> None:
     snapshot = build_tool_surface_snapshot(
         lane_config={"tool_surface_profile_id": CODEX_HOT_PATH_PROFILE_ID},
         task_contract={},
@@ -105,9 +109,22 @@ def test_current_codex_hot_path_snapshot_still_leaks_finish_until_phase_1() -> N
 
     result = scan_tool_surface_metadata_for_finish_leaks(snapshot.request_metadata())
 
-    assert not result.ok
-    assert any(
-        violation.code == "provider_visible_finish_tool" for violation in result.violations
+    assert result.ok, result.as_dict()
+
+
+def test_codex_hot_path_provider_descriptors_have_no_finish_after_phase_1() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"tool_surface_profile_id": CODEX_HOT_PATH_PROFILE_ID},
+        task_contract={},
+        transcript_items=(),
+    )
+    descriptors = provider_tool_specs(lower_implement_lane_tool_specs(snapshot.tool_specs))
+
+    result = scan_provider_tool_descriptors_for_finish_leaks(descriptors)
+
+    assert result.ok, result.as_dict()
+    assert all(
+        str(descriptor.get("name") or "") != "finish" for descriptor in descriptors
     )
 
 

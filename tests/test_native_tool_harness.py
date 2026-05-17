@@ -519,11 +519,10 @@ def test_live_native_descriptor_preserves_codex_hot_path_tools(tmp_path: Path) -
                     "apply_patch",
                     "exec_command",
                     "write_stdin",
-                    "finish",
                 ],
                 "tool_surface": {
                     "profile_id": CODEX_HOT_PATH_PROFILE_ID,
-                    "profile_version": "v0",
+                    "profile_version": "v1",
                 },
             }
         )
@@ -532,7 +531,7 @@ def test_live_native_descriptor_preserves_codex_hot_path_tools(tmp_path: Path) -
         tool.get("name") or dict(tool.get("function") or {}).get("name")
         for tool in provider.requests[0]["request_body"]["tools"]  # type: ignore[index]
     ]
-    assert tool_names == ["apply_patch", "exec_command", "write_stdin", "finish"]
+    assert tool_names == ["apply_patch", "exec_command", "write_stdin"]
 
 
 def test_codex_hot_path_exec_command_routes_to_managed_exec(tmp_path: Path) -> None:
@@ -561,7 +560,6 @@ def test_codex_hot_path_exec_command_routes_to_managed_exec(tmp_path: Path) -> N
         "apply_patch",
         "exec_command",
         "write_stdin",
-        "finish",
     ]
     output = next(item for item in result.transcript.items if item.kind == "function_call_output")
     assert output.tool_name == "exec_command"

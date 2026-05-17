@@ -220,7 +220,7 @@ def test_request_descriptor_lowers_codex_hot_path_tool_schemas() -> None:
     tools = descriptor["request_body"]["tools"]  # type: ignore[index]
     names = [str(tool.get("name") or "") for tool in tools]  # type: ignore[union-attr]
 
-    assert names == ["apply_patch", "exec_command", "write_stdin", "finish"]
+    assert names == ["apply_patch", "exec_command", "write_stdin"]
     assert descriptor["tool_surface_profile_id"] == CODEX_HOT_PATH_PROFILE_ID
     exec_schema = next(tool for tool in tools if tool.get("name") == "exec_command")  # type: ignore[union-attr]
     write_stdin_schema = next(tool for tool in tools if tool.get("name") == "write_stdin")  # type: ignore[union-attr]
