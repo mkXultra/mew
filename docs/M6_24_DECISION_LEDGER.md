@@ -424,24 +424,26 @@ conflict. The 2026-05-10 WorkFrame Phase 0 row supersedes older HOT_PATH rows
 that present another same-shape `step-check-10min`, `speed_1`, or `proof_5` as
 the immediate next action.
 
-Latest active-row update, 2026-05-15 JST: H5 terminal head+tail visibility
-repair, the follow-up closeout/debug-cleanup handoff, the same-shape
-`speed-proof`, and the `make-mips-interpreter proof-5` close proof are
-validated. The five-trial close proof reached `4/5`, mean `0.800`, runner
-errors `0`, and exceeded the frozen Codex target `3/5`. The active task is now
-selecting the next measured M6.24 gap from the scoped task table. Do not make
-another H5 behavior change, cleanup lifecycle change, prompt/tool wording
-change, WorkFrame steering change, probe-threshold change, time-pressure
-change, or broad measurement until that next gap is explicitly selected.
+Latest active-row update, 2026-05-17 JST: M6.24 Internal Finish Gate
+production-route quarantine is validated. The production native route remains
+native-only (`run_live_native_implement_v2`), the retired
+`run_live_json_implement_v2` / `implement_v2_model_json_tool_loop` path is not
+reachable from production command routing or native gate checks, and internal
+helper model calls such as the finish-verifier planner remain allowed as
+sidecar-filtered helpers. The active task now returns to the selected
+`make-doom-for-mips` gap with one same-shape pre-speed / step-shape diagnostic.
+Do not delete the legacy model-JSON runner in this slice, and do not add
+task-specific Doom/MIPS rules before the diagnostic.
 
 Note: older rows may retain their original status labels for historical search,
 but they are not task-selection authority while
-`h5_make_mips_proof5_closed_next_gap_selection` is the newest row. Treat
+`internal_finish_gate_phase5_6_green_make_doom_prespeed_next` is the newest row. Treat
 them as repair evidence only unless this row is explicitly closed or
 superseded.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-17 | Close the Internal Finish Gate Phase 5/6 production-route gate and return to `make-doom-for-mips` pre-speed. | Commit `4819886` narrowed the model-JSON cleanup scope to production-route quarantine: legacy `run_live_json_implement_v2` remains for historical tests/dogfood, while production native validation rejects `run_live_json_implement_v2` / `implement_v2_model_json_tool_loop` on the main route and allows internal helper model calls such as finish-verifier planner `call_codex_json`. codex-ultra review sessions `019e34c6-1227-7be1-a2b9-e94570c44473` and `019e34c8-f2f1-7fb1-b694-5cdec07b6ee1` approved. Validation passed: `uv run pytest --no-testmon tests/test_native_tool_schema.py tests/test_native_provider_adapter.py tests/test_native_tool_harness.py tests/test_native_finish_gate.py tests/test_hot_path_fastcheck.py tests/test_native_boundary_audit.py tests/test_native_validation.py -q` -> `323 passed`; `uv run python scripts/check_implement_v2_native_gate.py --source-root .` -> PASS; `uv run pytest --no-testmon tests/test_native_validation.py -q` -> `7 passed`; scoped ruff passed before commit. | Run exactly one same-shape `make-doom-for-mips` pre-speed / step-shape diagnostic under the current native codex-hot-path setup. If it still misses, classify the failure from artifact/replay/step diff before any code change. Do not run `speed-proof`, `proof-5`, broad measurement, legacy model-JSON deletion, or task-specific Doom/MIPS fixes first. | internal_finish_gate_phase5_6_green_make_doom_prespeed_next |
 | 2026-05-16 | Accept the latest `make-mips-interpreter` `proof-5` rerun as OK for M6.24 implementation-lane scoring. | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260516-192445/2026-05-16__19-24-45/result.json` finished `5` trials with mean `0.800`, rewards `4/5`, and Pass@2/4/5 `1.000`. The successful trials have Codex-like step shape (`avg_total=420.0s`, `avg_first_edit=313.5s`) versus the Codex reference total `416.4s` and first edit `367.8s`. The only failed trial, `make-mips-interpreter__AkUWt3H`, failed before editing from provider transport continuity (`websocket error status=400 code=previous_response_not_found`), not from task-solving, tool use, finish-gate, or verifier semantics. The transient WebSocket retry patch was reverted because WebSocket fallback/retry is out of the current M6.24 scoring scope. | Treat `make-mips-interpreter` as closed/OK for the current M6.24 implementation-lane proof gate. Do not reopen H5, finish-gate, prompt, tool-surface, or WebSocket retry work from this transport-only miss. Select or continue the next measured M6.24 gap. | h5_make_mips_20260516_transport_miss_accepted |
 | 2026-05-15 | Close H5 for `make-mips-interpreter` and return to measured M6.24 gap selection. | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260515-141331/2026-05-15__14-13-32/result.json` finished with `5` trials, runner errors `0`, mean `0.800`, rewards `4/5`, and Pass@2/4/5 `1.000`, exceeding frozen Codex target `3/5`. Runtime was `42m33s`. The only failed trial was `make-mips-interpreter__UiFm5aR`: it built and ran `vm.js`, but finish closeout accepted a `320x200` BMP while the external verifier expected `640x400`. The proof-5 run therefore validates the H5 hot-path repair and also records a separate future artifact-obligation / finish-verifier gap. | Mark `make-mips-interpreter` closed for this H5 repair. Select the next measured M6.24 scoped gap. Do not continue H5 polish from the single false-finish failure unless another selected task repeats the same artifact-obligation failure family. | h5_make_mips_proof5_closed_next_gap_selection |
 | 2026-05-15 | Escalate `make-mips-interpreter` to `proof-5` close proof. | The same-shape `speed-proof` at `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-speed-proof-ts-codex-hot-path-20260515-135942/2026-05-15__13-59-43/make-mips-interpreter__YiztSTx` reached external reward `1.0` with exceptions `0`, runtime `9m19s`, `work_exit_code=0`, `stop_reason=finish`, native pairing `36/36` valid, resolver block count `0`, and provider request inventory present. Step-diff output `tmp/m6_24_make_mips_speed_proof_step_diff.md` shows first mutation step 18 after 17 probes versus Codex step 25 after 24 probes, with `same_frontier_broad_cycle_count=0`. | Run `uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter --mode proof-5 --tool-surface-profile-id codex_hot_path`. Close this repair if the result reaches frozen Codex target `3/5` with runner errors 0 and no repeated new structural blocker; otherwise classify the proof failures before another behavior change. | h5_speed_proof_passed_proof5_next |

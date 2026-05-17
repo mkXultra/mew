@@ -214,6 +214,17 @@ obligation failure into a concrete repair. Next repair only the generic
 finish-block continuation / typed-evidence projection path; do not add
 `make-doom-for-mips`-specific regex/string gates or spend `speed-proof` /
 `proof-5` first.
+
+The Internal Finish Gate production-route gate is now green. Commit `4819886`
+keeps the legacy `run_live_json_implement_v2` surface out of scope for this
+slice while proving the production native route cannot reach
+`run_live_json_implement_v2` / `implement_v2_model_json_tool_loop`. The Phase
+5/6 gate suite passed with `323 passed`, and
+`scripts/check_implement_v2_native_gate.py --source-root .` passed. Next return
+to exactly one same-shape `make-doom-for-mips` pre-speed / step-shape
+diagnostic; if it misses, classify artifact/replay/step-diff evidence before
+any code change. Do not delete the legacy model-JSON runner, run broad
+measurement, or add task-specific Doom/MIPS rules first.
 The governing docs are:
 
 - `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
