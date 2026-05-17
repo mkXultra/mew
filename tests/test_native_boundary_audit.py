@@ -8,7 +8,12 @@ def test_native_boundary_audit_passes_current_repo() -> None:
 
     assert report.ok, report.as_dict()
     assert any(check.name == "design_tracks_codex_like_live_hot_path" for check in report.checks)
+    assert any(check.name == "design_tracks_internal_finish_gate_phase_0" for check in report.checks)
     assert any(check.name == "source_inventory_native_loop_control_policy_state" for check in report.checks)
+    assert any(
+        check.name == "source_inventory_internal_finish_gate_boundary_anchor_constants"
+        for check in report.checks
+    )
 
 
 def test_native_boundary_audit_reports_missing_required_design_marker(tmp_path: Path) -> None:
@@ -61,15 +66,47 @@ def _write_complete_fixture(root: Path) -> None:
         "Phase 1A: Transcript/Input Collapse Phase 1B: Tool Surface And Mutation Path Main Codex responsibilities\n",
         encoding="utf-8",
     )
+    internal_design = root / "docs/DESIGN_2026-05-17_M6_24_INTERNAL_FINISH_GATE.md"
+    internal_design.write_text(
+        "Phase 0 - Static Contract And Leak Gate no provider-visible finish "
+        "provider request descriptors contain no `finish` "
+        "done_candidate_detected internal_finish_gate_launched "
+        "ng_resume_signal_appended provider_visible_finish_absent\n"
+        "configured verifier first finish verifier planner second "
+        "auto-detected verifier diagnostic-only\n"
+        "Remove provider-visible `finish` normal final response internal gate\n",
+        encoding="utf-8",
+    )
     impl = root / "src/mew/implement_lane"
     impl.mkdir(parents=True)
+    (impl / "internal_finish_gate_contract.py").write_text(
+        "INTERNAL_FINISH_GATE_BOUNDARY_ANCHORS = (\n"
+        "    'done_candidate_detected',\n"
+        "    'internal_finish_gate_launched',\n"
+        "    'ng_resume_signal_appended',\n"
+        "    'provider_visible_finish_absent',\n"
+        ")\n"
+        "DONE_CANDIDATE_REQUIRED_FIELDS = ('done_candidate_id',)\n"
+        "DONE_CANDIDATE_FORBIDDEN_FIELDS = ('finish_call_id', 'finish_tool_call_id', 'provider_call_id')\n"
+        "def scan_provider_tool_descriptors_for_finish_leaks(descriptors):\n"
+        "    '''Detect provider-visible finish descriptors.'''\n"
+        "    return _scan_finish_surface(descriptors)\n"
+        "def validate_done_candidate_record(record):\n"
+        "    DONE_CANDIDATE_REQUIRED_FIELDS\n"
+        "    DONE_CANDIDATE_FORBIDDEN_FIELDS\n"
+        "    missing_done_candidate_field\n"
+        "    legacy_finish_field_in_done_candidate\n",
+        encoding="utf-8",
+    )
     (impl / "native_tool_harness.py").write_text(
-        'if call.kind == "finish_call" and result.status == "completed" and not result.is_error:\n'
+        'if call.kind == "finish_call" and _native_finish_authority_lane_status(result) == "completed":\n'
         "    accepted_finish = call\n"
         '    status = "completed"\n'
+        "def _run_native_finish_time_closeouts():\n"
+        "    scoped_calls = list(tool_calls)\n"
         "closeout = _native_final_verifier_closeout(\n"
         "    provider=provider,\n"
-        "    tool_calls=tuple(tool_calls),\n"
+        "    tool_calls=tuple(scoped_calls),\n"
         ")\n"
         "def _responses_input_items():\n"
         "    task_facts = {}\n"

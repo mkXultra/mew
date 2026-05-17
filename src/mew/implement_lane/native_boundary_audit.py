@@ -12,8 +12,15 @@ import argparse
 import json
 from pathlib import Path
 
+from mew.implement_lane.internal_finish_gate_contract import (
+    INTERNAL_FINISH_GATE_BOUNDARY_ANCHORS,
+)
+
 
 DESIGN_DOC = Path("docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md")
+INTERNAL_FINISH_GATE_DESIGN_DOC = Path(
+    "docs/DESIGN_2026-05-17_M6_24_INTERNAL_FINISH_GATE.md"
+)
 
 @dataclass(frozen=True)
 class SourceControlSpec:
@@ -28,9 +35,45 @@ class SourceControlSpec:
 
 SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
     SourceControlSpec(
+        name="internal_finish_gate_boundary_anchor_constants",
+        relative_path="src/mew/implement_lane/internal_finish_gate_contract.py",
+        anchor="INTERNAL_FINISH_GATE_BOUNDARY_ANCHORS",
+        markers=INTERNAL_FINISH_GATE_BOUNDARY_ANCHORS,
+        window_after=12,
+    ),
+    SourceControlSpec(
+        name="internal_finish_gate_forbidden_surface_gate",
+        relative_path="src/mew/implement_lane/internal_finish_gate_contract.py",
+        anchor="def scan_provider_tool_descriptors_for_finish_leaks",
+        markers=(
+            "Detect provider-visible finish descriptors",
+            "_scan_finish_surface",
+        ),
+        window_after=8,
+    ),
+    SourceControlSpec(
+        name="done_candidate_sidecar_schema_gate",
+        relative_path="src/mew/implement_lane/internal_finish_gate_contract.py",
+        anchor="def validate_done_candidate_record",
+        markers=(
+            "DONE_CANDIDATE_REQUIRED_FIELDS",
+            "DONE_CANDIDATE_FORBIDDEN_FIELDS",
+            "missing_done_candidate_field",
+            "legacy_finish_field_in_done_candidate",
+        ),
+        window_after=42,
+    ),
+    SourceControlSpec(
+        name="done_candidate_forbidden_legacy_finish_fields",
+        relative_path="src/mew/implement_lane/internal_finish_gate_contract.py",
+        anchor="DONE_CANDIDATE_FORBIDDEN_FIELDS",
+        markers=("finish_call_id", "finish_tool_call_id", "provider_call_id"),
+        window_after=8,
+    ),
+    SourceControlSpec(
         name="finish_call_resolver_completion",
         relative_path="src/mew/implement_lane/native_tool_harness.py",
-        anchor='if call.kind == "finish_call" and _native_finish_resolver_lane_status(result) == "completed"',
+        anchor='if call.kind == "finish_call" and _native_finish_authority_lane_status(result) == "completed"',
         markers=("accepted_finish = call", 'status = "completed"'),
         forbidden_markers=('result.status == "completed" and not result.is_error',),
         window_after=8,
@@ -38,9 +81,14 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
     SourceControlSpec(
         name="native_final_verifier_closeout_call",
         relative_path="src/mew/implement_lane/native_tool_harness.py",
-        anchor="closeout = _native_final_verifier_closeout(",
-        markers=("provider=provider", "tool_calls=tuple(scoped_calls)"),
-        window_after=18,
+        anchor="def _run_native_finish_time_closeouts",
+        markers=(
+            "scoped_calls = list(tool_calls)",
+            "closeout = _native_final_verifier_closeout(",
+            "provider=provider",
+            "tool_calls=tuple(scoped_calls)",
+        ),
+        window_after=82,
     ),
     SourceControlSpec(
         name="native_loop_control_policy_state",
@@ -168,6 +216,28 @@ DESIGN_TRACKING_MARKERS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+INTERNAL_FINISH_GATE_DESIGN_MARKERS: dict[str, tuple[str, ...]] = {
+    "internal_finish_gate_phase_0": (
+        "Phase 0 - Static Contract And Leak Gate",
+        "no provider-visible finish",
+        "provider request descriptors contain no `finish`",
+        "done_candidate_detected",
+        "internal_finish_gate_launched",
+        "ng_resume_signal_appended",
+        "provider_visible_finish_absent",
+    ),
+    "internal_finish_gate_verifier_precedence": (
+        "configured verifier first",
+        "finish verifier planner second",
+        "auto-detected verifier diagnostic-only",
+    ),
+    "internal_finish_gate_model_boundary": (
+        "Remove provider-visible `finish`",
+        "normal final response",
+        "internal gate",
+    ),
+}
+
 
 @dataclass(frozen=True)
 class BoundaryAuditCheck:
@@ -200,6 +270,7 @@ def run_native_boundary_audit(source_root: str | Path = ".") -> BoundaryAuditRep
     root = Path(source_root)
     checks: list[BoundaryAuditCheck] = []
     design_text = _read_text(root / DESIGN_DOC)
+    internal_finish_gate_design_text = _read_text(root / INTERNAL_FINISH_GATE_DESIGN_DOC)
 
     checks.append(
         BoundaryAuditCheck(
@@ -210,6 +281,22 @@ def run_native_boundary_audit(source_root: str | Path = ".") -> BoundaryAuditRep
     )
     for name, markers in DESIGN_TRACKING_MARKERS.items():
         missing = [marker for marker in markers if marker not in design_text]
+        checks.append(
+            BoundaryAuditCheck(
+                name=f"design_tracks_{name}",
+                passed=not missing,
+                detail="ok" if not missing else f"missing markers: {', '.join(missing)}",
+            )
+        )
+    checks.append(
+        BoundaryAuditCheck(
+            name="internal_finish_gate_design_doc_exists",
+            passed=bool(internal_finish_gate_design_text),
+            detail=str(INTERNAL_FINISH_GATE_DESIGN_DOC),
+        )
+    )
+    for name, markers in INTERNAL_FINISH_GATE_DESIGN_MARKERS.items():
+        missing = [marker for marker in markers if marker not in internal_finish_gate_design_text]
         checks.append(
             BoundaryAuditCheck(
                 name=f"design_tracks_{name}",
