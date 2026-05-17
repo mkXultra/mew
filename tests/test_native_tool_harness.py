@@ -2534,6 +2534,77 @@ def test_native_harness_done_candidate_gate_block_hides_closeout_from_next_provi
     assert "Assistant text is not a completion signal" in next_request_text
 
 
+def test_native_harness_done_candidate_finish_planner_rows_use_done_candidate_id(tmp_path: Path) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        planner_requests: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                            )
+                        ],
+                        [fake_message("Done.", item_id="msg-done")],
+                    ]
+                ).responses
+            )
+            self.planner_requests = []
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_requests.append(dict(request))
+            return {
+                "command": "test -f vm.js",
+                "cwd": ".",
+                "reason": "verify created file exists",
+                "confidence": "high",
+            }
+
+    artifact_root = tmp_path / "artifacts-done-planner"
+    provider = PlanningProvider()
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        artifact_root=artifact_root,
+        max_turns=2,
+    )
+
+    done_candidate_id = result.metrics["latest_done_candidate"]["done_candidate_id"]
+    assert result.status == "completed"
+    assert provider.planner_requests[0]["done_candidate_id"] == done_candidate_id
+    assert "finish_call_id" not in provider.planner_requests[0]
+    planner_decision = result.metrics["finish_verifier_planner_latest_decision"]
+    assert planner_decision["done_candidate_id"] == done_candidate_id
+    assert "finish_call_id" not in planner_decision
+    gate_decision = result.metrics["native_finish_gate_latest_decision"]
+    assert gate_decision["done_candidate_id"] == done_candidate_id
+    closeout_call = next(item for item in result.transcript.items if item.call_id.startswith("call-final-verifier-closeout"))
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
+    request_rows = [
+        json.loads(line)
+        for line in (artifact_root / "finish_verifier_planner_requests.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    decision_rows = [
+        json.loads(line)
+        for line in (artifact_root / "finish_verifier_planner_decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert request_rows[-1]["request"]["done_candidate_id"] == done_candidate_id
+    assert "finish_call_id" not in request_rows[-1]["request"]
+    assert decision_rows[-1]["done_candidate_id"] == done_candidate_id
+    assert "finish_call_id" not in decision_rows[-1]
+
+
 def test_native_harness_repeated_assistant_only_turn_records_no_tool_repeat(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [

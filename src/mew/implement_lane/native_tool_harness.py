@@ -251,7 +251,6 @@ class FinishVerifierPlannerLoopPolicy:
 class FinishVerifierPlannerLoopRequest:
     lane_attempt_id: str
     turn_id: str
-    finish_call_id: str
     task_id: str
     task_description: str
     task_contract: Mapping[str, object]
@@ -259,6 +258,8 @@ class FinishVerifierPlannerLoopRequest:
     recent_tool_results: tuple[Mapping[str, object], ...]
     candidate_paths: tuple[str, ...]
     policy: FinishVerifierPlannerLoopPolicy
+    finish_call_id: str = ""
+    done_candidate_id: str = ""
     legacy_request: Mapping[str, object] | None = None
 
     def as_planner_request(self) -> dict[str, object]:
@@ -276,7 +277,6 @@ class FinishVerifierPlannerLoopRequest:
                 "role": "independent_read_only_finish_verifier_planner",
                 "lane_attempt_id": self.lane_attempt_id,
                 "turn_id": self.turn_id,
-                "finish_call_id": self.finish_call_id,
                 "task": {
                     "task_id": self.task_id,
                     "description": self.task_description,
@@ -312,6 +312,11 @@ class FinishVerifierPlannerLoopRequest:
                 },
             }
         )
+        if self.done_candidate_id:
+            base["done_candidate_id"] = self.done_candidate_id
+            base.pop("finish_call_id", None)
+        elif self.finish_call_id:
+            base["finish_call_id"] = self.finish_call_id
         return base
 
 
@@ -670,6 +675,7 @@ def run_native_implement_v2(
             tool_calls=tuple(tool_calls),
             tool_results=tuple(tool_results),
             start_monotonic=start_monotonic,
+            done_candidate_id=done_candidate.done_candidate_id,
         )
         for closeout_event in closeout_events:
             append_closeout_event(closeout_event)
@@ -1486,6 +1492,7 @@ def _run_native_finish_time_closeouts(
     tool_calls: tuple[NativeTranscriptItem, ...],
     tool_results: tuple[ToolResultEnvelope, ...],
     start_monotonic: float,
+    done_candidate_id: str = "",
 ) -> tuple[tuple[_NativeCloseoutEvent, ...], _NativeCloseoutContext]:
     events: list[_NativeCloseoutEvent] = []
     context = _NativeCloseoutContext()
@@ -1548,6 +1555,7 @@ def _run_native_finish_time_closeouts(
         tool_results=tuple(scoped_results),
         start_monotonic=start_monotonic,
         pending_mutation=latest_mutation,
+        done_candidate_id=done_candidate_id,
     )
     if closeout is None:
         return tuple(events), context.merge(
@@ -1965,6 +1973,7 @@ def _native_final_verifier_closeout(
     tool_results: tuple[ToolResultEnvelope, ...],
     start_monotonic: float,
     pending_mutation: Mapping[str, object] | None = None,
+    done_candidate_id: str = "",
 ) -> tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]] | None:
     effective_mutation = dict(pending_mutation or {})
     if not effective_mutation:
@@ -1988,6 +1997,7 @@ def _native_final_verifier_closeout(
         provider=provider,
         lane_config=lane_config,
         tool_results=tool_results,
+        done_candidate_id=done_candidate_id,
     )
     if plan is None:
         return None
@@ -2127,6 +2137,7 @@ def _native_final_verifier_closeout_plan(
     provider: object,
     lane_config: Mapping[str, object],
     tool_results: tuple[ToolResultEnvelope, ...],
+    done_candidate_id: str = "",
 ) -> _NativeFinishVerifierPlan | None:
     configured = _native_final_verifier_command_candidate(lane_input, wanted_source="configured_verifier")
     if configured is not None:
@@ -2142,6 +2153,7 @@ def _native_final_verifier_closeout_plan(
         lane_input,
         lane_config=lane_config,
         tool_results=tool_results,
+        done_candidate_id=done_candidate_id,
     )
     request_hash = _finish_verifier_planner_request_hash(loop_request.as_planner_request())
     loop_result = run_finish_verifier_planner_loop(
@@ -2250,6 +2262,7 @@ def run_finish_verifier_planner_loop(
             reject_reason="finish verifier planner loop is disabled",
             reject_blockers=("planner_loop_disabled",),
         )
+        record = _finish_verifier_planner_record_with_authority(record, planner_request)
         return FinishVerifierPlannerLoopResult(
             status="no_plan",
             plan=None,
@@ -2265,6 +2278,7 @@ def run_finish_verifier_planner_loop(
             reject_reason="planner provider has no plan_finish_verifier_command",
             reject_blockers=("planner_provider_missing",),
         )
+        record = _finish_verifier_planner_record_with_authority(record, planner_request)
         return FinishVerifierPlannerLoopResult(
             status="no_plan",
             plan=None,
@@ -2280,6 +2294,7 @@ def run_finish_verifier_planner_loop(
             request_hash=request_hash,
             error=str(exc),
         )
+        record = _finish_verifier_planner_record_with_authority(record, planner_request)
         return FinishVerifierPlannerLoopResult(
             status="error",
             plan=None,
@@ -2296,6 +2311,7 @@ def run_finish_verifier_planner_loop(
             reject_reason="planner attempted forbidden tool",
             reject_blockers=forbidden,
         )
+        record = _finish_verifier_planner_record_with_authority(record, planner_request)
         return FinishVerifierPlannerLoopResult(
             status="rejected",
             plan=None,
@@ -2315,6 +2331,7 @@ def run_finish_verifier_planner_loop(
             reject_reason=coercion.reject_reason,
             reject_blockers=coercion.reject_blockers,
         )
+        record = _finish_verifier_planner_record_with_authority(record, planner_request)
         return FinishVerifierPlannerLoopResult(
             status="rejected" if coercion.status != "no_plan" else "no_plan",
             plan=None,
@@ -2328,6 +2345,7 @@ def run_finish_verifier_planner_loop(
         raw_plan=raw_plan,
         plan=coercion.plan,
     )
+    record = _finish_verifier_planner_record_with_authority(record, planner_request)
     return FinishVerifierPlannerLoopResult(
         status="selected",
         plan=coercion.plan,
@@ -2355,6 +2373,7 @@ def _finish_verifier_planner_loop_request(
     *,
     lane_config: Mapping[str, object],
     tool_results: tuple[ToolResultEnvelope, ...],
+    done_candidate_id: str = "",
 ) -> FinishVerifierPlannerLoopRequest:
     legacy_request = _finish_verifier_planner_request(lane_input, tool_results)
     task = legacy_request.get("task") if isinstance(legacy_request.get("task"), Mapping) else {}
@@ -2370,7 +2389,8 @@ def _finish_verifier_planner_loop_request(
     return FinishVerifierPlannerLoopRequest(
         lane_attempt_id=_lane_attempt_id(lane_input),
         turn_id="finish-verifier-planner",
-        finish_call_id="finish",
+        finish_call_id="" if done_candidate_id else "finish",
+        done_candidate_id=done_candidate_id,
         task_id=str(task.get("task_id") or lane_input.task_id),
         task_description=str(task.get("description") or _native_task_description(lane_input)),
         task_contract=task_contract,
@@ -2893,6 +2913,21 @@ def _provider_finish_verifier_planner_requests(provider: object) -> tuple[Mappin
 def _finish_verifier_planner_request_hash(request: Mapping[str, object]) -> str:
     encoded = json.dumps(dict(request), ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _finish_verifier_planner_record_with_authority(
+    record: Mapping[str, object],
+    request: Mapping[str, object],
+) -> dict[str, object]:
+    item = dict(record)
+    done_candidate_id = str(request.get("done_candidate_id") or "").strip()
+    finish_call_id = str(request.get("finish_call_id") or "").strip()
+    if done_candidate_id:
+        item["done_candidate_id"] = done_candidate_id
+        item.pop("finish_call_id", None)
+    elif finish_call_id:
+        item["finish_call_id"] = finish_call_id
+    return item
 
 
 def _finish_verifier_planner_value_hash(value: object) -> str:
