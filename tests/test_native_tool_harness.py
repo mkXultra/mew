@@ -2497,6 +2497,7 @@ def test_native_harness_done_candidate_runs_internal_finish_gate_after_mutation(
 
 
 def test_native_harness_done_candidate_gate_block_hides_closeout_from_next_provider_turn(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts-done-ng-resume"
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -2519,6 +2520,7 @@ def test_native_harness_done_candidate_gate_block_hides_closeout_from_next_provi
             final_verifier_closeout_seconds=3,
         ),
         provider=provider,
+        artifact_root=artifact_root,
         max_turns=3,
     )
 
@@ -2526,12 +2528,22 @@ def test_native_harness_done_candidate_gate_block_hides_closeout_from_next_provi
     assert result.metrics["done_candidate_count"] == 1
     assert result.metrics["native_finish_gate_decision_count"] == 1
     assert result.metrics["native_finish_gate_latest_decision"]["result"] == "block"
+    assert result.metrics["ng_resume_signal_count"] == 1
     assert result.metrics["no_tool_continuation_count"] == 1
+    assert result.metrics["latest_no_tool_continuation"]["reason"] == "ng_resume_signal"
     next_request_text = json.dumps(provider.requests[2]["input_items"], ensure_ascii=False, sort_keys=True)
     assert "call-final-verifier-closeout" not in next_request_text
     assert "finish_verifier" not in next_request_text
     assert "finish_verifier_plan" not in next_request_text
-    assert "Assistant text is not a completion signal" in next_request_text
+    assert "Previous completion attempt was not accepted" in next_request_text
+    assert "task_contract" not in result.metrics["latest_no_tool_continuation"]["continuation"]
+    rows = [
+        json.loads(line)
+        for line in (artifact_root / "ng_resume_signals.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[0]["done_candidate_id"] == result.metrics["latest_done_candidate"]["done_candidate_id"]
+    manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["metrics"]["ng_resume_signal_count"] == 1
 
 
 def test_native_harness_done_candidate_finish_planner_rows_use_done_candidate_id(tmp_path: Path) -> None:

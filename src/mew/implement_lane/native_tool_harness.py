@@ -47,6 +47,12 @@ from .native_done_candidate import (
     build_native_done_candidate,
     write_native_done_candidate_artifacts,
 )
+from .native_ng_resume import (
+    NativeNgResumeSignal,
+    build_native_ng_resume_signal,
+    native_ng_resume_input_item,
+    write_native_ng_resume_signal_artifacts,
+)
 from .native_sidecar_projection import build_compact_native_sidecar_digest
 from .native_transcript import (
     CALL_ITEM_KINDS,
@@ -611,6 +617,7 @@ def run_native_implement_v2(
     latest_no_tool_continuation: dict[str, object] = {}
     resolver_decisions: list[CompletionResolverDecision] = []
     native_finish_gate_decisions: list[NativeFinishGateDecision] = []
+    ng_resume_signals: list[NativeNgResumeSignal] = []
     native_model_budget_block: dict[str, object] | None = None
     start_monotonic = time.monotonic()
     status = "blocked"
@@ -797,6 +804,7 @@ def run_native_implement_v2(
                 tool_results=tuple(tool_results),
                 done_candidates=tuple(done_candidates),
                 native_finish_gate_decisions=tuple(native_finish_gate_decisions),
+                ng_resume_signals=tuple(ng_resume_signals),
                 artifact_root=artifact_root,
                 error=str(exc),
             )
@@ -876,6 +884,40 @@ def run_native_implement_v2(
                     status = "blocked"
                     finish_summary = native_decision.reason
                     break
+                if no_tool_reason == "no_tool_repeat":
+                    no_tool_repeat_done_candidate_count += 1
+                    latest_no_tool_continuation = {
+                        "turn_index": turn_index,
+                        "assistant_text": _native_first_assistant_text(turn_items),
+                        "continuation": "",
+                        "done_candidate_id": done_candidate.done_candidate_id,
+                        "reason": "no_tool_repeat",
+                    }
+                    status = "blocked"
+                    finish_summary = (
+                        "native model returned repeated assistant text without a tool call after continuation"
+                    )
+                    break
+                if native_decision.lane_status == "blocked_continue":
+                    ng_resume = build_native_ng_resume_signal(native_decision)
+                    ng_resume_signals.append(ng_resume)
+                    continuation = native_ng_resume_input_item(
+                        ng_resume,
+                        sequence=len(items) + 1,
+                        provider=provider.provider,
+                        model=provider.model,
+                    )
+                    items.append(continuation)
+                    no_tool_continuation_count += 1
+                    latest_no_tool_continuation = {
+                        "turn_index": turn_index,
+                        "assistant_text": _native_first_assistant_text(turn_items),
+                        "continuation": continuation.output_text_or_ref,
+                        "done_candidate_id": done_candidate.done_candidate_id,
+                        "reason": "ng_resume_signal",
+                    }
+                    finish_summary = finish_summary or ng_resume.concise_reason
+                    continue
             if no_tool_continuation_count >= 1:
                 no_tool_repeat_done_candidate_count += 1
                 latest_no_tool_continuation = {
@@ -1099,6 +1141,8 @@ def run_native_implement_v2(
         "finish_gate_decision": finish_gate_decision,
         "done_candidate_count": len(done_candidates),
         "latest_done_candidate": done_candidates[-1].as_dict() if done_candidates else {},
+        "ng_resume_signal_count": len(ng_resume_signals),
+        "latest_ng_resume_signal": ng_resume_signals[-1].as_dict() if ng_resume_signals else {},
         "no_tool_continuation_count": no_tool_continuation_count,
         "no_tool_repeat_done_candidate_count": no_tool_repeat_done_candidate_count,
         "latest_no_tool_continuation": latest_no_tool_continuation,
@@ -1128,6 +1172,7 @@ def run_native_implement_v2(
             resolver_decisions=tuple(resolver_decisions),
             native_finish_gate_decisions=tuple(native_finish_gate_decisions),
             done_candidates=tuple(done_candidates),
+            ng_resume_signals=tuple(ng_resume_signals),
             finish_verifier_planner_decisions=tuple(finish_verifier_planner_decisions),
             finish_verifier_planner_requests=tuple(finish_verifier_planner_requests),
         )
@@ -5472,6 +5517,7 @@ def _partial_failure_harness_result(
     artifact_root: str | Path | None,
     error: str,
     native_finish_gate_decisions: tuple[NativeFinishGateDecision, ...] = (),
+    ng_resume_signals: tuple[NativeNgResumeSignal, ...] = (),
 ) -> NativeImplementV2HarnessResult:
     transcript = NativeTranscript(
         lane_attempt_id=lane_attempt_id,
@@ -5492,6 +5538,8 @@ def _partial_failure_harness_result(
         "provider_request_inventory_available": bool(getattr(provider, "requests", []) or ()),
         "done_candidate_count": len(done_candidates),
         "latest_done_candidate": done_candidates[-1].as_dict() if done_candidates else {},
+        "ng_resume_signal_count": len(ng_resume_signals),
+        "latest_ng_resume_signal": ng_resume_signals[-1].as_dict() if ng_resume_signals else {},
         "native_finish_gate_decision_count": len(native_finish_gate_decisions),
         "native_finish_gate_latest_decision": (
             native_finish_gate_decisions[-1].as_dict() if native_finish_gate_decisions else {}
@@ -5508,6 +5556,7 @@ def _partial_failure_harness_result(
                 tool_results=tool_results,
                 done_candidates=done_candidates,
                 native_finish_gate_decisions=native_finish_gate_decisions,
+                ng_resume_signals=ng_resume_signals,
                 error=error,
                 artifact_root=Path(artifact_root),
             )
@@ -5519,6 +5568,7 @@ def _partial_failure_harness_result(
                 provider=provider,
                 done_candidates=done_candidates,
                 native_finish_gate_decisions=native_finish_gate_decisions,
+                ng_resume_signals=ng_resume_signals,
                 status="failed",
                 error=error,
             )
@@ -5540,6 +5590,7 @@ def _write_live_failure_artifacts(
     tool_results: tuple[ToolResultEnvelope, ...] = (),
     done_candidates: tuple[NativeDoneCandidate, ...] = (),
     native_finish_gate_decisions: tuple[NativeFinishGateDecision, ...] = (),
+    ng_resume_signals: tuple[NativeNgResumeSignal, ...] = (),
     error: str,
     artifact_root: Path | None = None,
 ) -> tuple[str, ...]:
@@ -5574,6 +5625,14 @@ def _write_live_failure_artifacts(
             write_native_finish_gate_artifacts(
                 root,
                 native_finish_gate_decisions,
+                proof_manifest_path=paths.get("proof_manifest"),
+            )
+        )
+    if ng_resume_signals:
+        paths.update(
+            write_native_ng_resume_signal_artifacts(
+                root,
+                ng_resume_signals,
                 proof_manifest_path=paths.get("proof_manifest"),
             )
         )
@@ -5795,6 +5854,7 @@ def _write_native_artifacts(
     resolver_decisions: tuple[CompletionResolverDecision, ...] = (),
     native_finish_gate_decisions: tuple[NativeFinishGateDecision, ...] = (),
     done_candidates: tuple[NativeDoneCandidate, ...] = (),
+    ng_resume_signals: tuple[NativeNgResumeSignal, ...] = (),
     finish_verifier_planner_decisions: tuple[Mapping[str, object], ...] = (),
     finish_verifier_planner_requests: tuple[Mapping[str, object], ...] = (),
 ) -> dict[str, Path]:
@@ -5832,6 +5892,14 @@ def _write_native_artifacts(
             write_native_done_candidate_artifacts(
                 root,
                 done_candidates,
+                proof_manifest_path=paths.get("proof_manifest"),
+            )
+        )
+    if ng_resume_signals:
+        paths.update(
+            write_native_ng_resume_signal_artifacts(
+                root,
+                ng_resume_signals,
                 proof_manifest_path=paths.get("proof_manifest"),
             )
         )
