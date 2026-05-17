@@ -143,6 +143,7 @@ _SOURCE_MUTATION_COMMAND_INTENTS = frozenset(
 )
 _COMMAND_RUN_ID_RE = re.compile(
     r"(?:^|[\s;,])command_run_id=(?P<id>[^\s;,]+)"
+    r"|Process running with command_id (?P<command_id>[^\s]+)"
     r"|Process running with session ID (?P<session>[^\s]+)"
 )
 _COMMAND_OUTPUT_REF_RE = re.compile(r"implement-v2-exec://[^/\s]+/(?P<id>[^/\s]+)/output")
@@ -1456,11 +1457,13 @@ def _adapt_codex_hot_path_call(
         chars = str(args.get("chars") or "")
         if chars:
             return call, args, "write_stdin non-empty chars are not supported in poll_only mode"
-        session_id = str(args.get("session_id") or args.get("command_run_id") or "").strip()
-        if not session_id:
-            return call, args, "write_stdin session_id is required"
+        command_id = str(
+            args.get("command_id") or args.get("session_id") or args.get("command_run_id") or ""
+        ).strip()
+        if not command_id:
+            return call, args, "write_stdin command_id is required"
         mapped = {
-            "command_run_id": session_id,
+            "command_id": command_id,
             "wait_seconds": max(0.0, _safe_float(args.get("yield_time_ms"), default=0.0) / 1000.0),
         }
         for key in ("max_output_chars", "max_output_tokens"):
@@ -4841,6 +4844,18 @@ def _command_run_id_from_output_item(item: NativeTranscriptItem) -> str:
     return ""
 
 
+def _command_run_ids_from_output_item(item: NativeTranscriptItem) -> set[str]:
+    command_run_ids: set[str] = set()
+    command_run_id = _command_run_id_from_output_text(item.output_text_or_ref)
+    if command_run_id:
+        command_run_ids.add(command_run_id)
+    for ref in item.content_refs:
+        match = _COMMAND_OUTPUT_REF_RE.search(str(ref or ""))
+        if match:
+            command_run_ids.add(match.group("id"))
+    return command_run_ids
+
+
 def _responses_input_items(
     lane_input: ImplementLaneInput,
     transcript_items: list[NativeTranscriptItem],
@@ -5225,7 +5240,7 @@ def _first_write_due_thresholds(
 def _native_call_is_prewrite_probe(item: NativeTranscriptItem) -> bool:
     if item.tool_name in READ_ONLY_TOOL_NAMES:
         return True
-    if item.tool_name not in EXEC_TOOL_NAMES:
+    if item.tool_name not in EXEC_TOOL_NAMES and item.tool_name != "exec_command":
         return False
     if _native_call_is_source_mutating_exec(item):
         return False
@@ -5258,7 +5273,7 @@ def _failed_verifier_repair_probe_threshold(item: NativeTranscriptItem | None) -
 def _native_call_is_probe_or_exec(item: NativeTranscriptItem) -> bool:
     if _native_call_is_source_mutating_exec(item):
         return False
-    return item.tool_name in READ_ONLY_TOOL_NAMES or item.tool_name in EXEC_TOOL_NAMES
+    return item.tool_name in READ_ONLY_TOOL_NAMES or item.tool_name in EXEC_TOOL_NAMES or item.tool_name == "exec_command"
 
 
 def _calls_after_sequence(calls: list[NativeTranscriptItem], sequence: int) -> list[NativeTranscriptItem]:
@@ -5304,9 +5319,7 @@ def _verifier_command_run_ids(
     for item in transcript_items:
         if item.kind not in OUTPUT_ITEM_KINDS or item.call_id not in verifier_call_ids:
             continue
-        command_run_id = _command_run_id_from_output_text(item.output_text_or_ref)
-        if command_run_id:
-            command_run_ids.add(command_run_id)
+        command_run_ids.update(_command_run_ids_from_output_item(item))
     return command_run_ids
 
 
@@ -5320,7 +5333,7 @@ def _output_belongs_to_verifier(
     if item.call_id in verifier_call_ids:
         return True
     call = calls_by_id.get(item.call_id)
-    if call is None or call.tool_name not in {"poll_command", "cancel_command"}:
+    if call is None or call.tool_name not in {"poll_command", "cancel_command", "write_stdin"}:
         return False
     return _command_run_id_from_call(call) in verifier_command_run_ids
 
@@ -5329,14 +5342,19 @@ def _command_run_id_from_call(item: NativeTranscriptItem) -> str:
     arguments, error = _arguments(item)
     if error:
         return ""
-    return str(arguments.get("command_run_id") or "").strip()
+    return str(
+        arguments.get("command_id")
+        or arguments.get("command_run_id")
+        or arguments.get("session_id")
+        or ""
+    ).strip()
 
 
 def _command_run_id_from_output_text(value: str) -> str:
     match = _COMMAND_RUN_ID_RE.search(str(value or ""))
     if not match:
         return ""
-    return str(match.group("id") or match.group("session") or "").strip()
+    return str(match.group("id") or match.group("command_id") or match.group("session") or "").strip()
 
 
 def _native_output_is_terminal(item: NativeTranscriptItem) -> bool:

@@ -156,10 +156,10 @@ def _rendered(
 
 def _render_codex_terminal(result: ToolResultEnvelope, *, limit: int) -> str:
     payload = _payload(result)
-    command_run_id = str(payload.get("command_run_id") or "").strip()
+    command_id = str(payload.get("command_id") or "").strip()
     if _terminal_status(result, payload) in _NONTERMINAL_STATUSES:
-        session_id = command_run_id or str(payload.get("session_id") or result.provider_call_id or "unknown")
-        return _clip(f"Process running with session ID {session_id}", limit)
+        visible_id = command_id or str(payload.get("session_id") or result.provider_call_id or "unknown")
+        return _clip(f"Process running with command_id {visible_id}", limit)
 
     output = _command_output_text(result, payload, limit=limit)
     exit_code = _exit_code(result, payload)

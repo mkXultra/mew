@@ -228,6 +228,9 @@ class ImplementV2ManagedExecRuntime:
         self.runner = ManagedCommandRunner(max_active=max_active)
         self.output_paths: dict[str, str] = {}
         self.command_metadata: dict[str, dict[str, object]] = {}
+        self.command_id_by_run_id: dict[str, str] = {}
+        self.command_run_id_by_alias: dict[str, str] = {}
+        self.next_command_index = 0
 
     def execute(self, call: ToolCallEnvelope) -> ToolResultEnvelope:
         if call.tool_name not in EXEC_TOOL_NAMES:
@@ -380,6 +383,10 @@ class ImplementV2ManagedExecRuntime:
         command_intent = _command_intent(args)
         raw_contract = args.get("execution_contract") if isinstance(args.get("execution_contract"), dict) else {}
         command_run_id = _command_run_id(call)
+        command_id = self._register_command_aliases(
+            command_run_id,
+            provider_call_id=call.provider_call_id,
+        )
         output_ref = f"{call.lane_attempt_id}/{command_run_id}/output.log"
         output_path = _output_path(self.workspace, output_ref)
         normalized_contract = _normalize_runtime_contract(
@@ -429,6 +436,7 @@ class ImplementV2ManagedExecRuntime:
         )
         self.output_paths[command_run_id] = str(output_path)
         self.command_metadata[command_run_id] = {
+            "command_id": command_id,
             "tool_name": call.tool_name,
             "effective_tool_name": effective_tool_name,
             "command": command,
@@ -454,6 +462,7 @@ class ImplementV2ManagedExecRuntime:
         )
         if payload.get("status") == "running":
             payload["status"] = "yielded"
+        payload["command_id"] = command_id
         payload["command_run_id"] = command_run_id
         payload["output_ref"] = output_ref
         payload["output_path"] = str(output_path)
@@ -477,7 +486,7 @@ class ImplementV2ManagedExecRuntime:
 
     def _poll_command(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
-        command_run_id = _required_command_run_id(args)
+        command_run_id = self._resolve_command_run_id(args)
         metadata = self.command_metadata.get(command_run_id, {})
         output_budget_chars = _command_output_budget_chars(
             args,
@@ -492,12 +501,13 @@ class ImplementV2ManagedExecRuntime:
         payload["provider_visible_output_chars"] = output_budget_chars
         if payload.get("status") == "running":
             payload["status"] = "yielded"
+        payload["command_id"] = str(metadata.get("command_id") or self.command_id_by_run_id.get(command_run_id) or "")
         payload["command_run_id"] = command_run_id
         return payload
 
     def _cancel_command(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
-        command_run_id = _required_command_run_id(args)
+        command_run_id = self._resolve_command_run_id(args)
         if not self.runner.has_handle(command_run_id):
             raise ValueError(f"unknown command_run_id: {command_run_id}")
         payload = self.runner.cancel(
@@ -505,12 +515,17 @@ class ImplementV2ManagedExecRuntime:
             command_run_id=command_run_id,
         )
         payload.update(_command_metadata_for_payload(self.command_metadata.get(command_run_id, {})))
+        payload["command_id"] = str(
+            self.command_metadata.get(command_run_id, {}).get("command_id")
+            or self.command_id_by_run_id.get(command_run_id)
+            or ""
+        )
         payload["command_run_id"] = command_run_id
         return payload
 
     def _read_command_output(self, call: ToolCallEnvelope) -> dict[str, object]:
         args = dict(call.arguments)
-        command_run_id = _required_command_run_id(args)
+        command_run_id = self._resolve_command_run_id(args)
         if command_run_id not in self.output_paths:
             raise ValueError(f"unknown command_run_id: {command_run_id}")
         output_path = Path(self.output_paths[command_run_id])
@@ -525,6 +540,7 @@ class ImplementV2ManagedExecRuntime:
         metadata = self.command_metadata.get(command_run_id, {})
         source_observer = metadata.get("source_observer") if isinstance(metadata, dict) else {}
         return {
+            "command_id": str(metadata.get("command_id") or self.command_id_by_run_id.get(command_run_id) or ""),
             "command_run_id": command_run_id,
             "output_path": str(output_path),
             "offset": offset,
@@ -536,6 +552,69 @@ class ImplementV2ManagedExecRuntime:
             **({"command_classification": dict(metadata["command_classification"])} if isinstance(metadata.get("command_classification"), dict) else {}),
             **({"command_source": str(metadata.get("command_source") or "")} if metadata.get("command_source") else {}),
         }
+
+    def _register_command_aliases(self, command_run_id: str, *, provider_call_id: str = "") -> str:
+        command_id = self.command_id_by_run_id.get(command_run_id)
+        if not command_id:
+            self.next_command_index += 1
+            command_id = f"cmd_{self.next_command_index:03d}"
+            self.command_id_by_run_id[command_run_id] = command_id
+        aliases = {
+            command_id,
+            command_run_id,
+            str(provider_call_id or "").strip(),
+        }
+        if provider_call_id:
+            aliases.add(f"native:{provider_call_id}")
+        for alias in aliases:
+            if alias:
+                self.command_run_id_by_alias[alias] = command_run_id
+        return command_id
+
+    def _resolve_command_run_id(self, args: dict[str, object]) -> str:
+        raw = str(
+            args.get("command_id")
+            or args.get("command_run_id")
+            or args.get("session_id")
+            or ""
+        ).strip()
+        if not raw:
+            raise ValueError("command_id is required")
+        resolved = self.command_run_id_by_alias.get(raw)
+        if resolved:
+            return resolved
+        if raw in self.output_paths or raw in self.command_metadata:
+            return raw
+        prefixed = [
+            command_run_id
+            for alias, command_run_id in self.command_run_id_by_alias.items()
+            if alias.startswith(raw) or command_run_id.startswith(raw)
+        ]
+        unique = sorted(set(prefixed))
+        if len(unique) == 1:
+            return unique[0]
+        hint = self._active_command_id_hint()
+        if len(unique) > 1:
+            raise ValueError(f"ambiguous command_id: {raw}.{hint}")
+        raise ValueError(f"unknown command_id: {raw}.{hint}")
+
+    def _active_command_id_hint(self) -> str:
+        active_ids = []
+        handles = getattr(self.runner, "handles", {})
+        if isinstance(handles, dict):
+            for command_run_id, handle in handles.items():
+                try:
+                    is_active = bool(handle.is_running())
+                except Exception:
+                    is_active = False
+                if not is_active:
+                    continue
+                command_id = self.command_id_by_run_id.get(str(command_run_id))
+                if command_id:
+                    active_ids.append(command_id)
+        if not active_ids:
+            return ""
+        return f" Active command_id(s): {', '.join(active_ids)}"
 
     def _result_from_payload(self, call: ToolCallEnvelope, payload: dict[str, object]) -> ToolResultEnvelope:
         return self._result_from_payload_parts(
@@ -1115,6 +1194,7 @@ def _command_metadata_for_payload(metadata: object) -> dict[str, object]:
     allowed_keys = (
         "tool_name",
         "effective_tool_name",
+        "command_id",
         "command",
         "command_source",
         "command_classification",

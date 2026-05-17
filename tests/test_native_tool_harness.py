@@ -639,6 +639,52 @@ def test_codex_hot_path_exec_command_matching_verifier_preserves_verify_intent(t
 
 
 def test_codex_hot_path_write_stdin_empty_chars_polls_session(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "exec-1",
+                    "exec_command",
+                    {
+                        "cmd": f"{sys.executable} -c \"import time; time.sleep(0.2); print('done')\"",
+                        "yield_time_ms": 0,
+                    },
+                    output_index=0,
+                )
+            ],
+            [
+                fake_call(
+                    "stdin-1",
+                    "write_stdin",
+                    {"command_id": "cmd_001", "chars": "", "yield_time_ms": 1000},
+                    output_index=0,
+                )
+            ],
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID),
+        provider=provider,
+        max_turns=2,
+    )
+
+    first_output = next(
+        item
+        for item in result.transcript.items
+        if item.kind == "function_call_output" and item.tool_name == "exec_command"
+    )
+    assert "Process running with command_id cmd_001" in first_output.output_text_or_ref
+    assert _command_run_id("exec-1") not in first_output.output_text_or_ref
+
+    output = result.transcript.items[-1]
+    assert output.tool_name == "write_stdin"
+    assert output.status == "completed"
+    assert "Process exited with code 0" not in output.output_text_or_ref
+    assert "done" in output.output_text_or_ref
+
+
+def test_codex_hot_path_write_stdin_accepts_legacy_long_session_alias(tmp_path: Path) -> None:
     command_id = _command_run_id("exec-1")
     provider = NativeFakeProvider.from_item_batches(
         [
@@ -647,7 +693,7 @@ def test_codex_hot_path_write_stdin_empty_chars_polls_session(tmp_path: Path) ->
                     "exec-1",
                     "exec_command",
                     {
-                        "cmd": f"{sys.executable} -c \"print('done')\"",
+                        "cmd": f"{sys.executable} -c \"import time; time.sleep(0.2); print('done')\"",
                         "yield_time_ms": 0,
                     },
                     output_index=0,
@@ -673,7 +719,6 @@ def test_codex_hot_path_write_stdin_empty_chars_polls_session(tmp_path: Path) ->
     output = result.transcript.items[-1]
     assert output.tool_name == "write_stdin"
     assert output.status == "completed"
-    assert "Process exited with code 0" not in output.output_text_or_ref
     assert "done" in output.output_text_or_ref
 
 
@@ -718,7 +763,7 @@ def test_codex_hot_path_write_stdin_non_empty_chars_fails_poll_only(tmp_path: Pa
             {"cmd": "echo ok", "login": True},
             "exec_command adapter error: login shells are not supported",
         ),
-        ("write_stdin", {"session_id": "missing", "chars": ""}, "no managed command is active"),
+        ("write_stdin", {"command_id": "missing", "chars": ""}, "unknown command_id: missing"),
     ],
 )
 def test_codex_hot_path_adapter_failures_use_terminal_renderer(
@@ -771,7 +816,7 @@ def test_codex_hot_path_exec_command_yielded_uses_terminal_session_shape(tmp_pat
     output = next(item for item in result.transcript.items if item.kind == "function_call_output")
     assert output.tool_name == "exec_command"
     assert output.status in {"yielded", "running", "completed", "failed", "interrupted"}
-    assert "Process running with session ID" in output.output_text_or_ref
+    assert "Process running with command_id cmd_001" in output.output_text_or_ref
     assert "run_command result" not in output.output_text_or_ref
 
 
@@ -3602,6 +3647,81 @@ def test_native_harness_adds_repair_control_after_yielded_verifier_poll_failure(
     )
 
     run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=4)
+
+    signals = _loop_signals(provider.requests[3])
+    assert signals["verifier_repair_due"] is True
+    assert signals["latest_failed_verifier"]["call_id"] == "poll-failure"
+    assert signals["latest_failed_verifier"]["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "poll_arguments",
+    (
+        {"command_id": "cmd_001", "chars": "", "yield_time_ms": 1000},
+        {"session_id": _command_run_id("verify-1"), "chars": "", "yield_time_ms": 1000},
+    ),
+)
+def test_codex_hot_path_repair_control_after_command_id_verifier_poll_failure(
+    tmp_path: Path,
+    poll_arguments: dict[str, object],
+) -> None:
+    verify_command = f"{sys.executable} -c \"import time, sys; time.sleep(0.2); sys.exit(1)\""
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "apply_patch",
+                    {"patch": "*** Begin Patch\n*** Add File: vm.js\n+bad\n*** End Patch\n"},
+                    output_index=0,
+                ),
+                fake_call(
+                    "verify-1",
+                    "exec_command",
+                    {
+                        "cmd": verify_command,
+                        "cwd": ".",
+                        "yield_time_ms": 10,
+                        "command_intent": "verifier",
+                    },
+                    output_index=1,
+                ),
+            ],
+            [
+                fake_call(
+                    "poll-failure",
+                    "write_stdin",
+                    poll_arguments,
+                    output_index=0,
+                )
+            ],
+            [
+                fake_call(
+                    "probe-after-failure-1",
+                    "exec_command",
+                    {"cmd": "printf diagnose1", "cwd": "."},
+                    output_index=0,
+                ),
+                fake_call(
+                    "probe-after-failure-2",
+                    "exec_command",
+                    {"cmd": "printf diagnose2", "cwd": "."},
+                    output_index=1,
+                ),
+            ],
+            [fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)],
+        ]
+    )
+
+    run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+            verify_command=verify_command,
+        ),
+        provider=provider,
+        max_turns=4,
+    )
 
     signals = _loop_signals(provider.requests[3])
     assert signals["verifier_repair_due"] is True

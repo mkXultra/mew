@@ -24,6 +24,7 @@ PROCESS_LIFECYCLE_TOOL_NAMES = frozenset(
 )
 _COMMAND_OUTPUT_REF_RE = re.compile(
     r"(?:^|[\s;,])(?:command_run_id|command_output_ref|spool_path)=['\"]?(?P<id>[^'\"\s;,]+)"
+    r"|Process running with command_id (?P<command_id>[^\s]+)"
     r"|Process running with session ID (?P<session>[^\s]+)"
 )
 _IMPLEMENT_V2_EXEC_REF_RE = re.compile(
@@ -314,7 +315,7 @@ def _codex_hot_path_specs(*, enable_list_dir: bool) -> tuple[ImplementLaneToolSp
             name="write_stdin",
             access="execute",
             description=(
-                "Poll an existing yielded command session with empty chars. "
+                "Poll an existing yielded command by short command_id with empty chars. "
                 "Interactive stdin is disabled in this profile version."
             ),
         ),
@@ -490,6 +491,7 @@ def _latest_command_lifecycle_states(transcript_items: object) -> dict[str, dict
             "has_output_ref": "command_output_ref=" in text
             or "command_run_id=" in text
             or "spool_path=" in text
+            or "Process running with command_id " in text
             or "Process running with session ID " in text
             or has_content_ref,
         }
@@ -507,20 +509,20 @@ def _item_mapping(item: object) -> Mapping[str, object]:
 
 
 def _command_run_id_from_item(item: Mapping[str, object]) -> str:
-    text = str(item.get("output_text_or_ref") or "")
-    match = _COMMAND_OUTPUT_REF_RE.search(text)
-    if match:
-        return str(match.group("id") or match.group("session") or "")
     refs = item.get("content_refs")
     if isinstance(refs, Sequence) and not isinstance(refs, (str, bytes, bytearray)):
         for ref in refs:
             ref_text = str(ref or "")
             match = _COMMAND_OUTPUT_REF_RE.search(ref_text)
             if match:
-                return match.group("id")
+                return str(match.group("id") or match.group("command_id") or match.group("session") or "")
             match = _IMPLEMENT_V2_EXEC_REF_RE.search(ref_text)
             if match:
                 return match.group("id")
+    text = str(item.get("output_text_or_ref") or "")
+    match = _COMMAND_OUTPUT_REF_RE.search(text)
+    if match:
+        return str(match.group("id") or match.group("command_id") or match.group("session") or "")
     return ""
 
 

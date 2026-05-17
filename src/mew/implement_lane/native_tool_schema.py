@@ -317,6 +317,7 @@ def structured_tool_json_schema(tool_name: str) -> dict[str, object] | None:
         "exec_command": _codex_exec_command_schema(),
         "write_stdin": _loose_object(
             {
+                "command_id": _string("Short yielded command id to poll, for example cmd_001."),
                 "session_id": _string("Yielded command session id to poll."),
                 "chars": _nullable_string(
                     "Characters to write. Empty or omitted chars performs a poll."
