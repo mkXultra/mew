@@ -38,6 +38,7 @@ from .affordance_visibility import (
 from .native_tool_harness import _native_call_is_verifier, _native_loop_control_state
 from .completion_resolver import COMPLETION_RESOLVER_DECISIONS_FILE
 from .native_sidecar_projection import build_compact_native_sidecar_digest
+from .native_done_candidate import DONE_CANDIDATES_FILE, build_native_done_candidate
 from .native_finish_gate import NATIVE_FINISH_GATE_DECISIONS_FILE
 from .native_transcript import (
     CALL_ITEM_KINDS,
@@ -1030,12 +1031,21 @@ def _check_native_finish_gate_decisions(
     transcript: NativeTranscript,
 ) -> HotPathCheck:
     valid_finish_call_ids = _native_valid_finish_call_ids(transcript)
+    done_candidate_rows, done_candidate_error = _load_native_done_candidate_rows(manifest_path=manifest_path, manifest=manifest)
+    valid_done_candidate_ids = {
+        str(row.get("done_candidate_id") or "").strip()
+        for row in done_candidate_rows
+        if str(row.get("done_candidate_id") or "").strip()
+    }
+    done_candidate_binding = _native_done_candidate_transcript_binding(transcript, done_candidate_rows)
     decision_ref = str(manifest.get("native_finish_gate_decisions_ref") or "").strip()
     decision_sha = str(manifest.get("native_finish_gate_decisions_sha256") or "").strip()
     if not decision_ref:
         has_resolver_fallback = bool(str(manifest.get("resolver_decisions_ref") or "").strip())
         has_trusted_closeout_pass = _native_has_completed_final_verifier_closeout(transcript)
-        ok = not valid_finish_call_ids or (has_resolver_fallback and not has_trusted_closeout_pass)
+        ok = not done_candidate_error and not valid_done_candidate_ids and (
+            not valid_finish_call_ids or (has_resolver_fallback and not has_trusted_closeout_pass)
+        )
         return _check(
             "native_finish_gate_decisions",
             ok,
@@ -1044,9 +1054,11 @@ def _check_native_finish_gate_decisions(
             else "finish claim exists without native finish-gate decision artifact",
             {
                 "finish_call_ids": sorted(valid_finish_call_ids),
+                "done_candidate_ids": sorted(valid_done_candidate_ids),
                 "native_finish_gate_decisions_ref": "",
                 "resolver_fallback_present": has_resolver_fallback,
                 "trusted_final_verifier_closeout_pass_present": has_trusted_closeout_pass,
+                "done_candidates_error": done_candidate_error,
             },
         )
     decision_path = (manifest_path.parent / decision_ref).resolve(strict=False)
@@ -1058,6 +1070,16 @@ def _check_native_finish_gate_decisions(
         if str(row.get("finish_call_id") or "").strip()
     }
     row_finish_id_values = [str(row.get("finish_call_id") or "").strip() for row in rows]
+    row_done_candidate_ids = {
+        str(row.get("done_candidate_id") or "").strip()
+        for row in rows
+        if str(row.get("done_candidate_id") or "").strip()
+    }
+    row_done_candidate_id_values = [str(row.get("done_candidate_id") or "").strip() for row in rows]
+    authority_id_values = [
+        str(row.get("done_candidate_id") or row.get("finish_call_id") or "").strip()
+        for row in rows
+    ]
     allow_rows = [row for row in rows if row.get("result") == "allow"]
     allow_completed_finish_ids = {
         str(row.get("finish_call_id") or "").strip()
@@ -1065,6 +1087,13 @@ def _check_native_finish_gate_decisions(
         if row.get("result") == "allow"
         and row.get("lane_status") == "completed"
         and str(row.get("finish_call_id") or "").strip()
+    }
+    allow_completed_done_candidate_ids = {
+        str(row.get("done_candidate_id") or "").strip()
+        for row in rows
+        if row.get("result") == "allow"
+        and row.get("lane_status") == "completed"
+        and str(row.get("done_candidate_id") or "").strip()
     }
     trusted_closeout_pass_finish_ids = _native_trusted_closeout_pass_finish_ids(transcript)
     expected_closeout_refs = _native_final_verifier_closeout_refs(transcript)
@@ -1110,12 +1139,64 @@ def _check_native_finish_gate_decisions(
         for row in allow_rows
         if _native_decision_closeout_refs_match_transcript(row, expected_refs=expected_closeout_refs)
     ]
+    completed_zero_done_candidate_ids_requiring_allow = {
+        str(row.get("done_candidate_id") or "").strip()
+        for row in rows
+        if str(row.get("done_candidate_id") or "").strip()
+        and _native_decision_closeout_completed_zero(row)
+    }
+    expected_unexpected_source_mutation_block_done_candidate_ids = {
+        done_id
+        for row in rows
+        if (done_id := str(row.get("done_candidate_id") or "").strip())
+        in completed_zero_done_candidate_ids_requiring_allow
+        and _native_decision_is_expected_unexpected_source_mutation_block(row)
+        and _native_decision_closeout_refs_match_transcript(row, expected_refs=expected_closeout_refs)
+    }
+    completed_zero_done_candidate_ids_requiring_allow -= expected_unexpected_source_mutation_block_done_candidate_ids
+    matching_completed_zero_done_candidate_ids = {
+        done_id
+        for row in rows
+        if (done_id := str(row.get("done_candidate_id") or "").strip())
+        in completed_zero_done_candidate_ids_requiring_allow
+        and row.get("result") == "allow"
+        and row.get("lane_status") == "completed"
+        and _native_decision_closeout_refs_match_transcript(row, expected_refs=expected_closeout_refs)
+    }
+    expected_done_candidate_hashes = {
+        key: str(value)
+        for key, value in _safe_mapping(done_candidate_binding.get("expected_transcript_hashes")).items()
+        if str(key).strip() and str(value).strip()
+    }
+    done_candidate_hash_mismatches = [
+        {
+            "done_candidate_id": candidate_id,
+            "expected": expected_done_candidate_hashes.get(candidate_id, ""),
+            "observed": str(row.get("transcript_hash_before_decision") or "").strip(),
+        }
+        for row in rows
+        if (candidate_id := str(row.get("done_candidate_id") or "").strip())
+        and expected_done_candidate_hashes.get(candidate_id)
+        and str(row.get("transcript_hash_before_decision") or "").strip()
+        != expected_done_candidate_hashes[candidate_id]
+    ]
     checks = {
         "path_exists": decision_path.is_file(),
         "sha_matches": bool(decision_sha) and decision_sha == actual_sha,
         "rows_present": bool(rows),
-        "row_finish_ids_present": all(row_finish_id_values),
+        "row_authority_ids_present": all(authority_id_values),
+        "row_finish_ids_present": all(
+            finish_id for finish_id, done_id in zip(row_finish_id_values, row_done_candidate_id_values, strict=True) if not done_id
+        ),
         "row_finish_ids_valid": all(finish_id in valid_finish_call_ids for finish_id in row_finish_id_values if finish_id),
+        "row_done_candidate_ids_valid": all(
+            done_id in valid_done_candidate_ids for done_id in row_done_candidate_id_values if done_id
+        ),
+        "done_candidates_bound_to_transcript": not done_candidate_binding["errors"],
+        "done_candidate_rows_cover_candidates": valid_done_candidate_ids.issubset(row_done_candidate_ids),
+        "completed_zero_done_candidate_rows_allow_completed": completed_zero_done_candidate_ids_requiring_allow.issubset(
+            matching_completed_zero_done_candidate_ids
+        ),
         "trusted_closeout_pass_rows_allow_completed": trusted_closeout_pass_finish_ids_requiring_allow.issubset(
             allow_completed_finish_ids
         ),
@@ -1123,13 +1204,15 @@ def _check_native_finish_gate_decisions(
             matching_trusted_closeout_pass_finish_ids
         ),
         "finish_calls_subset": row_finish_ids.issubset(valid_finish_call_ids),
-        "decision_count_within_finish_count": len(rows) <= len(valid_finish_call_ids),
+        "done_candidates_subset": row_done_candidate_ids.issubset(valid_done_candidate_ids),
+        "decision_count_within_finish_count": len(rows) <= len(valid_finish_call_ids) + len(valid_done_candidate_ids),
         "decision_ids_present": all(row_decision_ids),
         "decision_ids_unique": len(row_decision_ids) == len(set(row_decision_ids)),
         "allow_rows_have_matching_closeout_refs": len(closeout_ref_rows) == len(allow_rows),
         "transcript_hashes_present": len(row_transcript_hashes) == len(rows),
-        "transcript_hashes_match_pre_finish_prefix": not row_hash_mismatches,
+        "transcript_hashes_match_pre_finish_prefix": not row_hash_mismatches and not done_candidate_hash_mismatches,
         "expected_filename": decision_path.name == NATIVE_FINISH_GATE_DECISIONS_FILE,
+        "done_candidate_sidecar_loads": not done_candidate_error,
     }
     ok = all(checks.values())
     return _check(
@@ -1145,30 +1228,176 @@ def _check_native_finish_gate_decisions(
             "actual_sha256": actual_sha,
             "row_count": len(rows),
             "finish_call_ids": sorted(valid_finish_call_ids),
+            "done_candidate_ids": sorted(valid_done_candidate_ids),
             "row_finish_call_ids": sorted(row_finish_ids),
             "row_finish_call_id_values": row_finish_id_values,
+            "row_done_candidate_ids": sorted(row_done_candidate_ids),
+            "row_done_candidate_id_values": row_done_candidate_id_values,
+            "row_authority_id_values": authority_id_values,
             "trusted_closeout_pass_finish_ids": sorted(trusted_closeout_pass_finish_ids),
             "trusted_closeout_pass_finish_ids_requiring_allow": sorted(trusted_closeout_pass_finish_ids_requiring_allow),
             "expected_unexpected_source_mutation_block_finish_ids": sorted(
                 expected_unexpected_source_mutation_block_finish_ids
             ),
             "allow_completed_finish_ids": sorted(allow_completed_finish_ids),
+            "allow_completed_done_candidate_ids": sorted(allow_completed_done_candidate_ids),
+            "completed_zero_done_candidate_ids_requiring_allow": sorted(completed_zero_done_candidate_ids_requiring_allow),
+            "expected_unexpected_source_mutation_block_done_candidate_ids": sorted(
+                expected_unexpected_source_mutation_block_done_candidate_ids
+            ),
+            "matching_completed_zero_done_candidate_ids": sorted(matching_completed_zero_done_candidate_ids),
             "matching_trusted_closeout_pass_finish_ids": sorted(matching_trusted_closeout_pass_finish_ids),
             "decision_ids": row_decision_ids,
             "allow_count": len(allow_rows),
             "matching_closeout_ref_allow_count": len(closeout_ref_rows),
             "expected_closeout_refs": sorted(expected_closeout_refs),
             "expected_transcript_hashes": {key: sorted(value) for key, value in expected_transcript_hashes.items()},
+            "expected_done_candidate_hashes": expected_done_candidate_hashes,
+            "done_candidate_binding_errors": done_candidate_binding["errors"],
             "row_transcript_hashes": sorted(row_transcript_hashes),
             "row_hash_mismatches": row_hash_mismatches[:10],
+            "done_candidate_hash_mismatches": done_candidate_hash_mismatches[:10],
             "projection_warning_count": sum(
                 1
                 for row in rows
                 if str(_safe_mapping(row.get("closeout")).get("typed_evidence_projection_status") or "") == "warning"
             ),
             "load_error": error,
+            "done_candidates_error": done_candidate_error,
         },
     )
+
+
+def _load_native_done_candidate_rows(
+    *,
+    manifest_path: Path,
+    manifest: Mapping[str, object],
+) -> tuple[list[dict[str, object]], str]:
+    candidate_ref = str(manifest.get("done_candidates_ref") or "").strip()
+    if not candidate_ref:
+        metrics = _safe_mapping(manifest.get("metrics"))
+        count = _nonnegative_int(metrics.get("done_candidate_count") or metrics.get("done_candidates"))
+        return [], "" if count == 0 else "done_candidate_count present without done_candidates_ref"
+    candidate_path = (manifest_path.parent / candidate_ref).resolve(strict=False)
+    rows, error = _load_jsonl_objects(candidate_path)
+    if error:
+        return rows, error
+    expected_sha = str(manifest.get("done_candidates_sha256") or "").strip()
+    actual_sha = _file_sha256(candidate_path)
+    if not candidate_path.is_file():
+        return rows, f"{DONE_CANDIDATES_FILE} missing"
+    metrics = _safe_mapping(manifest.get("metrics"))
+    metric_counts: list[int] = []
+    invalid_count_keys: list[str] = []
+    for key in ("done_candidate_count", "done_candidates"):
+        if key not in metrics:
+            continue
+        count = _strict_nonnegative_int(metrics.get(key))
+        if count is None:
+            invalid_count_keys.append(key)
+            continue
+        metric_counts.append(count)
+    if invalid_count_keys:
+        return rows, "done_candidate_count invalid"
+    if not metric_counts:
+        return rows, "done_candidate_count missing"
+    if any(count != len(rows) for count in metric_counts):
+        return rows, "done_candidate_count mismatch"
+    if not expected_sha:
+        return rows, "done_candidates_sha256 missing"
+    if expected_sha != actual_sha:
+        return rows, "done_candidates_sha256 mismatch"
+    return rows, ""
+
+
+def _native_decision_closeout_completed_zero(row: Mapping[str, object]) -> bool:
+    closeout = _safe_mapping(row.get("closeout"))
+    if str(closeout.get("status") or "") == "completed_zero":
+        return True
+    try:
+        return int(closeout.get("exit_code")) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _strict_nonnegative_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str) and value.isdecimal():
+        return int(value)
+    return None
+
+
+def _native_done_candidate_transcript_binding(
+    transcript: NativeTranscript,
+    rows: Iterable[Mapping[str, object]],
+) -> dict[str, object]:
+    item_indexes_by_id: dict[str, int] = {}
+    for index, item in enumerate(transcript.items):
+        item_id = str(item.provider_item_id or f"sequence-{item.sequence}").strip()
+        if item_id:
+            item_indexes_by_id[item_id] = index
+    expected_hashes: dict[str, str] = {}
+    expected_ids: dict[str, str] = {}
+    errors: list[dict[str, object]] = []
+    for row in rows:
+        candidate_id = str(row.get("done_candidate_id") or "").strip()
+        row_errors: list[str] = []
+        if not candidate_id:
+            errors.append({"done_candidate_id": "", "errors": ["missing_done_candidate_id"]})
+            continue
+        if str(row.get("lane_attempt_id") or "").strip() != transcript.lane_attempt_id:
+            row_errors.append("lane_attempt_id_mismatch")
+        raw_assistant_ids = row.get("assistant_message_item_ids")
+        if isinstance(raw_assistant_ids, (list, tuple)):
+            assistant_ids = tuple(str(item).strip() for item in raw_assistant_ids if str(item).strip())
+        else:
+            assistant_ids = ()
+            row_errors.append("assistant_message_item_ids_not_list")
+        if not assistant_ids:
+            row_errors.append("missing_assistant_message_item_ids")
+        missing_ids = [item_id for item_id in assistant_ids if item_id not in item_indexes_by_id]
+        if missing_ids:
+            row_errors.append("assistant_message_item_ids_missing_from_transcript")
+        assistant_items = tuple(transcript.items[item_indexes_by_id[item_id]] for item_id in assistant_ids if item_id in item_indexes_by_id)
+        if any(item.kind != "assistant_message" for item in assistant_items):
+            row_errors.append("assistant_message_item_id_not_assistant_message")
+        if assistant_items:
+            turn_ids = {item.turn_id for item in assistant_items}
+            if str(row.get("turn_id") or "").strip() not in turn_ids:
+                row_errors.append("turn_id_mismatch")
+            last_index = max(item_indexes_by_id[item_id] for item_id in assistant_ids if item_id in item_indexes_by_id)
+            prefix = NativeTranscript(
+                lane_attempt_id=transcript.lane_attempt_id,
+                provider=transcript.provider,
+                model=transcript.model,
+                items=transcript.items[: last_index + 1],
+            )
+            expected_hash = native_transcript_hash(prefix)
+            expected_hashes[candidate_id] = expected_hash
+            if str(row.get("transcript_hash_before_gate") or "").strip() != expected_hash:
+                row_errors.append("transcript_hash_before_gate_mismatch")
+            expected = build_native_done_candidate(
+                prefix,
+                assistant_items,
+                compact_sidecar_digest_hash=str(row.get("compact_sidecar_digest_hash") or "").strip(),
+                reason=str(row.get("reason") or "assistant_message_without_tool_call"),
+            )
+            if expected is None:
+                row_errors.append("candidate_rebuild_failed")
+            else:
+                expected_ids[candidate_id] = expected.done_candidate_id
+                if candidate_id != expected.done_candidate_id:
+                    row_errors.append("done_candidate_id_mismatch")
+        if row_errors:
+            errors.append({"done_candidate_id": candidate_id, "errors": row_errors, "missing_item_ids": missing_ids})
+    return {
+        "expected_transcript_hashes": expected_hashes,
+        "expected_done_candidate_ids": expected_ids,
+        "errors": errors,
+    }
 
 
 def _check_finish_verifier_planner_decisions(

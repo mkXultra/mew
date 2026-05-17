@@ -6,6 +6,10 @@ import pytest
 
 from mew.implement_lane.completion_resolver import CompletionResolverDecision, write_completion_resolver_artifacts
 from mew.implement_lane.hot_path_fastcheck import _workframe_resolvable_refs, run_hot_path_fastcheck
+from mew.implement_lane.native_done_candidate import (
+    build_native_done_candidate,
+    write_native_done_candidate_artifacts,
+)
 from mew.implement_lane.native_finish_gate import (
     NativeFinishCloseoutResult,
     NativeFinishGateDecision,
@@ -576,6 +580,121 @@ def _write_native_finish_gate_artifact(
         evidence_refs=("ev:closeout:terminal",),
         closeout_refs=("implement-v2-exec://attempt/final-verifier/terminal",),
         transcript_hash_before_decision=native_transcript_hash(prefix),
+        compact_sidecar_digest_hash="sha256:compact-digest",
+        reason="trusted final verifier closeout exited 0",
+    )
+    write_native_finish_gate_artifacts(artifact, [decision], proof_manifest_path=paths["proof_manifest"])
+    write_native_evidence_observation(artifact, transcript, proof_manifest_path=paths["proof_manifest"])
+    return artifact
+
+
+def _write_native_done_candidate_finish_gate_artifact(tmp_path: Path) -> Path:
+    artifact = tmp_path / "native-done-candidate-finish-gate-artifact"
+    lane_attempt_id = "native-fastcheck:done-candidate-finish-gate"
+    prefix_items = (
+        NativeTranscriptItem(
+            sequence=1,
+            turn_id="turn-1",
+            lane_attempt_id=lane_attempt_id,
+            provider="codex",
+            model="gpt-5.5",
+            kind="function_call",
+            call_id="call-write-1",
+            tool_name="write_file",
+            arguments_json_text='{"path":"vm.js","content":"console.log(1)"}',
+        ),
+        NativeTranscriptItem(
+            sequence=2,
+            turn_id="turn-1",
+            lane_attempt_id=lane_attempt_id,
+            provider="codex",
+            model="gpt-5.5",
+            kind="function_call_output",
+            call_id="call-write-1",
+            tool_name="write_file",
+            status="completed",
+            output_text_or_ref="write_file result: completed",
+        ),
+        NativeTranscriptItem(
+            sequence=3,
+            turn_id="turn-2",
+            lane_attempt_id=lane_attempt_id,
+            provider="codex",
+            model="gpt-5.5",
+            kind="assistant_message",
+            provider_item_id="msg-done-1",
+            output_text_or_ref="Done. I implemented vm.js and verified it.",
+        ),
+    )
+    prefix = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider="codex",
+        model="gpt-5.5",
+        items=prefix_items,
+    )
+    closeout_items = (
+        NativeTranscriptItem(
+            sequence=4,
+            turn_id="turn-2",
+            lane_attempt_id=lane_attempt_id,
+            provider="codex",
+            model="gpt-5.5",
+            kind="function_call",
+            call_id="call-final-verifier-closeout-001",
+            tool_name="exec_command",
+            arguments_json_text='{"command":"node vm.js","command_intent":"finish_verifier"}',
+        ),
+        NativeTranscriptItem(
+            sequence=5,
+            turn_id="turn-2",
+            lane_attempt_id=lane_attempt_id,
+            provider="codex",
+            model="gpt-5.5",
+            kind="function_call_output",
+            call_id="call-final-verifier-closeout-001",
+            tool_name="exec_command",
+            status="completed",
+            output_text_or_ref="command exited 0",
+            evidence_refs=("ev:closeout:terminal",),
+            sidecar_refs=("implement-v2-exec://attempt/final-verifier/terminal",),
+        ),
+    )
+    transcript = NativeTranscript(
+        lane_attempt_id=lane_attempt_id,
+        provider="codex",
+        model="gpt-5.5",
+        items=prefix_items + closeout_items,
+    )
+    paths = write_native_transcript_artifacts(artifact, transcript)
+    candidate = build_native_done_candidate(
+        prefix,
+        (prefix_items[-1],),
+        compact_sidecar_digest_hash="sha256:compact-digest",
+    )
+    assert candidate is not None
+    write_native_done_candidate_artifacts(artifact, [candidate], proof_manifest_path=paths["proof_manifest"])
+    decision = NativeFinishGateDecision(
+        decision_id="native-finish-gate:turn-2:done-candidate",
+        lane_attempt_id=lane_attempt_id,
+        turn_id="turn-2",
+        finish_call_id="",
+        done_candidate_id=candidate.done_candidate_id,
+        lane_status="completed",
+        result="allow",
+        closeout=NativeFinishCloseoutResult(
+            command=None,
+            call_item=closeout_items[0].as_dict(),
+            output_item=closeout_items[1].as_dict(),
+            tool_result=None,
+            status="completed_zero",
+            exit_code=0,
+            typed_evidence_projection_status="passed",
+            evidence_refs=("ev:closeout:terminal",),
+            closeout_refs=("implement-v2-exec://attempt/final-verifier/terminal",),
+        ),
+        evidence_refs=("ev:closeout:terminal",),
+        closeout_refs=("implement-v2-exec://attempt/final-verifier/terminal",),
+        transcript_hash_before_decision=candidate.transcript_hash_before_gate,
         compact_sidecar_digest_hash="sha256:compact-digest",
         reason="trusted final verifier closeout exited 0",
     )
@@ -1228,6 +1347,268 @@ def test_hot_path_fastcheck_accepts_native_finish_gate_decision_sidecar(tmp_path
     assert checks["native_finish_gate_decisions"]["details"]["matching_closeout_ref_allow_count"] == 1
     assert checks["native_resolver_decisions"]["status"] == "pass"
     assert checks["native_resolver_decisions"]["details"]["native_finish_gate_decisions_present"] is True
+
+
+def test_hot_path_fastcheck_accepts_done_candidate_finish_gate_decision_sidecar(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "pass"
+    assert checks["native_finish_gate_decisions"]["status"] == "pass"
+    details = checks["native_finish_gate_decisions"]["details"]
+    assert details["done_candidate_ids"]
+    assert details["row_finish_call_id_values"] == [""]
+    assert details["row_done_candidate_ids"] == details["done_candidate_ids"]
+    assert details["completed_zero_done_candidate_rows_allow_completed"] is True
+
+
+def test_hot_path_fastcheck_rejects_done_candidate_without_finish_gate_decision(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("native_finish_gate_decisions_ref", None)
+    manifest.pop("native_finish_gate_decisions_sha256", None)
+    manifest.get("metrics", {}).pop("native_finish_gate_decisions", None)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (artifact / "native_finish_gate_decisions.jsonl").unlink()
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["done_candidate_ids"]
+    assert checks["native_finish_gate_decisions"]["details"]["native_finish_gate_decisions_ref"] == ""
+
+
+def test_hot_path_fastcheck_rejects_missing_done_candidate_sidecar_without_finish_gate_decision(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("native_finish_gate_decisions_ref", None)
+    manifest.pop("native_finish_gate_decisions_sha256", None)
+    manifest.get("metrics", {}).pop("native_finish_gate_decisions", None)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (artifact / "native_finish_gate_decisions.jsonl").unlink()
+    (artifact / "done_candidates.jsonl").unlink()
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["done_candidates_error"]
+
+
+def test_hot_path_fastcheck_rejects_truncated_done_candidate_sidecar_without_finish_gate_decision(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("native_finish_gate_decisions_ref", None)
+    manifest.pop("native_finish_gate_decisions_sha256", None)
+    manifest.get("metrics", {}).pop("native_finish_gate_decisions", None)
+    candidate_path = artifact / "done_candidates.jsonl"
+    candidate_path.write_text("", encoding="utf-8")
+    manifest["done_candidates_sha256"] = "sha256:" + hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (artifact / "native_finish_gate_decisions.jsonl").unlink()
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["done_candidates_error"] == "done_candidate_count mismatch"
+
+
+def test_hot_path_fastcheck_rejects_invalid_done_candidate_count_without_finish_gate_decision(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("native_finish_gate_decisions_ref", None)
+    manifest.pop("native_finish_gate_decisions_sha256", None)
+    manifest.get("metrics", {}).pop("native_finish_gate_decisions", None)
+    candidate_path = artifact / "done_candidates.jsonl"
+    candidate_path.write_text("", encoding="utf-8")
+    manifest["done_candidates_sha256"] = "sha256:" + hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+    manifest["metrics"]["done_candidate_count"] = "many"
+    manifest["metrics"]["done_candidates"] = "many"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (artifact / "native_finish_gate_decisions.jsonl").unlink()
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["done_candidates_error"] == "done_candidate_count invalid"
+
+
+def test_hot_path_fastcheck_rejects_done_candidate_finish_gate_hash_mismatch(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    decision_path = artifact / "native_finish_gate_decisions.jsonl"
+    rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["transcript_hash_before_decision"] = "sha256:wrong"
+    decision_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["native_finish_gate_decisions_sha256"] = "sha256:" + hashlib.sha256(decision_path.read_bytes()).hexdigest()
+    manifest["metrics"]["native_finish_gate_decisions"]["artifact_sha256"] = manifest[
+        "native_finish_gate_decisions_sha256"
+    ]
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["done_candidate_hash_mismatches"]
+
+
+def test_hot_path_fastcheck_rejects_done_candidate_sidecar_missing_sha(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("done_candidates_sha256", None)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["done_candidates_error"] == "done_candidates_sha256 missing"
+
+
+def test_hot_path_fastcheck_rejects_fabricated_done_candidate_sidecar(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    candidate_path = artifact / "done_candidates.jsonl"
+    rows = [json.loads(line) for line in candidate_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["lane_attempt_id"] = "fabricated-attempt"
+    candidate_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["done_candidates_sha256"] = "sha256:" + hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["done_candidate_binding_errors"] == [
+        {
+            "done_candidate_id": rows[0]["done_candidate_id"],
+            "errors": ["lane_attempt_id_mismatch"],
+            "missing_item_ids": [],
+        }
+    ]
+
+
+def test_hot_path_fastcheck_rejects_malformed_done_candidate_assistant_ids(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    candidate_path = artifact / "done_candidates.jsonl"
+    rows = [json.loads(line) for line in candidate_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["assistant_message_item_ids"] = 123
+    candidate_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["done_candidates_sha256"] = "sha256:" + hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["done_candidate_binding_errors"][0]["errors"] == [
+        "assistant_message_item_ids_not_list",
+        "missing_assistant_message_item_ids",
+    ]
+
+
+def test_hot_path_fastcheck_rejects_done_candidate_completed_zero_block_with_bogus_closeout_ref(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    decision_path = artifact / "native_finish_gate_decisions.jsonl"
+    rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["result"] = "block"
+    rows[0]["lane_status"] = "blocked_continue"
+    rows[0]["closeout_refs"] = ["bogus:closeout"]
+    rows[0]["closeout"]["closeout_refs"] = ["bogus:closeout"]
+    decision_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["native_finish_gate_decisions_sha256"] = "sha256:" + hashlib.sha256(decision_path.read_bytes()).hexdigest()
+    manifest["metrics"]["native_finish_gate_decisions"]["artifact_sha256"] = manifest[
+        "native_finish_gate_decisions_sha256"
+    ]
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["completed_zero_done_candidate_rows_allow_completed"] is False
+
+
+def test_hot_path_fastcheck_allows_done_candidate_expected_source_mutation_block(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    decision_path = artifact / "native_finish_gate_decisions.jsonl"
+    rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["result"] = "block"
+    rows[0]["lane_status"] = "blocked_continue"
+    rows[0]["blockers"] = ["closeout_unexpected_source_mutation"]
+    rows[0]["reason"] = "trusted final verifier passed but closeout mutated source unexpectedly"
+    rows[0]["closeout"]["observed_unexpected_source_mutation"] = True
+    rows[0]["closeout"]["blockers"] = ["closeout_unexpected_source_mutation"]
+    decision_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["native_finish_gate_decisions_sha256"] = "sha256:" + hashlib.sha256(decision_path.read_bytes()).hexdigest()
+    manifest["metrics"]["native_finish_gate_decisions"]["artifact_sha256"] = manifest[
+        "native_finish_gate_decisions_sha256"
+    ]
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "pass"
+    assert checks["native_finish_gate_decisions"]["status"] == "pass"
+    assert checks["native_finish_gate_decisions"]["details"][
+        "expected_unexpected_source_mutation_block_done_candidate_ids"
+    ] == [rows[0]["done_candidate_id"]]
+
+
+def test_hot_path_fastcheck_rejects_done_candidate_exit_zero_block_with_drifted_closeout_status(tmp_path):
+    artifact = _write_native_done_candidate_finish_gate_artifact(tmp_path)
+    manifest_path = artifact / "proof-manifest.json"
+    decision_path = artifact / "native_finish_gate_decisions.jsonl"
+    rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
+    rows[0]["result"] = "block"
+    rows[0]["lane_status"] = "blocked_continue"
+    rows[0]["closeout_refs"] = ["bogus:closeout"]
+    rows[0]["closeout"]["closeout_refs"] = ["bogus:closeout"]
+    rows[0]["closeout"]["status"] = "runtime_error"
+    rows[0]["closeout"]["exit_code"] = 0
+    decision_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in rows), encoding="utf-8")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["native_finish_gate_decisions_sha256"] = "sha256:" + hashlib.sha256(decision_path.read_bytes()).hexdigest()
+    manifest["metrics"]["native_finish_gate_decisions"]["artifact_sha256"] = manifest[
+        "native_finish_gate_decisions_sha256"
+    ]
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {item["name"]: item for item in result["checks"]}
+    assert result["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["status"] == "fail"
+    assert checks["native_finish_gate_decisions"]["details"]["completed_zero_done_candidate_rows_allow_completed"] is False
 
 
 def test_hot_path_fastcheck_surfaces_projection_warning_without_blocking_native_finish(tmp_path):
