@@ -1,7 +1,7 @@
 from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID, MEW_LEGACY_PROFILE_ID
 from mew.implement_lane.tool_result_renderer import (
     CODEX_APPLY_PATCH_RENDERER_ID,
-    CODEX_FINISH_RENDERER_ID,
+    CODEX_GENERIC_RENDERER_ID,
     CODEX_TERMINAL_RENDERER_ID,
     MEW_LEGACY_RENDERER_ID,
     render_observability_record,
@@ -207,7 +207,7 @@ def test_codex_apply_patch_failure_sanitizes_raw_unsupported_hunk_line() -> None
     assert rendered.leak_ok is True
 
 
-def test_codex_finish_renderer_hides_resolver_internals() -> None:
+def test_codex_hot_path_legacy_finish_uses_generic_renderer_without_resolver_internals() -> None:
     accepted = _result(
         "finish",
         summary="done",
@@ -225,9 +225,10 @@ def test_codex_finish_renderer_hides_resolver_internals() -> None:
     accepted_rendered = render_tool_result_for_profile(accepted, profile_id=CODEX_HOT_PATH_PROFILE_ID)
     blocked_rendered = render_tool_result_for_profile(blocked, profile_id=CODEX_HOT_PATH_PROFILE_ID)
 
-    assert accepted_rendered.renderer_id == CODEX_FINISH_RENDERER_ID
-    assert accepted_rendered.text == "finish accepted: done"
-    assert blocked_rendered.text == "finish blocked: needs verifier"
+    assert accepted_rendered.renderer_id == CODEX_GENERIC_RENDERER_ID
+    assert accepted_rendered.text == "finish result: completed\ndone"
+    assert blocked_rendered.renderer_id == CODEX_GENERIC_RENDERER_ID
+    assert blocked_rendered.text == "finish result: invalid\nneeds verifier"
     assert "completion_resolver" not in accepted_rendered.text + blocked_rendered.text
 
 

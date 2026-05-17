@@ -7,7 +7,7 @@ from mew.implement_lane.native_tool_harness import run_native_implement_v2
 from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID, MEW_LEGACY_PROFILE_ID
 from mew.implement_lane.tool_result_renderer import (
     CODEX_APPLY_PATCH_RENDERER_ID,
-    CODEX_FINISH_RENDERER_ID,
+    CODEX_GENERIC_RENDERER_ID,
     CODEX_TERMINAL_RENDERER_ID,
 )
 from mew.implement_lane.tool_surface_ab_report import (
@@ -37,6 +37,7 @@ def _lane_input(
             "allowed_write_roots": [str(workspace)],
             "allow_shell": True,
             "allow_verify": True,
+            "allow_legacy_provider_visible_finish": True,
             "auto_approve_writes": True,
             "artifact_dir": str(artifact_root),
             "tool_surface_profile_id": profile_id,
@@ -157,7 +158,7 @@ def test_tool_surface_ab_report_compares_profiles_on_same_snapshot(tmp_path: Pat
     assert candidate["provider_tool_names"] == ["apply_patch", "exec_command", "write_stdin"]
     assert set(candidate["renderer_ids"]) == {
         CODEX_APPLY_PATCH_RENDERER_ID,
-        CODEX_FINISH_RENDERER_ID,
+        CODEX_GENERIC_RENDERER_ID,
         CODEX_TERMINAL_RENDERER_ID,
     }
     assert candidate["every_call_has_exactly_one_output"] is True

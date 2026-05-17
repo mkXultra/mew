@@ -587,7 +587,7 @@ def test_codex_hot_path_exec_command_routes_to_managed_exec(tmp_path: Path) -> N
     assert "ok" in output.output_text_or_ref
     assert "run_command result" not in output.output_text_or_ref
     finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
-    assert "finish blocked:" in finish_output.output_text_or_ref
+    assert "finish result: invalid" in finish_output.output_text_or_ref
     assert "completion_resolver" not in finish_output.output_text_or_ref
     render_rows = [
         json.loads(line)

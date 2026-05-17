@@ -17,7 +17,6 @@ RENDERER_SCHEMA_VERSION = 1
 MEW_LEGACY_RENDERER_ID = "mew_legacy_result_cards_v1"
 CODEX_TERMINAL_RENDERER_ID = "codex_terminal_text_v2"
 CODEX_APPLY_PATCH_RENDERER_ID = "codex_apply_patch_text_v1"
-CODEX_FINISH_RENDERER_ID = "codex_finish_text_v1"
 CODEX_GENERIC_RENDERER_ID = "codex_generic_text_v1"
 DEFAULT_RENDER_LIMIT = 12_000
 
@@ -97,14 +96,6 @@ def render_tool_result_for_profile(
             text,
             profile_id=profile_id,
             renderer_id=CODEX_APPLY_PATCH_RENDERER_ID,
-            tool_name=result.tool_name,
-        )
-    if result.tool_name == "finish":
-        text = _render_codex_finish(result, limit=limit)
-        return _rendered(
-            text,
-            profile_id=profile_id,
-            renderer_id=CODEX_FINISH_RENDERER_ID,
             tool_name=result.tool_name,
         )
     text = _render_codex_generic(result, limit=limit)
@@ -252,14 +243,6 @@ def _format_patch_window_location(path: str, window: Mapping[str, object]) -> st
     if path:
         return path
     return ""
-
-
-def _render_codex_finish(result: ToolResultEnvelope, *, limit: int) -> str:
-    payload = _payload(result)
-    summary = _first_text(payload, "summary", "reason", "outcome") or result.status
-    if result.is_error or result.status not in {"completed"}:
-        return _clip(f"finish blocked: {summary}", limit)
-    return _clip(f"finish accepted: {summary}", limit)
 
 
 def _render_codex_generic(result: ToolResultEnvelope, *, limit: int) -> str:
@@ -499,7 +482,7 @@ def _provider_visible_debug_omissions(renderer_id: str) -> list[str]:
 
 __all__ = [
     "CODEX_APPLY_PATCH_RENDERER_ID",
-    "CODEX_FINISH_RENDERER_ID",
+    "CODEX_GENERIC_RENDERER_ID",
     "CODEX_TERMINAL_RENDERER_ID",
     "RenderedToolResult",
     "render_observability_record",
