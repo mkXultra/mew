@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import ast
 import datetime as dt
 import json
 import os
@@ -286,103 +285,6 @@ def build_mew_work_command_template(config: MewHarborRun) -> str:
 def debug_cleanup_specs_for_task(task_name: str) -> tuple[str, ...]:
     slug = str(task_name or "").removeprefix("terminal-bench/")
     return TASK_DEBUG_CLEANUP_SPECS_BY_SLUG.get(slug, ())
-
-
-def summarize_external_verifier_failure(path: Path) -> dict[str, object]:
-    """Return a bounded verifier-failure capsule for the finish verifier planner.
-
-    The capsule is intentionally diagnostic input, not a task-specific rule.
-    It lets a follow-up same-shape run ask the finish verifier planner to mimic
-    the prior oracle failure shape before trusting a model finish claim.
-    """
-
-    failure_path = path
-    if path.is_dir():
-        candidate = path / "verifier" / "test-stdout.txt"
-        if candidate.exists():
-            failure_path = candidate
-        elif (path / "test-stdout.txt").exists():
-            failure_path = path / "test-stdout.txt"
-    if not failure_path.exists() or not failure_path.is_file():
-        return {}
-    text = failure_path.read_text(encoding="utf-8", errors="replace")
-    tail = text[-4000:]
-    return {
-        "source": "external_verifier_failure_artifact",
-        "source_path": str(failure_path),
-        "status": "failed",
-        "failed_tests": list(_external_failure_test_names(text)),
-        "expected_stdout_substrings": list(_external_failure_expected_stdout_bytes(text)),
-        "artifact_paths": list(_external_failure_artifact_paths(text)),
-        "sampling_semantics": _external_failure_sampling_semantics(text),
-        "test_stdout_tail": tail,
-    }
-
-
-def _external_failure_test_names(text: str) -> tuple[str, ...]:
-    names: list[str] = []
-    for pattern in (r"_{2,}\s+([A-Za-z0-9_]+)\s+_{2,}", r"FAILED\s+\S+::([A-Za-z0-9_]+)"):
-        for match in re.finditer(pattern, text):
-            name = str(match.group(1) or "").strip()
-            if name and name not in names:
-                names.append(name)
-    return tuple(names[:12])
-
-
-def _external_failure_expected_stdout_bytes(text: str) -> tuple[str, ...]:
-    values: list[str] = []
-    for match in re.finditer(r"expected_text\s*=\s*(b[\"'].*?[\"'])", text, flags=re.DOTALL):
-        literal = match.group(1)
-        try:
-            decoded = ast.literal_eval(literal)
-        except (SyntaxError, ValueError):
-            continue
-        if isinstance(decoded, bytes):
-            value = decoded.decode("utf-8", errors="replace").strip()
-            if value and value not in values:
-                values.append(value)
-    return tuple(values[:8])
-
-
-def _external_failure_artifact_paths(text: str) -> tuple[str, ...]:
-    values: list[str] = []
-    assignment_re = re.compile(
-        r"(?is)\b(?:frame|artifact|output)[A-Za-z0-9_]*\s*=\s*Path\(\s*([\"'])(/[^\"']+)\1\s*\)"
-    )
-    for match in assignment_re.finditer(text):
-        value = str(match.group(2) or "").strip()
-        if value.startswith(("/tmp/", "/app/")) and value not in values:
-            values.append(value)
-    if values:
-        return tuple(values[:20])
-    for line in text.splitlines():
-        if not re.search(r"(?i)\b(?:frame|artifact)(?:_path)?\b|\boutput_path\b", line):
-            continue
-        for match in re.finditer(r"/(?:tmp|app)/[A-Za-z0-9_./+-]+", line):
-            value = str(match.group(0) or "").rstrip(".,;:)\"'")
-            if value and value not in values:
-                values.append(value)
-    return tuple(values[:20])
-
-
-def _external_failure_sampling_semantics(text: str) -> dict[str, object]:
-    lowered = text.casefold()
-    semantics: dict[str, object] = {}
-    if "while not frame_path.exists()" in text or "waiting for frame" in lowered:
-        semantics["waits_for_artifact_path"] = True
-    sleep_values = []
-    for sleep_match in re.finditer(r"time\.sleep\((\d+(?:\.\d+)?)\)", text):
-        try:
-            sleep_values.append(float(sleep_match.group(1)))
-        except ValueError:
-            pass
-    if sleep_values:
-        semantics["post_artifact_sleep_seconds"] = max(sleep_values)
-    if "process.terminate()" in text:
-        semantics["terminates_process_after_sampling"] = True
-    if "stdout" in lowered or "expected_text" in text:
-        semantics["checks_stdout"] = True
-    return semantics
 
 
 def build_mounts_json(config: MewHarborRun) -> str:
@@ -898,14 +800,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--finish-verifier-external-failure-artifact",
-        type=Path,
-        help=(
-            "Path to a prior verifier failure artifact or its test-stdout.txt. "
-            "A bounded summary is passed to the finish verifier planner."
-        ),
-    )
-    parser.add_argument(
         "--workframe-variant",
         default="",
         help="WorkFrame reducer variant to pass into mew work, e.g. transition_contract, current, or transcript_first.",
@@ -946,10 +840,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         tool_surface_profile_id=args.tool_surface_profile_id,
     )
     work_guidance_fragments = list(args.work_guidance or [])
-    if args.finish_verifier_external_failure_artifact:
-        failure = summarize_external_verifier_failure(args.finish_verifier_external_failure_artifact)
-        if failure:
-            work_guidance_fragments.append(json.dumps({"finish_verifier_external_failure": failure}, sort_keys=True))
     if args.tool_surface_profile_id:
         work_guidance_fragments = [
             cleaned

@@ -253,7 +253,6 @@ class FinishVerifierPlannerLoopRequest:
     recent_tool_results: tuple[Mapping[str, object], ...]
     candidate_paths: tuple[str, ...]
     policy: FinishVerifierPlannerLoopPolicy
-    external_verifier_failure: Mapping[str, object] | None = None
     legacy_request: Mapping[str, object] | None = None
 
     def as_planner_request(self) -> dict[str, object]:
@@ -264,8 +263,6 @@ class FinishVerifierPlannerLoopRequest:
             "description": self.task_description,
             "contract": dict(self.task_contract),
         }
-        if self.external_verifier_failure:
-            requirement_source["external_verifier_failure"] = dict(self.external_verifier_failure)
         base.update(
             {
                 "schema_version": 1,
@@ -309,8 +306,6 @@ class FinishVerifierPlannerLoopRequest:
                 },
             }
         )
-        if self.external_verifier_failure:
-            base["external_verifier_failure"] = dict(self.external_verifier_failure)
         return base
 
 
@@ -2257,9 +2252,6 @@ def _finish_verifier_planner_loop_request(
     legacy_contract = task.get("contract")
     if isinstance(legacy_contract, Mapping):
         task_contract.update(dict(legacy_contract))
-    external_failure = lane_config.get("finish_verifier_external_failure")
-    if not isinstance(external_failure, Mapping):
-        external_failure = None
     return FinishVerifierPlannerLoopRequest(
         lane_attempt_id=_lane_attempt_id(lane_input),
         turn_id="finish-verifier-planner",
@@ -2286,7 +2278,6 @@ def _finish_verifier_planner_loop_request(
             ),
             allowed_roots=tuple(str(root) for root in allowed_roots if str(root).strip()),
         ),
-        external_verifier_failure=dict(external_failure) if isinstance(external_failure, Mapping) else None,
         legacy_request=legacy_request,
     )
 
@@ -2509,7 +2500,7 @@ def _coerce_native_finish_verifier_plan_with_diagnostics(
     safety = _finish_verifier_command_safety(
         command,
         request=request,
-        require_observable_assertions=_finish_verifier_requires_observable_assertions(request),
+        require_observable_assertions=False,
     )
     if not safety.allowed:
         return _NativeFinishVerifierPlanCoercion(
@@ -2531,34 +2522,6 @@ def _coerce_native_finish_verifier_plan_with_diagnostics(
             raw=dict(value),
         ),
         status="accepted",
-    )
-
-
-def _finish_verifier_requires_observable_assertions(request: Mapping[str, object] | None) -> bool:
-    if not isinstance(request, Mapping):
-        return False
-    external_failure = request.get("external_verifier_failure")
-    if isinstance(external_failure, Mapping) and external_failure:
-        return True
-    return False
-
-
-def _finish_verifier_external_failure(request: Mapping[str, object] | None) -> Mapping[str, object]:
-    if not isinstance(request, Mapping):
-        return {}
-    value = request.get("external_verifier_failure")
-    return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _external_failure_assertion_blockers_allowed(command: str, blockers: tuple[str, ...]) -> bool:
-    allowed = {
-        "finish_verifier_weak_assertion",
-        "finish_verifier_shell_composition",
-    }
-    return (
-        bool(blockers)
-        and set(blockers).issubset(allowed)
-        and _finish_verifier_external_assertion_command_shape_safe(command)
     )
 
 
@@ -2625,8 +2588,6 @@ def _finish_verifier_command_safety(
         NativeFinishGatePolicy(allowed_sources=("finish_verifier_planner",)),
     )
     requirements = _finish_verifier_observable_requirements(request)
-    external_failure = _finish_verifier_external_failure(request)
-    external_failure_assertion = _finish_verifier_command_asserts_external_failure(text, external_failure)
     if not validation.allowed:
         mapped_blockers = tuple(_planner_safety_blocker(blocker) for blocker in validation.blockers)
         if (
@@ -2638,26 +2599,12 @@ def _finish_verifier_command_safety(
                 command=validation.command,
                 reason="nontrivial observable assertion command",
             )
-        elif external_failure and external_failure_assertion and _external_failure_assertion_blockers_allowed(text, mapped_blockers):
-            validation = FinishCloseoutCommandValidation(
-                allowed=True,
-                command=validation.command,
-                reason="concrete external verifier failure assertion command",
-            )
         else:
             return _FinishVerifierCommandSafetyResult(
                 allowed=False,
                 reason=validation.reason,
                 blockers=mapped_blockers,
             )
-    if external_failure:
-        if not external_failure_assertion:
-            return _FinishVerifierCommandSafetyResult(
-                allowed=False,
-                reason="finish verifier command does not assert the prior external verifier failure shape",
-                blockers=("finish_verifier_external_failure_shape_missing",),
-            )
-        return _FinishVerifierCommandSafetyResult(allowed=True, reason="asserts prior external verifier failure shape")
     if (
         require_observable_assertions
         and requirements
@@ -2668,8 +2615,6 @@ def _finish_verifier_command_safety(
             reason="finish verifier command does not assert required task-visible observables",
             blockers=("finish_verifier_observable_assertions_missing",),
         )
-    if require_observable_assertions and requirements and _finish_verifier_command_asserts_observables(text, requirements):
-        return _FinishVerifierCommandSafetyResult(allowed=True, reason="asserts external verifier observables")
     if _FINISH_VERIFIER_GENERIC_TEST_RE.search(text):
         return _FinishVerifierCommandSafetyResult(allowed=True, reason="generic test command")
     if request is None:
@@ -2712,7 +2657,6 @@ def _finish_verifier_observable_requirements(request: Mapping[str, object] | Non
                 ensure_ascii=False,
                 sort_keys=True,
             ),
-            json.dumps(_json_safe_native(request.get("external_verifier_failure") or {}), ensure_ascii=False, sort_keys=True),
         )
         if item
     )
@@ -2767,235 +2711,6 @@ def _finish_verifier_nontrivial_test_command(command: str) -> bool:
     if any(token in file_predicates for token in expression):
         return any(_PATH_LIKE_TOKEN_RE.search(token) for token in expression if token not in file_predicates)
     return any(_PATH_LIKE_TOKEN_RE.search(token) for token in expression)
-
-
-def _finish_verifier_command_asserts_external_failure(
-    command: str,
-    external_failure: Mapping[str, object],
-) -> bool:
-    if not external_failure:
-        return False
-    expected_terms = _external_failure_expected_stdout_terms(external_failure)
-    artifact_paths = _external_failure_artifact_path_terms(external_failure)
-    if not expected_terms and not artifact_paths:
-        return False
-    executable_terms = _finish_verifier_command_executable_terms(command)
-    normalized_command = " ".join(executable_terms).casefold()
-    if expected_terms and not any(term.casefold() in normalized_command for term in expected_terms):
-        return False
-    command_paths = {path.casefold() for path in _external_failure_command_path_terms(executable_terms)}
-    if artifact_paths and not any(path.casefold() in command_paths for path in artifact_paths):
-        return False
-    if artifact_paths and not _external_failure_artifact_paths_asserted(executable_terms, artifact_paths):
-        return False
-    if expected_terms and not _external_failure_stdout_assertion_has_runtime_target(
-        executable_terms,
-        expected_terms,
-        artifact_paths,
-        external_failure,
-    ):
-        return False
-    if not _finish_verifier_external_assertion_command_semantic(command):
-        return False
-    return True
-
-
-def _finish_verifier_external_assertion_command_shape_safe(command: str) -> bool:
-    if re.search(r"\$\(|`|\|\||;|(?<!\|)\|(?!\|)|(?<!&)&(?!&)|[<>]", command):
-        return False
-    return True
-
-
-def _finish_verifier_external_assertion_command_semantic(command: str) -> bool:
-    return _FINISH_VERIFIER_ASSERTION_COMMAND_RE.search(command) is not None or _finish_verifier_nontrivial_test_command(command)
-
-
-def _finish_verifier_command_executable_terms(command: str) -> tuple[str, ...]:
-    try:
-        tokens = shlex.split(command, comments=True)
-    except ValueError:
-        return tuple(command.split())
-    return tuple(tokens)
-
-
-def _external_failure_command_path_terms(executable_terms: tuple[str, ...]) -> tuple[str, ...]:
-    paths: list[str] = []
-    for term in executable_terms:
-        for match in _PATH_LIKE_TOKEN_RE.finditer(term):
-            value = str(match.group(0) or "").strip().strip("'\"`.,:;()[]{}")
-            if value and value not in paths:
-                paths.append(value)
-    return tuple(paths)
-
-
-def _external_failure_stdout_assertion_has_runtime_target(
-    executable_terms: tuple[str, ...],
-    expected_terms: tuple[str, ...],
-    artifact_paths: tuple[str, ...],
-    external_failure: Mapping[str, object],
-) -> bool:
-    artifact_set = {path.casefold() for path in artifact_paths}
-    for segment in _external_failure_assertion_segments(executable_terms):
-        segment_text = " ".join(segment).casefold()
-        if not any(term.casefold() in segment_text for term in expected_terms):
-            continue
-        if not _external_failure_stdout_assertion_tool(segment):
-            continue
-        has_runtime_target = False
-        for path in (path.casefold() for path in _external_failure_command_path_terms(segment)):
-            if path in artifact_set:
-                continue
-            if not _external_failure_runtime_stdout_path(path, external_failure):
-                return False
-            has_runtime_target = True
-        if has_runtime_target:
-            return True
-    return False
-
-
-def _external_failure_assertion_segments(executable_terms: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
-    segments: list[tuple[str, ...]] = []
-    current: list[str] = []
-    for term in executable_terms:
-        if term == "&&":
-            if current:
-                segments.append(tuple(current))
-                current = []
-            continue
-        current.append(term)
-    if current:
-        segments.append(tuple(current))
-    return tuple(segments)
-
-
-def _external_failure_artifact_paths_asserted(
-    executable_terms: tuple[str, ...],
-    artifact_paths: tuple[str, ...],
-) -> bool:
-    artifact_set = {path.casefold() for path in artifact_paths}
-    asserted: set[str] = set()
-    for segment in _external_failure_assertion_segments(executable_terms):
-        segment_paths = {path.casefold() for path in _external_failure_command_path_terms(segment)}
-        for artifact_path in artifact_set.intersection(segment_paths):
-            if _external_failure_artifact_segment_asserts_path(segment, artifact_path):
-                asserted.add(artifact_path)
-    return bool(artifact_set) and artifact_set.issubset(asserted)
-
-
-def _external_failure_artifact_segment_asserts_path(segment: tuple[str, ...], artifact_path: str) -> bool:
-    if not segment:
-        return False
-    segment_paths = {path.casefold() for path in _external_failure_command_path_terms(segment)}
-    if artifact_path not in segment_paths:
-        return False
-    first = Path(segment[0]).name.casefold()
-    if first in {"stat", "identify"}:
-        return True
-    if first not in {"test", "[", "[["}:
-        return False
-    if "!" in segment or "-o" in segment:
-        return False
-    file_predicates = {"-e", "-f", "-s", "-r", "-x", "-d"}
-    lowered = tuple(term.casefold() for term in segment)
-    return any(
-        term in file_predicates and index + 1 < len(lowered) and lowered[index + 1] == artifact_path
-        for index, term in enumerate(lowered)
-    )
-
-
-def _external_failure_stdout_assertion_tool(segment: tuple[str, ...]) -> bool:
-    if not segment:
-        return False
-    first = Path(segment[0]).name.casefold()
-    return first in {"grep", "rg"} and not _external_failure_stdout_assertion_inverted(segment)
-
-
-def _external_failure_stdout_assertion_inverted(segment: tuple[str, ...]) -> bool:
-    for term in segment[1:]:
-        lowered = term.casefold()
-        if lowered == "--invert-match":
-            return True
-        if lowered == "--files-without-match":
-            return True
-        if lowered == "-v":
-            return True
-        if term == "-L":
-            return True
-        if lowered.startswith("-") and not lowered.startswith("--") and "v" in lowered[1:]:
-            return True
-        if term.startswith("-") and not term.startswith("--") and "L" in term[1:]:
-            return True
-    return False
-
-
-def _external_failure_oracle_source_path(path: str) -> bool:
-    normalized = path.replace("\\", "/").casefold()
-    if "/tests/" in normalized or normalized.startswith("/app/test") or normalized.startswith("tests/"):
-        return True
-    name = Path(normalized).name
-    return name.startswith("test_") or name.endswith("_test.py") or name.endswith("_tests.py")
-
-
-def _external_failure_runtime_stdout_path(path: str, external_failure: Mapping[str, object]) -> bool:
-    normalized = path.replace("\\", "/").casefold()
-    source_path = str(external_failure.get("source_path") or "").replace("\\", "/").casefold()
-    if source_path and normalized == source_path:
-        return False
-    if "/verifier/test-stdout" in normalized or normalized.endswith("/test-stdout.txt"):
-        return False
-    if _external_failure_oracle_source_path(normalized):
-        return False
-    suffix = Path(normalized).suffix
-    if suffix in {
-        ".py",
-        ".pyx",
-        ".pxd",
-        ".js",
-        ".ts",
-        ".tsx",
-        ".jsx",
-        ".c",
-        ".h",
-        ".cc",
-        ".cpp",
-        ".hpp",
-        ".rs",
-        ".go",
-        ".java",
-        ".rb",
-        ".php",
-        ".lua",
-        ".sh",
-    }:
-        return False
-    name = Path(normalized).name
-    if any(marker in name for marker in ("stdout", "stderr", "output", "actual", "capture", "transcript", "log")):
-        return True
-    return suffix in {".txt", ".log", ".out"}
-
-
-def _external_failure_expected_stdout_terms(external_failure: Mapping[str, object]) -> tuple[str, ...]:
-    values = external_failure.get("expected_stdout_substrings")
-    if not isinstance(values, (list, tuple)):
-        return ()
-    terms: list[str] = []
-    for item in values:
-        term = " ".join(str(item or "").split()).strip()
-        if len(term) >= 4 and term not in terms:
-            terms.append(term)
-    return tuple(terms[:8])
-
-
-def _external_failure_artifact_path_terms(external_failure: Mapping[str, object]) -> tuple[str, ...]:
-    values = external_failure.get("artifact_paths")
-    if not isinstance(values, (list, tuple)):
-        return ()
-    paths: list[str] = []
-    for item in values:
-        path = str(item or "").strip()
-        if len(path) >= 4 and _PATH_LIKE_TOKEN_RE.search(path) and path not in paths:
-            paths.append(path)
-    return tuple(paths[:20])
 
 
 def _planner_safety_blocker(blocker: str) -> str:
@@ -3311,8 +3026,6 @@ def _finish_verifier_planner_prompt(request: Mapping[str, object]) -> str:
         "- The command must test the real task outcome, not print a self-acceptance marker.\n"
         "- Do not use echo/printf/true/exit 0 as the verifier.\n"
         "- Prefer task-provided tests, exact verifier commands, build/test commands, or a focused runtime smoke.\n"
-        "- If external_verifier_failure is present, choose a verifier that checks the same externally observed "
-        "failure shape instead of only running the candidate program to completion.\n"
         "- If no safe verifier exists, return {\"command\":\"\", \"reason\":\"no safe verifier\"}.\n\n"
         "Input:\n"
         f"{json.dumps(dict(request), ensure_ascii=False, sort_keys=True)}"
