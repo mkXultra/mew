@@ -14,6 +14,10 @@ def test_native_boundary_audit_passes_current_repo() -> None:
         check.name == "source_inventory_internal_finish_gate_boundary_anchor_constants"
         for check in report.checks
     )
+    assert any(
+        check.name == "source_inventory_provider_visible_finish_absent_tool_policy"
+        for check in report.checks
+    )
 
 
 def test_native_boundary_audit_reports_missing_required_design_marker(tmp_path: Path) -> None:
@@ -99,9 +103,6 @@ def _write_complete_fixture(root: Path) -> None:
         encoding="utf-8",
     )
     (impl / "native_tool_harness.py").write_text(
-        'if call.kind == "finish_call" and _native_finish_authority_lane_status(result) == "completed":\n'
-        "    accepted_finish = call\n"
-        '    status = "completed"\n'
         "def _run_native_finish_time_closeouts():\n"
         "    scoped_calls = list(tool_calls)\n"
         "closeout = _native_final_verifier_closeout(\n"
@@ -121,6 +122,12 @@ def _write_complete_fixture(root: Path) -> None:
         "    return {\n"
         '        "surface": "native_loop_signals",\n'
         "    }\n",
+        encoding="utf-8",
+    )
+    (impl / "tool_policy.py").write_text(
+        "def list_v2_tool_specs_for_mode(mode):\n"
+        "    production_specs = tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access != \"finish\")\n"
+        "    return production_specs\n",
         encoding="utf-8",
     )
     (impl / "exec_runtime.py").write_text(

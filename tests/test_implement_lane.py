@@ -13118,7 +13118,7 @@ def test_implement_v2_prompt_read_only_mode_omits_tool_surface_section() -> None
 def test_implement_v2_bypass_mode_fails_closed_until_explicit_policy_exists() -> None:
     tools = {spec.name for spec in list_v2_tool_specs_for_mode("bypass")}
 
-    assert tools == {"inspect_dir", "read_file", "search_text", "glob", "git_status", "git_diff", "finish"}
+    assert tools == {"inspect_dir", "read_file", "search_text", "glob", "git_status", "git_diff"}
 
 
 def test_implement_v2_exec_mode_surfaces_lifecycle_tools() -> None:
@@ -13132,7 +13132,8 @@ def test_implement_v2_write_mode_surfaces_write_tools() -> None:
     tools = {spec.name for spec in list_v2_tool_specs_for_mode("write")}
 
     assert {"write_file", "edit_file", "apply_patch"} <= tools
-    assert {"read_file", "finish"} <= tools
+    assert "read_file" in tools
+    assert "finish" not in tools
     assert "run_command" not in tools
 
 

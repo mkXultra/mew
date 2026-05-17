@@ -71,12 +71,11 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
         window_after=8,
     ),
     SourceControlSpec(
-        name="finish_call_resolver_completion",
-        relative_path="src/mew/implement_lane/native_tool_harness.py",
-        anchor='if call.kind == "finish_call" and _native_finish_authority_lane_status(result) == "completed"',
-        markers=("accepted_finish = call", 'status = "completed"'),
-        forbidden_markers=('result.status == "completed" and not result.is_error',),
-        window_after=8,
+        name="provider_visible_finish_absent_tool_policy",
+        relative_path="src/mew/implement_lane/tool_policy.py",
+        anchor="production_specs = tuple",
+        markers=('spec.access != "finish"', "return production_specs"),
+        window_after=18,
     ),
     SourceControlSpec(
         name="native_final_verifier_closeout_call",

@@ -145,7 +145,7 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
     ImplementLaneToolSpec(
         name="finish",
         access="finish",
-        description="Finish only after acceptance evidence is present.",
+        description="Legacy/replay-only finish tool. Production native implement_v2 must not expose this tool.",
     ),
 )
 
@@ -159,16 +159,17 @@ def list_v2_base_tool_specs() -> tuple[ImplementLaneToolSpec, ...]:
 def list_v2_tool_specs_for_mode(mode: object) -> tuple[ImplementLaneToolSpec, ...]:
     """Return the tool surface allowed for a v2 permission mode."""
 
+    production_specs = tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access != "finish")
     mode_name = str(mode or "read_only").strip() or "read_only"
     if mode_name in {"read_only", "plan"}:
-        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "finish"})
+        return tuple(spec for spec in production_specs if spec.access == "read")
     if mode_name == "exec":
-        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "execute", "finish"})
+        return tuple(spec for spec in production_specs if spec.access in {"read", "execute"})
     if mode_name == "write":
-        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "write", "finish"})
+        return tuple(spec for spec in production_specs if spec.access in {"read", "write"})
     if mode_name in {"full", "implement", "implementation"}:
-        return V2_BASE_TOOL_SPECS
-    return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "finish"})
+        return production_specs
+    return tuple(spec for spec in production_specs if spec.access == "read")
 
 
 def list_v2_tool_specs_for_task(

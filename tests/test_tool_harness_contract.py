@@ -602,7 +602,7 @@ def test_run_command_natural_text_keeps_readback_for_live_omitted_output() -> No
 def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
     registry = build_tool_registry_artifact(
         provider="model_json",
-        tool_specs=tuple(spec for spec in list_v2_tool_specs_for_mode("read_only") if spec.name in {"read_file", "finish"}),
+        tool_specs=tuple(spec for spec in list_v2_tool_specs_for_mode("read_only") if spec.name == "read_file"),
     )
     policy = build_tool_policy_index_artifact(registry)
     result = ToolResultEnvelope(
@@ -622,7 +622,8 @@ def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
     routes = build_tool_route_artifact((result,))
 
     assert registry["tool_registry_hash"] == registry["provider_tool_spec_hash"]
-    assert {"read_file", "finish", "model_response_error"}.issubset(set(registry["by_tool_name"]))
+    assert {"read_file", "model_response_error"}.issubset(set(registry["by_tool_name"]))
+    assert "finish" not in registry["by_tool_name"]
     assert policy["by_tool"]["read_file"]["tool_ref"] == tool_ref_for_name("read_file")
     assert policy["by_tool_ref"][tool_ref_for_name("read_file")]["tool_name"] == "read_file"
     assert policy["by_tool_ref"][tool_ref_for_name("model_response_error")]["access"] == "internal"

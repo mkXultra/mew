@@ -128,6 +128,33 @@ def test_codex_hot_path_provider_descriptors_have_no_finish_after_phase_1() -> N
     )
 
 
+def test_default_native_snapshot_has_no_provider_visible_finish_after_phase_6() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"mode": "full"},
+        task_contract={},
+        transcript_items=(),
+    )
+
+    result = scan_tool_surface_metadata_for_finish_leaks(snapshot.request_metadata())
+
+    assert result.ok, result.as_dict()
+    assert "finish" not in snapshot.provider_tool_names
+
+
+def test_default_native_provider_descriptors_have_no_finish_after_phase_6() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"mode": "full"},
+        task_contract={},
+        transcript_items=(),
+    )
+    descriptors = provider_tool_specs(lower_implement_lane_tool_specs(snapshot.tool_specs))
+
+    result = scan_provider_tool_descriptors_for_finish_leaks(descriptors)
+
+    assert result.ok, result.as_dict()
+    assert all(str(descriptor.get("name") or "") != "finish" for descriptor in descriptors)
+
+
 def test_future_no_finish_tool_surface_snapshot_passes_gate() -> None:
     result = scan_tool_surface_metadata_for_finish_leaks(
         {

@@ -1,6 +1,7 @@
 from mew.implement_lane.tool_policy import (
     is_hard_runtime_artifact_task,
     list_v2_base_tool_specs,
+    list_v2_tool_specs_for_mode,
     list_v2_tool_specs_for_task,
 )
 
@@ -13,6 +14,13 @@ def test_mutation_tools_prefer_patch_and_edit_before_write_file() -> None:
     names = _names(list_v2_base_tool_specs())
 
     assert names.index("apply_patch") < names.index("edit_file") < names.index("write_file")
+
+
+def test_production_modes_do_not_expose_provider_visible_finish() -> None:
+    for mode in ("read_only", "plan", "exec", "write", "full", "implement", "implementation", "unknown"):
+        names = set(_names(list_v2_tool_specs_for_mode(mode)))
+
+        assert "finish" not in names
 
 
 def test_hard_runtime_artifact_task_keeps_complete_file_creation_surface() -> None:
