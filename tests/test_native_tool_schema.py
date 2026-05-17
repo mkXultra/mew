@@ -9,10 +9,8 @@ from mew.implement_lane.native_tool_schema import (
     structured_tool_json_schema,
     validate_strict_json_schema,
 )
-from mew.implement_lane.tool_policy import (
-    ImplementLaneToolSpec,
-    list_v2_base_tool_specs,
-)
+from mew.implement_lane.tool_policy import list_v2_base_tool_specs
+from mew.implement_lane.tool_specs import ImplementLaneToolSpec
 
 
 def test_base_tool_specs_lower_to_responses_tools_with_strict_read_file_schema() -> (

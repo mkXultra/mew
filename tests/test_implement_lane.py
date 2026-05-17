@@ -10538,6 +10538,7 @@ def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:
     assert specs["write_file"].approval_required is True
     assert "complete new file" in specs["write_file"].description
     assert "Prefer apply_patch or edit_file" in specs["write_file"].description
+    assert "Primary source mutation tool" in specs["apply_patch"].description
     assert "smallest runnable candidate" in specs["apply_patch"].description
     assert specs["edit_file"].dry_run_supported is True
     assert specs["apply_patch"].dry_run_supported is True

@@ -1,5 +1,6 @@
+from pathlib import Path
+
 from mew.implement_lane.native_transcript import NativeTranscriptItem
-from mew.implement_lane.tool_policy import list_v2_tool_specs_for_task
 from mew.implement_lane.tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
     MEW_LEGACY_PROFILE_ID,
@@ -14,9 +15,17 @@ def test_mew_legacy_profile_preserves_default_tool_order_without_lifecycle() -> 
         transcript_items=(),
     )
     expected = [
-        spec.name
-        for spec in list_v2_tool_specs_for_task("full")
-        if spec.name not in {"poll_command", "cancel_command", "read_command_output"}
+        "apply_patch",
+        "edit_file",
+        "write_file",
+        "run_command",
+        "run_tests",
+        "read_file",
+        "search_text",
+        "glob",
+        "inspect_dir",
+        "git_status",
+        "git_diff",
     ]
 
     assert snapshot.profile_id == MEW_LEGACY_PROFILE_ID
@@ -140,6 +149,11 @@ def test_codex_hot_path_profile_exposes_codex_like_tools_only() -> None:
     assert "finish" not in snapshot.provider_tool_names
     assert "run_command" not in snapshot.provider_tool_names
     assert "read_file" not in snapshot.provider_tool_names
+    descriptions = "\n".join(spec.description for spec in snapshot.tool_specs)
+    assert "Use the `apply_patch` tool to edit files" in descriptions
+    assert "Runs a command, returning output or a command_id" in descriptions
+    assert "Primary source mutation tool" not in descriptions
+    assert "smallest runnable candidate" not in descriptions
     route_by_name = {entry.provider_name: entry.as_dict() for entry in snapshot.entries}
     assert route_by_name["exec_command"]["internal_kernel"] == "run_command"
     assert route_by_name["write_stdin"]["internal_kernel"] == "poll_command"
@@ -160,3 +174,18 @@ def test_codex_hot_path_profile_gates_list_dir_option() -> None:
     assert "list_dir" in snapshot.provider_tool_names
     route_by_name = {entry.provider_name: entry.as_dict() for entry in snapshot.entries}
     assert route_by_name["list_dir"]["internal_kernel"] == "inspect_dir"
+
+
+def test_phase6a_tool_registry_does_not_import_tool_policy_for_descriptors() -> None:
+    source = Path("src/mew/implement_lane/tool_registry.py").read_text(encoding="utf-8")
+
+    assert "tool_policy" not in source
+    assert "list_v2_tool_specs_for_task" not in source
+
+
+def test_phase6a_tool_policy_is_not_provider_visible_text_owner() -> None:
+    source = Path("src/mew/implement_lane/tool_policy.py").read_text(encoding="utf-8")
+
+    assert "ImplementLaneToolSpec(" not in source
+    assert "Primary source mutation tool" not in source
+    assert "Runs a command, returning output or a command_id" not in source

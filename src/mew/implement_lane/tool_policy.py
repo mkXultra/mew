@@ -1,148 +1,22 @@
-"""Provider-neutral implementation-lane tool policy."""
+"""Compatibility helpers for implementation-lane tool policy.
+
+Provider-visible tool descriptions/specs are owned by tool profile modules.
+This module remains as a compatibility facade plus non-provider-visible helper
+logic until the Phase 6C deletion gate.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
-from typing import Literal
 
-ToolAccess = Literal["read", "write", "execute", "approval"]
-ToolInputTransport = Literal["json_arguments", "json_line_array", "provider_native_freeform"]
-
-
-@dataclass(frozen=True)
-class ImplementLaneToolSpec:
-    """Provider-neutral tool shape before provider-specific translation."""
-
-    name: str
-    access: ToolAccess
-    description: str
-    approval_required: bool = False
-    dry_run_supported: bool = False
-    provider_native_eligible: bool = True
-    input_transport: ToolInputTransport = "json_arguments"
-    preferred_bulk_argument: str = ""
-    fallback_bulk_arguments: tuple[str, ...] = ()
-    provider_native_input_kind: str = ""
-
-    def as_dict(self) -> dict[str, object]:
-        return {
-            "name": self.name,
-            "access": self.access,
-            "description": self.description,
-            "approval_required": self.approval_required,
-            "dry_run_supported": self.dry_run_supported,
-            "provider_native_eligible": self.provider_native_eligible,
-            "input_transport": self.input_transport,
-            "preferred_bulk_argument": self.preferred_bulk_argument,
-            "fallback_bulk_arguments": list(self.fallback_bulk_arguments),
-            "provider_native_input_kind": self.provider_native_input_kind,
-        }
-
-
-V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
-    ImplementLaneToolSpec(
-        name="apply_patch",
-        access="write",
-        description=(
-            "Primary source mutation tool for multi-line edits, new files, deletions, "
-            "and renames. Use it for the smallest runnable candidate once the target "
-            "file or path is known. Do not wrap custom/freeform patch input in JSON."
-        ),
-        approval_required=True,
-        dry_run_supported=True,
-        input_transport="json_line_array",
-        preferred_bulk_argument="patch_lines",
-        fallback_bulk_arguments=("patch", "input"),
-        provider_native_input_kind="freeform_apply_patch",
-    ),
-    ImplementLaneToolSpec(
-        name="edit_file",
-        access="write",
-        description=(
-            "Edit a file with exact replacements or structured hunks. Use for focused "
-            "source changes when anchors are precise; ambiguous matches fail closed."
-        ),
-        approval_required=True,
-        dry_run_supported=True,
-    ),
-    ImplementLaneToolSpec(
-        name="write_file",
-        access="write",
-        description=(
-            "Write a complete new file when the target path is missing and the full "
-            "content is known. Use content_lines for multi-line source. Prefer "
-            "apply_patch or edit_file for modifying existing source files."
-        ),
-        approval_required=True,
-        dry_run_supported=True,
-    ),
-    ImplementLaneToolSpec(
-        name="run_command",
-        access="execute",
-        description=(
-            "Run a bounded command, build, runtime, or verifier through managed exec. "
-            "Use command output to patch or edit source; commands are not the source editing API. "
-            "Output is compact by default; request a larger bounded output budget when terminal text is needed."
-        ),
-        approval_required=True,
-    ),
-    ImplementLaneToolSpec(
-        name="run_tests",
-        access="execute",
-        description=(
-            "Run a bounded verifier or test command through managed exec. Use failures to patch "
-            "or edit source. Output is compact by default; request a larger bounded output budget "
-            "when failure text is needed."
-        ),
-        approval_required=True,
-    ),
-    ImplementLaneToolSpec(
-        name="poll_command",
-        access="execute",
-        description="Poll a yielded managed command by command_run_id.",
-    ),
-    ImplementLaneToolSpec(
-        name="cancel_command",
-        access="execute",
-        description="Cancel a yielded managed command by command_run_id.",
-    ),
-    ImplementLaneToolSpec(
-        name="read_command_output",
-        access="execute",
-        description="Read a bounded slice of managed command spool output.",
-    ),
-    ImplementLaneToolSpec(
-        name="read_file",
-        access="read",
-        description="Read only the bounded workspace excerpt needed to choose or validate a patch; returns line anchors.",
-    ),
-    ImplementLaneToolSpec(
-        name="search_text",
-        access="read",
-        description="Find candidate source anchors and return bounded path:line matches.",
-    ),
-    ImplementLaneToolSpec(
-        name="glob",
-        access="read",
-        description="List workspace paths matching a glob.",
-    ),
-    ImplementLaneToolSpec(
-        name="inspect_dir",
-        access="read",
-        description="List a workspace directory.",
-    ),
-    ImplementLaneToolSpec(
-        name="git_status",
-        access="read",
-        description="Inspect git status for an allowed workspace root.",
-    ),
-    ImplementLaneToolSpec(
-        name="git_diff",
-        access="read",
-        description="Inspect bounded git diff or diffstat for an allowed workspace root.",
-    ),
+from .tool_profiles.mew_legacy import (
+    MEW_LEGACY_TOOL_SPECS,
+    mew_legacy_tool_specs_for_mode,
+    mew_legacy_tool_specs_for_task,
 )
+from .tool_specs import ImplementLaneToolSpec, ToolAccess, ToolInputTransport
+
+V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = MEW_LEGACY_TOOL_SPECS
 
 
 def list_v2_base_tool_specs() -> tuple[ImplementLaneToolSpec, ...]:
@@ -154,16 +28,7 @@ def list_v2_base_tool_specs() -> tuple[ImplementLaneToolSpec, ...]:
 def list_v2_tool_specs_for_mode(mode: object) -> tuple[ImplementLaneToolSpec, ...]:
     """Return the tool surface allowed for a v2 permission mode."""
 
-    mode_name = str(mode or "read_only").strip() or "read_only"
-    if mode_name in {"read_only", "plan"}:
-        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access == "read")
-    if mode_name == "exec":
-        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "execute"})
-    if mode_name == "write":
-        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "write"})
-    if mode_name in {"full", "implement", "implementation"}:
-        return V2_BASE_TOOL_SPECS
-    return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access == "read")
+    return mew_legacy_tool_specs_for_mode(mode)
 
 
 def list_v2_tool_specs_for_task(
@@ -173,7 +38,7 @@ def list_v2_tool_specs_for_task(
 ) -> tuple[ImplementLaneToolSpec, ...]:
     """Return the provider-visible v2 tool surface for a task shape."""
 
-    return list_v2_tool_specs_for_mode(mode)
+    return mew_legacy_tool_specs_for_task(mode, task_contract=task_contract)
 
 
 def is_hard_runtime_artifact_task(task_contract: object) -> bool:

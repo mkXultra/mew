@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 
-from .tool_policy import ImplementLaneToolSpec
+from .tool_specs import ImplementLaneToolSpec
 
 NATIVE_TOOL_SCHEMA_VERSION = 1
 

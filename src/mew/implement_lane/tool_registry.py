@@ -12,10 +12,13 @@ from dataclasses import dataclass
 import re
 
 from .native_tool_schema import stable_json_hash
-from .tool_policy import ImplementLaneToolSpec, list_v2_tool_specs_for_task
+from .tool_profiles.codex_hot_path import (
+    CODEX_HOT_PATH_PROFILE_ID,
+    codex_hot_path_tool_specs,
+)
+from .tool_profiles.mew_legacy import MEW_LEGACY_PROFILE_ID, mew_legacy_tool_specs_for_task
+from .tool_specs import ImplementLaneToolSpec
 
-MEW_LEGACY_PROFILE_ID = "mew_legacy"
-CODEX_HOT_PATH_PROFILE_ID = "codex_hot_path"
 DEFAULT_TOOL_SURFACE_PROFILE_ID = MEW_LEGACY_PROFILE_ID
 TOOL_REGISTRY_SCHEMA_VERSION = 1
 
@@ -215,7 +218,7 @@ def build_tool_surface_snapshot(
         default_parallel_tool_calls=True,
         interactive_stdin=False,
     )
-    specs = list_v2_tool_specs_for_task(mode, task_contract=task_contract)
+    specs = mew_legacy_tool_specs_for_task(mode, task_contract=task_contract)
     specs = _filter_mew_legacy_lifecycle_tools(specs, transcript_items)
     if available_provider_tool_names is not None:
         names = {str(name) for name in available_provider_tool_names}
@@ -266,7 +269,9 @@ def _codex_hot_path_snapshot(
         interactive_stdin=False,
     )
     effective_options = {"write_stdin_mode": "poll_only", **dict(profile_options)}
-    specs = _codex_hot_path_specs(enable_list_dir=effective_options.get("enable_list_dir") is True)
+    specs = codex_hot_path_tool_specs(
+        enable_list_dir=effective_options.get("enable_list_dir") is True
+    )
     if available_provider_tool_names is not None:
         names = {str(name) for name in available_provider_tool_names}
         specs = tuple(spec for spec in specs if spec.name in names)
@@ -296,40 +301,6 @@ def _codex_hot_path_snapshot(
         parallel_tool_calls_effective=effective_parallel,
         interactive_stdin=profile.interactive_stdin,
     )
-
-
-def _codex_hot_path_specs(*, enable_list_dir: bool) -> tuple[ImplementLaneToolSpec, ...]:
-    legacy_by_name = {spec.name: spec for spec in list_v2_tool_specs_for_task("full")}
-    specs = [
-        legacy_by_name["apply_patch"],
-        ImplementLaneToolSpec(
-            name="exec_command",
-            access="execute",
-            description=(
-                "Run a bounded shell command in the workspace. Use it for builds, "
-                "tests, and probes; use apply_patch for source edits."
-            ),
-            approval_required=True,
-        ),
-        ImplementLaneToolSpec(
-            name="write_stdin",
-            access="execute",
-            description=(
-                "Poll an existing yielded command by short command_id with empty chars. "
-                "Interactive stdin is disabled in this profile version."
-            ),
-        ),
-    ]
-    if enable_list_dir:
-        specs.insert(
-            1,
-            ImplementLaneToolSpec(
-                name="list_dir",
-                access="read",
-                description="List a workspace directory with bounded entries.",
-            ),
-        )
-    return tuple(specs)
 
 
 def _codex_hot_path_entry(

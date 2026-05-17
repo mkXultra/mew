@@ -223,6 +223,10 @@ def test_request_descriptor_lowers_codex_hot_path_tool_schemas() -> None:
 
     assert names == ["apply_patch", "exec_command", "write_stdin"]
     assert descriptor["tool_surface_profile_id"] == CODEX_HOT_PATH_PROFILE_ID
+    descriptions = "\n".join(str(tool.get("description") or "") for tool in tools)  # type: ignore[union-attr]
+    assert "Use the `apply_patch` tool to edit files" in descriptions
+    assert "smallest runnable candidate" not in descriptions
+    assert "Runs a command, returning output or a command_id" in descriptions
     exec_schema = next(tool for tool in tools if tool.get("name") == "exec_command")  # type: ignore[union-attr]
     write_stdin_schema = next(tool for tool in tools if tool.get("name") == "write_stdin")  # type: ignore[union-attr]
     assert exec_schema["strict"] is False
