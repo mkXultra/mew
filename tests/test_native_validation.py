@@ -125,12 +125,36 @@ def test_native_loop_gate_requires_positive_native_command_route(tmp_path) -> No
     assert result.checks["command_route_has_native_runner"] is False
 
 
+def test_native_loop_gate_allows_internal_helper_model_call_in_native_harness(tmp_path) -> None:
+    files = {
+        "src/mew/commands.py": "run_live_native_implement_v2()\n",
+        "src/mew/implement_lane/__init__.py": "",
+        "src/mew/implement_lane/registry.py": "",
+        "src/mew/implement_lane/native_provider_adapter.py": "",
+        "src/mew/implement_lane/native_tool_harness.py": "call_codex_json()\n",
+    }
+    for relative_path, text in files.items():
+        path = tmp_path / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    result = validate_native_loop_gate(source_root=tmp_path)
+
+    assert result.ok is True
+    assert result.checks["native_production_paths_no_legacy_symbols"] is True
+    production_paths = result.details["native_production_paths"]
+    harness_scan = next(
+        item for item in production_paths if item["path"] == "src/mew/implement_lane/native_tool_harness.py"
+    )
+    assert harness_scan["legacy_hits"] == {}
+
+
 def test_native_loop_gate_rejects_legacy_symbols_in_native_production_paths(tmp_path) -> None:
     files = {
         "src/mew/commands.py": "run_unavailable_native_implement_v2()\n",
         "src/mew/implement_lane/__init__.py": "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID\n",
         "src/mew/implement_lane/registry.py": "",
-        "src/mew/implement_lane/native_provider_adapter.py": "call_codex_json()\n",
+        "src/mew/implement_lane/native_provider_adapter.py": "run_live_json_implement_v2()\n",
         "src/mew/implement_lane/native_tool_harness.py": "",
     }
     for relative_path, text in files.items():
@@ -147,4 +171,4 @@ def test_native_loop_gate_rejects_legacy_symbols_in_native_production_paths(tmp_
     provider_scan = next(
         item for item in production_paths if item["path"] == "src/mew/implement_lane/native_provider_adapter.py"
     )
-    assert provider_scan["legacy_hits"] == {"call_codex_json": 1}
+    assert provider_scan["legacy_hits"] == {"run_live_json_implement_v2": 1}

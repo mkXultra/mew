@@ -614,13 +614,18 @@ Legacy or ambiguous impact:
 
 - `src/mew/implement_lane/v2_runtime.py` still has model-JSON `finish`
   handling. Because production native routing now uses `run_live_native_implement_v2`,
-  it must be quarantined behind an explicit `legacy_test_only` / replay-only
-  route before close. `run_live_json_implement_v2()` must not be callable from
+  this milestone only proves that the model-JSON runner is not reachable from
   production command routing, native validation, or Codex hot-path profiles.
+  Deleting or fully migrating `run_live_json_implement_v2()` and its historical
+  fixtures is a separate cleanup slice.
+- Internal helper model calls, such as the finish verifier planner, are not the
+  retired model-JSON implement loop. They remain allowed when their inputs are
+  filtered and recorded by the internal gate.
 - Existing tests under `tests/test_implement_lane.py` heavily exercise
-  `run_live_json_implement_v2()`; keep them only under quarantined legacy test
-  markers or move them to legacy fixtures. New production tests must use
-  `run_live_native_implement_v2()` / `run_native_implement_v2()`.
+  `run_live_json_implement_v2()`. Do not rewrite that legacy surface in this
+  milestone unless a test directly blocks the native production gate. New
+  production tests must use `run_live_native_implement_v2()` /
+  `run_native_implement_v2()`.
 
 Likely test impact:
 
@@ -715,14 +720,16 @@ Likely script/check impact:
   planner rejected/fallback, hidden planner-input leak rejection, auto fallback
   policy rejection, and hash drift.
 
-### Phase 6 - Legacy Quarantine
+### Phase 6 - Production Route Quarantine
 
 - Remove production references to provider-visible finish tool.
-- Quarantine or delete model-JSON finish behavior where it is not needed for
-  legacy fixtures.
-- Mark `run_live_json_implement_v2()` as `legacy_test_only` or equivalent and
-  move existing `tests/test_implement_lane.py` finish coverage under explicit
-  legacy markers.
+- Prove production command routing, native validation, Codex hot-path profiles,
+  and native provider request assembly cannot call or expose
+  `run_live_json_implement_v2()` / `implement_v2_model_json_tool_loop`.
+- Leave `run_live_json_implement_v2()` and existing model-JSON tests/dogfood
+  fixtures intact unless they directly break the production native gate.
+  Full deletion or migration of that legacy surface is out of scope for this
+  milestone.
 - Fail native boundary audit if production native route can expose `finish`.
 
 ## Close Gate

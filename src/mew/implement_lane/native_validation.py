@@ -184,12 +184,14 @@ def _native_production_relative_paths() -> tuple[str, ...]:
 
 
 def _native_production_banned_symbols() -> tuple[str, ...]:
+    # This gate protects the main implement_v2 hot path. Internal helper model
+    # calls, such as the finish verifier planner, are checked by their own
+    # input-filtering tests and are not the retired model-JSON implement loop.
     return (
         "JsonModelProviderAdapter",
         "run_live_json_implement_v2",
         "_live_json_prompt",
         "_normalize_live_json_payload",
-        "call_codex_json",
         "call_model_json_with_retries",
         "implement_v2_model_json_tool_loop",
         "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID",
