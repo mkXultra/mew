@@ -211,11 +211,12 @@ def test_native_harness_read_finish_and_artifacts(tmp_path: Path) -> None:
     tool_route_rows = [
         json.loads(line) for line in (artifact_root / "tool_routes.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert [row["tool_route"] for row in tool_route_rows] == ["read", "finish"]
+    assert [row["tool_route"] for row in tool_route_rows] == ["read", "legacy_finish"]
     assert tool_route_rows[0]["tool_surface_profile_id"] == "mew_legacy"
     assert str(tool_route_rows[0]["tool_surface_route_table_hash"]).startswith("sha256:")
     assert tool_route_rows[0]["declared_tool"] == "read_file"
     assert tool_route_rows[1]["declared_tool"] == "finish"
+    assert tool_route_rows[1]["effective_tool"] == "legacy_provider_visible_finish"
     finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
     assert set(tool_route_rows[1]["typed_evidence_refs"]) == set(finish_output.evidence_refs)
     resolver_rows = [
@@ -2058,6 +2059,29 @@ def test_native_harness_rejects_provider_visible_finish_without_legacy_quarantin
     assert "tool-route:finish-1" in finish_output.sidecar_refs
     assert result.metrics["completion_resolver_latest_decision"] == {}
     assert result.metrics["finish_gate_block_count"] == 0
+
+
+def test_native_harness_rejects_malformed_provider_visible_finish_without_legacy_quarantine(
+    tmp_path: Path,
+) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_call("finish-json", "finish", "{not-json", output_index=0)]]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, allow_legacy_provider_visible_finish=False),
+        provider=provider,
+        max_turns=1,
+    )
+
+    finish_output = next(
+        item for item in result.transcript.items if item.call_id == "finish-json" and item.kind == "finish_output"
+    )
+    assert result.status == "blocked"
+    assert finish_output.status == "invalid"
+    assert "provider-visible finish is not available" in finish_output.output_text_or_ref
+    assert "tool-route:finish-json" in finish_output.sidecar_refs
+    assert result.metrics["completion_resolver_latest_decision"] == {}
 
 
 def test_native_harness_invalid_finish_args_pairs_protocol_error_without_resolver(tmp_path: Path) -> None:

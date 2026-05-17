@@ -1095,7 +1095,11 @@ def run_native_implement_v2(
                     )
                     resolver_decisions.append(decision)
                     result = _finish_result_with_resolver_decision(result, decision)
-                result = with_tool_route_decision(_finish_tool_call_envelope(call, _arguments(call)[0]), result)
+                result = with_tool_route_decision(
+                    _finish_tool_call_envelope(call, _arguments(call)[0]),
+                    result,
+                    effective_tool="legacy_provider_visible_finish",
+                )
             latency_finished = time.monotonic()
             output = _native_output_from_result(
                 call,
@@ -1304,6 +1308,13 @@ def _execute_native_call(
                 reason="native finish call is missing call_id",
             )
         return _invalid_result(call, reason="native tool call is missing call_id")
+    if call.kind == "finish_call" and not _legacy_provider_visible_finish_enabled(lane_config):
+        reason = "provider-visible finish is not available in production native implement_v2"
+        return with_tool_route_decision(
+            _finish_tool_call_envelope(call, {}),
+            _provider_visible_finish_unavailable_result(call, reason=reason),
+            effective_tool="unavailable_provider_visible_finish",
+        )
     arguments, error = _arguments(call)
     if error:
         if call.kind == "finish_call":
@@ -1316,17 +1327,11 @@ def _execute_native_call(
         envelope = _finish_tool_call_envelope(call, arguments)
     else:
         envelope = _tool_call_envelope_from_native_call(call, arguments)
-    if call.kind == "finish_call" and not _legacy_provider_visible_finish_enabled(lane_config):
-        reason = "provider-visible finish is not available in production native implement_v2"
-        return with_tool_route_decision(
-            envelope,
-            _provider_visible_finish_unavailable_result(call, reason=reason),
-            effective_tool="unavailable_provider_visible_finish",
-        )
     if call.kind == "finish_call":
         return with_tool_route_decision(
             envelope,
             _finish_result(envelope, lane_input=lane_input, prior_tool_results=prior_tool_results),
+            effective_tool="legacy_provider_visible_finish",
         )
     if not _native_tool_available(call.tool_name, lane_input=lane_input, lane_config=lane_config):
         return with_tool_route_decision(

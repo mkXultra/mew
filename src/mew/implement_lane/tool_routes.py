@@ -24,7 +24,7 @@ ToolRoute = Literal[
     "process_lifecycle",
     "typed_source_mutation",
     "legacy_shell_edit_bridge",
-    "finish",
+    "legacy_finish",
     "invalid_tool_contract",
 ]
 
@@ -36,7 +36,7 @@ TOOL_ROUTE_VALUES: tuple[str, ...] = (
     "process_lifecycle",
     "typed_source_mutation",
     "legacy_shell_edit_bridge",
-    "finish",
+    "legacy_finish",
     "invalid_tool_contract",
 )
 COMMAND_CLASSIFICATION_VALUES: tuple[str, ...] = ("simple", "too_complex", "unavailable")
@@ -286,8 +286,8 @@ def _route_for_tool_name(tool_name: str, *, status: str = "") -> tuple[str, str]
         return "process_lifecycle", "execute-route lifecycle tool"
     if tool_name in TYPED_SOURCE_MUTATION_TOOL_NAMES:
         return "typed_source_mutation", "typed source mutation tool"
-    if tool_name == "finish":
-        return "finish", "finish tool"
+    if tool_name == "legacy_provider_visible_finish":
+        return "legacy_finish", "legacy/quarantined provider-visible finish tool"
     return "invalid_tool_contract", f"unknown or unavailable tool status={status or 'unknown'}"
 
 
