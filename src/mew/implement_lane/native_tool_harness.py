@@ -128,6 +128,9 @@ _FIRST_WRITE_DUE_HARD_RUNTIME_TURN_THRESHOLD = 10_000
 _FAILED_VERIFIER_REPAIR_PROBE_THRESHOLD = 2
 _CONTROL_FAILURE_SUMMARY_LIMIT = 700
 _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS = 1.0
+_NG_CONTINUE_CONSECUTIVE_LIMIT = 2
+_NG_DECISION_TOTAL_LIMIT = 3
+_INTERNAL_CLOSEOUT_CALL_PREFIXES = ("call-final-verifier-closeout-", "call-active-command-closeout-")
 _NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
 _NATIVE_MODEL_TIMEOUT_MIN_SECONDS = 30.0
 _FINISH_VERIFIER_PLANNER_DECISIONS_ATTR = "_mew_finish_verifier_planner_decisions"
@@ -615,6 +618,14 @@ def run_native_implement_v2(
     no_tool_continuation_count = 0
     no_tool_repeat_done_candidate_count = 0
     latest_no_tool_continuation: dict[str, object] = {}
+    last_no_tool_continuation_progress_fingerprint = ""
+    ng_continue_total_count = 0
+    ng_continue_consecutive_count = 0
+    ng_continue_consecutive_max = 0
+    repeat_plateau_count = 0
+    last_ng_progress_fingerprint = ""
+    last_ng_plateau_signature = ""
+    latest_ng_plateau_signature = ""
     resolver_decisions: list[CompletionResolverDecision] = []
     native_finish_gate_decisions: list[NativeFinishGateDecision] = []
     ng_resume_signals: list[NativeNgResumeSignal] = []
@@ -830,6 +841,7 @@ def run_native_implement_v2(
             key=lambda item: (item.output_index, item.sequence),
         )
         if not calls and _native_turn_has_assistant_message(turn_items):
+            model_progress_fingerprint = _native_model_tool_progress_fingerprint(tuple(tool_results))
             active_closeout = _native_active_command_closeout(
                 lane_input,
                 lane_attempt_id=lane_attempt_id,
@@ -850,7 +862,8 @@ def run_native_implement_v2(
                 )
             no_tool_reason = (
                 "no_tool_repeat"
-                if no_tool_continuation_count >= 1
+                if last_no_tool_continuation_progress_fingerprint
+                and last_no_tool_continuation_progress_fingerprint == model_progress_fingerprint
                 else "assistant_message_without_tool_call"
             )
             transcript_before_gate = NativeTranscript(
@@ -872,6 +885,23 @@ def run_native_implement_v2(
                     done_candidate,
                     turn_index=turn_index,
                 )
+                if no_tool_reason == "no_tool_repeat" or native_decision.lane_status == "blocked_continue":
+                    ng_plateau_signature = _native_ng_plateau_signature(
+                        native_decision,
+                        tool_results=tuple(tool_results),
+                    )
+                    latest_ng_plateau_signature = ng_plateau_signature
+                    native_decision, repeat_increment = _native_apply_ng_resume_policy(
+                        native_decision,
+                        no_tool_reason=no_tool_reason,
+                        ng_continue_total_count=ng_continue_total_count,
+                        ng_continue_consecutive_count=ng_continue_consecutive_count,
+                        current_progress_fingerprint=model_progress_fingerprint,
+                        last_progress_fingerprint=last_ng_progress_fingerprint,
+                        current_plateau_signature=ng_plateau_signature,
+                        last_plateau_signature=last_ng_plateau_signature,
+                    )
+                    repeat_plateau_count += repeat_increment
                 native_finish_gate_decisions.append(native_decision)
                 finish_gate_decision = native_decision.as_dict()
                 if native_decision.result == "block":
@@ -879,10 +909,6 @@ def run_native_implement_v2(
                 if native_decision.lane_status == "completed":
                     status = "completed"
                     finish_summary = assistant_final_text or native_decision.reason
-                    break
-                if native_decision.lane_status == "blocked_return":
-                    status = "blocked"
-                    finish_summary = native_decision.reason
                     break
                 if no_tool_reason == "no_tool_repeat":
                     no_tool_repeat_done_candidate_count += 1
@@ -894,9 +920,13 @@ def run_native_implement_v2(
                         "reason": "no_tool_repeat",
                     }
                     status = "blocked"
-                    finish_summary = (
+                    finish_summary = native_decision.reason or (
                         "native model returned repeated assistant text without a tool call after continuation"
                     )
+                    break
+                if native_decision.lane_status == "blocked_return":
+                    status = "blocked"
+                    finish_summary = native_decision.reason
                     break
                 if native_decision.lane_status == "blocked_continue":
                     ng_resume = build_native_ng_resume_signal(native_decision)
@@ -917,8 +947,17 @@ def run_native_implement_v2(
                         "reason": "ng_resume_signal",
                     }
                     finish_summary = finish_summary or ng_resume.concise_reason
+                    ng_continue_total_count += 1
+                    ng_continue_consecutive_count += 1
+                    ng_continue_consecutive_max = max(ng_continue_consecutive_max, ng_continue_consecutive_count)
+                    last_ng_progress_fingerprint = model_progress_fingerprint
+                    last_ng_plateau_signature = latest_ng_plateau_signature
+                    last_no_tool_continuation_progress_fingerprint = model_progress_fingerprint
                     continue
-            if no_tool_continuation_count >= 1:
+            if (
+                last_no_tool_continuation_progress_fingerprint
+                and last_no_tool_continuation_progress_fingerprint == model_progress_fingerprint
+            ):
                 no_tool_repeat_done_candidate_count += 1
                 latest_no_tool_continuation = {
                     "turn_index": turn_index,
@@ -943,6 +982,7 @@ def run_native_implement_v2(
             )
             items.append(continuation)
             no_tool_continuation_count += 1
+            last_no_tool_continuation_progress_fingerprint = model_progress_fingerprint
             latest_no_tool_continuation = {
                 "turn_index": turn_index,
                 "assistant_text": _native_first_assistant_text(turn_items),
@@ -1143,6 +1183,10 @@ def run_native_implement_v2(
         "latest_done_candidate": done_candidates[-1].as_dict() if done_candidates else {},
         "ng_resume_signal_count": len(ng_resume_signals),
         "latest_ng_resume_signal": ng_resume_signals[-1].as_dict() if ng_resume_signals else {},
+        "ng_continue_total_count": ng_continue_total_count,
+        "ng_continue_consecutive_max": ng_continue_consecutive_max,
+        "repeat_plateau_count": repeat_plateau_count,
+        "latest_ng_plateau_signature": latest_ng_plateau_signature,
         "no_tool_continuation_count": no_tool_continuation_count,
         "no_tool_repeat_done_candidate_count": no_tool_repeat_done_candidate_count,
         "latest_no_tool_continuation": latest_no_tool_continuation,
@@ -5756,6 +5800,198 @@ def _result_is_verifier_like(result: ToolResultEnvelope) -> bool:
         return True
     payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
     return str(payload.get("command_intent") or "") == "verifier"
+
+
+def _native_apply_ng_resume_policy(
+    decision: NativeFinishGateDecision,
+    *,
+    no_tool_reason: str,
+    ng_continue_total_count: int,
+    ng_continue_consecutive_count: int,
+    current_progress_fingerprint: str,
+    last_progress_fingerprint: str,
+    current_plateau_signature: str,
+    last_plateau_signature: str,
+) -> tuple[NativeFinishGateDecision, int]:
+    if no_tool_reason == "no_tool_repeat":
+        return (
+            _native_ng_return_decision(
+                decision,
+                blocker="ng_repeat_plateau",
+                reason=(
+                    "native model returned repeated assistant text without tool progress "
+                    "after an NG resume signal"
+                ),
+            ),
+            1,
+        )
+    if (
+        last_progress_fingerprint
+        and last_progress_fingerprint == current_progress_fingerprint
+        and last_plateau_signature
+        and last_plateau_signature == current_plateau_signature
+    ):
+        return (
+            _native_ng_return_decision(
+                decision,
+                blocker="ng_repeat_plateau",
+                reason="internal finish gate repeated the same blocker plateau without model tool progress",
+            ),
+            1,
+        )
+    if ng_continue_consecutive_count >= _NG_CONTINUE_CONSECUTIVE_LIMIT:
+        return (
+            _native_ng_return_decision(
+                decision,
+                blocker="ng_continue_consecutive_cap",
+                reason="internal finish gate NG continue hard cap reached",
+            ),
+            0,
+        )
+    if ng_continue_total_count >= _NG_DECISION_TOTAL_LIMIT - 1:
+        return (
+            _native_ng_return_decision(
+                decision,
+                blocker="ng_decision_total_cap",
+                reason="internal finish gate total NG decision cap reached",
+            ),
+            0,
+        )
+    return decision, 0
+
+
+def _native_ng_return_decision(
+    decision: NativeFinishGateDecision,
+    *,
+    blocker: str,
+    reason: str,
+) -> NativeFinishGateDecision:
+    return replace(
+        decision,
+        lane_status="blocked_return",
+        result="block",
+        blockers=tuple(dict.fromkeys((*decision.blockers, blocker))),
+        reason=reason,
+    )
+
+
+def _native_model_tool_progress_fingerprint(tool_results: tuple[ToolResultEnvelope, ...]) -> str:
+    records = [
+        _native_tool_progress_record(result)
+        for result in tool_results
+        if not _native_result_is_internal_closeout(result)
+    ]
+    return "sha256:" + hashlib.sha256(
+        json.dumps(records, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _native_ng_plateau_signature(
+    decision: NativeFinishGateDecision,
+    *,
+    tool_results: tuple[ToolResultEnvelope, ...],
+) -> str:
+    payload = {
+        "policy_version": decision.policy_version,
+        "blockers": sorted(set(decision.blockers)),
+        "missing_obligations": sorted(set(decision.missing_obligations)),
+        "closeout_status": decision.closeout.status,
+        "closeout_timed_out": decision.closeout.timed_out,
+        "closeout_exit_class": _native_closeout_exit_class(decision.closeout.tool_result),
+        "source_mutation_hash": _native_source_mutation_fingerprint(tool_results),
+        "artifact_hash": _native_artifact_fingerprint(tool_results),
+        "evidence_refs": sorted(set(decision.evidence_refs)),
+        "closeout_refs": sorted(set(decision.closeout_refs)),
+        "terminal_exit": _native_latest_terminal_exit_class(tool_results),
+    }
+    return "sha256:" + hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _native_result_is_internal_closeout(result: ToolResultEnvelope) -> bool:
+    return str(result.provider_call_id or "").startswith(_INTERNAL_CLOSEOUT_CALL_PREFIXES)
+
+
+def _native_tool_progress_record(result: ToolResultEnvelope) -> dict[str, object]:
+    payload = _native_result_payload(result)
+    return {
+        "provider_call_id": result.provider_call_id,
+        "tool_name": result.tool_name,
+        "status": result.status,
+        "is_error": result.is_error,
+        "content_refs": list(result.content_refs),
+        "evidence_refs": list(result.evidence_refs),
+        "side_effects": list(result.side_effects),
+        "command_run_id": str(payload.get("command_run_id") or ""),
+        "exit_code": payload.get("exit_code"),
+        "terminal_status": payload.get("status"),
+    }
+
+
+def _native_source_mutation_fingerprint(tool_results: tuple[ToolResultEnvelope, ...]) -> str:
+    records: list[object] = []
+    for result in tool_results:
+        if _native_result_is_internal_closeout(result):
+            continue
+        payload = _native_result_payload(result)
+        side_effects = [
+            effect
+            for effect in result.side_effects
+            if str(effect.get("kind") or "") in {"file_write", "file_edit", "source_mutation"}
+        ]
+        if side_effects or payload.get("source_mutation_refs") or payload.get("changed_paths"):
+            records.append(
+                {
+                    "provider_call_id": result.provider_call_id,
+                    "tool_name": result.tool_name,
+                    "side_effects": side_effects,
+                    "source_mutation_refs": payload.get("source_mutation_refs") or (),
+                    "changed_paths": payload.get("changed_paths") or (),
+                }
+            )
+    return "sha256:" + hashlib.sha256(
+        json.dumps(records, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _native_artifact_fingerprint(tool_results: tuple[ToolResultEnvelope, ...]) -> str:
+    records: list[object] = []
+    for result in tool_results:
+        if _native_result_is_internal_closeout(result):
+            continue
+        payload = _native_result_payload(result)
+        artifact_refs = payload.get("artifact_refs") or payload.get("output_refs") or ()
+        if artifact_refs or result.content_refs:
+            records.append(
+                {
+                    "provider_call_id": result.provider_call_id,
+                    "tool_name": result.tool_name,
+                    "content_refs": list(result.content_refs),
+                    "artifact_refs": artifact_refs,
+                }
+            )
+    return "sha256:" + hashlib.sha256(
+        json.dumps(records, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _native_latest_terminal_exit_class(tool_results: tuple[ToolResultEnvelope, ...]) -> str:
+    for result in reversed(tool_results):
+        if _native_result_is_internal_closeout(result):
+            continue
+        if result.tool_name not in EXEC_TOOL_NAMES and result.tool_name not in _PROCESS_LIFECYCLE_TOOL_NAMES:
+            continue
+        payload = _native_result_payload(result)
+        return f"{payload.get('status') or result.status}:{payload.get('exit_code')}"
+    return "none"
+
+
+def _native_closeout_exit_class(tool_result: object | None) -> str:
+    if not isinstance(tool_result, ToolResultEnvelope):
+        return "none"
+    payload = _native_result_payload(tool_result)
+    return f"{payload.get('status') or tool_result.status}:{payload.get('exit_code')}"
 
 
 def _native_output_status(call: NativeTranscriptItem, result: ToolResultEnvelope) -> str:

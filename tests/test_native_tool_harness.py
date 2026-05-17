@@ -2546,6 +2546,132 @@ def test_native_harness_done_candidate_gate_block_hides_closeout_from_next_provi
     assert manifest["metrics"]["ng_resume_signal_count"] == 1
 
 
+def test_native_harness_ng_resume_allows_repair_tool_progress_before_next_done(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                )
+            ],
+            [fake_message("Done.", item_id="msg-done-1")],
+            [
+                fake_call(
+                    "write-artifact",
+                    "write_file",
+                    {"path": "missing-output.bin", "content": "ok\n", "apply": True, "create": True},
+                )
+            ],
+            [fake_message("Done after repair.", item_id="msg-done-2")],
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f missing-output.bin",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=4,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["done_candidate_count"] == 2
+    assert result.metrics["ng_resume_signal_count"] == 1
+    assert result.metrics["ng_continue_total_count"] == 1
+    assert result.metrics["ng_continue_consecutive_max"] == 1
+    assert result.metrics["no_tool_repeat_done_candidate_count"] == 0
+    assert result.metrics["native_finish_gate_latest_decision"]["lane_status"] == "completed"
+
+
+def test_native_harness_ng_resume_hard_cap_returns_after_repeated_ng_with_tool_progress(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                )
+            ],
+            [fake_message("Done.", item_id="msg-done-1")],
+            [fake_call("read-1", "read_file", {"path": "vm.js"})],
+            [fake_message("Still done.", item_id="msg-done-2")],
+            [fake_call("read-2", "read_file", {"path": "vm.js"})],
+            [fake_message("Done again.", item_id="msg-done-3")],
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f missing-output.bin",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=6,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["done_candidate_count"] == 3
+    assert result.metrics["ng_resume_signal_count"] == 2
+    assert result.metrics["ng_continue_total_count"] == 2
+    assert result.metrics["ng_continue_consecutive_max"] == 2
+    latest = result.metrics["native_finish_gate_latest_decision"]
+    assert latest["lane_status"] == "blocked_return"
+    assert latest["result"] == "block"
+    assert "ng_continue_consecutive_cap" in latest["blockers"]
+    assert "hard cap" in result.finish_summary
+
+
+def test_native_harness_ng_resume_no_tool_repeat_blocks_even_if_second_closeout_passes(tmp_path: Path) -> None:
+    marker = tmp_path.parent / f"{tmp_path.name}-flaky-verifier-marker"
+    verify_command = (
+        "python -c \"from pathlib import Path; import sys; "
+        f"p=Path({str(marker)!r}); "
+        "sys.exit(0 if p.exists() else (p.write_text('x') or 1))\""
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                )
+            ],
+            [fake_message("Done.", item_id="msg-done-1")],
+            [fake_message("Still done without tools.", item_id="msg-done-2")],
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command=verify_command,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=3,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["done_candidate_count"] == 2
+    assert result.metrics["no_tool_repeat_done_candidate_count"] == 1
+    assert result.metrics["repeat_plateau_count"] == 1
+    latest = result.metrics["native_finish_gate_latest_decision"]
+    assert latest["lane_status"] == "blocked_return"
+    assert latest["result"] == "block"
+    assert "ng_repeat_plateau" in latest["blockers"]
+    assert "without tool progress" in result.finish_summary
+
+
 def test_native_harness_done_candidate_finish_planner_rows_use_done_candidate_id(tmp_path: Path) -> None:
     class PlanningProvider(NativeFakeProvider):
         planner_requests: list[dict[str, object]]
@@ -2631,8 +2757,10 @@ def test_native_harness_repeated_assistant_only_turn_records_no_tool_repeat(tmp_
     assert result.status == "blocked"
     assert result.metrics["no_tool_continuation_count"] == 1
     assert result.metrics["no_tool_repeat_done_candidate_count"] == 1
+    assert result.metrics["repeat_plateau_count"] == 1
     assert result.metrics["done_candidate_count"] == 2
     assert result.metrics["latest_done_candidate"]["reason"] == "no_tool_repeat"
+    assert "ng_repeat_plateau" in result.metrics["native_finish_gate_latest_decision"]["blockers"]
     latest = result.metrics["latest_no_tool_continuation"]
     assert latest["reason"] == "no_tool_repeat"
     assert latest["continuation"] == ""
