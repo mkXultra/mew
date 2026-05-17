@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from mew.implement_lane.internal_finish_gate_contract import validate_done_candidate_record
 from mew.implement_lane.native_fake_provider import (
     NativeFakeProvider,
     fake_call,
@@ -34,6 +35,7 @@ from mew.implement_lane.native_tool_harness import (
 from mew.implement_lane.native_transcript import (
     NativeTranscript,
     NativeTranscriptItem,
+    native_transcript_hash,
     native_proof_manifest_from_transcript,
     validate_native_transcript_pairing,
 )
@@ -143,6 +145,21 @@ def _loop_signals(request: dict[str, object]) -> dict[str, object]:
     signals = inventory.get("diagnostic_loop_signals")
     assert isinstance(signals, dict)
     return signals
+
+
+def _assert_no_internal_completion_terms(text: object) -> None:
+    lowered = str(text).casefold()
+    for term in (
+        "finish",
+        "task_contract",
+        "task-contract",
+        "finish_gate",
+        "native_finish_gate",
+        "resolver",
+        "done candidate",
+        "internal gate",
+    ):
+        assert term not in lowered
 
 
 def test_unavailable_native_runtime_keeps_native_identity(tmp_path: Path) -> None:
@@ -2264,10 +2281,12 @@ def test_native_harness_assistant_only_turn_gets_tool_continuation(tmp_path: Pat
 
     assert result.status == "completed"
     assert result.metrics["no_tool_continuation_count"] == 1
+    assert result.metrics["done_candidate_count"] == 1
+    assert result.metrics["latest_done_candidate"]["reason"] == "assistant_message_without_tool_call"
     continuation = result.metrics["latest_no_tool_continuation"]["continuation"]
     assert "Assistant text is not a completion signal" in continuation
-    assert "call finish with fresh verifier/artifact evidence" in continuation
-    assert "Done." in continuation
+    _assert_no_internal_completion_terms(continuation)
+    assert "Last assistant response was not accepted as completion" in continuation
     assert provider.requests[1]["input_items"][-1]["content"][0]["text"] == continuation
     assert [item.kind for item in result.transcript.items[:2]] == ["assistant_message", "input_message"]
     assert validate_native_transcript_pairing(result.transcript).valid is True
@@ -2292,10 +2311,11 @@ def test_native_harness_assistant_only_turn_after_blocked_finish_carries_missing
 
     assert result.status == "blocked"
     assert result.metrics["no_tool_continuation_count"] == 1
+    assert result.metrics["done_candidate_count"] == 1
     continuation = result.metrics["latest_no_tool_continuation"]["continuation"]
-    assert "Previous finish was blocked" in continuation
-    assert "Missing evidence:" in continuation
-    assert "Done." in continuation
+    assert "Previous completion attempt was not accepted" in continuation
+    assert "concrete verification command" in continuation
+    _assert_no_internal_completion_terms(continuation)
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
@@ -2364,6 +2384,7 @@ def test_live_native_assistant_only_turn_sends_continuation_as_previous_response
 
     assert result.status == "completed"
     assert result.metrics["no_tool_continuation_count"] == 1
+    assert result.metrics["done_candidate_count"] == 1
     second_descriptor = call.call_args_list[1].kwargs["descriptor"]
     second_request = second_descriptor["request_body"]
     assert second_request["previous_response_id"] == "resp-1"
@@ -2374,8 +2395,8 @@ def test_live_native_assistant_only_turn_sends_continuation_as_previous_response
     assert continuation["role"] == "user"
     continuation_text = continuation["content"][0]["text"]
     assert "Assistant text is not a completion signal" in continuation_text
-    assert "call finish with fresh verifier/artifact evidence" in continuation_text
-    assert "Done." in continuation_text
+    _assert_no_internal_completion_terms(continuation_text)
+    assert "Last assistant response was not accepted as completion" in continuation_text
     transcript_payload = json.loads((artifact_root / "response_transcript.json").read_text(encoding="utf-8"))
     transcript = NativeTranscript(
         lane_attempt_id=str(transcript_payload["lane_attempt_id"]),
@@ -2389,6 +2410,170 @@ def test_live_native_assistant_only_turn_sends_continuation_as_previous_response
         "finish_call",
     ]
     assert validate_native_transcript_pairing(transcript).valid is True
+
+
+def test_native_harness_assistant_only_turn_writes_done_candidate_artifacts(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [fake_message("Done.", item_id="msg-done")],
+            [fake_finish("finish-after-continuation", {"outcome": "completed", "summary": "done"})],
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path),
+        provider=provider,
+        artifact_root=artifact_root,
+        max_turns=2,
+    )
+
+    assert result.metrics["done_candidate_count"] == 1
+    rows = [
+        json.loads(line)
+        for line in (artifact_root / "done_candidates.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == 1
+    assert rows[0]["done_candidate_id"] == result.metrics["latest_done_candidate"]["done_candidate_id"]
+    assert rows[0]["reason"] == "assistant_message_without_tool_call"
+    assert str(rows[0]["compact_sidecar_digest_hash"]).startswith("sha256:")
+    assert validate_done_candidate_record(rows[0]).ok
+    manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["done_candidates_ref"] == "done_candidates.jsonl"
+    assert str(manifest["done_candidates_sha256"]).startswith("sha256:")
+    assert manifest["metrics"]["done_candidate_count"] == 1
+
+
+def test_native_harness_repeated_assistant_only_turn_records_no_tool_repeat(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [fake_message("Done.", item_id="msg-done-1")],
+            [fake_message("Still done.", item_id="msg-done-2")],
+            [fake_finish("finish-should-not-run", {"outcome": "completed", "summary": "done"})],
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=3)
+
+    assert result.status == "blocked"
+    assert result.metrics["no_tool_continuation_count"] == 1
+    assert result.metrics["no_tool_repeat_done_candidate_count"] == 1
+    assert result.metrics["done_candidate_count"] == 2
+    assert result.metrics["latest_done_candidate"]["reason"] == "no_tool_repeat"
+    latest = result.metrics["latest_no_tool_continuation"]
+    assert latest["reason"] == "no_tool_repeat"
+    assert latest["continuation"] == ""
+    assert "repeated assistant text" in result.finish_summary
+    assert len(provider.requests) == 2
+    assert [item.kind for item in result.transcript.items[:3]] == [
+        "assistant_message",
+        "input_message",
+        "assistant_message",
+    ]
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_no_tool_continuation_does_not_quote_internal_assistant_terms(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_message(
+                    "finish resolver says task_contract is ready for the internal gate",
+                    item_id="msg-internal-terms",
+                )
+            ],
+            [fake_finish("finish-after-continuation", {"outcome": "completed", "summary": "done"})],
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    continuation = result.metrics["latest_no_tool_continuation"]["continuation"]
+    _assert_no_internal_completion_terms(continuation)
+    assert "Last assistant response was not accepted as completion" in continuation
+    assert "task_contract" not in continuation
+
+
+def test_native_harness_closes_active_command_before_done_candidate(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "run-1",
+                    "run_command",
+                    {
+                        "command": "sleep 0.1; echo done",
+                        "cwd": ".",
+                        "timeout_ms": 2000,
+                        "foreground_budget_seconds": 0.001,
+                        "command_intent": "probe",
+                    },
+                    output_index=0,
+                )
+            ],
+            [fake_message("Done.", item_id="msg-done")],
+        ]
+    )
+
+    result = run_native_implement_v2(_lane_input(tmp_path), provider=provider, max_turns=2)
+
+    assert result.metrics["active_command_closeout_count"] == 1
+    assert result.metrics["done_candidate_count"] == 1
+    active_closeout_index = next(
+        index
+        for index, item in enumerate(result.transcript.items)
+        if item.call_id.startswith("call-active-command-closeout")
+    )
+    continuation_index = next(
+        index
+        for index, item in enumerate(result.transcript.items)
+        if item.kind == "input_message" and "Assistant text is not a completion signal" in item.output_text_or_ref
+    )
+    assert active_closeout_index < continuation_index
+    candidate = result.metrics["latest_done_candidate"]
+    expected_hash = native_transcript_hash(
+        NativeTranscript(
+            lane_attempt_id=result.transcript.lane_attempt_id,
+            provider=result.transcript.provider,
+            model=result.transcript.model,
+            items=tuple(result.transcript.items[:continuation_index]),
+        )
+    )
+    assert candidate["transcript_hash_before_gate"] == expected_hash
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_provider_failure_preserves_done_candidate_artifacts(tmp_path: Path) -> None:
+    class FailingAfterCandidateProvider(NativeFakeProvider):
+        def next_response(self, request_descriptor):  # type: ignore[no-untyped-def]
+            if self._index >= 1:
+                self.requests.append(dict(request_descriptor))
+                raise RuntimeError("provider exploded after candidate")
+            return super().next_response(request_descriptor)
+
+    artifact_root = tmp_path / "artifacts"
+    provider = FailingAfterCandidateProvider.from_item_batches(
+        [[fake_message("Done.", item_id="msg-done")]]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path),
+        provider=provider,
+        artifact_root=artifact_root,
+        max_turns=2,
+    )
+
+    assert result.status == "failed"
+    assert result.metrics["done_candidate_count"] == 1
+    rows = [
+        json.loads(line)
+        for line in (artifact_root / "done_candidates.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == 1
+    assert validate_done_candidate_record(rows[0]).ok
+    manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["done_candidates_ref"] == "done_candidates.jsonl"
+    assert manifest["metrics"]["done_candidate_count"] == 1
 
 
 def test_phase3_surface_declares_transport_change_yes() -> None:

@@ -41,6 +41,11 @@ from .native_provider_adapter import (
     call_codex_native_responses,
     call_codex_native_responses_websocket,
 )
+from .native_done_candidate import (
+    NativeDoneCandidate,
+    build_native_done_candidate,
+    write_native_done_candidate_artifacts,
+)
 from .native_sidecar_projection import build_compact_native_sidecar_digest
 from .native_transcript import (
     CALL_ITEM_KINDS,
@@ -584,6 +589,7 @@ def run_native_implement_v2(
     tool_calls: list[NativeTranscriptItem] = []
     tool_results: list[ToolResultEnvelope] = []
     tool_latencies: list[dict[str, object]] = []
+    done_candidates: list[NativeDoneCandidate] = []
     first_write_metric: dict[str, object] | None = None
     first_verifier_metric: dict[str, object] | None = None
     final_verifier_closeout_count = 0
@@ -595,6 +601,7 @@ def run_native_implement_v2(
     finish_gate_block_count = 0
     finish_gate_decision: dict[str, object] = {}
     no_tool_continuation_count = 0
+    no_tool_repeat_done_candidate_count = 0
     latest_no_tool_continuation: dict[str, object] = {}
     resolver_decisions: list[CompletionResolverDecision] = []
     native_finish_gate_decisions: list[NativeFinishGateDecision] = []
@@ -750,6 +757,7 @@ def run_native_implement_v2(
                 provider=provider,
                 items=items,
                 tool_results=tuple(tool_results),
+                done_candidates=tuple(done_candidates),
                 artifact_root=artifact_root,
                 error=str(exc),
             )
@@ -775,6 +783,57 @@ def run_native_implement_v2(
             key=lambda item: (item.output_index, item.sequence),
         )
         if not calls and _native_turn_has_assistant_message(turn_items):
+            active_closeout = _native_active_command_closeout(
+                lane_input,
+                lane_attempt_id=lane_attempt_id,
+                provider=provider,
+                exec_runtime=exec_runtime,
+                start_monotonic=start_monotonic,
+            )
+            if active_closeout is not None:
+                active_call, active_result, active_latency = active_closeout
+                append_closeout_event(
+                    _NativeCloseoutEvent(
+                        kind="active_command",
+                        call=active_call,
+                        result=active_result,
+                        latency=active_latency,
+                        reason="native active command closeout ran before done candidate detection",
+                    )
+                )
+            no_tool_reason = (
+                "no_tool_repeat"
+                if no_tool_continuation_count >= 1
+                else "assistant_message_without_tool_call"
+            )
+            transcript_before_gate = NativeTranscript(
+                lane_attempt_id=lane_attempt_id,
+                provider=provider.provider,
+                model=provider.model,
+                items=tuple(items),
+            )
+            done_candidate = build_native_done_candidate(
+                transcript_before_gate,
+                turn_items,
+                compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
+                reason=no_tool_reason,
+            )
+            if done_candidate is not None:
+                done_candidates.append(done_candidate)
+            if no_tool_continuation_count >= 1:
+                no_tool_repeat_done_candidate_count += 1
+                latest_no_tool_continuation = {
+                    "turn_index": turn_index,
+                    "assistant_text": _native_first_assistant_text(turn_items),
+                    "continuation": "",
+                    "done_candidate_id": done_candidate.done_candidate_id if done_candidate else "",
+                    "reason": "no_tool_repeat",
+                }
+                status = "blocked"
+                finish_summary = (
+                    "native model returned repeated assistant text without a tool call after continuation"
+                )
+                break
             continuation = _native_no_tool_continuation_item(
                 turn_items,
                 lane_attempt_id=lane_attempt_id,
@@ -790,6 +849,8 @@ def run_native_implement_v2(
                 "turn_index": turn_index,
                 "assistant_text": _native_first_assistant_text(turn_items),
                 "continuation": continuation.output_text_or_ref,
+                "done_candidate_id": done_candidate.done_candidate_id if done_candidate else "",
+                "reason": "assistant_message_without_tool_call",
             }
             finish_summary = finish_summary or "native model returned assistant text without a tool call; continuation requested"
             continue
@@ -980,7 +1041,10 @@ def run_native_implement_v2(
         "active_command_closeout_provider_call_id": active_command_closeout_provider_call_id,
         "finish_gate_block_count": finish_gate_block_count,
         "finish_gate_decision": finish_gate_decision,
+        "done_candidate_count": len(done_candidates),
+        "latest_done_candidate": done_candidates[-1].as_dict() if done_candidates else {},
         "no_tool_continuation_count": no_tool_continuation_count,
+        "no_tool_repeat_done_candidate_count": no_tool_repeat_done_candidate_count,
         "latest_no_tool_continuation": latest_no_tool_continuation,
         "completion_resolver_decision_count": len(resolver_decisions),
         "completion_resolver_latest_decision": resolver_decisions[-1].as_dict() if resolver_decisions else {},
@@ -1007,6 +1071,7 @@ def run_native_implement_v2(
             status=status,
             resolver_decisions=tuple(resolver_decisions),
             native_finish_gate_decisions=tuple(native_finish_gate_decisions),
+            done_candidates=tuple(done_candidates),
             finish_verifier_planner_decisions=tuple(finish_verifier_planner_decisions),
             finish_verifier_planner_requests=tuple(finish_verifier_planner_requests),
         )
@@ -5232,6 +5297,7 @@ def _partial_failure_harness_result(
     provider: object,
     items: list[NativeTranscriptItem],
     tool_results: tuple[ToolResultEnvelope, ...],
+    done_candidates: tuple[NativeDoneCandidate, ...],
     artifact_root: str | Path | None,
     error: str,
 ) -> NativeImplementV2HarnessResult:
@@ -5252,6 +5318,8 @@ def _partial_failure_harness_result(
         "error": error,
         "turn_count": len(getattr(provider, "requests", []) or ()),
         "provider_request_inventory_available": bool(getattr(provider, "requests", []) or ()),
+        "done_candidate_count": len(done_candidates),
+        "latest_done_candidate": done_candidates[-1].as_dict() if done_candidates else {},
         "pairing": validation.as_dict(),
     }
     proof_artifacts: tuple[str, ...] = ()
@@ -5262,6 +5330,7 @@ def _partial_failure_harness_result(
                 transcript=transcript,
                 provider=provider,
                 tool_results=tool_results,
+                done_candidates=done_candidates,
                 error=error,
                 artifact_root=Path(artifact_root),
             )
@@ -5271,6 +5340,7 @@ def _partial_failure_harness_result(
                 transcript,
                 tool_results=tool_results,
                 provider=provider,
+                done_candidates=done_candidates,
                 status="failed",
                 error=error,
             )
@@ -5290,6 +5360,7 @@ def _write_live_failure_artifacts(
     transcript: NativeTranscript,
     provider: NativeCodexResponsesProvider,
     tool_results: tuple[ToolResultEnvelope, ...] = (),
+    done_candidates: tuple[NativeDoneCandidate, ...] = (),
     error: str,
     artifact_root: Path | None = None,
 ) -> tuple[str, ...]:
@@ -5311,6 +5382,14 @@ def _write_live_failure_artifacts(
         encoding="utf-8",
     )
     paths["tool_routes"] = tool_routes_path
+    if done_candidates:
+        paths.update(
+            write_native_done_candidate_artifacts(
+                root,
+                done_candidates,
+                proof_manifest_path=paths.get("proof_manifest"),
+            )
+        )
     request_path = root / "native-provider-requests.json"
     inventory_path = root / "provider-request-inventory.json"
     response_count = len(provider.responses)
@@ -5463,21 +5542,15 @@ def _native_no_tool_continuation_item(
     lines = [
         "Continue with native tool calls.",
         "Assistant text is not a completion signal for this implement_v2 lane.",
-        "If the task is complete, call finish with fresh verifier/artifact evidence.",
+        "If the task is complete, provide a concise final response after a concrete verifier or requested artifact exists.",
         "If it is not complete, call a tool to verify or repair from the latest concrete result.",
+        "A repeated prose-only response will stop the loop for supervisor review.",
     ]
     if latest_resolver_decision is not None and latest_resolver_decision.lane_status == "blocked_continue":
-        blockers = _bounded_finish_block_items(latest_resolver_decision.blockers, limit=4)
-        missing = _bounded_finish_block_items(
-            (_compact_finish_missing_obligation(item) for item in latest_resolver_decision.missing_obligations),
-            limit=6,
-        )
-        lines.append(f"Previous finish was blocked: {_finish_block_headline(blockers, missing)}.")
-        if missing:
-            lines.append("Missing evidence: " + ", ".join(missing) + ".")
+        lines.append(_provider_safe_blocked_completion_summary(latest_resolver_decision))
     assistant_text = _native_first_assistant_text(items)
     if assistant_text:
-        lines.append(f"Last assistant text was not accepted as completion: {assistant_text}")
+        lines.append("Last assistant response was not accepted as completion.")
     return NativeTranscriptItem(
         sequence=sequence,
         turn_id=f"turn-{turn_index}-continuation",
@@ -5487,6 +5560,25 @@ def _native_no_tool_continuation_item(
         model=model,
         output_text_or_ref="\n".join(lines),
     )
+
+
+def _provider_safe_blocked_completion_summary(decision: CompletionResolverDecision) -> str:
+    joined = " ".join(
+        (
+            *[str(item or "") for item in decision.blockers],
+            *[str(item or "") for item in decision.missing_obligations],
+        )
+    ).casefold()
+    if "verifier" in joined or "evidence" in joined or "oracle" in joined:
+        return (
+            "Previous completion attempt was not accepted: run a concrete verification "
+            "command or inspect the requested artifact before responding again."
+        )
+    if "unsafe" in joined:
+        return "Previous completion attempt was not accepted: repair the unsafe change before responding again."
+    if "budget" in joined:
+        return "Previous completion attempt needs supervisor review or more budget."
+    return "Previous completion attempt was not accepted: call a tool to verify or repair before responding again."
 
 
 def _native_first_assistant_text(items: tuple[NativeTranscriptItem, ...]) -> str:
@@ -5510,6 +5602,7 @@ def _write_native_artifacts(
     error: str = "",
     resolver_decisions: tuple[CompletionResolverDecision, ...] = (),
     native_finish_gate_decisions: tuple[NativeFinishGateDecision, ...] = (),
+    done_candidates: tuple[NativeDoneCandidate, ...] = (),
     finish_verifier_planner_decisions: tuple[Mapping[str, object], ...] = (),
     finish_verifier_planner_requests: tuple[Mapping[str, object], ...] = (),
 ) -> dict[str, Path]:
@@ -5539,6 +5632,14 @@ def _write_native_artifacts(
             write_native_finish_gate_artifacts(
                 root,
                 native_finish_gate_decisions,
+                proof_manifest_path=paths.get("proof_manifest"),
+            )
+        )
+    if done_candidates:
+        paths.update(
+            write_native_done_candidate_artifacts(
+                root,
+                done_candidates,
                 proof_manifest_path=paths.get("proof_manifest"),
             )
         )
