@@ -142,8 +142,9 @@ class NativeFinishGateRequest:
 
     lane_attempt_id: str
     turn_id: str
-    finish_call_id: str
-    finish_arguments: Mapping[str, object]
+    finish_call_id: str = ""
+    finish_arguments: Mapping[str, object] = field(default_factory=dict)
+    done_candidate_id: str = ""
     task_id: str = ""
     task_description: str = ""
     task_contract: Mapping[str, object] = field(default_factory=dict)
@@ -218,6 +219,7 @@ class NativeFinishGateDecision:
     lane_status: FinishGateStatus
     result: FinishGateResult
     closeout: NativeFinishCloseoutResult
+    done_candidate_id: str = ""
     blockers: tuple[str, ...] = ()
     missing_obligations: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
@@ -240,6 +242,7 @@ class NativeFinishGateDecision:
             "lane_attempt_id": self.lane_attempt_id,
             "turn_id": self.turn_id,
             "finish_call_id": self.finish_call_id,
+            "done_candidate_id": self.done_candidate_id,
             "lane_status": self.lane_status,
             "result": self.result,
             "closeout": self.closeout.as_dict(),
@@ -350,6 +353,7 @@ def finish_output_payload_for_decision(decision: NativeFinishGateDecision) -> di
             "kind": "native_finish_gate_decision",
             "decision_id": decision.decision_id,
             "policy_version": decision.policy_version,
+            "done_candidate_id": decision.done_candidate_id,
             "lane_status": decision.lane_status,
             "result": decision.result,
             "reason": decision.reason,
@@ -385,8 +389,9 @@ def decide_native_finish_from_closeout(
     decision_id = build_decision_id(
         lane_attempt_id=request.lane_attempt_id,
         turn_id=request.turn_id,
-        finish_call_id=request.finish_call_id,
         policy_version=active_policy.policy_version,
+        finish_call_id=request.finish_call_id,
+        done_candidate_id=request.done_candidate_id,
     )
     blockers = tuple(dict.fromkeys(closeout.blockers))
     missing: tuple[str, ...] = ()
@@ -434,6 +439,7 @@ def decide_native_finish_from_closeout(
         lane_attempt_id=request.lane_attempt_id,
         turn_id=request.turn_id,
         finish_call_id=request.finish_call_id,
+        done_candidate_id=request.done_candidate_id,
         lane_status=lane_status,
         result=result,
         closeout=closeout,
@@ -480,22 +486,39 @@ def native_finish_gate_manifest_fields(path: str | Path) -> dict[str, object]:
     }
 
 
-def build_decision_id(*, lane_attempt_id: str, turn_id: str, finish_call_id: str, policy_version: str) -> str:
+def build_decision_id(
+    *,
+    lane_attempt_id: str,
+    turn_id: str,
+    policy_version: str,
+    finish_call_id: str = "",
+    done_candidate_id: str = "",
+) -> str:
     """Return a deterministic decision id for sidecar/replay records."""
 
+    authority_id = done_candidate_id or finish_call_id
+    if done_candidate_id:
+        hash_payload = {
+            "done_candidate_id": done_candidate_id,
+            "lane_attempt_id": lane_attempt_id,
+            "policy_version": policy_version,
+            "turn_id": turn_id,
+        }
+    else:
+        hash_payload = {
+            "finish_call_id": finish_call_id,
+            "lane_attempt_id": lane_attempt_id,
+            "policy_version": policy_version,
+            "turn_id": turn_id,
+        }
     digest = hashlib.sha256(
         json.dumps(
-            {
-                "finish_call_id": finish_call_id,
-                "lane_attempt_id": lane_attempt_id,
-                "policy_version": policy_version,
-                "turn_id": turn_id,
-            },
+            hash_payload,
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()[:16]
-    return f"native-finish-gate:{turn_id}:{finish_call_id}:{digest}"
+    return f"native-finish-gate:{turn_id}:{authority_id}:{digest}"
 
 
 _NOOP_COMMANDS = frozenset(
@@ -725,6 +748,10 @@ def _decision_summary(records: list[Mapping[str, object]]) -> dict[str, object]:
         "allow_count": sum(1 for record in records if record.get("result") == "allow"),
         "block_count": sum(1 for record in records if record.get("result") == "block"),
         "completed_count": sum(1 for record in records if record.get("lane_status") == "completed"),
+        "done_candidate_count": sum(1 for record in records if record.get("done_candidate_id")),
+        "legacy_finish_call_count": sum(
+            1 for record in records if record.get("finish_call_id") and not record.get("done_candidate_id")
+        ),
         "closeout_ref_count": sum(len(_strings(record.get("closeout_refs"))) for record in records),
         "observer_ref_count": sum(len(_strings(record.get("observer_refs"))) for record in records),
         "typed_evidence_warning_count": sum(

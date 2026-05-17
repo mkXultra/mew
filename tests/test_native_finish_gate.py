@@ -20,6 +20,7 @@ from mew.implement_lane.native_finish_gate import (
     select_and_validate_closeout_command,
     select_closeout_command,
     validate_closeout_command,
+    write_native_finish_gate_artifacts,
 )
 from mew.implement_lane.types import ImplementLaneInput
 from mew.implement_lane.exec_runtime import (
@@ -301,6 +302,104 @@ def test_native_finish_closeout_exit_zero_allows_despite_projection_warnings() -
     assert decision.blockers == ()
     assert decision.missing_obligations == ()
     assert decision.closeout_refs == ("implement-v2-exec://attempt/final-verifier/terminal",)
+
+
+def test_native_finish_gate_can_key_decision_by_done_candidate_id() -> None:
+    request = NativeFinishGateRequest(
+        lane_attempt_id="attempt-1",
+        turn_id="turn-9",
+        done_candidate_id="done-candidate:turn-9:abc123",
+    )
+    closeout = NativeFinishCloseoutResult(
+        command=None,
+        call_item=None,
+        output_item=None,
+        tool_result=None,
+        status="completed_zero",
+        exit_code=0,
+        closeout_refs=("implement-v2-exec://attempt/final-verifier/terminal",),
+    )
+
+    decision = decide_native_finish_from_closeout(request, closeout)
+    payload = decision.as_dict()
+
+    assert decision.result == "allow"
+    assert decision.done_candidate_id == "done-candidate:turn-9:abc123"
+    assert decision.finish_call_id == ""
+    assert "done-candidate:turn-9:abc123" in decision.decision_id
+    assert payload["done_candidate_id"] == "done-candidate:turn-9:abc123"
+    assert "finish_call_id" not in payload
+
+
+def test_done_candidate_decision_id_ignores_legacy_finish_call_id() -> None:
+    first = build_decision_id(
+        lane_attempt_id="attempt-1",
+        turn_id="turn-9",
+        policy_version=NATIVE_FINISH_GATE_POLICY_VERSION,
+        done_candidate_id="done-candidate:turn-9:abc123",
+        finish_call_id="legacy-finish-a",
+    )
+    second = build_decision_id(
+        lane_attempt_id="attempt-1",
+        turn_id="turn-9",
+        policy_version=NATIVE_FINISH_GATE_POLICY_VERSION,
+        done_candidate_id="done-candidate:turn-9:abc123",
+        finish_call_id="legacy-finish-b",
+    )
+
+    assert first == second
+
+
+def test_legacy_finish_call_decision_id_stays_stable_after_done_candidate_migration() -> None:
+    legacy = build_decision_id(
+        lane_attempt_id="attempt-1",
+        turn_id="turn-7",
+        finish_call_id="finish-1",
+        policy_version=NATIVE_FINISH_GATE_POLICY_VERSION,
+    )
+
+    assert legacy == "native-finish-gate:turn-7:finish-1:fb5eb9acd0989d6d"
+
+
+def test_native_finish_gate_manifest_summarizes_done_candidate_keyed_rows(tmp_path) -> None:
+    manifest_path = tmp_path / "proof-manifest.json"
+    manifest_path.write_text('{"metrics":{"existing":true}}\n', encoding="utf-8")
+    closeout = NativeFinishCloseoutResult(
+        command=None,
+        call_item=None,
+        output_item=None,
+        tool_result=None,
+        status="completed_zero",
+        exit_code=0,
+    )
+    decision = NativeFinishGateDecision(
+        decision_id=build_decision_id(
+            lane_attempt_id="attempt-1",
+            turn_id="turn-9",
+            policy_version=NATIVE_FINISH_GATE_POLICY_VERSION,
+            done_candidate_id="done-candidate:turn-9:abc123",
+        ),
+        lane_attempt_id="attempt-1",
+        turn_id="turn-9",
+        finish_call_id="",
+        done_candidate_id="done-candidate:turn-9:abc123",
+        lane_status="completed",
+        result="allow",
+        closeout=closeout,
+    )
+
+    paths = write_native_finish_gate_artifacts(
+        tmp_path,
+        (decision,),
+        proof_manifest_path=manifest_path,
+    )
+
+    assert paths["native_finish_gate_decisions"] == tmp_path / "native_finish_gate_decisions.jsonl"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    summary = manifest["metrics"]["native_finish_gate_decisions"]
+    assert summary["done_candidate_count"] == 1
+    assert summary["legacy_finish_call_count"] == 0
+    assert manifest["metrics"]["existing"] is True
 
 
 def test_native_finish_closeout_exit_zero_blocks_unexpected_source_mutation() -> None:
