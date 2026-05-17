@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active subfocus is ToolRegistry / Codex hot-path Phase 6: profile-owned tool surface and prompt contract. Implement Phase 6A -> 6B -> 6C from `docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md` before returning to Terminal-Bench proof loops. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | ToolRegistry / Codex hot-path Phase 6 is implemented, reviewed, and committed through Phase 6C. Active next action is to run the post-Phase-6 make-doom-for-mips pre-speed / step-shape diagnostic, classify the result from artifacts, then return to the M6.24 Terminal-Bench proof loop. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,34 +70,38 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_tool_registry_profile_owned_surface_phase6`.
+`m6_24_post_tool_registry_phase6_step_shape`.
 
 Current diagnostic mode:
-`phase6_design_reviewed__implementation_prep__phase6a_next`.
+`phase6_complete__make_doom_pre_speed_next`.
 
 Current reentry decision:
-2026-05-17 override: the active next action is not the older
-`make-doom-for-mips` pre-speed checkpoint. The user pivoted to fixing tool
-surface injection drift first. The governing design is
-`docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md`, revised by
-the `orchestrate-build-review-controller` workflow (controller pid 83200,
-round 2 reviewers clean). Next implementation order is:
+2026-05-17 update: ToolRegistry / Codex hot-path Phase 6 from
+`docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md` is complete
+for the scoped implementation gate:
 
-1. Phase 6A: move provider-visible descriptors/specs into profile modules and
-   make `tool_registry.py` stop using `tool_policy.py` for provider-visible
-   text/spec ownership.
-2. Phase 6B: move prompt tool/coding sections into profile-owned prompt
-   contracts selected by `ToolSurfaceSnapshot.prompt_contract_id`; `prompt.py`
-   must not inspect concrete tool names or import `tool_policy.py`.
-3. Phase 6C: delete `tool_policy.py` or shrink it to an internal-only
-   migration shim with no provider-visible descriptions/specs/prompt text.
+1. Phase 6A committed as `59f3734`: provider-visible descriptors/specs moved
+   into profile modules and `tool_registry.py` stopped using the legacy policy
+   module for provider-visible ownership.
+2. Phase 6B committed as `a79a9d2`: prompt tool/coding sections moved into
+   profile-owned prompt contracts selected by `ToolSurfaceSnapshot`.
+3. Phase 6C committed as `60a8471`: `tool_policy.py` was removed from the
+   implement-lane live path, non-provider-visible helper logic moved to
+   `tool_guidance.py`, and the old `tool_policy_index` artifact was renamed to
+   `tool_surface_index`.
 
-Direct hand-tuned tool-description edits from the interrupted prior attempt are
-not the authority for this work. Commit the reviewed design/status preparation
-separately, then implement Phase 6 from the design close gates with review and
-focused tests. Do not resume broad Terminal-Bench measurement, make-doom
-proofs, or task-specific prompt/tool wording until Phase 6 implementation
-either closes or exposes a concrete blocker.
+codex-ultra reviewed Phase 6C in session
+`019e35eb-d557-7020-bb11-579a928fdc8e` with `STATUS: APPROVE`.
+Focused validation passed: Phase 6 surface/registry/provider/harness tests,
+targeted `tests/test_implement_lane.py` selections, targeted
+`tests/test_commands.py` tool CLI selections, `tests/test_native_tool_harness.py`,
+scoped ruff, `git diff --check`, and `rg` gates for legacy policy imports.
+
+Do not restart Phase 6A/6B/6C after context compression. The next action is the
+post-Phase-6 same-shape `make-doom-for-mips` pre-speed / step-shape diagnostic
+with `codex_hot_path`, followed by artifact-based classification before any code
+change. Do not run broad Terminal-Bench measurement or add task-specific
+prompt/tool wording before that classification.
 
 H0 is measured. The saved-artifact report shows that mew reaches
 first-patch readiness early but does not convert those probe facts into a first
@@ -1070,19 +1074,26 @@ Useful historical files:
 - `docs/REVIEW_2026-05-03_CLAUDE_CODE_LONG_BUILD_BUDGET_PLANNING.md`
 - `docs/REVIEW_2026-05-03_FORGECODE_LONG_BUILD_BUDGET_PLANNING.md`
 
-## Current Roadmap Focus
+## Historical Roadmap Focus
 
-1. The active M6.24 focus is native responsibility-boundary Phase 5 from
+This section is retained as historical M6.24 context. It is no longer the active
+reentry guard after the 2026-05-17 ToolRegistry Phase 6 completion. The active
+next action is the post-Phase-6 `make-doom-for-mips` pre-speed / step-shape
+diagnostic described in the Active Milestone section above.
+
+Historical order before the Phase 6 pivot:
+
+1. The active M6.24 focus was native responsibility-boundary Phase 5 from
    `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`.
-2. Use `docs/M6_24_DECISION_LEDGER.md` and the native boundary section above as
-   the reentry guard. They supersede older HOT_PATH polish, WorkFrame,
-   diagnostic-runner, or scoped-rebaseline rows that point directly to
+2. `docs/M6_24_DECISION_LEDGER.md` and the native boundary section above were
+   the reentry guard. They superseded older HOT_PATH polish, WorkFrame,
+   diagnostic-runner, or scoped-rebaseline rows that pointed directly to
    `step-check-10min`, `speed_1`, `proof_5`, or broad measurement.
-3. Required next order: keep the native boundary intact, implement replay /
-   fastcheck for transcript, compact digest, resolver decision, and closeout
-   artifact invariants, run focused tests plus the native boundary audit when
-   touched, then decide whether one bounded diagnostic is allowed.
-4. If the gate is red, repair the native boundary/projection failure first. Do
+3. The historical next order was: keep the native boundary intact, implement
+   replay / fastcheck for transcript, compact digest, resolver decision, and
+   closeout artifact invariants, run focused tests plus the native boundary audit
+   when touched, then decide whether one bounded diagnostic is allowed.
+4. If the gate was red, repair the native boundary/projection failure first. Do
    not add another model-visible frontier/todo/evidence projection as a shortcut.
 5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
    user explicitly changes the priority.

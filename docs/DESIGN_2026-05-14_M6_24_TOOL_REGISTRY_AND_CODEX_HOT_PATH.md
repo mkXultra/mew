@@ -3,10 +3,11 @@
 Status: Phase 0-5 implementation exists for registry selection, hot-path
 descriptors/routes, rendering, A/B reporting, and the explicit default-switch
 gate; default remains `mew_legacy` until the Phase 5 gate passes real fixed-set
-evidence. Phase 6 is still required because profile ownership is incomplete:
-`tool_policy.py` still owns canonical provider-visible tool descriptions/specs,
-and `prompt.py` still assembles profile-sensitive tool/coding prompt text
-through that policy layer instead of from profile-owned prompt contracts.
+evidence. Phase 6 is implemented, reviewed, and committed as of 2026-05-17:
+provider-visible tool descriptions/specs and prompt contracts are profile-owned,
+and the legacy `tool_policy.py` live module has been removed from the
+implement-lane path. M6.24 overall remains in progress until the Terminal-Bench
+parity close gate passes.
 
 Scope: `implement_v2` native tool surface selection, provider-visible tool
 descriptors, provider-visible tool result rendering, route observability, and
@@ -1215,20 +1216,21 @@ tool/coding surface to the model. The registry may select and snapshot that
 profile, but profile-specific tool text must not live in a central policy
 module.
 
-Current implementation reality: `src/mew/implement_lane/tool_registry.py`
-selects `mew_legacy` or `codex_hot_path`, but it still imports
+Pre-Phase-6 implementation reality: `src/mew/implement_lane/tool_registry.py`
+selected `mew_legacy` or `codex_hot_path`, but it still imported
 `tool_policy.py` for canonical specs and provider-visible descriptions.
-`src/mew/implement_lane/prompt.py` also imports `tool_policy.py` to assemble
-the tool section and coding contract, then branches on the selected profile.
-Provider-visible behavior is therefore scattered across `tool_policy.py`,
-`tool_registry.py`, and `prompt.py`. This makes injection partial: the profile
-affects route selection and some metadata, but the profile does not yet own all
+`src/mew/implement_lane/prompt.py` also imported `tool_policy.py` to assemble
+the tool section and coding contract, then branched on the selected profile.
+Provider-visible behavior was therefore scattered across `tool_policy.py`,
+`tool_registry.py`, and `prompt.py`. This made injection partial: the profile
+affected route selection and some metadata, but the profile did not yet own all
 provider-visible descriptions or prompt steering.
 
-Implementation status: not implemented. Phase 0-5 route/render/A-B/gate
-plumbing exists, and `codex_hot_path` has no provider-visible `finish`, but
-provider-visible descriptor/spec ownership and profile prompt-contract
-ownership are still incomplete.
+Implementation status: implemented and reviewed as of 2026-05-17. Phase 6A
+landed in `59f3734`, Phase 6B landed in `a79a9d2`, and Phase 6C landed in
+`60a8471`. Phase 0-5 route/render/A-B/gate plumbing already existed, and the
+Phase 6 work moved provider-visible descriptor/spec ownership plus profile
+prompt-contract ownership into profile modules.
 
 Target module boundary:
 
@@ -1293,11 +1295,9 @@ changing prompt assembly. The full repository-wide
 `rg "tool_policy" src/mew/implement_lane tests` zero-or-compatibility-shim gate
 belongs to the final Phase 6 / Phase 6C end-state, not to this slice.
 
-Implementation status: not implemented. `tool_registry.py` still reaches
-`tool_policy.py` for canonical provider-visible specs/descriptions; Phase 6A
-ends when descriptor/spec ownership is profile-local even if `prompt.py` still
-has temporary Phase 6B dependencies and other modules still carry tracked
-non-provider-visible contract/type imports scheduled for Phase 6C cleanup.
+Implementation status: implemented by `59f3734`. `tool_registry.py` no longer
+reaches a central policy module for canonical provider-visible
+specs/descriptions; descriptor/spec ownership is profile-local.
 
 Implementation slice:
 
@@ -1357,9 +1357,10 @@ Suggested tests:
 Intent: make prompt injection consume profile-owned prompt contracts rather
 than reconstructing profile semantics from a central tool policy.
 
-Implementation status: not implemented. `prompt.py` still imports
-`tool_policy.py`, branches on concrete profile/tool details, and assembles
-profile-sensitive tool/coding prompt text directly.
+Implementation status: implemented by `a79a9d2`. `prompt.py` now consumes
+profile-owned prompt contracts through a narrow catalog interface and no longer
+imports the legacy policy module or concrete profile internals for prompt
+assembly.
 
 Implementation slice:
 
@@ -1414,10 +1415,10 @@ Suggested tests:
 Intent: finish the migration so future profiles cannot accidentally inherit
 central provider-visible text.
 
-Implementation status: not implemented. `tool_policy.py` remains a live module
-for provider-visible specs/descriptions and prompt-policy dependencies; Phase
-6C closes only after those dependencies are deleted or contained in an
-internal-only shim.
+Implementation status: implemented by `60a8471`. The legacy `tool_policy.py`
+live module was removed from the implement-lane path; remaining
+non-provider-visible helper logic lives in `tool_guidance.py`, and old policy
+index artifacts were renamed to `tool_surface_index`.
 
 Implementation slice:
 
