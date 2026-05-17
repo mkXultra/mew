@@ -9,14 +9,14 @@ from mew.implement_lane.tool_harness_contract import (
     build_evidence_ref_index_artifact,
     build_evidence_sidecar_artifact,
     build_model_turn_index_artifact,
-    build_tool_policy_index_artifact,
     build_tool_registry_artifact,
     build_tool_route_artifact,
     build_tool_result_index_artifact,
+    build_tool_surface_index_artifact,
     tool_ref_for_name,
 )
 from mew.implement_lane.tool_routes import route_records_from_native_transcript_items
-from mew.implement_lane.tool_policy import list_v2_tool_specs_for_mode
+from mew.implement_lane.tool_profiles.mew_legacy import list_v2_tool_specs_for_mode
 from mew.implement_lane.types import ImplementLaneInput, ImplementLaneProofManifest, ToolResultEnvelope
 from mew.implement_lane.v2_runtime import _tool_result_transcript_events, _write_live_json_artifacts
 from mew.tool_kernel import ToolKernel, ToolKernelConfig, make_tool_call_envelope
@@ -604,7 +604,7 @@ def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
         provider="model_json",
         tool_specs=tuple(spec for spec in list_v2_tool_specs_for_mode("read_only") if spec.name == "read_file"),
     )
-    policy = build_tool_policy_index_artifact(registry)
+    surface = build_tool_surface_index_artifact(registry)
     result = ToolResultEnvelope(
         lane_attempt_id="attempt-1",
         provider_call_id="call-1",
@@ -624,9 +624,9 @@ def test_tool_registry_and_result_index_artifacts_are_stable() -> None:
     assert registry["tool_registry_hash"] == registry["provider_tool_spec_hash"]
     assert {"read_file", "model_response_error"}.issubset(set(registry["by_tool_name"]))
     assert "finish" not in registry["by_tool_name"]
-    assert policy["by_tool"]["read_file"]["tool_ref"] == tool_ref_for_name("read_file")
-    assert policy["by_tool_ref"][tool_ref_for_name("read_file")]["tool_name"] == "read_file"
-    assert policy["by_tool_ref"][tool_ref_for_name("model_response_error")]["access"] == "internal"
+    assert surface["by_tool"]["read_file"]["tool_ref"] == tool_ref_for_name("read_file")
+    assert surface["by_tool_ref"][tool_ref_for_name("read_file")]["tool_name"] == "read_file"
+    assert surface["by_tool_ref"][tool_ref_for_name("model_response_error")]["access"] == "internal"
     assert index["by_provider_call_id"]["call-1"]["ref"] == "tool-result:call-1"
     assert index["by_provider_call_id"]["call-1"]["tool_ref"] == tool_ref_for_name("read_file")
     assert index["by_provider_call_id"]["call-1"]["output_refs"] == ["file://README.md"]
@@ -1199,7 +1199,7 @@ def test_live_artifact_writer_emits_phase1_tool_harness_files(tmp_path: Path) ->
     artifact_root = tmp_path / "artifacts" / "implement_v2"
 
     assert str(artifact_root / "tool_registry.json") in paths
-    assert str(artifact_root / "tool_policy_index.json") in paths
+    assert str(artifact_root / "tool_surface_index.json") in paths
     assert str(artifact_root / "natural_transcript.jsonl") in paths
     assert str(artifact_root / "tool_results.jsonl") in paths
     assert str(artifact_root / "tool_result_index.json") in paths

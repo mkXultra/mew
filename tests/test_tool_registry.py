@@ -176,16 +176,19 @@ def test_codex_hot_path_profile_gates_list_dir_option() -> None:
     assert route_by_name["list_dir"]["internal_kernel"] == "inspect_dir"
 
 
-def test_phase6a_tool_registry_does_not_import_tool_policy_for_descriptors() -> None:
+def test_phase6a_tool_registry_does_not_import_legacy_policy_for_descriptors() -> None:
     source = Path("src/mew/implement_lane/tool_registry.py").read_text(encoding="utf-8")
 
-    assert "tool_policy" not in source
+    assert "tool_" + "policy" not in source
     assert "list_v2_tool_specs_for_task" not in source
 
 
-def test_phase6a_tool_policy_is_not_provider_visible_text_owner() -> None:
-    source = Path("src/mew/implement_lane/tool_policy.py").read_text(encoding="utf-8")
+def test_phase6c_legacy_policy_module_removed_from_implement_lane() -> None:
+    assert not Path("src/mew/implement_lane/" + "tool_" + "policy.py").exists()
 
-    assert "ImplementLaneToolSpec(" not in source
-    assert "Primary source mutation tool" not in source
-    assert "Runs a command, returning output or a command_id" not in source
+    live_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in Path("src/mew/implement_lane").glob("*.py")
+        if path.name not in {"native_boundary_audit.py"}
+    )
+    assert "tool_" + "policy" not in live_sources

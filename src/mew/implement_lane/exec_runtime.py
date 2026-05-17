@@ -572,14 +572,14 @@ class ImplementV2ManagedExecRuntime:
         return command_id
 
     def _resolve_command_run_id(self, args: dict[str, object]) -> str:
-        raw = str(
-            args.get("command_id")
-            or args.get("command_run_id")
-            or args.get("session_id")
-            or ""
-        ).strip()
+        raw_key = "command_id"
+        if args.get("command_run_id") and not args.get("command_id"):
+            raw_key = "command_run_id"
+        if args.get("session_id") and not args.get("command_id") and not args.get("command_run_id"):
+            raw_key = "session_id"
+        raw = str(args.get(raw_key) or "").strip()
         if not raw:
-            raise ValueError("command_id is required")
+            raise ValueError(f"{raw_key} is required")
         resolved = self.command_run_id_by_alias.get(raw)
         if resolved:
             return resolved
@@ -594,9 +594,10 @@ class ImplementV2ManagedExecRuntime:
         if len(unique) == 1:
             return unique[0]
         hint = self._active_command_id_hint()
+        suffix = f".{hint}" if hint else ""
         if len(unique) > 1:
-            raise ValueError(f"ambiguous command_id: {raw}.{hint}")
-        raise ValueError(f"unknown command_id: {raw}.{hint}")
+            raise ValueError(f"ambiguous {raw_key}: {raw}{suffix}")
+        raise ValueError(f"unknown {raw_key}: {raw}{suffix}")
 
     def _active_command_id_hint(self) -> str:
         active_ids = []

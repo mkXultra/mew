@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .tool_policy import list_v2_base_tool_specs
+from .tool_profiles.mew_legacy import list_v2_base_tool_specs
 from .workframe import (
     WorkFrame,
     WorkFrameForbiddenNext,

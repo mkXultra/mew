@@ -79,18 +79,18 @@ from .tool_harness_contract import (
     tool_results_jsonl_lines,
     write_jsonl,
 )
-from .tool_policy import (
-    ImplementLaneToolSpec,
+from .tool_guidance import (
     hide_unavailable_write_file_guidance,
     is_hard_runtime_artifact_task,
-    list_v2_tool_specs_for_task,
 )
+from .tool_profiles.mew_legacy import list_v2_tool_specs_for_task
 from .tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
     ToolSurfaceSnapshot,
     build_tool_surface_snapshot,
     tool_surface_profile_id,
 )
+from .tool_specs import ImplementLaneToolSpec
 from .tool_result_renderer import render_observability_record, render_tool_result_for_profile
 from .tool_routes import route_records_from_results, with_tool_route_decision
 from .types import ImplementLaneInput, ImplementLaneResult, ToolCallEnvelope, ToolResultEnvelope

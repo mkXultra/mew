@@ -134,6 +134,28 @@ def mew_legacy_tool_specs_for_mode(mode: object) -> tuple[ImplementLaneToolSpec,
     return tuple(spec for spec in MEW_LEGACY_TOOL_SPECS if spec.access == "read")
 
 
+def list_v2_base_tool_specs() -> tuple[ImplementLaneToolSpec, ...]:
+    """Return the legacy default provider-neutral v2 tool surface."""
+
+    return MEW_LEGACY_TOOL_SPECS
+
+
+def list_v2_tool_specs_for_mode(mode: object) -> tuple[ImplementLaneToolSpec, ...]:
+    """Return the legacy tool surface allowed for a v2 permission mode."""
+
+    return mew_legacy_tool_specs_for_mode(mode)
+
+
+def list_v2_tool_specs_for_task(
+    mode: object,
+    *,
+    task_contract: object = None,
+) -> tuple[ImplementLaneToolSpec, ...]:
+    """Return the legacy provider-visible v2 tool surface for a task shape."""
+
+    return mew_legacy_tool_specs_for_task(mode, task_contract=task_contract)
+
+
 def mew_legacy_tool_specs_for_task(
     mode: object,
     *,
@@ -241,6 +263,9 @@ __all__ = [
     "MEW_LEGACY_PROFILE_ID",
     "MEW_LEGACY_PROMPT_CONTRACT_ID",
     "MEW_LEGACY_TOOL_SPECS",
+    "list_v2_base_tool_specs",
+    "list_v2_tool_specs_for_mode",
+    "list_v2_tool_specs_for_task",
     "mew_legacy_prompt_sections",
     "mew_legacy_tool_specs_for_mode",
     "mew_legacy_tool_specs_for_task",

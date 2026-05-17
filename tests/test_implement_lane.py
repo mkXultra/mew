@@ -43,7 +43,7 @@ from mew.implement_lane import (
     validate_tool_result_pairing,
     validate_workframe_variant_name,
 )
-from mew.implement_lane.tool_policy import list_v2_tool_specs_for_task
+from mew.implement_lane.tool_profiles.mew_legacy import list_v2_tool_specs_for_task
 from mew.implement_lane.provider import FakeProviderAdapter, FakeProviderToolCall
 from mew.implement_lane.legacy_shell_edit_bridge import bridge_registry_manifest
 from mew.implement_lane.v2_runtime import (
@@ -10521,7 +10521,7 @@ def test_implement_v2_closeout_config_is_capped_by_remaining_wall_budget(tmp_pat
     assert result.metrics["command_closeout_count"] == 1
 
 
-def test_v2_tool_policy_marks_write_and_execute_tools_approval_gated() -> None:
+def test_v2_tool_surface_marks_write_and_execute_tools_approval_gated() -> None:
     specs = {spec.name: spec for spec in list_v2_base_tool_specs()}
 
     assert specs["inspect_dir"].approval_required is False
@@ -10972,7 +10972,7 @@ def test_implement_v2_history_projection_preserves_terminal_diagnostics_without_
                 "status": "failed",
                 "reason": "run_command is disabled; pass --allow-shell",
                 "error": "unknown command_run_id: cmd-missing",
-                "failure_class": "tool_policy_denied",
+                "failure_class": "tool_permission_denied",
             },
         ),
     )
@@ -10984,7 +10984,7 @@ def test_implement_v2_history_projection_preserves_terminal_diagnostics_without_
     assert item["status"] == "failed"
     assert item["reason"] == "run_command is disabled; pass --allow-shell"
     assert item["error"] == "unknown command_run_id: cmd-missing"
-    assert item["failure_class"] == "tool_policy_denied"
+    assert item["failure_class"] == "tool_permission_denied"
     assert "stdout" not in item
     assert "stderr" not in item
 
@@ -11440,7 +11440,7 @@ def test_phase6b_prompt_contracts_are_profile_owned() -> None:
         encoding="utf-8"
     )
 
-    assert "tool_policy" not in prompt_source
+    assert "tool_" + "policy" not in prompt_source
     assert "CODEX_HOT_PATH_PROFILE_ID" not in prompt_source
     assert "MEW_LEGACY_PROFILE_ID" not in prompt_source
     assert "tool_names =" not in prompt_source

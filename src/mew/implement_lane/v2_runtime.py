@@ -42,8 +42,8 @@ from .tool_harness_contract import (
     build_evidence_ref_index_artifact,
     build_evidence_sidecar_artifact,
     build_model_turn_index_artifact,
-    build_tool_policy_index_artifact,
     build_tool_registry_artifact,
+    build_tool_surface_index_artifact,
     build_tool_route_artifact,
     build_tool_result_index_artifact,
     tool_ref_for_name,
@@ -51,14 +51,12 @@ from .tool_harness_contract import (
     transcript_jsonl_lines,
     write_jsonl,
 )
-from .tool_policy import (
-    ImplementLaneToolSpec,
+from .tool_guidance import (
     hide_unavailable_write_file_guidance,
     is_hard_runtime_artifact_task,
-    list_v2_base_tool_specs,
-    list_v2_tool_specs_for_mode,
-    list_v2_tool_specs_for_task,
 )
+from .tool_profiles.mew_legacy import list_v2_base_tool_specs, list_v2_tool_specs_for_mode, list_v2_tool_specs_for_task
+from .tool_specs import ImplementLaneToolSpec
 from .transcript import lane_artifact_namespace
 from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
 from .types import ToolCallEnvelope
@@ -11486,7 +11484,7 @@ def _write_live_json_artifacts(
         provider=str(manifest.metrics.get("transport") or ""),
         tool_specs=_tool_specs_from_metric_names(manifest.metrics.get("provider_tool_names")),
     )
-    tool_policy_index_artifact = build_tool_policy_index_artifact(tool_registry_artifact)
+    tool_surface_index_artifact = build_tool_surface_index_artifact(tool_registry_artifact)
     tool_result_index_artifact = build_tool_result_index_artifact(
         manifest.tool_results,
         tool_registry_ref=str(tool_registry_artifact.get("tool_registry_ref") or ""),
@@ -11506,7 +11504,7 @@ def _write_live_json_artifacts(
     transcript_path = root / "transcript.json"
     history_path = root / "history.json"
     tool_registry_path = root / "tool_registry.json"
-    tool_policy_index_path = root / "tool_policy_index.json"
+    tool_surface_index_path = root / "tool_surface_index.json"
     natural_transcript_path = root / "natural_transcript.jsonl"
     tool_results_path = root / "tool_results.jsonl"
     tool_result_index_path = root / "tool_result_index.json"
@@ -11526,8 +11524,8 @@ def _write_live_json_artifacts(
         json.dumps(tool_registry_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    tool_policy_index_path.write_text(
-        json.dumps(tool_policy_index_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+    tool_surface_index_path.write_text(
+        json.dumps(tool_surface_index_artifact, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     write_jsonl(natural_transcript_path, transcript_jsonl_lines(transcript))
@@ -11565,7 +11563,7 @@ def _write_live_json_artifacts(
         str(transcript_path),
         str(history_path),
         str(tool_registry_path),
-        str(tool_policy_index_path),
+        str(tool_surface_index_path),
         str(natural_transcript_path),
         str(tool_results_path),
         str(tool_result_index_path),

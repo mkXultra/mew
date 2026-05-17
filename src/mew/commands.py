@@ -16255,7 +16255,7 @@ def _print_json_or_text(result, as_json, text):
         print(text)
 
 def cmd_tool_specs(args):
-    from .implement_lane.tool_policy import list_v2_tool_specs_for_mode
+    from .implement_lane.tool_profiles.mew_legacy import list_v2_tool_specs_for_mode
 
     specs = [spec.as_dict() for spec in list_v2_tool_specs_for_mode(args.mode)]
     result = {

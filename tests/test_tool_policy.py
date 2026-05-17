@@ -1,5 +1,5 @@
-from mew.implement_lane.tool_policy import (
-    is_hard_runtime_artifact_task,
+from mew.implement_lane.tool_guidance import is_hard_runtime_artifact_task
+from mew.implement_lane.tool_profiles.mew_legacy import (
     list_v2_base_tool_specs,
     list_v2_tool_specs_for_mode,
     list_v2_tool_specs_for_task,

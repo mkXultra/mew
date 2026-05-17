@@ -29,7 +29,7 @@ from mew.implement_lane.native_transcript import (
     NativeTranscriptItem,
     native_transcript_hash,
 )
-from mew.implement_lane.tool_policy import list_v2_base_tool_specs
+from mew.implement_lane.tool_profiles.mew_legacy import list_v2_base_tool_specs
 from mew.implement_lane.tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
     build_tool_surface_snapshot,

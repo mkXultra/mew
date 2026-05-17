@@ -24,7 +24,8 @@ from .native_tool_schema import (
     strict_false_reasons,
 )
 from .native_transcript import NativeTranscript, NativeTranscriptItem
-from .tool_policy import ImplementLaneToolSpec, list_v2_base_tool_specs
+from .tool_profiles.mew_legacy import list_v2_base_tool_specs
+from .tool_specs import ImplementLaneToolSpec
 
 NATIVE_PROVIDER_ADAPTER_SCHEMA_VERSION = 1
 REASONING_SIDECAR_SCHEMA_VERSION = 1

@@ -152,7 +152,7 @@ class ToolKernel:
         return self.exec_runtime.poll_active_commands(wait_seconds=wait_seconds)
 
     def _available(self, tool_name: object) -> bool:
-        from .implement_lane.tool_policy import list_v2_tool_specs_for_task
+        from .implement_lane.tool_profiles.mew_legacy import list_v2_tool_specs_for_task
 
         return str(tool_name or "") in {
             spec.name

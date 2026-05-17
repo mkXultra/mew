@@ -15,7 +15,7 @@ def test_native_boundary_audit_passes_current_repo() -> None:
         for check in report.checks
     )
     assert any(
-        check.name == "source_inventory_provider_visible_finish_absent_tool_policy"
+        check.name == "source_inventory_provider_visible_finish_absent_tool_profiles"
         for check in report.checks
     )
 
@@ -124,10 +124,12 @@ def _write_complete_fixture(root: Path) -> None:
         "    }\n",
         encoding="utf-8",
     )
-    (impl / "tool_policy.py").write_text(
-        "ToolAccess = Literal[\"read\", \"write\", \"execute\", \"approval\"]\n"
+    profiles = impl / "tool_profiles"
+    profiles.mkdir()
+    (profiles / "mew_legacy.py").write_text(
+        "MEW_LEGACY_TOOL_SPECS = ()\n"
         "def list_v2_tool_specs_for_mode(mode):\n"
-        "    return V2_BASE_TOOL_SPECS\n",
+        "    return MEW_LEGACY_TOOL_SPECS\n",
         encoding="utf-8",
     )
     (impl / "exec_runtime.py").write_text(

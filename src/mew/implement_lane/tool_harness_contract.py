@@ -8,7 +8,8 @@ from collections import defaultdict
 from typing import Any, Iterable
 
 from .execution_evidence import build_oracle_bundle, evidence_events_from_tool_payload
-from .tool_policy import ImplementLaneToolSpec, list_v2_base_tool_specs
+from .tool_profiles.mew_legacy import list_v2_base_tool_specs
+from .tool_specs import ImplementLaneToolSpec
 from .tool_routes import tool_route_artifact_from_results
 from .types import ImplementLaneTranscriptEvent, ToolResultEnvelope
 
@@ -75,8 +76,8 @@ def build_tool_registry_artifact(
     }
 
 
-def build_tool_policy_index_artifact(registry: dict[str, object]) -> dict[str, object]:
-    """Build a compact tool policy index from a registry artifact."""
+def build_tool_surface_index_artifact(registry: dict[str, object]) -> dict[str, object]:
+    """Build a compact tool surface index from a registry artifact."""
 
     tools = registry.get("tools") if isinstance(registry.get("tools"), list) else []
     by_tool: dict[str, object] = {}
@@ -874,7 +875,7 @@ __all__ = [
     "TOOL_HARNESS_CONTRACT_SCHEMA_VERSION",
     "TOOL_REGISTRY_ARTIFACT_SCHEMA_VERSION",
     "TOOL_RESULT_INDEX_SCHEMA_VERSION",
-    "build_tool_policy_index_artifact",
+    "build_tool_surface_index_artifact",
     "build_evidence_ref_index_artifact",
     "build_evidence_sidecar_artifact",
     "build_model_turn_index_artifact",

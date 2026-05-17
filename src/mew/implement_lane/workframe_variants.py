@@ -184,7 +184,7 @@ def common_workframe_inputs_from_workframe_inputs(
             "registry_hash": _string_from_metrics(inputs.baseline_metrics, "tool_registry_hash"),
             "active_tool_refs": _list_from_metrics(inputs.baseline_metrics, "provider_tool_names"),
             "provider_tool_spec_hash": _string_from_metrics(inputs.baseline_metrics, "provider_tool_spec_hash"),
-            "tool_policy_index_ref": "",
+            "tool_surface_index_ref": "",
             **(tool_registry or {}),
         },
         sidecars={

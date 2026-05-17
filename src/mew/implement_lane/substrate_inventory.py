@@ -18,7 +18,7 @@ from .execution_evidence import (
     TYPED_ACCEPTANCE_SCHEMA_VERSION,
     VERIFIER_EVIDENCE_SCHEMA_VERSION,
 )
-from .tool_policy import list_v2_base_tool_specs, list_v2_tool_specs_for_mode
+from .tool_profiles.mew_legacy import list_v2_base_tool_specs, list_v2_tool_specs_for_mode
 from .types import PROOF_MANIFEST_SCHEMA_VERSION, TOOL_CALL_SCHEMA_VERSION, TOOL_RESULT_SCHEMA_VERSION
 from .workframe import (
     WORKFRAME_CANONICALIZER_VERSION,
@@ -41,7 +41,7 @@ PHASE2_INDEX_FILENAMES = (
 
 REQUIRED_SHARED_ARTIFACTS = (
     {"filename": "tool_registry.json", "phase": 1, "surface": "tool registry artifact"},
-    {"filename": "tool_policy_index.json", "phase": 1, "surface": "tool policy artifact"},
+    {"filename": "tool_surface_index.json", "phase": 1, "surface": "tool surface artifact"},
     {"filename": "natural_transcript.jsonl", "phase": 1, "surface": "natural transcript log"},
     {"filename": "tool_results.jsonl", "phase": 1, "surface": "tool result log"},
     {"filename": "tool_result_index.json", "phase": 2, "surface": "tool result index"},

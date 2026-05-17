@@ -1,50 +1,14 @@
-"""Compatibility helpers for implementation-lane tool policy.
-
-Provider-visible tool descriptions/specs are owned by tool profile modules.
-This module remains as a compatibility facade plus non-provider-visible helper
-logic until the Phase 6C deletion gate.
-"""
+"""Internal helper logic for implementation-lane tool guidance."""
 
 from __future__ import annotations
 
 import json
 
-from .tool_profiles.mew_legacy import (
-    MEW_LEGACY_TOOL_SPECS,
-    mew_legacy_tool_specs_for_mode,
-    mew_legacy_tool_specs_for_task,
-)
-from .tool_specs import ImplementLaneToolSpec, ToolAccess, ToolInputTransport
-
-V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = MEW_LEGACY_TOOL_SPECS
-
-
-def list_v2_base_tool_specs() -> tuple[ImplementLaneToolSpec, ...]:
-    """Return the default provider-neutral v2 tool surface."""
-
-    return V2_BASE_TOOL_SPECS
-
-
-def list_v2_tool_specs_for_mode(mode: object) -> tuple[ImplementLaneToolSpec, ...]:
-    """Return the tool surface allowed for a v2 permission mode."""
-
-    return mew_legacy_tool_specs_for_mode(mode)
-
-
-def list_v2_tool_specs_for_task(
-    mode: object,
-    *,
-    task_contract: object = None,
-) -> tuple[ImplementLaneToolSpec, ...]:
-    """Return the provider-visible v2 tool surface for a task shape."""
-
-    return mew_legacy_tool_specs_for_task(mode, task_contract=task_contract)
-
 
 def is_hard_runtime_artifact_task(task_contract: object) -> bool:
     """Return whether the task should use the hard-runtime artifact profile."""
 
-    text = _contract_text_for_tool_policy(task_contract)
+    text = _contract_text_for_tool_guidance(task_contract)
     if not text:
         return False
     runtime_markers = (
@@ -87,15 +51,6 @@ def is_hard_runtime_artifact_task(task_contract: object) -> bool:
     )
 
 
-def _contract_text_for_tool_policy(task_contract: object) -> str:
-    if isinstance(task_contract, str):
-        return task_contract.casefold()
-    try:
-        return json.dumps(task_contract, ensure_ascii=False, sort_keys=True).casefold()
-    except TypeError:
-        return str(task_contract or "").casefold()
-
-
 def hide_unavailable_write_file_guidance(text: str) -> str:
     """Remove positive write_file guidance when the tool is not available."""
 
@@ -116,14 +71,16 @@ def hide_unavailable_write_file_guidance(text: str) -> str:
     return value
 
 
+def _contract_text_for_tool_guidance(task_contract: object) -> str:
+    if isinstance(task_contract, str):
+        return task_contract.casefold()
+    try:
+        return json.dumps(task_contract, ensure_ascii=False, sort_keys=True).casefold()
+    except TypeError:
+        return str(task_contract or "").casefold()
+
+
 __all__ = [
-    "ImplementLaneToolSpec",
-    "ToolAccess",
-    "ToolInputTransport",
-    "V2_BASE_TOOL_SPECS",
     "hide_unavailable_write_file_guidance",
     "is_hard_runtime_artifact_task",
-    "list_v2_base_tool_specs",
-    "list_v2_tool_specs_for_mode",
-    "list_v2_tool_specs_for_task",
 ]
