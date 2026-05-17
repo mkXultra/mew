@@ -1,7 +1,12 @@
 # Design 2026-05-14 - M6.24 ToolRegistry And Codex Hot Path
 
-Status: Phase 0-5 implemented; default remains `mew_legacy` until the Phase 5
-gate passes real fixed-set evidence.
+Status: Phase 0-5 implementation exists for registry selection, hot-path
+descriptors/routes, rendering, A/B reporting, and the explicit default-switch
+gate; default remains `mew_legacy` until the Phase 5 gate passes real fixed-set
+evidence. Phase 6 is still required because profile ownership is incomplete:
+`tool_policy.py` still owns canonical provider-visible tool descriptions/specs,
+and `prompt.py` still assembles profile-sensitive tool/coding prompt text
+through that policy layer instead of from profile-owned prompt contracts.
 
 Scope: `implement_v2` native tool surface selection, provider-visible tool
 descriptors, provider-visible tool result rendering, route observability, and
@@ -52,8 +57,8 @@ explicit profile id
   -> sidecars store evidence, route, replay, observer, and finish details
 ```
 
-The first concrete profile is `codex_hot_path`. It exposes the Codex-like coding
-hot path plus a minimal native completion trigger:
+The first concrete profile is `codex_hot_path`. It exposes only the Codex-like
+coding hot path:
 
 ```text
 provider-visible coding tools:
@@ -61,12 +66,15 @@ provider-visible coding tools:
   exec_command
   write_stdin
 
-provider-visible completion tool:
-  finish
-
 optional gated alias:
   list_dir
 ```
+
+Native finish/closeout, completion resolution, proof, replay, and evidence stay
+resident-internal for this profile. If a future profile wants to project a
+provider-visible completion tool, that profile must own its descriptor, prompt
+contract, renderer, and leak gates separately; it must not change
+`codex_hot_path`.
 
 `mew_legacy` remains runnable for A/B. It keeps the current mew tool names and
 mew card-like result text until `codex_hot_path` proves better.
@@ -104,6 +112,8 @@ controller.
 - No new provider-visible planner.
 - No provider-visible `next_action`, `required_next`, `first_write_due`,
   `prewrite_probe_plateau`, WorkFrame action card, or renamed equivalent.
+- No provider-visible `finish` tool, task-specific finish pressure, evidence
+  citation pressure, or sidecar/proof foregrounding in `codex_hot_path`.
 - No registry-owned WorkFrame reducer, CompletionResolver, finish policy,
   task semantic classifier, or "what should the model do next" decision.
 - No task-specific MIPS, VM, Terminal-Bench, browser, mail, or calendar
@@ -114,8 +124,11 @@ controller.
 
 ## ToolRegistry Responsibilities
 
-`ToolRegistry` owns only the mechanical boundary from provider-visible tools to
-internal kernels:
+`ToolRegistry` is the complete injection boundary for provider-visible tool
+surfaces. All provider-visible descriptor, route, renderer, and prompt-contract
+material must enter the request through a selected `ToolSurfaceProfile` snapshot
+that the registry builds. The registry owns only the mechanical boundary from
+provider-visible tools to internal kernels:
 
 1. Build ordered provider-visible descriptors for an explicit profile.
 2. Record descriptor, route, and render-policy hashes.
@@ -245,6 +258,7 @@ ToolSurfaceProfile
   tool_entries: list[ToolRegistryEntry]
   default_parallel_tool_calls: boolean
   prompt_contract_id: string
+  prompt_sections: list[ProfilePromptSection]
   hidden_internal_families: list[string]
   profile_hash: sha256
 
@@ -277,11 +291,37 @@ ToolSurfaceSnapshot
   interactive_stdin: boolean
   provider_tool_names: list[string]
   provider_tool_specs: list[object]
+  prompt_sections: list[ProfilePromptSection]
   entries: list[entry metadata]
 ```
 
 The request descriptor and provider request inventory must record the
 `ToolSurfaceSnapshot` identity, not just a flat `tool_spec_hash`.
+
+Provider-visible descriptor text and profile-specific prompt text are part of
+the profile contract. For `codex_hot_path`, `mew_legacy`, and any later profile,
+the profile module owns:
+
+- provider-visible names, descriptions, schemas, strict/custom/freeform flags,
+  and descriptor ordering;
+- descriptor factory id, argument adapter id, result renderer id, and renderer
+  policy label for each exposed provider-visible tool;
+- profile prompt contract id and the tool/coding prompt sections that explain
+  the exposed surface to the provider;
+- profile renderer ids and provider-visible renderer policy labels;
+- golden fixtures that lock descriptor and prompt-contract text.
+
+Profile-owned modules/catalogs are the durable home for tool details. The first
+catalog entries are `codex_hot_path` and `mew_legacy`; later entries such as
+`web_search`, `python_task`, browser, repo-native, or connector profiles must
+follow the same ownership rule instead of extending a central tool policy.
+
+`tool_policy.py` must not be the source of provider-visible descriptions or
+canonical provider tool specs once Phase 6 closes. It should be deleted if the
+profile modules and registry fully replace it. If deletion is too disruptive in
+one step, it may remain only as an internal migration shim or internal contract
+module with no provider-visible descriptions, no provider-visible schemas, and
+no profile-specific prompt text.
 
 `availability_class` is declarative metadata, not a predicate hook. Allowed
 classes are:
@@ -363,12 +403,6 @@ exec_command
 write_stdin
 ```
 
-Provider-visible completion name:
-
-```text
-finish
-```
-
 Optional alias:
 
 ```text
@@ -387,14 +421,20 @@ use `exec_command` with familiar commands such as `rg`, `sed`, `nl`, `cat`, and
 `git diff`. A future `read_file` alias may be added only if A/B traces show
 terminal reads are worse and the alias does not increase prewrite probe count.
 
-Internal mappings:
+No provider-visible completion tool is part of `codex_hot_path`. Native
+finish/closeout state, `CompletionResolver`, and verifier evidence remain
+resident-internal. The profile prompt contract must not tell the model to call a
+finish tool, cite evidence refs, satisfy task-specific closeout pressure, or
+surface proof/sidecar details. A separate profile may expose a completion tool
+only if that profile owns the descriptor and prompt contract explicitly.
+
+Internal mappings for provider-visible tools:
 
 | Provider name | Internal kernel | Argument adapter | Renderer |
 | --- | --- | --- | --- |
 | `apply_patch` | `write.apply_patch` | freeform patch to current apply-patch args with `apply=true` | `codex_apply_patch_text_v1` |
 | `exec_command` | `exec.run_command` | Codex unified exec args to managed exec args | `codex_terminal_text_v1` |
 | `write_stdin` | `exec.poll_command` initially; `exec.write_stdin` only when implemented | Codex session args to managed command lifecycle args | `codex_terminal_text_v1` |
-| `finish` | `finish.native_finish_call` | minimal finish args to current finish call args | `codex_finish_text_v1` |
 | `list_dir` | `read.inspect_dir` | `dir_path` and implemented listing controls to bounded inspect args | `codex_list_dir_text_v1` |
 
 Internal-only surfaces still run but are never provider-visible in this
@@ -406,7 +446,7 @@ profile:
 - execution contracts;
 - artifact observers;
 - transcript rebuild and replay;
-- finish gates and `CompletionResolver`;
+- native finish/closeout, finish gates, and `CompletionResolver`;
 - provider request inventories;
 - forbidden-field scans;
 - route decision artifacts;
@@ -554,54 +594,35 @@ write_stdin adapter error: interactive stdin is unavailable for this session
 implemented or the A/B report shows no successful hot-path trace requires
 interactive stdin.
 
-### `finish`
+### Finish And Closeout Stay Internal
 
-`codex_hot_path` keeps a minimal provider-visible `finish` tool because the
-native harness completes through a `finish_call` plus `CompletionResolver`.
-This is a completion trigger, not a planning tool.
+`codex_hot_path` must not expose a provider-visible `finish` descriptor. The
+native harness may still use `finish_call`, `CompletionResolver`, verifier
+closeout checks, and blocked-return/blocked-continue state internally, but those
+mechanisms are resident-internal for this profile.
 
-Descriptor shape:
-
-```text
-name: finish
-strict: false
-required:
-  summary
-optional:
-  evidence_refs
-  final_status
-```
-
-Completion contract:
+Profile contract:
 
 ```text
-model emits finish(summary, evidence_refs?, final_status?)
-  -> registry maps to current native finish call args
-  -> harness validates the finish call
-  -> CompletionResolver decides allow, blocked_continue, or blocked_return
-  -> transcript stores exactly one paired finish_output for the call_id
-  -> resolver decision and evidence details stay in sidecars
+provider-visible descriptors:
+  apply_patch
+  exec_command
+  write_stdin
+  list_dir only when enable_list_dir=true
+
+provider-visible prompt sections:
+  no finish-tool instruction
+  no evidence-ref citation pressure
+  no task-specific closeout pressure
+  no WorkFrame, proof, sidecar, or next-action steering
 ```
 
-Provider-visible `finish` output is concise:
-
-```text
-finish accepted: <bounded summary>
-```
-
-or:
-
-```text
-finish blocked: <bounded blocker summary>
-```
-
-Blocked finish behavior matches the existing native boundary: `blocked_continue`
-keeps the blocked finish call/output in the transcript and lets the model
-continue; `blocked_return` stores the pair and returns control to supervisor or
-reentry. The registry does not decide either outcome.
-
-Finish gates, verifier closeout details, resolver policy version, typed
-evidence validation, and missing-obligation internals remain sidecar-only.
+If the runtime needs an internal closeout attempt after the model's natural
+final response, that attempt is recorded in resolver/sidecar artifacts, not as
+a provider-native tool descriptor or provider-visible tool output in
+`codex_hot_path`. If a future profile exposes a completion tool, it must be a
+separate selectable profile with its own profile-owned descriptor, argument
+adapter, renderer, prompt contract, and golden fixtures.
 
 ### `list_dir`
 
@@ -655,6 +676,11 @@ refs: ...
 
 Use Codex-like terminal text for command-family results. The string should make
 the terminal result immediate and should not foreground mew evidence refs.
+Only provider-visible `apply_patch`, `exec_command`, `write_stdin`, and
+explicitly enabled `list_dir` calls are rendered into provider-native tool
+outputs in this profile. Internal finish/closeout, proof, replay, route, and
+evidence artifacts remain sidecar-only unless a different selected profile
+explicitly projects them.
 
 Terminal completed shape:
 
@@ -735,16 +761,16 @@ already factual and bounded. They must not include `suggested_next_action`,
 `required_next`, or action-card language.
 
 Sidecar refs may appear as a single short footer only when needed to recover
-omitted output:
+omitted raw terminal output:
 
 ```text
 Refs: output=<ref>
 ```
 
 They should not dominate model-visible output. Evidence refs, source snapshot
-refs, proof refs, route metadata, and finish-gate detail remain internal
-sidecar artifacts unless a specific result cannot be understood without a
-bounded factual ref.
+refs, proof refs, route metadata, finish-gate detail, and task-specific closeout
+pressure remain internal sidecar artifacts. `codex_hot_path` provider-visible
+output stays raw task context plus native transcript plus compact tool output.
 
 ## Future Tool Family Injection
 
@@ -895,13 +921,14 @@ Implementation slice:
 Close gate:
 
 - `codex_hot_path` golden descriptor contains only `apply_patch`,
-  `exec_command`, `write_stdin`, `finish`, and no default
-  `read_file`/`search_text`;
+  `exec_command`, `write_stdin`, plus explicitly gated `list_dir`; it contains
+  no default `read_file`, `search_text`, `run_tests`, `finish`, or legacy
+  mew-specific tool;
 - optional `list_dir` appears only in an explicitly named fixture;
 - `apply_patch` freeform descriptor uses the Codex short description;
 - command descriptors are `strict=false`;
-- `finish` descriptor is present and maps to native `finish_call` plus
-  `CompletionResolver`;
+- native finish/closeout and `CompletionResolver` are represented only as
+  resident-internal runtime/sidecar contracts for `codex_hot_path`;
 - every registry entry has one visibility class and one availability class;
 - `prompt_contract_id` and `default_parallel_tool_calls` are static profile
   metadata in fixtures;
@@ -957,12 +984,13 @@ Suggested tests:
 
 Intent: expose the Codex-like tool names and map them to existing kernels.
 
-Implementation status: explicit `codex_hot_path` selection now exposes
-`apply_patch`, `exec_command`, `write_stdin`, and `finish` by default.
-`list_dir` is available only behind an explicit boolean profile option.
-`exec_command` routes to managed exec, `write_stdin` is poll-only when chars
-are empty, and route records preserve provider-visible declared names plus the
-internal effective kernel.
+Implementation status: explicit `codex_hot_path` selection already exposes only
+`apply_patch`, `exec_command`, and `write_stdin` by default, with `list_dir`
+available only behind an explicit boolean profile option. No provider-visible
+`finish` descriptor belongs to this profile; native finish/closeout and
+`CompletionResolver` stay resident-internal. Phase 6 is about moving ownership
+of provider-visible descriptions/specs and prompt sections into profile modules,
+not about removing `finish` from the current selected surface.
 
 Implementation slice:
 
@@ -970,15 +998,20 @@ Implementation slice:
 - implement `apply_patch`, `exec_command`, and `write_stdin` descriptors;
 - implement argument adapters to `write.apply_patch`, `exec.run_command`, and
   command lifecycle kernels;
-- implement minimal `finish` descriptor and adapter to native finish calls;
+- keep native finish/closeout, `CompletionResolver`, and blocked-finish state
+  resident-internal for this profile;
 - implement the internal verifier classification bridge for `exec_command`;
 - add optional `list_dir` profile variant if chosen;
 - ensure unknown mew legacy names are unavailable in this profile.
 
 Close gate:
 
-- provider request with `profile_id=codex_hot_path` exposes only the expected
-  tools;
+- provider request with `profile_id=codex_hot_path` exposes exactly
+  `apply_patch`, `exec_command`, and `write_stdin` by default, and only adds
+  `list_dir` when the explicit profile option enables it;
+- no provider request with `profile_id=codex_hot_path` exposes `finish`,
+  `run_command`, `run_tests`, `read_file`, `search_text`, `glob`,
+  `inspect_dir`, WorkFrame steering tools, or evidence/proof projection tools;
 - `exec_command` maps to managed exec without exposing `run_command`;
 - an `exec_command` matching the configured verifier command produces the same
   verifier evidence class that `run_tests` produced under `mew_legacy`;
@@ -987,8 +1020,9 @@ Close gate:
 - non-empty `write_stdin` is either implemented or records
   `interactive_stdin=false`, `write_stdin_mode=poll_only`, and returns the
   terminal-shaped adapter failure defined above;
-- `finish` calls produce paired finish outputs and route through
-  `CompletionResolver`;
+- internal closeout/`CompletionResolver` artifacts remain present but are not
+  provider-visible descriptors or provider-native tool outputs in
+  `codex_hot_path`;
 - optional `list_dir` exposes no `offset` or `depth` fields unless both are
   implemented honestly;
 - `mew_legacy` still runs unchanged.
@@ -1001,7 +1035,7 @@ Suggested tests:
 - `write_stdin` poll tests;
 - `write_stdin` non-empty poll-only adapter-failure test;
 - verifier evidence tests for `exec_command` verifier commands;
-- `finish` allow, blocked_continue, and blocked_return tests;
+- internal closeout/blocked-finish tests proving sidecar-only behavior;
 - optional `list_dir` route tests;
 - unknown legacy tool rejection tests for `codex_hot_path`.
 
@@ -1013,9 +1047,10 @@ keeping mew cards in `mew_legacy`.
 Implementation status: implemented in `tool_result_renderer.py` and wired into
 the native harness. `mew_legacy` preserves `natural_result_text()` output.
 `codex_hot_path` renders command-family results with terminal-shaped output,
-`apply_patch` with changed-path output, and `finish` with concise
-accepted/blocked output. Render metrics and leak-scan records are written to
-`tool_render_outputs.jsonl`.
+and `apply_patch` with changed-path output. Any finish/closeout rendering is
+internal or belongs to a non-hot profile; `codex_hot_path` must not add a
+provider-visible finish-output shape. Render metrics and leak-scan records are
+written to `tool_render_outputs.jsonl`.
 
 Implementation slice:
 
@@ -1034,8 +1069,8 @@ Close gate:
 - `apply_patch` output is concise and changed-path focused;
 - adapter failures are paired outputs and use the profile renderer, not
   unpaired registry exceptions;
-- `finish` accepted/blocked outputs are concise and do not expose resolver
-  internals;
+- no `codex_hot_path` renderer emits provider-visible finish, evidence-pressure,
+  proof, WorkFrame, or next-action text;
 - sidecar refs do not dominate provider-visible output;
 - renderer outputs contain no forbidden steering fields.
 
@@ -1046,7 +1081,8 @@ Suggested tests:
   `tty`, unsupported `login`, non-empty stdin in poll-only mode, and malformed
   `apply_patch`;
 - apply-patch success/failure renderer fixtures;
-- finish accepted/blocked renderer fixtures;
+- internal closeout fixtures proving no provider-visible finish output under
+  `codex_hot_path`;
 - output byte count tests;
 - leak scan tests over rendered output;
 - replay test proving internal refs still recover omitted details.
@@ -1127,11 +1163,13 @@ the child Harbor diagnostics. The cwd comes from a task map by default
 (`prove-plus-comm` uses `/workspace`; unknown tasks fall back to `/app`), with
 `--command-cwd` available only as an explicit override.
 
-Internal finish acceptance is required for default switching unless an explicit
-reviewer-visible external-reward override is supplied. This keeps externally
-passing Terminal-Bench traces usable as caveated A/B evidence without silently
-treating blocked mew closeout / evidence-citation behavior as a clean default
-switch signal.
+Internal closeout acceptance is required for default switching unless an
+explicit reviewer-visible external-reward override is supplied. This keeps
+externally passing Terminal-Bench traces usable as caveated A/B evidence without
+silently treating blocked mew closeout / evidence-citation behavior as a clean
+default switch signal. That acceptance requirement must not be implemented by
+projecting a provider-visible `finish` tool or evidence-citation instruction in
+`codex_hot_path`.
 
 Close gate:
 
@@ -1140,12 +1178,13 @@ Close gate:
 - pairing, replay, proof manifest, resolver decisions, and source snapshot
   checks pass;
 - success/acceptance rate is not worse than `mew_legacy`;
-- if any `codex_hot_path` candidate finish remains blocked, the gate blocks
-  unless `external_reward_override_reason` explicitly records the reviewer
-  accepted external verifier evidence;
-- accepted completion under `codex_hot_path` always passes through native
-  `finish_call` plus `CompletionResolver`, with blocked finish continuation
-  preserved in transcript artifacts;
+- if any `codex_hot_path` internal closeout remains blocked, the gate blocks
+  unless `external_reward_override_reason` explicitly records reviewer-accepted
+  external verifier evidence;
+- accepted completion under `codex_hot_path` records native closeout /
+  `CompletionResolver` state in internal artifacts without exposing a
+  provider-visible `finish` descriptor, finish tool output, or evidence-pressure
+  prompt text;
 - verifier evidence production is not worse after provider-visible `run_tests`
   is hidden behind `exec_command`;
 - zero-write timeout rate is lower than or equal to `mew_legacy`, and lower on
@@ -1157,7 +1196,7 @@ Close gate:
 - visible prompt/tool-output bytes are lower or have a documented safety reason;
 - `write_stdin` limitations do not appear in successful hot-path traces, or
   interactive stdin support is implemented;
-- reviewer accepts the A/B report.
+- reviewer accepts the A/B report;
 - paired live A/B evidence comes from a single-task wrapper run with explicit
   real workspace/task identity; synthetic hashes, failed child diagnostics, and
   missing or non-passing external rewards are not accepted as default-switch
@@ -1166,20 +1205,276 @@ Close gate:
 Only after this gate may `codex_hot_path` become the default. `mew_legacy` can
 remain available as an explicit diagnostic/A-B profile until release cleanup.
 
+### Phase 6: Profile-Owned Tool Surface And Prompt Contract
+
+Intent: restore the full meaning of tool injection. A selected
+`ToolSurfaceProfile` must define the provider-visible tool surface end to end:
+names, descriptions, schemas, descriptor ordering, argument adapters, route
+metadata, renderer policy labels, and the prompt contract that describes the
+tool/coding surface to the model. The registry may select and snapshot that
+profile, but profile-specific tool text must not live in a central policy
+module.
+
+Current implementation reality: `src/mew/implement_lane/tool_registry.py`
+selects `mew_legacy` or `codex_hot_path`, but it still imports
+`tool_policy.py` for canonical specs and provider-visible descriptions.
+`src/mew/implement_lane/prompt.py` also imports `tool_policy.py` to assemble
+the tool section and coding contract, then branches on the selected profile.
+Provider-visible behavior is therefore scattered across `tool_policy.py`,
+`tool_registry.py`, and `prompt.py`. This makes injection partial: the profile
+affects route selection and some metadata, but the profile does not yet own all
+provider-visible descriptions or prompt steering.
+
+Implementation status: not implemented. Phase 0-5 route/render/A-B/gate
+plumbing exists, and `codex_hot_path` has no provider-visible `finish`, but
+provider-visible descriptor/spec ownership and profile prompt-contract
+ownership are still incomplete.
+
+Target module boundary:
+
+- `codex_hot_path` provider-visible descriptions/specs live only in the
+  `codex_hot_path` profile module.
+- `mew_legacy` provider-visible descriptions/specs live only in the
+  `mew_legacy` profile module.
+- each later profile, for example `web_search` or `python_task`, owns its own
+  descriptor, argument-adapter, renderer, and prompt-contract module/catalog
+  entry.
+- `tool_registry.py` imports profile definitions or receives them through a
+  profile catalog; it is the complete provider-visible injection boundary and
+  does not import provider-visible text from `tool_policy.py`.
+- `prompt.py` accepts a `ToolSurfaceSnapshot` or equivalent profile prompt
+  contract object and injects profile-defined prompt sections selected by
+  `ToolSurfaceSnapshot.prompt_contract_id`.
+- `prompt.py` does not directly inspect `tool_policy.py`, concrete profile
+  internals, profile module constants beyond the snapshot/contract interface,
+  or raw tool-name lists such as `if "apply_patch" in tool_names` to construct
+  coding/tool guidance.
+- `tool_policy.py` is deleted, or shrunk to an internal-only migration shim
+  with no provider-visible descriptions, canonical provider specs, or
+  profile-specific prompt text.
+- `codex_hot_path` provider-visible descriptors are exactly `apply_patch`,
+  `exec_command`, and `write_stdin` by default, with `list_dir` only under an
+  explicit profile option; no `finish`, proof, evidence, WorkFrame, or
+  next-action projection is included.
+
+Phase 6 is not closed until these grep/testable gates pass:
+
+- provider-visible tool descriptions live only in profile-owned
+  modules/catalogs and descriptor golden fixtures, never in `tool_policy.py`;
+- `rg "tool_policy" src/mew/implement_lane tests` has no live
+  provider-visible or prompt dependency, or only a clearly named compatibility
+  shim with a deletion plan and a failing test if provider-visible text is
+  added there;
+- `prompt.py` receives tool/prompt sections through
+  `ToolSurfaceSnapshot.prompt_contract_id` or an explicit profile-owned prompt
+  contract object, has no direct `tool_policy.py` import, and does not infer
+  coding guidance by inspecting concrete tool names;
+- `codex_hot_path` golden descriptor proves thin Codex-like descriptions and
+  the exact provider-visible tool list: `apply_patch`, `exec_command`,
+  `write_stdin`, plus optional `list_dir` only in the explicitly enabled
+  fixture;
+- `mew_legacy` golden descriptor proves legacy profile stability, or records an
+  explicit reviewed migration with a new legacy fixture;
+- profile modules/catalogs own descriptor, argument adapter, renderer, prompt
+  contract id, and prompt sections where applicable;
+- tests prove descriptors and prompt sections can change by selected profile
+  without changing runtime kernel contracts;
+- provider-visible `codex_hot_path` stays raw task plus native transcript plus
+  compact tool output; sidecar/proof/evidence/finish detail remains internal
+  unless the selected non-hot profile explicitly projects it;
+- forbidden-field scans fail on provider-visible `next_action`, `first_write`,
+  WorkFrame steering, task-specific finish pressure, evidence citation
+  pressure, proof foregrounding, or sidecar control text in `codex_hot_path`.
+
+#### Phase 6A: Move Descriptors Into Profile Modules
+
+Intent: make provider-visible descriptor ownership local to each profile before
+changing prompt assembly. The full repository-wide
+`rg "tool_policy" src/mew/implement_lane tests` zero-or-compatibility-shim gate
+belongs to the final Phase 6 / Phase 6C end-state, not to this slice.
+
+Implementation status: not implemented. `tool_registry.py` still reaches
+`tool_policy.py` for canonical provider-visible specs/descriptions; Phase 6A
+ends when descriptor/spec ownership is profile-local even if `prompt.py` still
+has temporary Phase 6B dependencies and other modules still carry tracked
+non-provider-visible contract/type imports scheduled for Phase 6C cleanup.
+
+Implementation slice:
+
+- introduce profile modules for `mew_legacy` and `codex_hot_path`, or expand
+  existing profile modules if they already exist;
+- move all provider-visible names, descriptions, schemas, strict flags,
+  custom/freeform descriptors, descriptor ordering, descriptor ids, argument
+  adapter ids, renderer ids, renderer policy labels, and prompt contract ids
+  into the profile modules;
+- make `tool_registry.py` build `ToolSurfaceSnapshot` from selected profile
+  definitions instead of from `tool_policy.py` canonical specs;
+- allow existing `tool_policy.py` imports outside the registry/profile
+  descriptor path to remain only when they are non-provider-visible
+  contract/type imports or explicitly Phase 6B prompt dependencies, and record
+  them as Phase 6B/6C follow-up inventory;
+- keep route maps and internal kernel ids in registry/profile metadata, not in
+  prompt assembly;
+- preserve the current Phase 0-5 behavior and descriptor hashes unless a
+  fixture is intentionally updated with a reviewer-visible reason.
+
+Close gate:
+
+- `tool_registry.py` no longer imports `tool_policy.py` for provider-visible
+  descriptors, canonical specs, names, schemas, or descriptions;
+- profile descriptor/spec modules do not depend on `tool_policy.py` for
+  provider-visible text or schemas;
+- any remaining `tool_policy.py` imports in `src/mew/implement_lane` or tests
+  are explicitly inventoried as non-provider-visible contract/type dependencies
+  or Phase 6B prompt-migration dependencies, with no provider-visible
+  descriptor/spec/ordering ownership and with removal or shim containment
+  assigned to Phase 6B/6C;
+- provider-visible descriptions exist only in profile modules and their golden
+  fixtures;
+- `codex_hot_path` descriptor golden tests lock Codex-like thin descriptions
+  and the exact list `apply_patch`, `exec_command`, `write_stdin`, with
+  optional gated `list_dir` only in the explicit option fixture;
+- `mew_legacy` descriptor is fixed in the legacy profile module and remains
+  byte-for-byte stable against its legacy golden fixture;
+- route tests still prove `exec_command`, `write_stdin`, `apply_patch`, and
+  optional `list_dir` map to the intended internal kernels without exposing
+  legacy names; native finish/closeout remains resident-internal.
+
+Suggested tests:
+
+- descriptor golden tests per profile module;
+- provider-visible description location test or static grep test;
+- `tool_registry.py` import-boundary test;
+- Phase 6A import-inventory test or fixture proving remaining `tool_policy.py`
+  imports are outside provider-visible descriptor/spec/ordering construction;
+- profile hash stability tests;
+- cross-profile injection test showing a descriptor/prompt change in one
+  profile does not require changing runtime kernel contracts;
+- unknown-tool rejection tests for `codex_hot_path`.
+
+#### Phase 6B: Move Prompt Tool/Coding Contract Into Profiles
+
+Intent: make prompt injection consume profile-owned prompt contracts rather
+than reconstructing profile semantics from a central tool policy.
+
+Implementation status: not implemented. `prompt.py` still imports
+`tool_policy.py`, branches on concrete profile/tool details, and assembles
+profile-sensitive tool/coding prompt text directly.
+
+Implementation slice:
+
+- define a profile prompt contract record keyed by
+  `ToolSurfaceSnapshot.prompt_contract_id`;
+- move the provider-visible tool section, coding contract text, tool-use
+  affordance text, and profile-specific warnings into profile-owned prompt
+  sections;
+- make `prompt.py` receive the selected snapshot/contract and inject those
+  sections through a narrow interface;
+- keep generic, profile-independent prompt scaffolding in `prompt.py`;
+- remove profile-specific branching in `prompt.py` except for selecting already
+  materialized sections from the snapshot/contract interface;
+- remove tool-name-inspection prompt assembly from `prompt.py`; it must not
+  build coding guidance by checking whether names such as `apply_patch`,
+  `exec_command`, `run_tests`, or `write_file` are present;
+- preserve the Codex-like hot path: `codex_hot_path` prompt text must stay
+  thin and must not drift into mew-heavy proof, WorkFrame, sidecar, or steering
+  language, and must not mention provider-visible finish or evidence-citation
+  pressure.
+
+Close gate:
+
+- prompt tool/coding sections are injected from profile prompt contracts
+  selected by `ToolSurfaceSnapshot.prompt_contract_id`;
+- `prompt.py` does not import or inspect `tool_policy.py`;
+- `prompt.py` does not import concrete `codex_hot_path` or `mew_legacy`
+  internals;
+- `prompt.py` does not construct profile-specific tool/coding guidance by
+  inspecting provider-visible tool names directly;
+- `codex_hot_path` prompt golden tests lock thin Codex-like wording and fail on
+  mew-heavy descriptions, WorkFrame steering, proof/sidecar foregrounding, or
+  hidden next-action, first-write, finish, or evidence pressure;
+- `mew_legacy` prompt contract remains fixed in the legacy profile module and
+  keeps the legacy provider-visible expectations;
+- descriptor and prompt-contract hashes both appear in request inventory or
+  equivalent profile artifacts.
+
+Suggested tests:
+
+- prompt golden tests for `codex_hot_path_prompt_v1` and
+  `mew_legacy_prompt_v1`;
+- forbidden-field scans over prompt text;
+- import-boundary tests for `prompt.py`;
+- tool-name-inspection static test for `prompt.py`;
+- request inventory tests for prompt contract id/hash;
+- A/B smoke fixture proving the same selected profile controls descriptors and
+  prompt contract.
+
+#### Phase 6C: Delete Or Contain `tool_policy.py`
+
+Intent: finish the migration so future profiles cannot accidentally inherit
+central provider-visible text.
+
+Implementation status: not implemented. `tool_policy.py` remains a live module
+for provider-visible specs/descriptions and prompt-policy dependencies; Phase
+6C closes only after those dependencies are deleted or contained in an
+internal-only shim.
+
+Implementation slice:
+
+- delete `tool_policy.py` after all imports are removed; or, if one release
+  needs a migration shim, shrink it to internal-only adapters with an explicit
+  removal issue/date;
+- move any remaining non-provider-visible helpers to appropriately named
+  internal modules;
+- update `__init__.py`, native provider adapter, harness contract, schema,
+  substrate inventory, workframe navigation, and runtime imports to consume
+  profile/registry/internal-contract APIs instead of `tool_policy.py`;
+- update artifact names only if needed, keeping old artifact readers tolerant
+  through internal migration code rather than provider-visible policy text.
+
+Close gate:
+
+- `rg "tool_policy" src/mew/implement_lane tests` is zero; or the only match
+  is a documented migration shim with zero provider-visible description/spec
+  dependency and a failing test if provider-visible text is added there;
+- provider-visible descriptions/specs are discoverable only in profile modules
+  and descriptor golden fixtures;
+- `codex_hot_path` descriptor and prompt-contract golden tests still pass and
+  prove thin Codex-like wording and the exact hot-path tool list;
+- `mew_legacy` descriptor and prompt-contract golden tests still pass from the
+  legacy profile module;
+- `prompt.py` has no direct dependency on tool policy or concrete profile
+  internals and no profile-specific tool-name inspection;
+- registry, prompt, provider adapter, native harness, replay/fastcheck, and A/B
+  report tests pass on saved fixtures;
+- reviewer can verify that the profile-selected surface includes
+  provider-visible descriptions and prompt contract, not only route selection.
+
 ## Risks
 
 - The registry may gradually become a planner. Mitigation: fail tests if it
   imports WorkFrame reducers, consumes `required_next`, or emits action
   pressure.
+- Central provider-visible tool text may survive under another name and keep
+  profile injection partial. Mitigation: require profile-owned descriptor and
+  prompt-contract golden tests plus static import/grep gates for
+  `tool_policy.py`.
+- The Codex-like hot path may drift into mew-heavy descriptions or prompt
+  steering while preserving the same tool names. Mitigation: lock
+  `codex_hot_path` descriptor and prompt-contract text in profile-owned golden
+  tests and scan for WorkFrame/proof/sidecar/next-action steering terms.
 - Availability, prompt, or parallel-call metadata may become covert runtime
   steering. Mitigation: constrain them to static profile metadata plus explicit
   provider/runtime capability downgrades.
 - Hiding `run_tests` may weaken verifier classification. Mitigation: require
   the internal-only `exec_command` verifier bridge and A/B evidence before
   default switching.
-- Adding a provider-visible `finish` tool may look like an extra hot-path tool.
-  Mitigation: classify it as completion-only, route it through the existing
-  resolver, and keep finish gates internal.
+- Reintroducing a provider-visible `finish` tool into `codex_hot_path` would
+  violate the Codex-thin surface and reintroduce task-specific closeout/evidence
+  pressure. Mitigation: keep finish/closeout resident-internal for
+  `codex_hot_path`; if a provider-visible completion tool is needed, expose it
+  only through a separate selectable profile with its own golden descriptor and
+  prompt contract.
 - `write_stdin` may not map cleanly to the current managed runner. Mitigation:
   make interactive stdin capability explicit and block default switch until
   traces prove it is acceptable.
@@ -1202,11 +1497,26 @@ remain available as an explicit diagnostic/A-B profile until release cleanup.
 Reviewers should reject an implementation if any item is false:
 
 - `ToolRegistry` exposes tools and maps calls; it does not choose next actions.
+- the selected `ToolSurfaceProfile` owns provider-visible descriptions, specs,
+  descriptor ordering, renderer policy labels, and prompt contract sections.
+- `tool_policy.py` is deleted, or contains only internal migration/contract
+  code with no provider-visible descriptions, no canonical provider specs, and
+  no profile-specific prompt text.
+- `rg "tool_policy" src/mew/implement_lane tests` is zero except for the
+  documented internal shim case above.
+- provider-visible descriptions exist only in profile modules and descriptor
+  golden fixtures.
+- prompt tool/coding sections are injected from the selected profile prompt
+  contract through `ToolSurfaceSnapshot.prompt_contract_id`.
+- `prompt.py` does not directly depend on `tool_policy.py` or concrete profile
+  internals.
+- `codex_hot_path` descriptor and prompt-contract golden tests lock thin
+  Codex-like wording and fail on mew-heavy prompt steering.
 - `codex_hot_path` exposes only `apply_patch`, `exec_command`,
-  `write_stdin`, completion-only `finish`, plus explicitly gated `list_dir` if
-  enabled.
-- `finish` uses native `finish_call` plus `CompletionResolver`; finish gates
-  and resolver internals stay sidecar-only.
+  `write_stdin`, plus explicitly gated `list_dir` if enabled; no
+  provider-visible `finish` tool is exposed.
+- native finish/closeout uses internal `finish_call` / `CompletionResolver`
+  artifacts only; finish gates and resolver internals stay sidecar-only.
 - verifier classification is preserved when verifier commands arrive through
   `exec_command` instead of provider-visible `run_tests`.
 - `mew_legacy` remains selectable for A/B.
@@ -1220,6 +1530,9 @@ Reviewers should reject an implementation if any item is false:
 - adapter failures render as paired profile-shaped outputs.
 - mew card rendering remains available for `mew_legacy`.
 - provider-visible output does not foreground sidecar/proof refs.
+- provider-visible hot path stays raw task plus native transcript plus compact
+  tool output; sidecar/proof/evidence remains internal unless the selected
+  profile explicitly projects it.
 - profile id/hash appears in request inventory and route artifacts.
 - `LaneConfig.tool_surface_profile_id` is the profile plumbing entry point.
 - per-tool visible byte counts and edit/verify/repair metrics are recorded.

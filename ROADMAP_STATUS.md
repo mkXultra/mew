@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-15
+Last updated: 2026-05-17
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | H0 hot-path observability is complete; H10 compact task-facts failed/reverted; H6 synthetic apply_patch affordance passed; H1 task-first provider shape is a partial keep; H7 sidecar visibility is a measured hygiene keep; H4 and H2 failed/reverted; H3 found no continuity defect; H5 terminal head+tail repair measured as keep; closeout/debug-cleanup handoff, same-shape `make-mips-interpreter` speed proof, and `proof-5` close proof are validated. `task_contract_compiler` default-on is now validated on `make-doom-for-mips`; next is the generic typed finish-block continuation repair exposed by that diagnostic. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | Active subfocus is ToolRegistry / Codex hot-path Phase 6: profile-owned tool surface and prompt contract. Implement Phase 6A -> 6B -> 6C from `docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md` before returning to Terminal-Bench proof loops. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,12 +70,35 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_typed_finish_block_continuation_repair`.
+`m6_24_tool_registry_profile_owned_surface_phase6`.
 
 Current diagnostic mode:
-`h10_failed_reverted__h6_passed__h1_partial_keep__h7_hygiene_keep__h4_failed_reverted__h2_failed_reverted__h3_measured_no_change__h5_keep__closeout_cleanup_validated__speed_proof_passed__proof5_closed__task_contract_compiler_validated__typed_finish_block_continuation_repair`.
+`phase6_design_reviewed__implementation_prep__phase6a_next`.
 
 Current reentry decision:
+2026-05-17 override: the active next action is not the older
+`make-doom-for-mips` pre-speed checkpoint. The user pivoted to fixing tool
+surface injection drift first. The governing design is
+`docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md`, revised by
+the `orchestrate-build-review-controller` workflow (controller pid 83200,
+round 2 reviewers clean). Next implementation order is:
+
+1. Phase 6A: move provider-visible descriptors/specs into profile modules and
+   make `tool_registry.py` stop using `tool_policy.py` for provider-visible
+   text/spec ownership.
+2. Phase 6B: move prompt tool/coding sections into profile-owned prompt
+   contracts selected by `ToolSurfaceSnapshot.prompt_contract_id`; `prompt.py`
+   must not inspect concrete tool names or import `tool_policy.py`.
+3. Phase 6C: delete `tool_policy.py` or shrink it to an internal-only
+   migration shim with no provider-visible descriptions/specs/prompt text.
+
+Direct hand-tuned tool-description edits from the interrupted prior attempt are
+not the authority for this work. Commit the reviewed design/status preparation
+separately, then implement Phase 6 from the design close gates with review and
+focused tests. Do not resume broad Terminal-Bench measurement, make-doom
+proofs, or task-specific prompt/tool wording until Phase 6 implementation
+either closes or exposes a concrete blocker.
+
 H0 is measured. The saved-artifact report shows that mew reaches
 first-patch readiness early but does not convert those probe facts into a first
 mutation. H10 tested whether compact probe-derived `implementation_constraints`
