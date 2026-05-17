@@ -72,6 +72,10 @@ def test_base_tool_specs_order_prefers_mutation_then_execution_then_context() ->
     ]
 
 
+def test_finish_has_no_provider_visible_structured_schema() -> None:
+    assert structured_tool_json_schema("finish") is None
+
+
 def test_base_tool_specs_descriptions_remove_probe_frontier_salience() -> None:
     descriptions = "\n".join(spec.description for spec in list_v2_base_tool_specs())
 

@@ -396,13 +396,6 @@ def structured_tool_json_schema(tool_name: str) -> dict[str, object] | None:
                 ),
             }
         ),
-        "finish": _strict_object(
-            {
-                "summary": _string("Concise completion summary."),
-                "evidence_refs": _string_array("Evidence refs supporting completion."),
-                "final_status": _nullable_string("Optional final status label."),
-            }
-        ),
     }
     return schemas.get(tool_name)
 
