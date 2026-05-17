@@ -18,7 +18,9 @@ from mew.reference_trace_runner import latest_run_dir, trial_dirs
 DEFAULT_DATASET = "terminal-bench/terminal-bench-2"
 DEFAULT_JOBS_ROOT = Path("proof-artifacts/terminal-bench/harbor-smoke")
 DEFAULT_WORK_GUIDANCE = (
-    "selected_lane=implement_v2 write_integration_observation_detail=true"
+    "selected_lane=implement_v2 "
+    "write_integration_observation_detail=true "
+    "finish_verifier_planner=true"
 )
 DEFAULT_INSTALL_COMMAND = (
     "apt-get update && apt-get install -y python3 python3-pip python3-venv "

@@ -50,7 +50,11 @@ def _config(tmp_path, **overrides):
 def test_mew_command_template_enables_implement_v2_and_observer_detail(tmp_path):
     template = build_mew_work_command_template(_config(tmp_path))
 
-    assert "selected_lane=implement_v2 write_integration_observation_detail=true" in template
+    assert (
+        "selected_lane=implement_v2 "
+        "write_integration_observation_detail=true "
+        "finish_verifier_planner=true"
+    ) in template
     assert "--cwd {command_cwd_shell}" in template
     assert "--auth /codex-auth/auth.json" in template
     assert "--model gpt-5.5" in template
@@ -118,6 +122,7 @@ def test_combine_work_guidance_keeps_diagnostic_defaults_and_adds_fragments():
     assert guidance == (
         "selected_lane=implement_v2 "
         "write_integration_observation_detail=true "
+        "finish_verifier_planner=true "
         "m6_24_step_shape_check=true"
     )
 
@@ -128,7 +133,11 @@ def test_combine_work_guidance_allows_explicit_key_override():
         DEFAULT_WORK_GUIDANCE,
     )
 
-    assert guidance == "write_integration_observation_detail=true selected_lane=other_lane extra=true"
+    assert (
+        "write_integration_observation_detail=true "
+        "finish_verifier_planner=true "
+        "selected_lane=other_lane extra=true"
+    ) == guidance
 
 
 def test_combine_work_guidance_allows_spaced_explicit_key_override():
@@ -137,7 +146,11 @@ def test_combine_work_guidance_allows_spaced_explicit_key_override():
         DEFAULT_WORK_GUIDANCE,
     )
 
-    assert guidance == "write_integration_observation_detail=true selected_lane = other_lane"
+    assert (
+        "write_integration_observation_detail=true "
+        "finish_verifier_planner=true "
+        "selected_lane = other_lane"
+    ) == guidance
 
 
 def test_combine_work_guidance_preserves_json_payload_shape_with_defaults():
@@ -150,6 +163,7 @@ def test_combine_work_guidance_preserves_json_payload_shape_with_defaults():
 
     assert payload["selected_lane"] == "other_lane"
     assert payload["write_integration_observation_detail"] is True
+    assert payload["finish_verifier_planner"] is True
     assert payload["persisted_lane_state"] == {"lane_context_capsule": {"ok": True}}
 
 
