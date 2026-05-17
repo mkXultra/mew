@@ -13,7 +13,9 @@ def test_substrate_inventory_lists_current_tools_and_variants(tmp_path: Path) ->
     variants = inventory["workframe_variants"]["variants"]
 
     assert inventory["schema_version"] == 1
-    assert {tool["name"] for tool in tools} >= {"read_file", "run_command", "apply_patch", "finish"}
+    tool_names = {tool["name"] for tool in tools}
+    assert tool_names >= {"read_file", "run_command", "apply_patch"}
+    assert "finish" not in tool_names
     assert inventory["tool_registry"]["hash"].startswith("sha256:")
     assert inventory["workframe_variants"]["default"] == "transition_contract"
     assert [variant["name"] for variant in variants] == [

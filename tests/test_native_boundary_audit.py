@@ -125,9 +125,9 @@ def _write_complete_fixture(root: Path) -> None:
         encoding="utf-8",
     )
     (impl / "tool_policy.py").write_text(
+        "ToolAccess = Literal[\"read\", \"write\", \"execute\", \"approval\"]\n"
         "def list_v2_tool_specs_for_mode(mode):\n"
-        "    production_specs = tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access != \"finish\")\n"
-        "    return production_specs\n",
+        "    return V2_BASE_TOOL_SPECS\n",
         encoding="utf-8",
     )
     (impl / "exec_runtime.py").write_text(

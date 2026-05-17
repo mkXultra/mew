@@ -248,7 +248,6 @@ def test_implement_v2_descriptor_exposes_live_runtime_and_tools() -> None:
         "write_file",
         "edit_file",
         "apply_patch",
-        "finish",
     }
     assert result.status == "unavailable"
     assert result.next_reentry_hint["fallback_lane"] == IMPLEMENT_V1_LANE
@@ -11470,7 +11469,6 @@ def test_codex_hot_path_prompt_uses_actual_tool_surface_names() -> None:
         ImplementLaneToolSpec(name="apply_patch", access="write", description="Patch files."),
         ImplementLaneToolSpec(name="exec_command", access="execute", description="Run shell commands."),
         ImplementLaneToolSpec(name="write_stdin", access="execute", description="Continue commands."),
-        ImplementLaneToolSpec(name="finish", access="finish", description="Finish the task."),
     )
 
     coding_contract = next(

@@ -1219,7 +1219,8 @@ def test_live_artifact_writer_emits_phase1_tool_harness_files(tmp_path: Path) ->
     route_lines = (artifact_root / "tool_routes.jsonl").read_text(encoding="utf-8").splitlines()
 
     assert registry["provider"] == "model_json"
-    assert {"read_file", "finish", "model_response_error"}.issubset(set(registry["by_tool_name"]))
+    assert {"read_file", "model_response_error"}.issubset(set(registry["by_tool_name"]))
+    assert "finish" not in registry["by_tool_name"]
     assert result_index["by_provider_call_id"]["call-1"]["tool_name"] == "read_file"
     assert result_index["by_provider_call_id"]["call-1"]["tool_ref"] == tool_ref_for_name("read_file")
     assert route_artifact["counts"]["read"] == 1

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import json
 from typing import Literal
 
-ToolAccess = Literal["read", "write", "execute", "approval", "finish"]
+ToolAccess = Literal["read", "write", "execute", "approval"]
 ToolInputTransport = Literal["json_arguments", "json_line_array", "provider_native_freeform"]
 
 
@@ -142,11 +142,6 @@ V2_BASE_TOOL_SPECS: tuple[ImplementLaneToolSpec, ...] = (
         access="read",
         description="Inspect bounded git diff or diffstat for an allowed workspace root.",
     ),
-    ImplementLaneToolSpec(
-        name="finish",
-        access="finish",
-        description="Legacy/replay-only finish tool. Production native implement_v2 must not expose this tool.",
-    ),
 )
 
 
@@ -159,17 +154,16 @@ def list_v2_base_tool_specs() -> tuple[ImplementLaneToolSpec, ...]:
 def list_v2_tool_specs_for_mode(mode: object) -> tuple[ImplementLaneToolSpec, ...]:
     """Return the tool surface allowed for a v2 permission mode."""
 
-    production_specs = tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access != "finish")
     mode_name = str(mode or "read_only").strip() or "read_only"
     if mode_name in {"read_only", "plan"}:
-        return tuple(spec for spec in production_specs if spec.access == "read")
+        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access == "read")
     if mode_name == "exec":
-        return tuple(spec for spec in production_specs if spec.access in {"read", "execute"})
+        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "execute"})
     if mode_name == "write":
-        return tuple(spec for spec in production_specs if spec.access in {"read", "write"})
+        return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access in {"read", "write"})
     if mode_name in {"full", "implement", "implementation"}:
-        return production_specs
-    return tuple(spec for spec in production_specs if spec.access == "read")
+        return V2_BASE_TOOL_SPECS
+    return tuple(spec for spec in V2_BASE_TOOL_SPECS if spec.access == "read")
 
 
 def list_v2_tool_specs_for_task(

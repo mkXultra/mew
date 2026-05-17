@@ -408,16 +408,12 @@ def _mew_legacy_entry(
 def _tool_family(spec: ImplementLaneToolSpec) -> str:
     if spec.name in PROCESS_LIFECYCLE_TOOL_NAMES:
         return "lifecycle"
-    if spec.access == "finish":
-        return "finish"
     return spec.access
 
 
 def _availability_class(spec: ImplementLaneToolSpec, *, family: str) -> str:
     if family == "lifecycle":
         return "active_session"
-    if spec.access == "finish":
-        return "always"
     return "permission_mode"
 
 

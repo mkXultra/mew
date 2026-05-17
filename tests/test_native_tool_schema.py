@@ -69,7 +69,6 @@ def test_base_tool_specs_order_prefers_mutation_then_execution_then_context() ->
         "inspect_dir",
         "git_status",
         "git_diff",
-        "finish",
     ]
 
 

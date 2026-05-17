@@ -8165,7 +8165,7 @@ def _live_json_prompt(
             task_contract=lane_input.task_contract,
         )
     )
-    available_tool_names = " | ".join(spec.name for spec in specs if spec.access != "finish") or "no tool calls"
+    available_tool_names = " | ".join(spec.name for spec in specs) or "no tool calls"
     write_file_visible = any(spec.name == "write_file" for spec in specs)
     if write_file_visible:
         accept_edits_sentence = (

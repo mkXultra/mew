@@ -54,6 +54,7 @@ def _lane_input(
         "allowed_write_roots": [str(tmp_path)],
         "allow_shell": True,
         "auto_approve_writes": True,
+        "allow_legacy_provider_visible_finish": True,
     }
     config.update(lane_config)
     return ImplementLaneInput(
@@ -2035,6 +2036,28 @@ def test_native_harness_invalid_arguments_get_paired_output(tmp_path: Path) -> N
     assert bad_output.status == "invalid"
     assert bad_output.is_error is True
     assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_rejects_provider_visible_finish_without_legacy_quarantine(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=0)]]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(tmp_path, allow_legacy_provider_visible_finish=False),
+        provider=provider,
+        max_turns=1,
+    )
+
+    finish_output = next(item for item in result.transcript.items if item.call_id == "finish-1" and item.kind == "finish_output")
+    assert result.status == "blocked"
+    assert finish_output.kind == "finish_output"
+    assert finish_output.status == "invalid"
+    assert finish_output.is_error is True
+    assert "provider-visible finish is not available" in finish_output.output_text_or_ref
+    assert "tool-route:finish-1" in finish_output.sidecar_refs
+    assert result.metrics["completion_resolver_latest_decision"] == {}
+    assert result.metrics["finish_gate_block_count"] == 0
 
 
 def test_native_harness_invalid_finish_args_pairs_protocol_error_without_resolver(tmp_path: Path) -> None:

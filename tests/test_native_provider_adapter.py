@@ -136,7 +136,8 @@ def test_request_descriptor_preserves_codex_like_tool_order_and_collapsed_descri
     descriptions = "\n".join(str(tool.get("description") or "") for tool in tools)  # type: ignore[union-attr]
 
     assert names[:5] == ["apply_patch", "edit_file", "write_file", "run_command", "run_tests"]
-    assert names[-1] == "finish"
+    assert names[-1] == "git_diff"
+    assert "finish" not in names
     assert "Primary source mutation tool" in descriptions
     assert "smallest runnable candidate" in descriptions
     assert "cheap probe" not in descriptions

@@ -1049,7 +1049,9 @@ def run_native_implement_v2(
                 write_runtime=write_runtime,
                 prior_tool_results=tuple(tool_results),
             )
-            if call.kind == "finish_call" and not _native_finish_protocol_error(result):
+            if call.kind == "finish_call" and not (
+                _native_finish_protocol_error(result) or _native_provider_visible_finish_unavailable(result)
+            ):
                 closeout_events, closeout_context = _run_native_finish_time_closeouts(
                     lane_input,
                     lane_attempt_id=lane_attempt_id,
@@ -1314,6 +1316,13 @@ def _execute_native_call(
         envelope = _finish_tool_call_envelope(call, arguments)
     else:
         envelope = _tool_call_envelope_from_native_call(call, arguments)
+    if call.kind == "finish_call" and not _legacy_provider_visible_finish_enabled(lane_config):
+        reason = "provider-visible finish is not available in production native implement_v2"
+        return with_tool_route_decision(
+            envelope,
+            _provider_visible_finish_unavailable_result(call, reason=reason),
+            effective_tool="unavailable_provider_visible_finish",
+        )
     if call.kind == "finish_call":
         return with_tool_route_decision(
             envelope,
@@ -1566,6 +1575,12 @@ def _native_tool_available(
             task_contract=lane_input.task_contract,
         )
     }
+
+
+def _legacy_provider_visible_finish_enabled(lane_config: Mapping[str, object]) -> bool:
+    """Return whether quarantined legacy fixtures may still emit finish calls."""
+
+    return lane_config.get("allow_legacy_provider_visible_finish") is True
 
 
 def _run_native_finish_time_closeouts(
@@ -3738,6 +3753,25 @@ def _finish_protocol_error_result(call: ToolCallEnvelope, *, reason: str) -> Too
     )
 
 
+def _provider_visible_finish_unavailable_result(call: NativeTranscriptItem, *, reason: str) -> ToolResultEnvelope:
+    return ToolResultEnvelope(
+        lane_attempt_id=call.lane_attempt_id,
+        provider_call_id=call.call_id,
+        mew_tool_call_id=f"native:{call.call_id}",
+        tool_name="finish",
+        status="invalid",
+        is_error=True,
+        content=(
+            {
+                "reason": reason,
+                "summary": reason,
+                "outcome": "invalid_tool_contract",
+                "provider_visible_finish_unavailable": {"reason": reason},
+            },
+        ),
+    )
+
+
 def _native_finish_outcome(arguments: Mapping[str, object]) -> str:
     raw = str(
         arguments.get("outcome")
@@ -4342,6 +4376,13 @@ def _native_finish_protocol_error(result: ToolResultEnvelope) -> bool:
         return False
     payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
     return isinstance(payload.get("finish_protocol_error"), dict)
+
+
+def _native_provider_visible_finish_unavailable(result: ToolResultEnvelope) -> bool:
+    if result.tool_name != "finish":
+        return False
+    payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
+    return isinstance(payload.get("provider_visible_finish_unavailable"), dict)
 
 
 def _native_finish_resolver_decision_payload(result: ToolResultEnvelope) -> dict[str, object]:
