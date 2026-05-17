@@ -39,6 +39,10 @@ INTENT_CATEGORIES = (
     "process_poll",
     "delegated_explore",
     "dependency_probe",
+    "done_candidate",
+    "internal_gate",
+    "ng_resume",
+    "blocked_return",
     "finish",
     "other_probe",
     "unknown",
@@ -54,6 +58,14 @@ PROBE_INTENTS = frozenset(
         "runtime_verifier",
         "delegated_explore",
         "other_probe",
+    }
+)
+SYNTHETIC_SIDECAR_INTENTS = frozenset(
+    {
+        "done_candidate",
+        "internal_gate",
+        "ng_resume",
+        "blocked_return",
     }
 )
 MUTATION_TOOLS = frozenset({"apply_patch", "edit_file", "write_file"})
@@ -137,6 +149,7 @@ class TraceBundle:
     sources: dict[str, str]
     warnings: tuple[str, ...] = ()
     artifact_summary: dict[str, Any] | None = None
+    synthetic_events: tuple[dict[str, Any], ...] = ()
 
 
 def analyze_hot_path_step_diff(
@@ -156,7 +169,11 @@ def analyze_hot_path_step_diff(
     mew = _load_mew_bundle(Path(str(mew_artifact_root)).expanduser())
     codex_steps = _normalize_tool_steps(codex.events, agent="codex")
     claude_code_steps = _normalize_tool_steps(claude_code.events, agent="claude_code") if claude_code else []
-    mew_steps = _normalize_tool_steps(mew.events, agent="mew")
+    mew_steps = _append_synthetic_steps(
+        _normalize_tool_steps(mew.events, agent="mew"),
+        _normalize_tool_steps(mew.synthetic_events, agent="mew"),
+        core_events_present=bool(mew.events),
+    )
     codex_step_summary = _step_summary(codex_steps)
     claude_code_step_summary = _step_summary(claude_code_steps) if claude_code else {}
     mew_step_summary = _step_summary(mew_steps)
@@ -491,6 +508,7 @@ def _load_mew_bundle(root: Path) -> TraceBundle:
     sources: dict[str, str] = {}
     artifact_summary: dict[str, Any] = {}
     events: list[dict[str, Any]] = []
+    synthetic_events: list[dict[str, Any]] = []
     trace_summary_path: Path | None = None
 
     transcript_path = _resolve_first_existing(
@@ -577,6 +595,63 @@ def _load_mew_bundle(root: Path) -> TraceBundle:
         artifact_summary["native_provider_requests"] = _native_provider_request_summary(_load_json_any(provider_requests_path))
         sources["native_provider_requests"] = str(provider_requests_path.resolve(strict=False))
 
+    done_candidates_path = _resolve_first_existing(
+        root,
+        relative_candidates=("done_candidates.jsonl", "implement_v2/done_candidates.jsonl"),
+        basename="done_candidates.jsonl",
+    )
+    if done_candidates_path is not None:
+        rows = _jsonl_rows(done_candidates_path)
+        synthetic_events.extend(
+            _synthetic_sidecar_step_events(
+                rows,
+                source=done_candidates_path,
+                tool="done_candidate",
+                id_key="done_candidate_id",
+                summary_keys=("assistant_text_preview", "reason"),
+            )
+        )
+        artifact_summary["done_candidates"] = {"row_count": len(rows)}
+        sources["done_candidates"] = str(done_candidates_path.resolve(strict=False))
+
+    internal_gate_path = _resolve_first_existing(
+        root,
+        relative_candidates=("native_finish_gate_decisions.jsonl", "implement_v2/native_finish_gate_decisions.jsonl"),
+        basename="native_finish_gate_decisions.jsonl",
+    )
+    if internal_gate_path is not None:
+        rows = _jsonl_rows(internal_gate_path)
+        synthetic_events.extend(
+            _synthetic_sidecar_step_events(
+                rows,
+                source=internal_gate_path,
+                tool="internal_gate",
+                id_key="decision_id",
+                summary_keys=("result", "lane_status", "reason"),
+            )
+        )
+        artifact_summary["internal_finish_gate"] = {"row_count": len(rows)}
+        sources["internal_finish_gate"] = str(internal_gate_path.resolve(strict=False))
+
+    ng_resume_path = _resolve_first_existing(
+        root,
+        relative_candidates=("ng_resume_signals.jsonl", "implement_v2/ng_resume_signals.jsonl"),
+        basename="ng_resume_signals.jsonl",
+    )
+    if ng_resume_path is not None:
+        rows = _jsonl_rows(ng_resume_path)
+        synthetic_events.extend(
+            _synthetic_sidecar_step_events(
+                rows,
+                source=ng_resume_path,
+                tool="ng_resume",
+                id_key="decision_id",
+                summary_keys=("concise_reason", "repair_focus", "reason"),
+            )
+        )
+        artifact_summary["ng_resume_signals"] = {"row_count": len(rows)}
+        sources["ng_resume_signals"] = str(ng_resume_path.resolve(strict=False))
+
     if not events:
         warnings.append("no mew response transcript, report, or history events were found")
     summary = _load_json_mapping(trace_summary_path) if trace_summary_path is not None else {}
@@ -590,7 +665,70 @@ def _load_mew_bundle(root: Path) -> TraceBundle:
         sources=sources,
         warnings=tuple(warnings),
         artifact_summary=artifact_summary,
+        synthetic_events=tuple(synthetic_events),
     )
+
+
+def _synthetic_sidecar_step_events(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    source: Path,
+    tool: str,
+    id_key: str,
+    summary_keys: Sequence[str],
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, 1):
+        step_id = _turn_index_from_sidecar(row.get("turn_id"))
+        event_id = str(row.get(id_key) or f"{tool}-{index}")
+        summary = " ".join(str(row.get(key) or "").strip() for key in summary_keys if str(row.get(key) or "").strip())
+        base = {
+            "schema_version": 1,
+            "agent": "mew",
+            "kind": "tool_call",
+            "tool": tool,
+            "id": event_id,
+            "summary": _truncate(summary or tool, 500),
+            "arguments": _sidecar_step_arguments(row),
+            "step_id": step_id,
+            "elapsed_ms": None,
+            "source": str(source.resolve(strict=False)),
+            "line_number": index,
+        }
+        events.append({**base, "phase": "started"})
+        events.append(
+            {
+                **base,
+                "phase": "completed",
+                "status": str(row.get("result") or row.get("lane_status") or "completed"),
+            }
+        )
+    return events
+
+
+def _turn_index_from_sidecar(value: object) -> int | None:
+    text = str(value or "").strip()
+    match = re.search(r"(\d+)$", text)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _sidecar_step_arguments(row: Mapping[str, Any]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key in (
+        "done_candidate_id",
+        "decision_id",
+        "lane_status",
+        "result",
+        "reason",
+        "concise_reason",
+        "repair_focus",
+    ):
+        value = row.get(key)
+        if value not in (None, "", [], {}):
+            result[key] = value
+    return result
 
 
 def _normalize_tool_steps(events: Sequence[Mapping[str, Any]], *, agent: str) -> list[dict[str, object]]:
@@ -663,8 +801,56 @@ def _normalize_tool_steps(events: Sequence[Mapping[str, Any]], *, agent: str) ->
             kinds = merged.get("source_mutation_effect_kinds") or merged.get("side_effect_kinds")
             if isinstance(kinds, list):
                 step["source_mutation_effect_kinds"] = [str(kind) for kind in kinds]
+        if intent in {"internal_gate", "blocked_return"}:
+            step["lane_status"] = str(_mapping(merged.get("arguments")).get("lane_status") or "")
         steps.append(step)
     return steps
+
+
+def _append_synthetic_steps(
+    steps: Sequence[Mapping[str, object]],
+    synthetic_steps: Sequence[Mapping[str, object]],
+    *,
+    core_events_present: bool,
+) -> list[dict[str, object]]:
+    if not core_events_present:
+        return []
+    merged = [dict(step) for step in steps]
+    offset = len(merged)
+    sorted_synthetic_steps = sorted(synthetic_steps, key=_synthetic_step_sort_key)
+    for index, step in enumerate(sorted_synthetic_steps, start=1):
+        item = dict(step)
+        step_index = offset + index
+        item["index"] = step_index
+        item["step_index"] = step_index
+        merged.append(item)
+    return sorted(merged, key=_timeline_step_sort_key)
+
+
+def _synthetic_step_sort_key(step: Mapping[str, object]) -> tuple[int, int, str]:
+    turn = _int_or_none(step.get("turn"))
+    intent = str(step.get("intent") or "")
+    priority = {
+        "done_candidate": 10,
+        "internal_gate": 20,
+        "blocked_return": 30,
+        "ng_resume": 40,
+    }.get(intent, 99)
+    return (turn if turn is not None else 1_000_000_000, priority, str(step.get("tool_id") or step.get("summary") or ""))
+
+
+def _timeline_step_sort_key(step: Mapping[str, object]) -> tuple[int, int, int, int]:
+    turn = _int_or_none(step.get("turn"))
+    sidecar_priority = 0
+    if str(step.get("intent") or "") in SYNTHETIC_SIDECAR_INTENTS:
+        sidecar_priority = _synthetic_step_sort_key(step)[1]
+    index = _int_or_none(step.get("index"))
+    return (
+        turn if turn is not None else 1_000_000_000,
+        sidecar_priority,
+        index if index is not None else 1_000_000_000,
+        1 if str(step.get("intent") or "") in SYNTHETIC_SIDECAR_INTENTS else 0,
+    )
 
 
 def _tool_group_key(event: Mapping[str, Any], event_index: int) -> tuple[object, ...]:
@@ -716,6 +902,17 @@ def _classify_intent(step: Mapping[str, Any]) -> tuple[str, list[str]]:
     arguments = step.get("arguments") if isinstance(step.get("arguments"), Mapping) else {}
     contract = step.get("execution_contract") if isinstance(step.get("execution_contract"), Mapping) else {}
 
+    if tool == "done_candidate":
+        return "done_candidate", [f"tool={tool}"]
+    if tool == "internal_gate":
+        status = str(step.get("status") or "").casefold()
+        arguments = step.get("arguments") if isinstance(step.get("arguments"), Mapping) else {}
+        lane_status = str(arguments.get("lane_status") or "").casefold()
+        if status == "block" and lane_status == "blocked_return":
+            return "blocked_return", [f"tool={tool}", "lane_status=blocked_return"]
+        return "internal_gate", [f"tool={tool}"]
+    if tool == "ng_resume":
+        return "ng_resume", [f"tool={tool}"]
     if tool in {"finish", "finish_call"}:
         return "finish", [f"tool={tool}"]
     if tool in {"agent", "explore"}:
@@ -1074,6 +1271,14 @@ def _tool_family(step: Mapping[str, object], *, intent: str) -> str:
         return "build"
     if intent == "process_poll":
         return "process_poll"
+    if intent == "done_candidate":
+        return "done_candidate"
+    if intent == "internal_gate":
+        return "internal_gate"
+    if intent == "ng_resume":
+        return "ng_resume"
+    if intent == "blocked_return":
+        return "blocked_return"
     if intent == "finish":
         return "finish"
     if intent == "delegated_explore":
@@ -1100,18 +1305,20 @@ def _tool_family(step: Mapping[str, object], *, intent: str) -> str:
 
 
 def _step_summary(steps: Sequence[Mapping[str, object]]) -> dict[str, object]:
-    first_mutation = _first_step(steps, lambda step: step.get("intent") == "mutation")
+    real_steps = _real_tool_steps(steps)
+    first_mutation = _first_step(real_steps, lambda step: step.get("intent") == "mutation")
     first_apply_patch_or_write = _first_step(
-        steps,
+        real_steps,
         lambda step: str(step.get("tool") or "").casefold() in MUTATION_TOOLS,
     )
-    first_verifier = _first_step(steps, lambda step: step.get("intent") == "runtime_verifier")
-    before_first_mutation = _steps_before(steps, first_mutation)
+    first_verifier = _first_step(real_steps, lambda step: step.get("intent") == "runtime_verifier")
+    before_first_mutation = _steps_before(real_steps, first_mutation)
     intent_counts = Counter(str(step.get("intent") or "") for step in steps)
-    tool_counts = Counter(str(step.get("tool") or "") for step in steps)
+    tool_counts = Counter(str(step.get("tool") or "") for step in real_steps)
     before_intent_counts = Counter(str(step.get("intent") or "") for step in before_first_mutation)
     return {
-        "tool_step_count": len(steps),
+        "tool_step_count": len(real_steps),
+        "sidecar_step_count": len(steps) - len(real_steps),
         "intent_counts": dict(sorted(intent_counts.items())),
         "tool_counts": dict(sorted(tool_counts.items())),
         "mutation_count": intent_counts.get("mutation", 0),
@@ -1134,7 +1341,22 @@ def _step_summary(steps: Sequence[Mapping[str, object]]) -> dict[str, object]:
             intent: before_intent_counts.get(intent, 0) for intent in sorted(PROBE_INTENTS)
         },
         "process_poll_count_before_first_mutation": sum(1 for step in before_first_mutation if step.get("intent") == "process_poll"),
+        "done_candidate_turn_count": intent_counts.get("done_candidate", 0),
+        "internal_gate_turn_count": intent_counts.get("internal_gate", 0),
+        "ng_resume_turn_count": intent_counts.get("ng_resume", 0),
+        "blocked_return_turn_count": intent_counts.get("blocked_return", 0),
+        "completed_after_internal_gate_count": sum(
+            1
+            for step in steps
+            if step.get("intent") == "internal_gate"
+            and step.get("status") == "allow"
+            and step.get("lane_status") == "completed"
+        ),
     }
+
+
+def _real_tool_steps(steps: Sequence[Mapping[str, object]]) -> list[Mapping[str, object]]:
+    return [step for step in steps if str(step.get("intent") or "") not in SYNTHETIC_SIDECAR_INTENTS]
 
 
 def _combined_summary(
@@ -1182,18 +1404,19 @@ def _agent_metrics(
     steps: Sequence[Mapping[str, object]],
     step_summary: Mapping[str, object],
 ) -> dict[str, object]:
-    readiness = _first_patch_readiness(steps)
-    first_mutation = _first_step(steps, lambda step: step.get("intent") == "mutation")
+    real_steps = _real_tool_steps(steps)
+    readiness = _first_patch_readiness(real_steps)
+    first_mutation = _first_step(real_steps, lambda step: step.get("intent") == "mutation")
     return {
         **dict(step_summary),
-        "first_tool": _step_citation(steps[0]) if steps else {},
+        "first_tool": _step_citation(real_steps[0]) if real_steps else {},
         "first_patch_readiness": readiness,
         "readiness_to_mutation": _readiness_to_mutation(readiness=readiness, first_mutation=first_mutation),
-        "implementation_constraint_families": _implementation_constraint_families(steps),
-        "tool_result_pairing": _tool_result_pairing_counts(steps),
+        "implementation_constraint_families": _implementation_constraint_families(real_steps),
+        "tool_result_pairing": _tool_result_pairing_counts(real_steps),
         "prompt_input_size": _prompt_input_size_metrics(bundle.artifact_summary or {}),
         "duplicate_exploration_after_readiness": _duplicate_exploration_after_readiness(
-            steps=steps,
+            steps=real_steps,
             readiness=readiness,
             first_mutation=first_mutation,
         ),
@@ -1295,14 +1518,15 @@ def _h0_readiness_diagnostics(
 ) -> dict[str, object]:
     agents: dict[str, object] = {}
     for agent, (_bundle, steps, _summary) in agent_inputs.items():
-        readiness = _first_patch_readiness(steps)
-        first_mutation = _first_step(steps, lambda step: step.get("intent") == "mutation")
+        real_steps = _real_tool_steps(steps)
+        readiness = _first_patch_readiness(real_steps)
+        first_mutation = _first_step(real_steps, lambda step: step.get("intent") == "mutation")
         agents[agent] = {
             **readiness,
             **_readiness_to_mutation(readiness=readiness, first_mutation=first_mutation),
-            "implementation_constraint_families": _implementation_constraint_families(steps),
+            "implementation_constraint_families": _implementation_constraint_families(real_steps),
             "duplicate_exploration_after_readiness": _duplicate_exploration_after_readiness(
-                steps=steps,
+                steps=real_steps,
                 readiness=readiness,
                 first_mutation=first_mutation,
             ),
@@ -1495,6 +1719,7 @@ def _long_design_stalls_after_readiness(
 
 
 def _repeated_probe_families(steps: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    steps = _real_tool_steps(steps)
     first_mutation = _first_step(steps, lambda step: step.get("intent") == "mutation")
     before_first_mutation = _steps_before(steps, first_mutation)
     diagnostics = _intent_repeats(before_first_mutation)

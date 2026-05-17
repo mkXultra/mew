@@ -269,6 +269,187 @@ def test_hot_path_step_diff_compares_reference_and_mew_native_artifact(tmp_path:
     assert report["pairwise_comparisons"][0]["comparison_id"] == "codex_vs_mew"
 
 
+def test_hot_path_step_diff_classifies_done_candidate_and_internal_gate_sidecars(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+    _write_jsonl(
+        mew_root / "done_candidates.jsonl",
+        [
+            {
+                "done_candidate_id": "done-candidate:turn-6:abc",
+                "turn_id": "turn-6",
+                "assistant_text_preview": "Done after verifier passed.",
+                "reason": "assistant_message_without_tool_call",
+            }
+        ],
+    )
+    _write_jsonl(
+        mew_root / "native_finish_gate_decisions.jsonl",
+        [
+            {
+                "decision_id": "native-finish-gate:turn-6:abc",
+                "done_candidate_id": "done-candidate:turn-6:abc",
+                "turn_id": "turn-6",
+                "result": "allow",
+                "lane_status": "completed",
+                "reason": "trusted final verifier closeout exited 0",
+            }
+        ],
+    )
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    intents = [step["intent"] for step in report["normalized_mew_steps"]]
+    assert intents[-2:] == ["done_candidate", "internal_gate"]
+    assert report["summary"]["mew"]["done_candidate_turn_count"] == 1
+    assert report["summary"]["mew"]["internal_gate_turn_count"] == 1
+    assert report["summary"]["mew"]["completed_after_internal_gate_count"] == 1
+    assert report["summary"]["mew"]["artifact_summary"]["done_candidates"]["row_count"] == 1
+    assert report["summary"]["mew"]["artifact_summary"]["internal_finish_gate"]["row_count"] == 1
+    assert report["summary"]["mew"]["tool_call_started_count"] == 5
+    assert report["summary"]["mew"]["tool_step_count"] == 5
+    assert report["summary"]["mew"]["sidecar_step_count"] == 2
+    assert report["agents"]["mew"]["metrics"]["tool_result_pairing"]["paired"] == 5
+
+
+def test_hot_path_step_diff_keeps_sidecars_from_becoming_primary_trace(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = tmp_path / "mew"
+    _write_jsonl(
+        mew_root / "done_candidates.jsonl",
+        [
+            {
+                "done_candidate_id": "done-candidate:turn-6:abc",
+                "turn_id": "turn-6",
+                "assistant_text_preview": "Done after verifier passed.",
+            }
+        ],
+    )
+    _write_jsonl(
+        mew_root / "native_finish_gate_decisions.jsonl",
+        [
+            {
+                "decision_id": "native-finish-gate:turn-6:abc",
+                "turn_id": "turn-6",
+                "result": "allow",
+                "lane_status": "completed",
+            }
+        ],
+    )
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["inputs"]["mew"]["status"] == "missing"
+    assert report["normalized_mew_steps"] == []
+    assert report["summary"]["mew"]["tool_step_count"] == 0
+    assert report["summary"]["mew"]["sidecar_step_count"] == 0
+    assert report["summary"]["mew"]["artifact_summary"]["done_candidates"]["row_count"] == 1
+    assert report["summary"]["mew"]["artifact_summary"]["internal_finish_gate"]["row_count"] == 1
+    assert any("no mew response transcript" in warning for warning in report["warnings"])
+
+
+def test_hot_path_step_diff_keeps_sidecars_for_message_only_core_trace(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = tmp_path / "mew"
+    mew_root.mkdir(parents=True, exist_ok=True)
+    (mew_root / "response_transcript.json").write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "sequence": 1,
+                        "kind": "message",
+                        "turn_id": "turn-6",
+                        "output_text_or_ref": "Done.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        mew_root / "done_candidates.jsonl",
+        [
+            {
+                "done_candidate_id": "done-candidate:turn-6:abc",
+                "turn_id": "turn-6",
+                "assistant_text_preview": "Done.",
+            }
+        ],
+    )
+    _write_jsonl(
+        mew_root / "native_finish_gate_decisions.jsonl",
+        [
+            {
+                "decision_id": "native-finish-gate:turn-6:abc",
+                "turn_id": "turn-6",
+                "result": "allow",
+                "lane_status": "completed",
+            }
+        ],
+    )
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["inputs"]["mew"]["status"] == "loaded"
+    assert [step["intent"] for step in report["normalized_mew_steps"]] == ["done_candidate", "internal_gate"]
+    assert report["summary"]["mew"]["tool_step_count"] == 0
+    assert report["summary"]["mew"]["sidecar_step_count"] == 2
+    assert report["summary"]["mew"]["done_candidate_turn_count"] == 1
+    assert report["summary"]["mew"]["completed_after_internal_gate_count"] == 1
+
+
+def test_hot_path_step_diff_sorts_and_classifies_ng_resume_sidecars(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+    _write_jsonl(
+        mew_root / "ng_resume_signals.jsonl",
+        [
+            {
+                "decision_id": "ng-resume:turn-3:abc",
+                "turn_id": "turn-3",
+                "concise_reason": "finish blocked",
+                "repair_focus": "rerun verifier",
+            }
+        ],
+    )
+    _write_jsonl(
+        mew_root / "native_finish_gate_decisions.jsonl",
+        [
+            {
+                "decision_id": "native-finish-gate:turn-9:def",
+                "turn_id": "turn-9",
+                "result": "block",
+                "lane_status": "blocked_return",
+                "reason": "verifier failed",
+            },
+            {
+                "decision_id": "native-finish-gate:turn-6:abc",
+                "turn_id": "turn-6",
+                "result": "allow",
+                "lane_status": "completed",
+                "reason": "trusted verifier passed",
+            },
+        ],
+    )
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    sidecar_steps = [step for step in report["normalized_mew_steps"] if step["intent"] in {"internal_gate", "blocked_return", "ng_resume"}]
+    assert [(step["turn"], step["intent"]) for step in sidecar_steps] == [
+        (3, "ng_resume"),
+        (6, "internal_gate"),
+        (9, "blocked_return"),
+    ]
+    intents = [step["intent"] for step in report["normalized_mew_steps"]]
+    assert intents.index("ng_resume") < intents.index("mutation")
+    assert report["summary"]["mew"]["internal_gate_turn_count"] == 1
+    assert report["summary"]["mew"]["ng_resume_turn_count"] == 1
+    assert report["summary"]["mew"]["blocked_return_turn_count"] == 1
+    assert report["summary"]["mew"]["sidecar_step_count"] == 3
+    assert report["summary"]["mew"]["artifact_summary"]["ng_resume_signals"]["row_count"] == 1
+
+
 def test_hot_path_step_diff_writes_json_and_markdown(tmp_path: Path) -> None:
     codex_root = _write_codex_reference(tmp_path / "codex")
     mew_root = _write_mew_artifact(tmp_path / "mew")
