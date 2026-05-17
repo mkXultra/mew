@@ -2444,6 +2444,96 @@ def test_native_harness_assistant_only_turn_writes_done_candidate_artifacts(tmp_
     assert manifest["metrics"]["done_candidate_count"] == 1
 
 
+def test_native_harness_done_candidate_runs_internal_finish_gate_after_mutation(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts-done-gate"
+    final_text = "Done.\n\nRan the verifier and the workspace is ready.\n" + ("detail line\n" * 30)
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                )
+            ],
+            [fake_message(final_text, item_id="msg-done")],
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        artifact_root=artifact_root,
+        max_turns=2,
+    )
+
+    assert result.status == "completed"
+    assert result.finish_summary == final_text
+    assert result.metrics["done_candidate_count"] == 1
+    assert result.metrics["no_tool_continuation_count"] == 0
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["native_finish_gate_decision_count"] == 1
+    decision = result.metrics["native_finish_gate_latest_decision"]
+    assert decision["result"] == "allow"
+    assert decision["lane_status"] == "completed"
+    assert decision["done_candidate_id"] == result.metrics["latest_done_candidate"]["done_candidate_id"]
+    assert "finish_call_id" not in decision
+    assert not any(item.kind == "finish_output" for item in result.transcript.items)
+    rows = [
+        json.loads(line)
+        for line in (artifact_root / "native_finish_gate_decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert rows[0]["done_candidate_id"] == result.metrics["latest_done_candidate"]["done_candidate_id"]
+    assert "finish_call_id" not in rows[0]
+    manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["metrics"]["native_finish_gate_decisions"]["done_candidate_count"] == 1
+    assert manifest["metrics"]["native_finish_gate_decisions"]["legacy_finish_call_count"] == 0
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_done_candidate_gate_block_hides_closeout_from_next_provider_turn(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-1",
+                    "write_file",
+                    {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                )
+            ],
+            [fake_message("Done.", item_id="msg-done")],
+            [fake_call("read-after-block", "read_file", {"path": "vm.js"})],
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f missing-output.bin",
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=3,
+    )
+
+    assert result.status == "blocked"
+    assert result.metrics["done_candidate_count"] == 1
+    assert result.metrics["native_finish_gate_decision_count"] == 1
+    assert result.metrics["native_finish_gate_latest_decision"]["result"] == "block"
+    assert result.metrics["no_tool_continuation_count"] == 1
+    next_request_text = json.dumps(provider.requests[2]["input_items"], ensure_ascii=False, sort_keys=True)
+    assert "call-final-verifier-closeout" not in next_request_text
+    assert "finish_verifier" not in next_request_text
+    assert "finish_verifier_plan" not in next_request_text
+    assert "Assistant text is not a completion signal" in next_request_text
+
+
 def test_native_harness_repeated_assistant_only_turn_records_no_tool_repeat(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
@@ -2565,6 +2655,7 @@ def test_native_harness_provider_failure_preserves_done_candidate_artifacts(tmp_
 
     assert result.status == "failed"
     assert result.metrics["done_candidate_count"] == 1
+    assert result.metrics["native_finish_gate_decision_count"] == 1
     rows = [
         json.loads(line)
         for line in (artifact_root / "done_candidates.jsonl").read_text(encoding="utf-8").splitlines()
@@ -2574,6 +2665,7 @@ def test_native_harness_provider_failure_preserves_done_candidate_artifacts(tmp_
     manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
     assert manifest["done_candidates_ref"] == "done_candidates.jsonl"
     assert manifest["metrics"]["done_candidate_count"] == 1
+    assert manifest["metrics"]["native_finish_gate_decisions"]["decision_count"] == 1
 
 
 def test_phase3_surface_declares_transport_change_yes() -> None:

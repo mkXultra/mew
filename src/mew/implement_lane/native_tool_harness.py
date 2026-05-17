@@ -22,6 +22,7 @@ from .completion_resolver import (
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
 from .native_fake_provider import PHASE3_TRANSPORT_CHANGE, NativeFakeProvider
 from .native_finish_gate import (
+    FinishCloseoutStatus,
     FinishCloseoutCommand,
     FinishCloseoutCommandValidation,
     NativeFinishCloseoutResult,
@@ -652,6 +653,37 @@ def run_native_implement_v2(
                 "wall_seconds": closeout_event.latency["started_ms"] / 1000,
             }
 
+    def run_internal_finish_gate_for_done_candidate(
+        done_candidate: NativeDoneCandidate,
+        *,
+        turn_index: int,
+    ) -> NativeFinishGateDecision:
+        closeout_events, closeout_context = _run_native_finish_time_closeouts(
+            lane_input,
+            lane_attempt_id=lane_attempt_id,
+            provider=provider,
+            exec_runtime=exec_runtime,
+            workspace=workspace,
+            allowed_read_roots=allowed_read_roots,
+            allowed_write_roots=allowed_write_roots,
+            lane_config=lane_config,
+            tool_calls=tuple(tool_calls),
+            tool_results=tuple(tool_results),
+            start_monotonic=start_monotonic,
+        )
+        for closeout_event in closeout_events:
+            append_closeout_event(closeout_event)
+        return _native_finish_gate_decision_from_done_candidate(
+            done_candidate,
+            lane_input=lane_input,
+            lane_config=lane_config,
+            provider=provider,
+            turn_index=turn_index,
+            transcript_items=tuple(items),
+            closeout_events=closeout_events,
+            closeout_context=closeout_context,
+        )
+
     for turn_index in range(1, max_turns + 1):
         turn_timeout = _native_next_model_timeout_seconds(
             lane_input,
@@ -758,6 +790,7 @@ def run_native_implement_v2(
                 items=items,
                 tool_results=tuple(tool_results),
                 done_candidates=tuple(done_candidates),
+                native_finish_gate_decisions=tuple(native_finish_gate_decisions),
                 artifact_root=artifact_root,
                 error=str(exc),
             )
@@ -819,7 +852,24 @@ def run_native_implement_v2(
                 reason=no_tool_reason,
             )
             if done_candidate is not None:
+                assistant_final_text = _native_final_assistant_response_text(turn_items)
                 done_candidates.append(done_candidate)
+                native_decision = run_internal_finish_gate_for_done_candidate(
+                    done_candidate,
+                    turn_index=turn_index,
+                )
+                native_finish_gate_decisions.append(native_decision)
+                finish_gate_decision = native_decision.as_dict()
+                if native_decision.result == "block":
+                    finish_gate_block_count += 1
+                if native_decision.lane_status == "completed":
+                    status = "completed"
+                    finish_summary = assistant_final_text or native_decision.reason
+                    break
+                if native_decision.lane_status == "blocked_return":
+                    status = "blocked"
+                    finish_summary = native_decision.reason
+                    break
             if no_tool_continuation_count >= 1:
                 no_tool_repeat_done_candidate_count += 1
                 latest_no_tool_continuation = {
@@ -3777,6 +3827,46 @@ def _native_finish_gate_decision_from_closeout_events(
     return decide_native_finish_from_closeout(request, closeout)
 
 
+def _native_finish_gate_decision_from_done_candidate(
+    done_candidate: NativeDoneCandidate,
+    *,
+    lane_input: ImplementLaneInput,
+    lane_config: Mapping[str, object],
+    provider: object,
+    turn_index: int,
+    transcript_items: tuple[NativeTranscriptItem, ...],
+    closeout_events: tuple[_NativeCloseoutEvent, ...],
+    closeout_context: _NativeCloseoutContext,
+) -> NativeFinishGateDecision:
+    final_event = next((event for event in reversed(closeout_events) if event.kind == "final_verifier"), None)
+    if final_event is not None:
+        closeout = _native_finish_closeout_result_from_event(final_event, closeout_context=closeout_context)
+    else:
+        closeout = _native_finish_closeout_result_from_context(closeout_context)
+    request = NativeFinishGateRequest(
+        lane_attempt_id=done_candidate.lane_attempt_id,
+        turn_id=done_candidate.turn_id or f"turn-{turn_index}",
+        done_candidate_id=done_candidate.done_candidate_id,
+        task_id=str(lane_input.task_id or ""),
+        task_description=_native_task_description(lane_input),
+        task_contract=dict(lane_input.task_contract),
+        lane_config=dict(lane_config),
+        workspace=str(lane_input.workspace or ""),
+        allowed_read_roots=tuple(str(root) for root in lane_config.get("allowed_read_roots") or ()),
+        allowed_write_roots=tuple(str(root) for root in lane_config.get("allowed_write_roots") or ()),
+        transcript_hash_before_decision=native_transcript_hash(
+            NativeTranscript(
+                lane_attempt_id=done_candidate.lane_attempt_id,
+                provider=str(getattr(provider, "provider", "")),
+                model=str(getattr(provider, "model", "")),
+                items=transcript_items,
+            )
+        ),
+        compact_sidecar_digest_hash=done_candidate.compact_sidecar_digest_hash,
+    )
+    return decide_native_finish_from_closeout(request, closeout)
+
+
 def _native_finish_gate_decision_from_controller_closeout_event(
     event: _NativeCloseoutEvent,
     *,
@@ -3812,6 +3902,43 @@ def _native_finish_gate_decision_from_controller_closeout_event(
         ),
     )
     return decide_native_finish_from_closeout(request, closeout)
+
+
+def _native_finish_closeout_result_from_context(
+    context: _NativeCloseoutContext,
+) -> NativeFinishCloseoutResult:
+    blockers = tuple(dict.fromkeys((*context.blockers, *context.unsafe_blockers, *context.budget_blockers)))
+    status: FinishCloseoutStatus = "not_run"
+    reason = "final verifier closeout did not run"
+    if "closeout_verifier_command_missing" in context.blockers:
+        status = "missing_command"
+        reason = "final verifier closeout command is missing"
+    elif "closeout_verifier_budget_or_timeout" in context.budget_blockers:
+        status = "timed_out"
+        reason = "final verifier closeout timed out"
+    elif context.budget_blockers:
+        status = "budget_insufficient"
+        reason = "insufficient budget for final verifier closeout"
+    elif context.unsafe_blockers:
+        status = "unsafe"
+        reason = "final verifier closeout is not permitted"
+    elif "closeout_verifier_failed" in context.blockers:
+        status = "completed_nonzero"
+        reason = "final verifier closeout exited nonzero"
+    elif "closeout_verifier_not_run" in context.blockers:
+        status = "not_run"
+        reason = "final verifier closeout was not run"
+    return NativeFinishCloseoutResult(
+        command=None,
+        call_item=None,
+        output_item=None,
+        tool_result=None,
+        status=status,
+        evidence_refs=context.fresh_verifier_refs,
+        closeout_refs=context.closeout_refs,
+        blockers=blockers,
+        reason=reason,
+    )
 
 
 def _native_finish_closeout_result_from_event(
@@ -4324,6 +4451,7 @@ def _request_descriptor(
     provider_visible_transcript_items = [
         _provider_visible_native_item(item, lane_input=lane_input)
         for item in transcript_items
+        if _native_item_provider_visible(item)
     ]
     compact_sidecar_digest = _compact_sidecar_digest_for_request(
         lane_input=lane_input,
@@ -5191,6 +5319,14 @@ def _provider_visible_native_item(
     )
 
 
+def _native_item_provider_visible(item: NativeTranscriptItem) -> bool:
+    """Return whether a transcript item belongs in the next provider input."""
+
+    if str(item.call_id or "").startswith("call-final-verifier-closeout"):
+        return False
+    return True
+
+
 def _mapping_list(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
@@ -5300,6 +5436,7 @@ def _partial_failure_harness_result(
     done_candidates: tuple[NativeDoneCandidate, ...],
     artifact_root: str | Path | None,
     error: str,
+    native_finish_gate_decisions: tuple[NativeFinishGateDecision, ...] = (),
 ) -> NativeImplementV2HarnessResult:
     transcript = NativeTranscript(
         lane_attempt_id=lane_attempt_id,
@@ -5320,6 +5457,10 @@ def _partial_failure_harness_result(
         "provider_request_inventory_available": bool(getattr(provider, "requests", []) or ()),
         "done_candidate_count": len(done_candidates),
         "latest_done_candidate": done_candidates[-1].as_dict() if done_candidates else {},
+        "native_finish_gate_decision_count": len(native_finish_gate_decisions),
+        "native_finish_gate_latest_decision": (
+            native_finish_gate_decisions[-1].as_dict() if native_finish_gate_decisions else {}
+        ),
         "pairing": validation.as_dict(),
     }
     proof_artifacts: tuple[str, ...] = ()
@@ -5331,6 +5472,7 @@ def _partial_failure_harness_result(
                 provider=provider,
                 tool_results=tool_results,
                 done_candidates=done_candidates,
+                native_finish_gate_decisions=native_finish_gate_decisions,
                 error=error,
                 artifact_root=Path(artifact_root),
             )
@@ -5341,6 +5483,7 @@ def _partial_failure_harness_result(
                 tool_results=tool_results,
                 provider=provider,
                 done_candidates=done_candidates,
+                native_finish_gate_decisions=native_finish_gate_decisions,
                 status="failed",
                 error=error,
             )
@@ -5361,6 +5504,7 @@ def _write_live_failure_artifacts(
     provider: NativeCodexResponsesProvider,
     tool_results: tuple[ToolResultEnvelope, ...] = (),
     done_candidates: tuple[NativeDoneCandidate, ...] = (),
+    native_finish_gate_decisions: tuple[NativeFinishGateDecision, ...] = (),
     error: str,
     artifact_root: Path | None = None,
 ) -> tuple[str, ...]:
@@ -5387,6 +5531,14 @@ def _write_live_failure_artifacts(
             write_native_done_candidate_artifacts(
                 root,
                 done_candidates,
+                proof_manifest_path=paths.get("proof_manifest"),
+            )
+        )
+    if native_finish_gate_decisions:
+        paths.update(
+            write_native_finish_gate_artifacts(
+                root,
+                native_finish_gate_decisions,
                 proof_manifest_path=paths.get("proof_manifest"),
             )
         )
@@ -5586,6 +5738,11 @@ def _native_first_assistant_text(items: tuple[NativeTranscriptItem, ...]) -> str
         if item.kind == "assistant_message":
             return _finish_block_clip(item.output_text_or_ref, limit=160)
     return ""
+
+
+def _native_final_assistant_response_text(items: tuple[NativeTranscriptItem, ...]) -> str:
+    texts = [item.output_text_or_ref for item in items if item.kind == "assistant_message" and item.output_text_or_ref]
+    return "\n\n".join(texts)
 
 
 def _call_order_key(call: NativeTranscriptItem) -> tuple[int, int]:
