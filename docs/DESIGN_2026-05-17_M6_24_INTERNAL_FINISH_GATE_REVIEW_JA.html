@@ -1,0 +1,890 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M6.24 Internal Finish Gate レビュー用要約</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f5;
+      --paper: #ffffff;
+      --ink: #20272e;
+      --muted: #5d6872;
+      --line: #d9dfd8;
+      --soft: #eef3f0;
+      --accent: #28635c;
+      --accent-2: #7a5a20;
+      --danger: #9a3730;
+      --warn: #8a5a16;
+      --ok: #2f6b3f;
+      --code: #f0f3f1;
+      --old: #fff7f4;
+      --new: #f4fbf6;
+      --internal: #fffaf0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+        "Yu Gothic", "YuGothic", "Noto Sans JP", "Meiryo", sans-serif;
+      line-height: 1.72;
+    }
+
+    a {
+      color: #174f49;
+      text-underline-offset: 0.18em;
+      text-decoration-thickness: 0.08em;
+    }
+
+    code {
+      padding: 0.08rem 0.32rem;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      white-space: nowrap;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      overflow: auto;
+      padding: 26px 20px;
+      border-right: 1px solid var(--line);
+      background: #e9eee9;
+    }
+
+    aside h2 {
+      margin: 0 0 8px;
+      font-size: 0.96rem;
+    }
+
+    aside p {
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.58;
+    }
+
+    nav {
+      display: grid;
+      gap: 4px;
+    }
+
+    nav a {
+      display: block;
+      padding: 7px 9px;
+      border-radius: 6px;
+      color: #334047;
+      text-decoration: none;
+      font-size: 0.9rem;
+      line-height: 1.35;
+    }
+
+    nav a:hover {
+      background: rgba(40, 99, 92, 0.13);
+      color: #153f3b;
+    }
+
+    main {
+      width: min(100%, 1180px);
+      padding: 44px clamp(22px, 5vw, 68px) 72px;
+    }
+
+    header {
+      padding-bottom: 26px;
+      margin-bottom: 30px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
+    h1 {
+      max-width: 920px;
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.4rem);
+      line-height: 1.16;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 920px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 1.04rem;
+    }
+
+    section {
+      margin: 38px 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: clamp(1.35rem, 2.2vw, 1.9rem);
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 1.08rem;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    p {
+      max-width: 930px;
+      margin: 10px 0;
+    }
+
+    ul,
+    ol {
+      max-width: 960px;
+      margin: 10px 0;
+      padding-left: 1.35rem;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    .panel {
+      margin: 14px 0;
+      padding: 17px 19px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    .summary-card {
+      min-height: 120px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .summary-card strong {
+      display: block;
+      margin-bottom: 8px;
+      color: #173f3a;
+      font-size: 1.02rem;
+    }
+
+    .summary-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.94rem;
+      line-height: 1.62;
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      padding: 12px 16px;
+      background: #f2f7f4;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+      background: #fff9ed;
+    }
+
+    .danger {
+      border-left-color: var(--danger);
+      background: #fff6f4;
+    }
+
+    .diagram-wrap {
+      margin: 16px 0;
+      padding: 16px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfa;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(138px, 1fr));
+      gap: 12px;
+      min-width: 940px;
+      align-items: stretch;
+    }
+
+    .node {
+      position: relative;
+      min-height: 104px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .node:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      right: -19px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-weight: 700;
+      z-index: 1;
+    }
+
+    .node strong {
+      display: block;
+      margin-bottom: 5px;
+      line-height: 1.34;
+    }
+
+    .node span {
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }
+
+    .old {
+      background: var(--old);
+      border-color: #e2beb7;
+    }
+
+    .new {
+      background: var(--new);
+      border-color: #b9d8c0;
+    }
+
+    .internal {
+      background: var(--internal);
+      border-color: #dec994;
+    }
+
+    .swimlane {
+      display: grid;
+      grid-template-columns: minmax(130px, 180px) minmax(0, 1fr);
+      gap: 0;
+      min-width: 820px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .lane-label,
+    .lane-body {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .lane-label {
+      background: #eef3f0;
+      font-weight: 700;
+    }
+
+    .lane-body {
+      background: var(--paper);
+    }
+
+    .lane-label:last-of-type,
+    .lane-body:last-of-type {
+      border-bottom: 0;
+    }
+
+    .tokens {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .token {
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8faf8;
+      font-size: 0.88rem;
+      line-height: 1.3;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 15px 0;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      font-size: 0.94rem;
+    }
+
+    th,
+    td {
+      padding: 10px 11px;
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eef3f0;
+      color: #203c37;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    th:last-child,
+    td:last-child {
+      border-right: 0;
+    }
+
+    .table-scroll {
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+
+    .table-scroll table {
+      min-width: 900px;
+      margin: 0;
+    }
+
+    .checklist {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .checklist li {
+      position: relative;
+      margin: 0;
+      padding: 9px 11px 9px 34px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--paper);
+      line-height: 1.5;
+    }
+
+    .checklist li::before {
+      content: "";
+      position: absolute;
+      left: 12px;
+      top: 15px;
+      width: 12px;
+      height: 12px;
+      border: 1px solid #8f9a96;
+      border-radius: 3px;
+      background: #fff;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 14px 0;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfa;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.88rem;
+      line-height: 1.55;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .meta span {
+      padding: 5px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--paper);
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    @media (max-width: 900px) {
+      .layout {
+        display: block;
+      }
+
+      aside {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      main {
+        padding-top: 30px;
+      }
+
+      .summary-grid,
+      .checklist {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media print {
+      body {
+        background: #fff;
+      }
+
+      aside {
+        display: none;
+      }
+
+      .layout {
+        display: block;
+      }
+
+      main {
+        width: 100%;
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <h2>レビュー目次</h2>
+      <p>元設計書を短時間で確認するための日本語サマリー。実装内容ではなく、設計レビュー用の読み替えです。</p>
+      <nav aria-label="ページ内目次">
+        <a href="#summary">1分要約</a>
+        <a href="#flow">フロー比較</a>
+        <a href="#why">変更理由</a>
+        <a href="#visibility">見せる/見せない</a>
+        <a href="#verifier">Verifier precedence</a>
+        <a href="#phases">Phase 0-6</a>
+        <a href="#close-gate">Close Gate</a>
+        <a href="#drift">driftしやすい点</a>
+        <a href="#questions">レビュー質問</a>
+        <a href="#source">参考元</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header>
+        <p class="eyebrow">Design review helper / 2026-05-17</p>
+        <h1>M6.24 Internal Finish Gate レビュー用日本語HTML</h1>
+        <p class="lead">
+          対象は <code>implement_v2</code> の完了判定を、main model に見える
+          <code>finish</code> tool から、通常の最終応答後に走る mew 内部の
+          finish gate へ移す設計です。目的は Codex-like hot path に寄せつつ、
+          完了判定・検証・証跡を sidecar 側で厳密に保つことです。
+        </p>
+        <div class="meta">
+          <span>Status: design only</span>
+          <span>出力: review-only HTML</span>
+          <span>元Markdownは未変更</span>
+          <span>実装コード変更なし</span>
+        </div>
+      </header>
+
+      <section id="summary">
+        <h2>1. 1分で分かる要約</h2>
+        <div class="summary-grid">
+          <div class="summary-card">
+            <strong>何を変えるか</strong>
+            <p>
+              main model に <code>finish</code> tool を呼ばせない。モデルは通常の
+              assistant final response を出し、controller が
+              <code>done_candidate</code> を記録してから内部 finish gate を走らせる。
+            </p>
+          </div>
+          <div class="summary-card">
+            <strong>何を隠すか</strong>
+            <p>
+              <code>task_contract</code>、finish gate/resolver JSON、
+              <code>evidence_refs</code>、planner rationale などの mew 内部完了スキーマを
+              main model の hot path に出さない。
+            </p>
+          </div>
+          <div class="summary-card">
+            <strong>どう閉じるか</strong>
+            <p>
+              OK ならモデルの最終応答を保って lane completed。NG continue なら抽象的な修復信号で再開。
+              NG return なら安全・権限・予算・plateau などで blocked として返す。
+            </p>
+          </div>
+        </div>
+
+        <div class="panel callout">
+          <strong>レビューの中心論点:</strong>
+          provider-visible completion protocol をなくしても、完了判定の厳密さ、verifier precedence、
+          proof/replay/observability が落ちない設計になっているかを確認する。
+        </div>
+      </section>
+
+      <section id="flow">
+        <h2>2. 現状と変更後のフロー比較</h2>
+        <h3>旧構造: provider-visible finish tool</h3>
+        <div class="diagram-wrap" aria-label="旧構造フロー図">
+          <div class="flow">
+            <div class="node old"><strong>main model</strong><span>通常の編集・テスト</span></div>
+            <div class="node old"><strong>finish tool</strong><span>provider-visible に呼ぶ</span></div>
+            <div class="node old"><strong>finish schema</strong><span>summary / evidence_refs / final_status</span></div>
+            <div class="node internal"><strong>resolver / gate</strong><span>finish_call_id 起点</span></div>
+            <div class="node internal"><strong>closeout</strong><span>verifier / sidecar</span></div>
+            <div class="node old"><strong>lane outcome</strong><span>completion or blocked</span></div>
+          </div>
+        </div>
+
+        <h3>新構造: done candidate → internal finish gate</h3>
+        <div class="diagram-wrap" aria-label="新構造フロー図">
+          <div class="flow">
+            <div class="node new"><strong>main model</strong><span>provider-native tools / edits / tests</span></div>
+            <div class="node new"><strong>normal final</strong><span>通常の assistant 最終応答</span></div>
+            <div class="node internal"><strong>done candidate</strong><span>controller-side に記録</span></div>
+            <div class="node internal"><strong>internal gate</strong><span>done_candidate_id 起点</span></div>
+            <div class="node new"><strong>OK / NG</strong><span>completed / continue / return</span></div>
+            <div class="node new"><strong>resume if needed</strong><span>抽象修復信号のみ</span></div>
+          </div>
+        </div>
+
+        <div class="diagram-wrap">
+          <div class="swimlane">
+            <div class="lane-label">main model に見える</div>
+            <div class="lane-body">
+              普通の coding instructions、provider-native transcript window、通常 tool specs、
+              通常 tool results、必要な場合だけ抽象的な NG resume signal。
+            </div>
+            <div class="lane-label">controller / sidecar</div>
+            <div class="lane-body">
+              <code>done_candidates.jsonl</code>、internal gate decision、planner request/decision、
+              manifest hash、leak scan、replay metrics。
+            </div>
+            <div class="lane-label">禁止される流れ</div>
+            <div class="lane-body">
+              main model に <code>finish</code> schema、<code>task_contract</code>、
+              resolver/gate JSON、hidden verifier details を渡すこと。
+            </div>
+          </div>
+        </div>
+
+        <pre aria-label="状態遷移">RUNNING
+  -> DONE_CANDIDATE
+  -> INTERNAL_GATE_RUNNING
+  -> COMPLETED
+  -> BLOCKED_RETURN
+  -> RESUME_SIGNAL_ENQUEUED
+  -> RUNNING</pre>
+      </section>
+
+      <section id="why">
+        <h2>3. なぜこの変更をするのか</h2>
+        <div class="panel">
+          <h3>make-doom-for-mips のズレとの関係</h3>
+          <p>
+            このHTMLでは、元設計の趣旨を次のように読む。<code>make-doom-for-mips</code> のような
+            実タスクでズレが出る場合、main model が「mew 固有の完了スキーマを満たすこと」に引っ張られると、
+            本来の coding hot path から意識が逸れる。設計は、モデルには普通に作業させ、完了判定の厳密さは
+            controller/sidecar 側で担保する方向へ寄せている。
+          </p>
+          <p>
+            重要なのは、モデルに隠し期待値や gate の JSON を学習させて解かせるのではなく、
+            モデル可視の事実と通常の verifier 実行から修復させること。NG continue でも raw gate blocker ではなく、
+            一、二文の修復焦点と安全な refs だけを返す。
+          </p>
+        </div>
+
+        <div class="panel">
+          <h3>Codex-like hot path に寄せる意図</h3>
+          <p>
+            Codex-like hot path では、モデルに見える状態を限定し、編集・テスト・通常応答を中心にする。
+            WorkFrame、proof、typed evidence、resolver/gate details は sidecar-first に置く。
+            この設計は <code>finish</code> tool を provider-visible surface から外し、
+            hot path から completion-specific schema pressure を取り除く。
+          </p>
+        </div>
+      </section>
+
+      <section id="visibility">
+        <h2>4. main model に見せないもの / 内部 sidecar に残すもの</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>カテゴリ</th>
+                <th>main model には見せない</th>
+                <th>内部 sidecar / controller には残す</th>
+                <th>レビュー観点</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>完了プロトコル</td>
+                <td><code>finish</code> tool、finish schema、<code>summary</code>、<code>final_status</code>、<code>evidence_refs</code></td>
+                <td><code>done_candidates.jsonl</code>、internal gate decisions</td>
+                <td>provider request と tool list に finish が残っていないか。</td>
+              </tr>
+              <tr>
+                <td>契約・判定</td>
+                <td><code>task_contract</code>、raw gate/resolver JSON、<code>NativeFinishGateRequest</code></td>
+                <td>internal gate input、resolver diagnostic sub-decisions、manifest refs</td>
+                <td>resume signal に内部キー名が漏れないか。</td>
+              </tr>
+              <tr>
+                <td>hidden acceptance</td>
+                <td>hidden verifier failure details、benchmark-only expected output、proof oracle constraints</td>
+                <td>gate は内部判断に使える。ただし planner には shortcut として渡さない。</td>
+                <td>planner request builder の入力フィルタが十分か。</td>
+              </tr>
+              <tr>
+                <td>観測・再現</td>
+                <td>full <code>proof-manifest.json</code>、planner prompt/rationale、private blocker codes</td>
+                <td>manifest hashes、metrics、leak scan status、step classifications</td>
+                <td>artifact-only observability が live behavior を変えないか。</td>
+              </tr>
+              <tr>
+                <td>compact digest</td>
+                <td><code>finish_status</code>、<code>finish_readiness_state</code>、<code>finish_required_evidence_refs</code></td>
+                <td><code>done_candidate_status</code>、<code>done_candidate_ref</code>、<code>internal_gate_status</code>、<code>resume_signal_status</code></td>
+                <td>旧 finish-readiness 語彙が provider-visible digest に残らないか。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="verifier">
+        <h2>5. Verifier precedence</h2>
+        <ol>
+          <li>まず active managed commands を close または observe する。</li>
+          <li><code>configured_verifier</code> が明示供給され安全なら第一 authority。これで証明できたら planner を completion authority として起動しない。</li>
+          <li><code>finish_verifier_planner</code> は第二 authority。configured verifier が証明しない場合に、planner-visible inputs だけで request を作る。</li>
+          <li><code>auto_detected_verifier</code> は原則 diagnostic-only。planner rejection を黙って置換して completion authority になってはいけない。</li>
+          <li>auto-detected completion authority は、<code>allow_auto_detected_finish_verifier_fallback_v1</code> のような明示 policy がある場合だけ許可される。</li>
+        </ol>
+
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>入力</th>
+                <th>planner に渡してよい</th>
+                <th>planner に渡してはいけない</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>タスク情報</td>
+                <td>main model に元々渡した raw user task text</td>
+                <td>raw <code>task_contract</code> JSON、hidden acceptance constraints</td>
+              </tr>
+              <tr>
+                <td>verifier</td>
+                <td>ユーザー/task/lane config で明示供給された configured verifier command</td>
+                <td>hidden benchmark metadata から推測した expected output や失敗詳細</td>
+              </tr>
+              <tr>
+                <td>実行結果</td>
+                <td>model-visible tool results、artifact refs、可視 transcript summaries</td>
+                <td>private resolver/gate blocker JSON、proof oracle obligation records</td>
+              </tr>
+              <tr>
+                <td>runtime facts</td>
+                <td>workspace root、allowed roots、remaining timeout、command lifecycle、visible mutation summary</td>
+                <td>モデルに見えていない oracle 制約や benchmark-only expected artifacts</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="panel danger">
+          <strong>重要制約:</strong>
+          gate は hidden external verifier/oracle state を内部判断に使ってよいが、
+          <code>finish_verifier_planner</code> へ hidden oracle knowledge を shortcut として渡してはいけない。
+        </div>
+      </section>
+
+      <section id="phases">
+        <h2>6. Phase 0-6 の表</h2>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Phase</th>
+                <th>目的</th>
+                <th>触るファイル群</th>
+                <th>close 条件</th>
+                <th>注意点</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>0 Static Contract And Leak Gate</td>
+                <td>finish 非表示を先に検査可能にする。</td>
+                <td><code>hot_path_fastcheck.py</code>、<code>native_boundary_audit.py</code>、tool registry/routes/renderer の fixture、done-candidate schema tests</td>
+                <td>provider request descriptors に finish tool/schema fields がないことを fixture で検出できる。</td>
+                <td>live behavior はまだ変えない。先に gate を作る。</td>
+              </tr>
+              <tr>
+                <td>1 Tool Surface Removal</td>
+                <td>production native surface から <code>finish</code> を消す。</td>
+                <td><code>tool_policy.py</code>、<code>tool_registry.py</code>、<code>tool_routes.py</code>、<code>tool_result_renderer.py</code>、<code>native_tool_schema.py</code>、<code>native_provider_adapter.py</code>、compact digest projection</td>
+                <td>production request assembly から finish access/route/render/schema が到達不能。</td>
+                <td>旧 fixture は legacy/replay namespace に隔離する。</td>
+              </tr>
+              <tr>
+                <td>2 Done Candidate Detector</td>
+                <td>no-call assistant final response を controller-side candidate として記録する。</td>
+                <td><code>native_tool_harness.py</code>、<code>native_transcript.py</code>、<code>done_candidates.jsonl</code> writer、manifest</td>
+                <td>done candidate が sidecar と manifest hash/metrics に出る。</td>
+                <td>assistant text の JSON 風 finish を control JSON として parse しない。曖昧 no-tool prose の continuation は1回だけ。</td>
+              </tr>
+              <tr>
+                <td>3 Internal Finish Gate</td>
+                <td>done candidate の後に内部 gate を起動し、OK/NG を決める。</td>
+                <td><code>native_finish_gate.py</code>、<code>completion_resolver.py</code>、<code>native_tool_harness.py</code>、planner artifacts、manifest</td>
+                <td>gate/planner rows が <code>done_candidate_id</code> primary key で記録される。</td>
+                <td>planner-visible input filtering と verifier precedence をここで強制する。provider-visible <code>finish_output</code> は出さない。</td>
+              </tr>
+              <tr>
+                <td>4 NG Resume Signal</td>
+                <td>NG continue の再開信号を抽象化し、transport を固定しない。</td>
+                <td><code>native_tool_harness.py</code>、<code>ng_resume_signals.jsonl</code> または gate row、<code>response_transcript.json</code></td>
+                <td>resume signal の内容・非漏洩・cap・plateau がテストされる。</td>
+                <td>transport の種類ではなく、抽象 content contract と leak policy を pin する。</td>
+              </tr>
+              <tr>
+                <td>5 Observability And Replay Closure</td>
+                <td>fastcheck、step-diff、replay で結果を再現可能にする。</td>
+                <td><code>hot_path_fastcheck.py</code>、<code>hot_path_step_diff.py</code>、<code>native_boundary_audit.py</code>、scripts、fixture tests</td>
+                <td>OK/NG/planner accepted/rejected/fallback/hash drift/leak rejection などの replay tests が揃う。</td>
+                <td>observability は artifact-only。live behavior を変えない。</td>
+              </tr>
+              <tr>
+                <td>6 Legacy Quarantine</td>
+                <td>provider-visible finish と model-JSON finish を production から隔離する。</td>
+                <td><code>v2_runtime.py</code>、<code>tests/test_implement_lane.py</code>、production command route、native boundary audit</td>
+                <td><code>run_live_json_implement_v2()</code> が legacy_test_only 相当になり、production native route から finish が露出しない。</td>
+                <td>後方互換要件はないが、旧 artifact replay は明示 quarantine のみ許可。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="close-gate">
+        <h2>7. Close Gate チェックリスト</h2>
+        <ul class="checklist">
+          <li>production native provider requests に <code>finish</code> tool descriptor がない。</li>
+          <li>finish argument schema fields が provider request にない。</li>
+          <li>main-model input に raw <code>task_contract</code>、gate/resolver JSON、planner rationale、proof manifest body がない。</li>
+          <li>planner request は planner-visible inputs だけで構成される。</li>
+          <li>planner request に hidden verifier detail、hidden acceptance、raw contract、oracle constraint、benchmark-only expected output がない。</li>
+          <li>sidecar で configured verifier → planner → diagnostic-only auto の precedence が見える。</li>
+          <li>auto-detected verifier が rejected planner command を黙って置換しない。</li>
+          <li>no-tool assistant final response から done candidate がちょうど1つ作られる。</li>
+          <li>すべての done candidate に internal finish-gate decision がちょうど1つある。</li>
+          <li>production gate/planner rows は <code>done_candidate_id</code> で keying される。</li>
+          <li>OK は lane completed にし、モデルの final response を保持する。</li>
+          <li>NG continue は抽象 signal で再開し、内部 schema を漏らさない。</li>
+          <li>NG continue の hard cap と repeat plateau rule が守られる。</li>
+          <li>NG return は supervisor-safe summary で blocked として止まる。</li>
+          <li>planner decisions は sidecar-only で manifest-hashed。</li>
+          <li>compact digest は done-candidate/internal-gate fields を使い、legacy finish-readiness fields を含まない。</li>
+          <li><code>response_transcript.json</code>、sidecars、<code>proof-manifest.json</code> で completion outcome が決定的に replay できる。</li>
+          <li>hot-path step-diff が model work、done candidate、internal gate、NG resume を区別できる。</li>
+        </ul>
+      </section>
+
+      <section id="drift">
+        <h2>8. 実装時に drift しやすいポイント</h2>
+        <div class="panel warning">
+          <ul>
+            <li><code>finish</code> を <code>tool_policy.py</code> から消しても、registry/routes/renderer/schema/provider adapter に残って provider-visible surface へ復活する。</li>
+            <li><code>done_candidate_id</code> へ rekey したつもりで、planner/gate の一部 artifact がまだ <code>finish_call_id</code> production key になる。</li>
+            <li>NG resume signal に raw gate blocker、<code>task_contract</code> field name、<code>evidence_refs</code> などが混ざる。</li>
+            <li>planner request builder が hidden external verifier detail や benchmark-only expected output を便利情報として渡してしまう。</li>
+            <li><code>auto_detected_verifier</code> が diagnostic-only を超えて、planner rejection 後の silent fallback になる。</li>
+            <li>ambiguous no-tool prose で continuation を無制限に出し、done candidate に収束しない。</li>
+            <li>observability/fastcheck/step-diff の追加が artifact-only ではなく live path を変える。</li>
+            <li>legacy <code>run_live_json_implement_v2()</code> の finish tests が production native close gate を満たした扱いになる。</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="questions">
+        <h2>9. ユーザーがレビューするときの質問リスト</h2>
+        <ol>
+          <li>main model に見える入力は、本当に通常の coding loop と安全な NG resume signal だけになっているか。</li>
+          <li><code>finish</code> removal は tool policy だけでなく registry、routes、renderer、schema、provider adapter まで閉じているか。</li>
+          <li><code>done_candidate</code> の検出条件は、final response と途中の no-tool prose を保守的に分けられるか。</li>
+          <li>曖昧 no-tool prose の「1回だけ continuation、その次は <code>no_tool_repeat</code> candidate」は十分に実装可能か。</li>
+          <li>internal gate は <code>task_contract</code> を読める一方、main model と planner へ漏らさない境界がテストできるか。</li>
+          <li>configured verifier がある場合に planner を不要にする precedence は、sidecar 上で後から監査できるか。</li>
+          <li>auto-detected verifier の fallback policy は、許可条件・記録項目・拒否時挙動が十分に明示されているか。</li>
+          <li>NG continue の cap と plateau signature は、無限修復ループを止めるのに足りるか。</li>
+          <li>OK 時に controller metadata を user response に混ぜず、モデルの final response を保持できるか。</li>
+          <li>legacy replay/quarantine と production native route の境界は、テスト名・artifact key・audit で混同されないか。</li>
+          <li>make-doom-for-mips のような実タスクで、mew 固有完了スキーマへの適応ではなく、普通の編集・検証へ戻れる設計になっているか。</li>
+          <li>Close Gate は「実装済みっぽい」ではなく、provider request artifacts と sidecar hash で機械的に判定できるか。</li>
+        </ol>
+      </section>
+
+      <section id="source">
+        <h2>10. 参考元</h2>
+        <div class="panel">
+          <p>
+            元設計書:
+            <a href="DESIGN_2026-05-17_M6_24_INTERNAL_FINISH_GATE.md">
+              docs/DESIGN_2026-05-17_M6_24_INTERNAL_FINISH_GATE.md
+            </a>
+          </p>
+          <p>
+            このHTMLはレビュー補助用の要約です。元設計書を変更せず、実装コードにも触れていません。
+            「レビュー観点」「実装時に drift しやすいポイント」「質問リスト」は、元設計の内容を確認しやすくするための整理です。
+          </p>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
