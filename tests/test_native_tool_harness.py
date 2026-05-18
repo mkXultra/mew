@@ -39,7 +39,9 @@ from mew.implement_lane.native_transcript import (
     native_proof_manifest_from_transcript,
     validate_native_transcript_pairing,
 )
-from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID
+from mew.implement_lane.native_workframe_projection import build_provider_visible_forbidden_fields_report
+from mew.implement_lane.tool_profiles.codex_hot_path import codex_hot_path_developer_contract
+from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID, build_tool_surface_snapshot
 from mew.implement_lane.types import ImplementLaneInput, ToolResultEnvelope
 
 
@@ -162,6 +164,34 @@ def test_codex_hot_path_folds_developer_contract_when_role_input_unsupported(tmp
     assert inventory["developer_contract_transport"] == "instructions_folded"
     assert inventory["developer_contract_wire_visible"] is True
     assert inventory["developer_contract_fallback_reason"] == "provider_lacks_developer_role"
+
+
+def test_codex_hot_path_developer_contract_forbidden_terms_are_scanned(tmp_path: Path) -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"tool_surface_profile_id": CODEX_HOT_PATH_PROFILE_ID},
+        task_contract={},
+        transcript_items=(),
+    )
+    contract = codex_hot_path_developer_contract(tool_specs=snapshot.tool_specs)
+    dirty_text = " ".join(contract.forbidden_terms)
+
+    report = build_provider_visible_forbidden_fields_report(
+        input_items=[
+            {
+                "role": "developer",
+                "content": [{"type": "input_text", "text": dirty_text}],
+            }
+        ],
+        instructions="",
+        compact_sidecar_digest={},
+        compact_sidecar_digest_wire_visible=False,
+        developer_contract_texts=(dirty_text,),
+        developer_contract_forbidden_terms=contract.forbidden_terms,
+    )
+
+    assert snapshot.profile_id == CODEX_HOT_PATH_PROFILE_ID
+    assert report["ok"] is False
+    assert set(contract.forbidden_terms) <= set(report["detected"])
 
 
 def test_native_task_description_includes_goal_and_objective(tmp_path: Path) -> None:

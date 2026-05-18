@@ -148,6 +148,7 @@ def codex_hot_path_developer_contract(
             "next_action",
             "required_next",
             "first_write",
+            "sidecar",
             "proof_manifest",
             "native_finish_gate",
             "make-doom-for-mips",

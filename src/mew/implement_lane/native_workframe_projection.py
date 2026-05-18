@@ -8,6 +8,7 @@ state channel.
 
 from __future__ import annotations
 
+import re
 from typing import Iterable, Mapping
 
 from .affordance_visibility import fields_from_forbidden_violations, scan_forbidden_provider_visible
@@ -307,6 +308,8 @@ def build_provider_visible_forbidden_fields_report(
     instructions: str,
     compact_sidecar_digest: Mapping[str, object],
     compact_sidecar_digest_wire_visible: bool = True,
+    developer_contract_texts: Iterable[str] = (),
+    developer_contract_forbidden_terms: Iterable[str] = (),
 ) -> dict[str, object]:
     """Report steering/control fields visible to the provider request hot path."""
 
@@ -317,7 +320,13 @@ def build_provider_visible_forbidden_fields_report(
         if compact_sidecar_digest_wire_visible
         else {},
     }
-    violations = scan_forbidden_provider_visible(provider_visible_payload, surface="provider_request")
+    violations = [
+        *scan_forbidden_provider_visible(provider_visible_payload, surface="provider_request"),
+        *_developer_contract_forbidden_violations(
+            developer_contract_texts,
+            developer_contract_forbidden_terms=developer_contract_forbidden_terms,
+        ),
+    ]
     detected = fields_from_forbidden_violations(violations)
     return {
         "schema_version": NATIVE_PROVIDER_VISIBLE_FORBIDDEN_FIELDS_SCHEMA_VERSION,
@@ -328,6 +337,37 @@ def build_provider_visible_forbidden_fields_report(
         "violations": violations,
         "payload_sha256": stable_json_hash(provider_visible_payload),
     }
+
+
+def _developer_contract_forbidden_violations(
+    developer_contract_texts: Iterable[str],
+    *,
+    developer_contract_forbidden_terms: Iterable[str],
+) -> list[dict[str, object]]:
+    terms = tuple(str(term).strip() for term in developer_contract_forbidden_terms if str(term).strip())
+    if not terms:
+        return []
+    violations: list[dict[str, object]] = []
+    for index, text in enumerate(str(item) for item in developer_contract_texts if str(item).strip()):
+        for term in terms:
+            if _forbidden_term_in_text(term, text):
+                violations.append(
+                    {
+                        "surface": "profile_developer_contract",
+                        "field": term,
+                        "path": f"profile_developer_contract.{index}",
+                        "kind": "developer_contract_text_marker",
+                    }
+                )
+    return violations
+
+
+def _forbidden_term_in_text(term: str, text: str) -> bool:
+    if not term:
+        return False
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", term):
+        return re.search(rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])", text) is not None
+    return term in text
 
 
 def native_workframe_projection_policy(variant: object = DEFAULT_WORKFRAME_VARIANT) -> dict[str, object]:

@@ -4638,6 +4638,11 @@ def _request_descriptor(
         provider_visible_transcript_items,
     )
     tool_specs = tool_surface.tool_specs
+    developer_contract = (
+        codex_hot_path_developer_contract(tool_specs=tool_surface.tool_specs)
+        if tool_surface.profile_id == CODEX_HOT_PATH_PROFILE_ID
+        else None
+    )
     input_items = _responses_input_items(
         lane_input,
         provider_visible_transcript_items,
@@ -4654,6 +4659,8 @@ def _request_descriptor(
         instructions=instructions,
         compact_sidecar_digest=compact_sidecar_digest,
         compact_sidecar_digest_wire_visible=False,
+        developer_contract_texts=(developer_contract.rendered_text,) if developer_contract else (),
+        developer_contract_forbidden_terms=developer_contract.forbidden_terms if developer_contract else (),
     )
     provider_request_inventory = build_native_prompt_input_inventory(
         compact_sidecar_digest=compact_sidecar_digest,
