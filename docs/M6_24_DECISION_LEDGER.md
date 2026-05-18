@@ -424,25 +424,28 @@ conflict. The 2026-05-10 WorkFrame Phase 0 row supersedes older HOT_PATH rows
 that present another same-shape `step-check-10min`, `speed_1`, or `proof_5` as
 the immediate next action.
 
-Latest active-row update, 2026-05-17 JST: M6.24 Internal Finish Gate
-production-route quarantine is validated. The production native route remains
-native-only (`run_live_native_implement_v2`), the retired
-`run_live_json_implement_v2` / `implement_v2_model_json_tool_loop` path is not
-reachable from production command routing or native gate checks, and internal
-helper model calls such as the finish-verifier planner remain allowed as
-sidecar-filtered helpers. The active task now returns to the selected
-`make-doom-for-mips` gap with one same-shape pre-speed / step-shape diagnostic.
-Do not delete the legacy model-JSON runner in this slice, and do not add
-task-specific Doom/MIPS rules before the diagnostic.
+Latest active-row update, 2026-05-18 JST: the post-Phase-6D
+`make-doom-for-mips` pre-speed and speed proof are recorded and the task is
+deferred as pending evidence, not an active repair target. The latest speed
+proof no longer shows the old standalone synthetic-builder failure shape: mew
+used `apply_patch`, source/build files under `doomgeneric/doomgeneric`, and a
+source-connected build path. External verifier passed frame existence and
+visual-similarity checks but failed the stdout timing check; internal finish
+closeout also timed out because `finish_verifier_planner` selected long-running
+`node vm.js` as the final closeout command. Do not keep spending
+`make-doom-for-mips` proof budget or add Doom/MIPS-specific prompt/tool/gate
+rules. Revisit only after a generic bounded verifier closeout / long-running
+observable-output verifier design is selected, or if another scoped task
+repeats the same finish-closeout/stdout-timing class.
 
 Note: older rows may retain their original status labels for historical search,
 but they are not task-selection authority while
-`internal_finish_gate_phase5_6_green_make_doom_prespeed_next` is the newest row. Treat
-them as repair evidence only unless this row is explicitly closed or
-superseded.
+`make_doom_pending_next_scoped_task` is the newest row. Treat them as repair
+evidence only unless this row is explicitly closed or superseded.
 
 | Date | Decision | Evidence | Next action | Status |
 |---|---|---|---|---|
+| 2026-05-18 | Defer `make-doom-for-mips` as pending evidence and return to scoped M6.24 measurement. | Step-check artifact `proof-artifacts/terminal-bench/harbor-smoke/mew-make-doom-for-mips-step-check-10min-ts-codex-hot-path-20260518-163852/2026-05-18__16-38-53/make-doom-for-mips__MQfTcym` showed source-connected direction after moving codex-like discipline into the lane/base contract. Speed proof artifact `proof-artifacts/terminal-bench/harbor-smoke/mew-make-doom-for-mips-speed-proof-ts-codex-hot-path-20260518-165842/2026-05-18__16-58-42/make-doom-for-mips__32HXn2D` scored reward `0.0` with runner errors `0`; external verifier passed frame existence and visual similarity but failed stdout text capture. The mew report shows `done_candidate_count=1`, native transcript pairing valid, `finish_verifier_planner` chose `node vm.js`, and closeout timed out while stdout tail already contained `I_InitGraphics: DOOM screen size: w x h: 320 x 200`. The failure class is now bounded-verifier/stdout-timing closeout plus task-solving quality, not the old synthetic-builder drift. | Mark `make-doom-for-mips` pending. Do not add task-specific Doom/MIPS fixes, source-grounding prompt patches, or more finish-gate heuristics from this artifact. Continue M6.24 scoped rebaseline with the next pending task, starting with `merge-diff-arc-agi-task` speed_1 under `codex_hot_path`, unless a generic bounded verifier closeout design is explicitly selected first. | make_doom_pending_next_scoped_task |
 | 2026-05-17 | Close the Internal Finish Gate Phase 5/6 production-route gate and return to `make-doom-for-mips` pre-speed. | Commit `4819886` narrowed the model-JSON cleanup scope to production-route quarantine: legacy `run_live_json_implement_v2` remains for historical tests/dogfood, while production native validation rejects `run_live_json_implement_v2` / `implement_v2_model_json_tool_loop` on the main route and allows internal helper model calls such as finish-verifier planner `call_codex_json`. codex-ultra review sessions `019e34c6-1227-7be1-a2b9-e94570c44473` and `019e34c8-f2f1-7fb1-b694-5cdec07b6ee1` approved. Validation passed: `uv run pytest --no-testmon tests/test_native_tool_schema.py tests/test_native_provider_adapter.py tests/test_native_tool_harness.py tests/test_native_finish_gate.py tests/test_hot_path_fastcheck.py tests/test_native_boundary_audit.py tests/test_native_validation.py -q` -> `323 passed`; `uv run python scripts/check_implement_v2_native_gate.py --source-root .` -> PASS; `uv run pytest --no-testmon tests/test_native_validation.py -q` -> `7 passed`; scoped ruff passed before commit. | Run exactly one same-shape `make-doom-for-mips` pre-speed / step-shape diagnostic under the current native codex-hot-path setup. If it still misses, classify the failure from artifact/replay/step diff before any code change. Do not run `speed-proof`, `proof-5`, broad measurement, legacy model-JSON deletion, or task-specific Doom/MIPS fixes first. | internal_finish_gate_phase5_6_green_make_doom_prespeed_next |
 | 2026-05-16 | Accept the latest `make-mips-interpreter` `proof-5` rerun as OK for M6.24 implementation-lane scoring. | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260516-192445/2026-05-16__19-24-45/result.json` finished `5` trials with mean `0.800`, rewards `4/5`, and Pass@2/4/5 `1.000`. The successful trials have Codex-like step shape (`avg_total=420.0s`, `avg_first_edit=313.5s`) versus the Codex reference total `416.4s` and first edit `367.8s`. The only failed trial, `make-mips-interpreter__AkUWt3H`, failed before editing from provider transport continuity (`websocket error status=400 code=previous_response_not_found`), not from task-solving, tool use, finish-gate, or verifier semantics. The transient WebSocket retry patch was reverted because WebSocket fallback/retry is out of the current M6.24 scoring scope. | Treat `make-mips-interpreter` as closed/OK for the current M6.24 implementation-lane proof gate. Do not reopen H5, finish-gate, prompt, tool-surface, or WebSocket retry work from this transport-only miss. Select or continue the next measured M6.24 gap. | h5_make_mips_20260516_transport_miss_accepted |
 | 2026-05-15 | Close H5 for `make-mips-interpreter` and return to measured M6.24 gap selection. | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260515-141331/2026-05-15__14-13-32/result.json` finished with `5` trials, runner errors `0`, mean `0.800`, rewards `4/5`, and Pass@2/4/5 `1.000`, exceeding frozen Codex target `3/5`. Runtime was `42m33s`. The only failed trial was `make-mips-interpreter__UiFm5aR`: it built and ran `vm.js`, but finish closeout accepted a `320x200` BMP while the external verifier expected `640x400`. The proof-5 run therefore validates the H5 hot-path repair and also records a separate future artifact-obligation / finish-verifier gap. | Mark `make-mips-interpreter` closed for this H5 repair. Select the next measured M6.24 scoped gap. Do not continue H5 polish from the single false-finish failure unless another selected task repeats the same artifact-obligation failure family. | h5_make_mips_proof5_closed_next_gap_selection |

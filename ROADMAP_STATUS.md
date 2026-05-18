@@ -73,9 +73,27 @@ Current controller mode:
 `m6_24_post_tool_profile_developer_message_reentry`.
 
 Current diagnostic mode:
-`phase6d_complete__return_to_m6_24_gap_loop`.
+`make_doom_pending_next_scoped_task`.
 
 Current reentry decision:
+2026-05-18 update: `make-doom-for-mips` is now pending evidence rather than
+the active repair target. The post-Phase-6D pre-speed and speed proof showed
+that current `codex_hot_path` no longer clearly drifts into the old standalone
+synthetic-builder shape. The latest speed proof at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-doom-for-mips-speed-proof-ts-codex-hot-path-20260518-165842/2026-05-18__16-58-42/make-doom-for-mips__32HXn2D`
+scored reward `0.0` with runner errors `0`, but external verifier passed frame
+existence and visual similarity and failed only the stdout text capture.
+Internal closeout also timed out because `finish_verifier_planner` selected
+long-running `node vm.js`; its stdout tail contained the expected
+`I_InitGraphics: DOOM screen size: w x h: 320 x 200` line.
+
+Do not add Doom/MIPS-specific prompt, tool, or finish-gate rules from this
+artifact. Revisit `make-doom-for-mips` only after a generic bounded verifier
+closeout / long-running observable-output verifier design is selected, or if
+another scoped task repeats the same class. The next active M6.24 action is
+scoped rebaseline measurement: run `merge-diff-arc-agi-task` speed_1 with
+`codex_hot_path` and record the result before selecting another repair.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:

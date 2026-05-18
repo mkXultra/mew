@@ -135,7 +135,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `hf-model-inference` | 5/5 | pass 1/1 after Docker capacity retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030` | proof_5 deferred until controller selects close proof |
 | `kv-store-grpc` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050` | proof_5 deferred until controller selects close proof |
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
-| `make-doom-for-mips` | 1/5 | recorded/deferred after 0/1 strategy-wall-budget frontier | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-finish-gate-prior-failure-make-doom-speed1-20260507-1217` | no same-shape rerun until a generic frontier-throttling or strategy design is selected and locally proven |
+| `make-doom-for-mips` | 1/5 | pending after source-connected 0/1 speed proof; frame/visual pass but stdout/finish-closeout miss | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-doom-for-mips-speed-proof-ts-codex-hot-path-20260518-165842/2026-05-18__16-58-42/make-doom-for-mips__32HXn2D` | defer until generic bounded verifier closeout / long-running observable-output verifier design is selected, or another scoped task repeats the same class |
 | `make-mips-interpreter` | 3/5 | closed: proof-5 pass 4/5 after H5/codex_hot_path repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260515-141331` | H5 closed for this task; select next measured M6.24 scoped gap |
 | `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
@@ -243,6 +243,20 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   header validity. Focused acceptance, implement-lane, and terminal-bench
   replay tests passed; scoped ruff and `git diff --check` passed; codex-ultra
   reviewer session `019dfb1a-5815-7f62-9669-cff64ea61fbc` approved.
+- 2026-05-18 source-connected recheck: the latest `make-doom-for-mips`
+  pre-speed and speed proof moved beyond the older synthetic/stub failure
+  shape. The speed proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-make-doom-for-mips-speed-proof-ts-codex-hot-path-20260518-165842/2026-05-18__16-58-42/make-doom-for-mips__32HXn2D`
+  scored reward `0.0` with runner errors `0`, but external verifier passed
+  frame existence and visual similarity while failing only the expected stdout
+  text capture. Internal closeout timed out because `finish_verifier_planner`
+  selected the long-running command `node vm.js`; the closeout stdout tail did
+  contain `I_InitGraphics: DOOM screen size: w x h: 320 x 200`. Treat this task
+  as pending evidence, not as the active repair target. Do not add Doom/MIPS
+  task-specific rules or source-grounding prompt patches from this artifact.
+  Revisit only after a generic bounded verifier closeout / long-running
+  observable-output verifier design is selected, or if another scoped task
+  repeats the same finish-closeout/stdout-timing class.
 - The post-repair rerun
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-make-doom-for-mips-speed1-20260506-1158-visual-quality-gate`
   is inconclusive product evidence. It scored reward `0.0` with runner errors
