@@ -5688,11 +5688,15 @@ def _live_failure_lane_result(
         provider=provider.provider,
         model=provider.model,
     )
+    finish_verifier_planner_decisions = _provider_finish_verifier_planner_decisions(provider)
+    finish_verifier_planner_requests = _provider_finish_verifier_planner_requests(provider)
     proof_artifacts = _write_live_failure_artifacts(
         lane_input,
         transcript=transcript,
         provider=provider,
         error=error,
+        finish_verifier_planner_decisions=finish_verifier_planner_decisions,
+        finish_verifier_planner_requests=finish_verifier_planner_requests,
     )
     return ImplementLaneResult(
         status="failed",
@@ -5716,6 +5720,11 @@ def _live_failure_lane_result(
             "error": error,
             "turn_count": len(provider.requests),
             "provider_request_inventory_available": bool(provider.requests),
+            "finish_verifier_planner_decision_count": len(finish_verifier_planner_decisions),
+            "finish_verifier_planner_request_count": len(finish_verifier_planner_requests),
+            "finish_verifier_planner_latest_decision": (
+                dict(finish_verifier_planner_decisions[-1]) if finish_verifier_planner_decisions else {}
+            ),
         },
     )
 
@@ -5742,6 +5751,8 @@ def _partial_failure_harness_result(
     validation = validate_native_transcript_pairing(transcript)
     if not validation.valid:
         raise InvalidNativeTranscriptError(f"invalid native transcript: {', '.join(validation.errors)}")
+    finish_verifier_planner_decisions = _provider_finish_verifier_planner_decisions(provider)
+    finish_verifier_planner_requests = _provider_finish_verifier_planner_requests(provider)
     metrics = {
         **_native_surface_for_provider(provider),
         "status": "failed",
@@ -5758,6 +5769,11 @@ def _partial_failure_harness_result(
         "native_finish_gate_latest_decision": (
             native_finish_gate_decisions[-1].as_dict() if native_finish_gate_decisions else {}
         ),
+        "finish_verifier_planner_decision_count": len(finish_verifier_planner_decisions),
+        "finish_verifier_planner_request_count": len(finish_verifier_planner_requests),
+        "finish_verifier_planner_latest_decision": (
+            dict(finish_verifier_planner_decisions[-1]) if finish_verifier_planner_decisions else {}
+        ),
         "pairing": validation.as_dict(),
     }
     proof_artifacts: tuple[str, ...] = ()
@@ -5771,6 +5787,8 @@ def _partial_failure_harness_result(
                 done_candidates=done_candidates,
                 native_finish_gate_decisions=native_finish_gate_decisions,
                 ng_resume_signals=ng_resume_signals,
+                finish_verifier_planner_decisions=finish_verifier_planner_decisions,
+                finish_verifier_planner_requests=finish_verifier_planner_requests,
                 error=error,
                 artifact_root=Path(artifact_root),
             )
@@ -5783,6 +5801,8 @@ def _partial_failure_harness_result(
                 done_candidates=done_candidates,
                 native_finish_gate_decisions=native_finish_gate_decisions,
                 ng_resume_signals=ng_resume_signals,
+                finish_verifier_planner_decisions=finish_verifier_planner_decisions,
+                finish_verifier_planner_requests=finish_verifier_planner_requests,
                 status="failed",
                 error=error,
             )
@@ -5805,6 +5825,8 @@ def _write_live_failure_artifacts(
     done_candidates: tuple[NativeDoneCandidate, ...] = (),
     native_finish_gate_decisions: tuple[NativeFinishGateDecision, ...] = (),
     ng_resume_signals: tuple[NativeNgResumeSignal, ...] = (),
+    finish_verifier_planner_decisions: tuple[Mapping[str, object], ...] = (),
+    finish_verifier_planner_requests: tuple[Mapping[str, object], ...] = (),
     error: str,
     artifact_root: Path | None = None,
 ) -> tuple[str, ...]:
@@ -5850,6 +5872,14 @@ def _write_live_failure_artifacts(
                 proof_manifest_path=paths.get("proof_manifest"),
             )
         )
+    paths.update(
+        _write_finish_verifier_planner_artifacts(
+            root,
+            proof_manifest_path=paths.get("proof_manifest"),
+            finish_verifier_planner_decisions=finish_verifier_planner_decisions,
+            finish_verifier_planner_requests=finish_verifier_planner_requests,
+        )
+    )
     request_path = root / "native-provider-requests.json"
     inventory_path = root / "provider-request-inventory.json"
     response_count = len(provider.responses)
@@ -6249,6 +6279,47 @@ def _call_order_key(call: NativeTranscriptItem) -> tuple[int, int]:
     return (call.output_index, call.sequence)
 
 
+def _write_finish_verifier_planner_artifacts(
+    root: Path,
+    *,
+    proof_manifest_path: Path | None,
+    finish_verifier_planner_decisions: tuple[Mapping[str, object], ...],
+    finish_verifier_planner_requests: tuple[Mapping[str, object], ...] = (),
+) -> dict[str, Path]:
+    if not finish_verifier_planner_decisions:
+        return {}
+    paths: dict[str, Path] = {}
+    planner_requests_path: Path | None = None
+    if finish_verifier_planner_requests:
+        planner_requests_path = root / _FINISH_VERIFIER_PLANNER_REQUESTS_FILE
+        planner_requests_path.write_text(
+            "".join(
+                json.dumps(_json_safe_native(dict(record)), ensure_ascii=False, sort_keys=True) + "\n"
+                for record in finish_verifier_planner_requests
+            ),
+            encoding="utf-8",
+        )
+        paths["finish_verifier_planner_requests"] = planner_requests_path
+    planner_decisions_path = root / _FINISH_VERIFIER_PLANNER_DECISIONS_FILE
+    planner_decisions_path.write_text(
+        "".join(
+            json.dumps(_json_safe_native(dict(record)), ensure_ascii=False, sort_keys=True) + "\n"
+            for record in finish_verifier_planner_decisions
+        ),
+        encoding="utf-8",
+    )
+    paths["finish_verifier_planner_decisions"] = planner_decisions_path
+    if proof_manifest_path is not None:
+        _patch_proof_manifest_with_finish_verifier_planner_decisions(
+            proof_manifest_path,
+            decision_path=planner_decisions_path,
+            records=finish_verifier_planner_decisions,
+            request_path=planner_requests_path,
+            request_records=finish_verifier_planner_requests,
+        )
+    return paths
+
+
 def _write_native_artifacts(
     root: Path,
     transcript: NativeTranscript,
@@ -6309,35 +6380,14 @@ def _write_native_artifacts(
                 proof_manifest_path=paths.get("proof_manifest"),
             )
         )
-    if finish_verifier_planner_decisions:
-        planner_requests_path: Path | None = None
-        if finish_verifier_planner_requests:
-            planner_requests_path = root / _FINISH_VERIFIER_PLANNER_REQUESTS_FILE
-            planner_requests_path.write_text(
-                "".join(
-                    json.dumps(_json_safe_native(dict(record)), ensure_ascii=False, sort_keys=True) + "\n"
-                    for record in finish_verifier_planner_requests
-                ),
-                encoding="utf-8",
-            )
-            paths["finish_verifier_planner_requests"] = planner_requests_path
-        planner_decisions_path = root / _FINISH_VERIFIER_PLANNER_DECISIONS_FILE
-        planner_decisions_path.write_text(
-            "".join(
-                json.dumps(_json_safe_native(dict(record)), ensure_ascii=False, sort_keys=True) + "\n"
-                for record in finish_verifier_planner_decisions
-            ),
-            encoding="utf-8",
+    paths.update(
+        _write_finish_verifier_planner_artifacts(
+            root,
+            proof_manifest_path=paths.get("proof_manifest"),
+            finish_verifier_planner_decisions=finish_verifier_planner_decisions,
+            finish_verifier_planner_requests=finish_verifier_planner_requests,
         )
-        paths["finish_verifier_planner_decisions"] = planner_decisions_path
-        if paths.get("proof_manifest") is not None:
-            _patch_proof_manifest_with_finish_verifier_planner_decisions(
-                paths["proof_manifest"],
-                decision_path=planner_decisions_path,
-                records=finish_verifier_planner_decisions,
-                request_path=planner_requests_path,
-                request_records=finish_verifier_planner_requests,
-            )
+    )
     paths.update(
         write_native_evidence_observation(
             root,

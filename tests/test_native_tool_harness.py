@@ -28,6 +28,9 @@ from mew.implement_lane.native_tool_harness import (
     _native_final_verifier_closeout_call,
     _native_finish_supplied_closeout_context,
     _native_task_description,
+    _partial_failure_harness_result,
+    _record_finish_verifier_planner_decision,
+    _record_finish_verifier_planner_request,
     run_live_native_implement_v2,
     run_native_implement_v2,
     run_unavailable_native_implement_v2,
@@ -700,6 +703,64 @@ def test_finish_verifier_planner_timeout_config_overrides_default(tmp_path: Path
 
     assert result == {"command": "pytest -q"}
     assert call_json.call_args.args[4] == 12.0
+
+
+def test_partial_failure_persists_finish_verifier_planner_observability(tmp_path: Path) -> None:
+    lane_input = _lane_input(tmp_path)
+    provider = NativeCodexResponsesProvider(
+        lane_input=lane_input,
+        auth={"access_token": "token"},
+        base_url="https://example.invalid",
+        timeout=10,
+        model="gpt-5.5",
+    )
+    provider.requests.append({"turn_index": 1, "provider_request_inventory": {"turn_index": 1}})
+    _record_finish_verifier_planner_request(
+        provider,
+        {
+            "component": "FinishVerifierPlannerLoop",
+            "done_candidate_id": "done-1",
+            "task": {"description": "verify completion"},
+        },
+        request_hash="sha256:planner-request",
+    )
+    _record_finish_verifier_planner_decision(
+        provider,
+        {
+            "status": "error",
+            "request_hash": "sha256:planner-request",
+            "done_candidate_id": "done-1",
+            "error": "websocket closed before response.completed",
+        },
+    )
+    artifact_root = tmp_path / "partial-failure-artifacts"
+
+    result = _partial_failure_harness_result(
+        lane_input,
+        lane_attempt_id="ws-native:task-native:implement_v2:native",
+        provider=provider,
+        items=[],
+        tool_results=(),
+        done_candidates=(),
+        artifact_root=artifact_root,
+        error="websocket closed before response.completed",
+    )
+
+    assert result.status == "failed"
+    assert result.metrics["finish_verifier_planner_decision_count"] == 1
+    assert result.metrics["finish_verifier_planner_request_count"] == 1
+    assert result.metrics["finish_verifier_planner_latest_decision"]["status"] == "error"
+    request_path = artifact_root / "finish_verifier_planner_requests.jsonl"
+    decision_path = artifact_root / "finish_verifier_planner_decisions.jsonl"
+    request_rows = [json.loads(line) for line in request_path.read_text(encoding="utf-8").splitlines()]
+    decision_rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
+    assert request_rows[-1]["request_hash"] == "sha256:planner-request"
+    assert decision_rows[-1]["error"] == "websocket closed before response.completed"
+    manifest = json.loads((artifact_root / "proof-manifest.json").read_text(encoding="utf-8"))
+    assert manifest["finish_verifier_planner_decisions_ref"] == "finish_verifier_planner_decisions.jsonl"
+    assert manifest["finish_verifier_planner_requests_ref"] == "finish_verifier_planner_requests.jsonl"
+    assert manifest["metrics"]["finish_verifier_planner_decisions"]["error_count"] == 1
+    assert manifest["metrics"]["finish_verifier_planner_requests"]["request_count"] == 1
 
 
 def test_codex_hot_path_exec_command_routes_to_managed_exec(tmp_path: Path) -> None:
