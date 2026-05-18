@@ -6,6 +6,11 @@ from mew.implement_lane.tool_registry import (
     MEW_LEGACY_PROFILE_ID,
     build_tool_surface_snapshot,
 )
+from mew.implement_lane.tool_profiles.codex_hot_path import (
+    CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID,
+    codex_hot_path_developer_contract,
+    codex_hot_path_tool_specs,
+)
 
 
 def test_mew_legacy_profile_preserves_default_tool_order_without_lifecycle() -> None:
@@ -174,6 +179,70 @@ def test_codex_hot_path_profile_gates_list_dir_option() -> None:
     assert "list_dir" in snapshot.provider_tool_names
     route_by_name = {entry.provider_name: entry.as_dict() for entry in snapshot.entries}
     assert route_by_name["list_dir"]["internal_kernel"] == "inspect_dir"
+
+
+def test_phase6d0_codex_hot_path_developer_contract_fixture_matches_tools() -> None:
+    specs = codex_hot_path_tool_specs(enable_list_dir=False)
+    contract = codex_hot_path_developer_contract(tool_specs=specs)
+
+    assert contract.profile_id == CODEX_HOT_PATH_PROFILE_ID
+    assert contract.contract_id == CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID
+    assert contract.provider_tool_names == tuple(spec.name for spec in specs)
+    assert "Use apply_patch for manual source edits." in contract.rendered_text
+    assert (
+        "Use exec_command for inspection, builds, tests, probes, package-manager setup, and verification."
+        in contract.rendered_text
+    )
+    assert "Do not create or edit source files with shell heredocs" in contract.rendered_text
+    assert "shell is not the manual source editing API." in contract.rendered_text
+    assert "list_dir" not in contract.rendered_text
+    expected_forbidden_terms = (
+        "finish",
+        "final_status",
+        "summary",
+        "evidence_refs",
+        "task_done",
+        "run_tests",
+        "run_command",
+        "read_file",
+        "search_text",
+        "glob",
+        "inspect_dir",
+        "WorkFrame",
+        "next_action",
+        "required_next",
+        "first_write",
+        "proof_manifest",
+        "native_finish_gate",
+        "make-doom-for-mips",
+        "doomgeneric_mips",
+        "/tmp/frame.bmp",
+        "Terminal-Bench",
+    )
+    assert contract.forbidden_terms == expected_forbidden_terms
+    for forbidden in expected_forbidden_terms:
+        assert forbidden not in contract.rendered_text
+
+
+def test_phase6d0_codex_hot_path_developer_contract_tracks_list_dir_option() -> None:
+    specs = codex_hot_path_tool_specs(enable_list_dir=True)
+    contract = codex_hot_path_developer_contract(tool_specs=specs)
+
+    assert contract.provider_tool_names == tuple(spec.name for spec in specs)
+    assert "list_dir" in contract.provider_tool_names
+    assert (
+        "Use list_dir only for bounded directory listings; use exec_command for normal terminal inspection when shell access is available."
+        in contract.rendered_text
+    )
+
+
+def test_phase6d0_legacy_profile_does_not_import_codex_developer_contract() -> None:
+    legacy_profile = Path("src/mew/implement_lane/tool_profiles/mew_legacy.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID" not in legacy_profile
+    assert "codex_hot_path_developer_contract" not in legacy_profile
 
 
 def test_phase6a_tool_registry_does_not_import_legacy_policy_for_descriptors() -> None:

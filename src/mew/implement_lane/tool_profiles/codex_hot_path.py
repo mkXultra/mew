@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ...prompt_sections import (
     CACHE_POLICY_CACHEABLE,
     CACHE_POLICY_SESSION,
@@ -13,6 +15,34 @@ from ..tool_specs import ImplementLaneToolSpec
 
 CODEX_HOT_PATH_PROFILE_ID = "codex_hot_path"
 CODEX_HOT_PATH_PROMPT_CONTRACT_ID = "codex_hot_path_prompt_v1"
+CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID = "codex_hot_path_developer_contract_v1"
+CODEX_HOT_PATH_DEVELOPER_CONTRACT_VERSION = "v1"
+
+
+@dataclass(frozen=True)
+class DeveloperToolBehaviorContract:
+    """Profile-owned provider-visible developer contract fixture."""
+
+    profile_id: str
+    profile_version: str
+    contract_id: str
+    contract_version: str
+    provider_tool_names: tuple[str, ...]
+    rendered_text: str
+    required_phrases: tuple[str, ...]
+    forbidden_terms: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "profile_id": self.profile_id,
+            "profile_version": self.profile_version,
+            "contract_id": self.contract_id,
+            "contract_version": self.contract_version,
+            "provider_tool_names": list(self.provider_tool_names),
+            "rendered_text": self.rendered_text,
+            "required_phrases": list(self.required_phrases),
+            "forbidden_terms": list(self.forbidden_terms),
+        }
 
 _CODEX_APPLY_PATCH_SPEC = ImplementLaneToolSpec(
     name="apply_patch",
@@ -59,6 +89,70 @@ def codex_hot_path_tool_specs(*, enable_list_dir: bool) -> tuple[ImplementLaneTo
     if enable_list_dir:
         specs.insert(1, _CODEX_LIST_DIR_SPEC)
     return tuple(specs)
+
+
+def codex_hot_path_developer_contract(
+    *,
+    tool_specs: tuple[ImplementLaneToolSpec, ...],
+) -> DeveloperToolBehaviorContract:
+    """Return the profile-owned developer contract fixture for codex_hot_path."""
+
+    provider_tool_names = tuple(spec.name for spec in tool_specs)
+    required_phrases = (
+        "Use apply_patch for manual source edits.",
+        "Use exec_command for inspection, builds, tests, probes, package-manager setup, and verification.",
+        "Do not create or edit source files with shell heredocs, cat, printf, sed -i, perl -pi, Python file-writing scripts, or equivalent shell text-generation shortcuts.",
+        "shell is not the manual source editing API.",
+    )
+    paragraphs = (
+        "You are working through the codex_hot_path tool surface.",
+        required_phrases[0],
+        required_phrases[1],
+        (
+            f"{required_phrases[2]} Shell commands may create build outputs, run tools, "
+            f"install packages when permitted, and inspect files, but {required_phrases[3]}"
+        ),
+        (
+            "Use write_stdin only to poll or interact with an existing exec_command session "
+            "according to the profile's interactive-stdin capability."
+        ),
+    )
+    if "list_dir" in provider_tool_names:
+        paragraphs += (
+            "Use list_dir only for bounded directory listings; use exec_command for normal terminal inspection when shell access is available.",
+        )
+    return DeveloperToolBehaviorContract(
+        profile_id=CODEX_HOT_PATH_PROFILE_ID,
+        profile_version="v1",
+        contract_id=CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID,
+        contract_version=CODEX_HOT_PATH_DEVELOPER_CONTRACT_VERSION,
+        provider_tool_names=provider_tool_names,
+        rendered_text="\n\n".join(paragraphs),
+        required_phrases=required_phrases,
+        forbidden_terms=(
+            "finish",
+            "final_status",
+            "summary",
+            "evidence_refs",
+            "task_done",
+            "run_tests",
+            "run_command",
+            "read_file",
+            "search_text",
+            "glob",
+            "inspect_dir",
+            "WorkFrame",
+            "next_action",
+            "required_next",
+            "first_write",
+            "proof_manifest",
+            "native_finish_gate",
+            "make-doom-for-mips",
+            "doomgeneric_mips",
+            "/tmp/frame.bmp",
+            "Terminal-Bench",
+        ),
+    )
 
 
 def codex_hot_path_prompt_sections(
@@ -158,8 +252,12 @@ def _tool_contract_section() -> PromptSection:
 
 
 __all__ = [
+    "CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID",
+    "CODEX_HOT_PATH_DEVELOPER_CONTRACT_VERSION",
     "CODEX_HOT_PATH_PROFILE_ID",
     "CODEX_HOT_PATH_PROMPT_CONTRACT_ID",
+    "DeveloperToolBehaviorContract",
+    "codex_hot_path_developer_contract",
     "codex_hot_path_prompt_sections",
     "codex_hot_path_tool_specs",
 ]
