@@ -12,6 +12,7 @@ verifier closeout exits 0.  They are not the hot completion authority.
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -317,7 +318,11 @@ def validate_closeout_command(
             reason=f"command source {command.source!r} is not allowed by policy",
         )
 
-    blockers = _unsafe_command_blockers(normalized, allow_shell=active_policy.allow_shell)
+    blockers = _unsafe_command_blockers(
+        normalized,
+        allow_shell=active_policy.allow_shell,
+        allow_planner_read_only_inline_python=command.source == "finish_verifier_planner",
+    )
     if blockers:
         return FinishCloseoutCommandValidation(
             allowed=False,
@@ -537,6 +542,97 @@ _SHELL_TOKENS = frozenset({"bash", "sh", "zsh", "/bin/bash", "/bin/sh", "/bin/zs
 _SELF_ACCEPTANCE_TOKENS = frozenset({"echo", "printf"})
 _WEAK_ASSERTION_TOKENS = frozenset({"test", "[", "[["})
 _INLINE_EVALUATOR_TOKENS = frozenset({"node", "python", "python3", "ruby"})
+_READ_ONLY_INLINE_PYTHON_IMPORT_ROOTS = frozenset(
+    {
+        "collections",
+        "csv",
+        "hashlib",
+        "importlib",
+        "inspect",
+        "json",
+        "math",
+        "os",
+        "pathlib",
+        "re",
+        "statistics",
+        "subprocess",
+        "sys",
+    }
+)
+_UNSAFE_INLINE_PYTHON_CALLS = frozenset(
+    {
+        "__import__",
+        "builtins.open",
+        "compile",
+        "eval",
+        "exec",
+        "exit",
+        "getattr",
+        "importlib.import_module",
+        "mkdir",
+        "os.chmod",
+        "os.chown",
+        "os.makedirs",
+        "os.mkdir",
+        "os.open",
+        "os.popen",
+        "os.remove",
+        "os.rename",
+        "os.replace",
+        "os.rmdir",
+        "os.system",
+        "os.truncate",
+        "os.unlink",
+        "quit",
+        "pathlib.Path.mkdir",
+        "pathlib.Path.rename",
+        "pathlib.Path.replace",
+        "pathlib.Path.rmdir",
+        "pathlib.Path.touch",
+        "pathlib.Path.unlink",
+        "pathlib.Path.write_bytes",
+        "pathlib.Path.write_text",
+        "remove",
+        "rename",
+        "replace",
+        "rmdir",
+        "shutil.copy",
+        "shutil.copy2",
+        "shutil.copyfile",
+        "shutil.copytree",
+        "shutil.move",
+        "shutil.rmtree",
+        "sys.exit",
+        "touch",
+        "unlink",
+        "write",
+        "write_bytes",
+        "write_text",
+    }
+)
+_UNSAFE_INLINE_PYTHON_GIT_SUBCOMMANDS = frozenset(
+    {
+        "add",
+        "am",
+        "apply",
+        "checkout",
+        "cherry-pick",
+        "clean",
+        "clone",
+        "commit",
+        "fetch",
+        "merge",
+        "mv",
+        "pull",
+        "push",
+        "rebase",
+        "reset",
+        "restore",
+        "revert",
+        "rm",
+        "switch",
+    }
+)
 _WRAPPER_TOKENS = frozenset({"command", "env"})
 _SOURCE_MUTATION_TOKENS = frozenset(
     {
@@ -569,7 +665,12 @@ _SECRET_MARKERS = (
 )
 
 
-def _unsafe_command_blockers(command: str, *, allow_shell: bool) -> tuple[str, ...]:
+def _unsafe_command_blockers(
+    command: str,
+    *,
+    allow_shell: bool,
+    allow_planner_read_only_inline_python: bool = False,
+) -> tuple[str, ...]:
     if "\n" in command or "\r" in command:
         return ("closeout_command_multiline",)
     normalized = " ".join(command.strip().split())
@@ -585,7 +686,11 @@ def _unsafe_command_blockers(command: str, *, allow_shell: bool) -> tuple[str, .
     if first in _WEAK_ASSERTION_TOKENS:
         blockers.append("closeout_command_weak_assertion")
     if first in _INLINE_EVALUATOR_TOKENS and any(token in {"-c", "-e"} for token in semantic_tokens):
-        blockers.append("closeout_command_inline_program")
+        if not (
+            allow_planner_read_only_inline_python
+            and _is_read_only_planner_inline_python(semantic_tokens)
+        ):
+            blockers.append("closeout_command_inline_program")
     if first in _SHELL_TOKENS and not allow_shell:
         blockers.append("closeout_command_shell_disallowed")
     semantic_basenames = {_basename(token) for token in semantic_tokens}
@@ -611,6 +716,167 @@ def _unsafe_command_blockers(command: str, *, allow_shell: bool) -> tuple[str, .
     if _contains_self_pass_marker(command):
         blockers.append("closeout_command_self_acceptance")
     return tuple(dict.fromkeys(blockers))
+
+
+def _is_read_only_planner_inline_python(tokens: tuple[str, ...]) -> bool:
+    if not tokens or _basename(tokens[0]) not in {"python", "python3"}:
+        return False
+    if any(token in {"-O", "-OO"} for token in tokens):
+        return False
+    code = _inline_python_code(tokens)
+    if not code:
+        return False
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.asname for alias in node.names):
+                return False
+            if any(alias.name.split(".", 1)[0] not in _READ_ONLY_INLINE_PYTHON_IMPORT_ROOTS for alias in node.names):
+                return False
+        elif isinstance(node, ast.ImportFrom):
+            return False
+        elif isinstance(node, ast.Call):
+            call_name = _python_call_name(node.func)
+            if _python_call_name_is_unsafe(call_name):
+                return False
+            if call_name == "open" and _python_open_call_can_write(node):
+                return False
+            if call_name.startswith("subprocess.") and (
+                _python_subprocess_call_uses_shell(node)
+                or _python_subprocess_call_mentions_mutating_command(node)
+            ):
+                return False
+        elif isinstance(node, ast.Assign):
+            if _python_assignment_value_is_unsafe(node.value):
+                return False
+        elif isinstance(node, ast.AnnAssign):
+            if _python_assignment_value_is_unsafe(node.value):
+                return False
+    return True
+
+
+def _inline_python_code(tokens: tuple[str, ...]) -> str:
+    for index, token in enumerate(tokens[:-1]):
+        if token in {"-c", "-e"}:
+            return tokens[index + 1]
+    return ""
+
+
+def _python_call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _python_call_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return ""
+
+
+def _python_call_name_is_unsafe(call_name: str) -> bool:
+    if call_name in _UNSAFE_INLINE_PYTHON_CALLS:
+        return True
+    unsafe_suffixes = (
+        ".mkdir",
+        ".remove",
+        ".rename",
+        ".replace",
+        ".rmdir",
+        ".touch",
+        ".unlink",
+        ".write",
+        ".write_bytes",
+        ".write_text",
+    )
+    return any(call_name.endswith(suffix) for suffix in unsafe_suffixes)
+
+
+def _python_open_call_can_write(node: ast.Call) -> bool:
+    mode = ""
+    if len(node.args) == 1 and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+        candidate = node.args[0].value
+        if candidate in {"w", "a", "x"} or any(marker in candidate for marker in ("w", "a", "x", "+")):
+            mode = candidate
+    if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
+        mode = node.args[1].value
+    for keyword in node.keywords:
+        if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
+            mode = keyword.value.value
+    if not mode:
+        return False
+    return any(marker in mode for marker in ("w", "a", "x", "+"))
+
+
+def _python_assignment_value_is_unsafe(value: ast.AST | None) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, ast.Attribute):
+        return _python_call_name_is_unsafe(_python_call_name(value))
+    if isinstance(value, ast.Call):
+        return _python_call_name_is_unsafe(_python_call_name(value.func))
+    return False
+
+
+def _python_subprocess_call_uses_shell(node: ast.Call) -> bool:
+    for keyword in node.keywords:
+        if keyword.arg == "shell" and isinstance(keyword.value, ast.Constant):
+            return bool(keyword.value.value)
+    return False
+
+
+def _python_subprocess_call_mentions_mutating_command(node: ast.Call) -> bool:
+    if not node.args:
+        return False
+    command_arg = node.args[0]
+    if isinstance(command_arg, ast.Constant) and isinstance(command_arg.value, str):
+        return _python_string_mentions_mutating_command(command_arg.value)
+    if isinstance(command_arg, ast.Name):
+        return True
+    if isinstance(command_arg, (ast.List, ast.Tuple)):
+        tokens: list[str] = []
+        for element in command_arg.elts:
+            if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                tokens.append(element.value)
+        return _python_tokens_mention_mutating_command(tokens)
+    return False
+
+
+def _python_string_mentions_mutating_command(value: str) -> bool:
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        tokens = value.split()
+    return _python_tokens_mention_mutating_command(tokens)
+
+
+def _python_tokens_mention_mutating_command(tokens: list[str]) -> bool:
+    if not tokens:
+        return False
+    basenames = [_basename(token) for token in tokens]
+    if set(basenames) & (_SOURCE_MUTATION_TOKENS | _PACKAGE_INSTALL_TOKENS | _PRIVILEGED_TOKENS):
+        return True
+    for index, token in enumerate(basenames):
+        if token != "git":
+            continue
+        subcommand = _first_git_subcommand(basenames[index + 1 :])
+        if subcommand in _UNSAFE_INLINE_PYTHON_GIT_SUBCOMMANDS:
+            return True
+    return False
+
+
+def _first_git_subcommand(tokens: list[str]) -> str:
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "-C":
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        return token
+    return ""
 
 
 def _split_command_tokens(command: str) -> tuple[str, ...]:
@@ -664,7 +930,13 @@ def _contains_self_pass_marker(command: str) -> bool:
 
 
 def _contains_chain_operator(command: str) -> bool:
-    return any(marker in command for marker in ("&&", "||", ";", "|"))
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        return any(str(token) in {"&&", "||", ";", "|"} for token in lexer)
+    except ValueError:
+        return _contains_unquoted_control(command, (";", "|"))
 
 
 def _contains_unquoted_control(command: str, controls: tuple[str, ...]) -> bool:

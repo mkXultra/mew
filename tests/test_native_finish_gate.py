@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from mew.implement_lane import (
     FinishCloseoutCommand,
     NativeFinishCloseoutResult,
@@ -167,6 +169,83 @@ def test_validate_closeout_command_rejects_mutating_and_unsafe_planner_commands(
 
         assert validation.allowed is False
         assert blocker in validation.blockers
+
+
+def test_validate_closeout_command_allows_planner_read_only_inline_python() -> None:
+    command = (
+        "python3 -B -c \"import json, subprocess; "
+        "assert json.loads('[1]') == [1]; "
+        "assert subprocess.run(['git', 'status', '--short']).returncode == 0\""
+    )
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is True
+
+
+def test_validate_closeout_command_rejects_planner_inline_python_writes() -> None:
+    command = "python3 -B -c \"import os; os.remove('/tmp/marker')\""
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is False
+    assert "closeout_command_inline_program" in validation.blockers
+
+
+def test_validate_closeout_command_rejects_planner_inline_python_mutating_subprocess() -> None:
+    command = "python3 -B -c \"import subprocess; subprocess.run(['git', 'commit', '-m', 'done'])\""
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is False
+    assert "closeout_command_inline_program" in validation.blockers
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "python3 -B -c \"import os as o; o.remove('/tmp/marker')\"",
+        "python3 -B -c \"from os import remove as r; r('/tmp/marker')\"",
+        "python3 -B -c \"import pathlib; p = pathlib.Path('/tmp/marker'); p.write_text('x')\"",
+        "python3 -B -c \"import importlib; importlib.import_module('os').remove('/tmp/marker')\"",
+        "python3 -B -c \"import subprocess as sp; sp.run(['git', 'commit', '-m', 'done'])\"",
+        "python3 -B -c \"import os; r = os.remove; r('/tmp/marker')\"",
+        "python3 -B -c \"import os; getattr(os, 'remove')('/tmp/marker')\"",
+        "python3 -B -c \"import pathlib; p = pathlib.Path('/tmp/marker'); w = p.write_text; w('x')\"",
+        "python3 -B -c \"import pathlib; pathlib.Path('/tmp/marker').open('w')\"",
+        "python3 -B -c \"import subprocess; cmd = ['git', 'commit', '-m', 'done']; subprocess.run(cmd)\"",
+        "python3 -B -c \"import sys; sys.exit()\"",
+        "python3 -B -c \"exit()\"",
+        "python3 -O -c \"assert False\"",
+    ),
+)
+def test_validate_closeout_command_rejects_planner_inline_python_bypasses(command: str) -> None:
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is False
+    assert "closeout_command_inline_program" in validation.blockers
+
+
+def test_validate_closeout_command_allows_planner_inline_python_data_words() -> None:
+    command = (
+        "python3 -B -c \"import json; "
+        "data = json.loads('{\\\"merge\\\": 1, \\\"commit\\\": 2}'); "
+        "assert data['merge'] == 1 and data['commit'] == 2\""
+    )
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is True
 
 
 def test_select_and_validate_closeout_command_rejects_disallowed_source() -> None:
