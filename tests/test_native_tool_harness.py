@@ -23,6 +23,7 @@ from mew.implement_lane.native_tool_harness import (
     _NativeFinishVerifierPlan,
     _NativeCloseoutContext,
     _completion_resolver_input_from_finish,
+    _finish_verifier_planner_prompt,
     _finish_gate_block_resolved_by_closeout,
     _finish_gate_missing_obligations,
     _native_final_verifier_closeout_call,
@@ -703,6 +704,14 @@ def test_finish_verifier_planner_timeout_config_overrides_default(tmp_path: Path
 
     assert result == {"command": "pytest -q"}
     assert call_json.call_args.args[4] == 12.0
+
+
+def test_finish_verifier_planner_prompt_requests_safety_compatible_python() -> None:
+    prompt = _finish_verifier_planner_prompt({"task": {"description": "verify completion"}})
+
+    assert "If using python -c" in prompt
+    assert "no helper lambdas/functions" in prompt
+    assert "subprocess calls must use literal argv lists" in prompt
 
 
 def test_partial_failure_persists_finish_verifier_planner_observability(tmp_path: Path) -> None:
