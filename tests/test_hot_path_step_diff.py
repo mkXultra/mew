@@ -164,6 +164,32 @@ def _write_codex_reference_with_commands(root: Path, commands: list[str]) -> Pat
     return root
 
 
+def _write_codex_reference_with_tool_steps(root: Path, steps: list[dict[str, object]]) -> Path:
+    trace_dir = root / "normalized-trace"
+    rows: list[dict[str, object]] = []
+    for index, step in enumerate(steps, 1):
+        events = _codex_tool_events(
+            tool=str(step["tool"]),
+            tool_id=f"step-{index}",
+            summary=str(step.get("summary") or step.get("command") or step["tool"]),
+            arguments=dict(step.get("arguments") or {}),
+            step_id=index,
+            elapsed_ms=index * 1000,
+            exit_code=step.get("exit_code") if isinstance(step.get("exit_code"), int) else None,
+        )
+        if isinstance(step.get("source_mutation"), dict):
+            events[-1]["source_mutation"] = dict(step["source_mutation"])  # type: ignore[index]
+            events[-1]["side_effect_kinds"] = ["file_write"]
+            events[-1]["source_mutation_effect_kinds"] = ["file_write"]
+        rows.extend(events)
+    _write_jsonl(trace_dir / "agent_trace.jsonl", rows)
+    (trace_dir / "summary.json").write_text(
+        json.dumps({"schema_version": 1, "agent": "codex", "tool_call_count": len(rows)}),
+        encoding="utf-8",
+    )
+    return root
+
+
 def _native_call(sequence: int, turn: int, call_id: str, tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
     return {
         "sequence": sequence,
@@ -469,6 +495,434 @@ def test_hot_path_step_diff_writes_json_and_markdown(tmp_path: Path) -> None:
     assert json.loads(out_json.read_text(encoding="utf-8"))["report_kind"] == "m6_24_hot_path_observability"
     assert "Normalized Codex Steps" in out_md.read_text(encoding="utf-8")
     assert "Normalized mew Steps" in markdown
+
+
+def test_hot_path_step_diff_classifies_added_source_direct_compile_as_standalone_candidate(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "x86_64-linux-gnu-gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "x86_64-linux-gnu-gcc -O2 -o /app/target src/generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+    markdown = format_hot_path_step_diff_markdown(report)
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["direct_artifact_builds"][0]["source_path"] == "src/generated_runner.c"
+    assert provenance["direct_artifact_builds"][0]["output_path"] == "/app/target"
+    assert "`src/generated_runner.c` -> `/app/target`" in markdown
+
+
+def test_hot_path_step_diff_classifies_existing_source_update_as_source_connected(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Update File: src/main.c",
+                            "@@",
+                            "-return 1;",
+                            "+return 0;",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {"tool": "exec_command", "arguments": {"cmd": "make target"}, "command": "make target"},
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "source_connected"
+    assert provenance["updated_existing_paths"] == ["src/main.c"]
+
+
+def test_hot_path_step_diff_classifies_write_file_direct_compile_as_standalone_candidate(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "write_file",
+                "arguments": {"path": "src/generated_runner.c", "content": "int main(void) { return 0; }\n"},
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "gcc -O2 -o /app/target src/generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["added_source_paths"] == ["src/generated_runner.c"]
+
+
+def test_hot_path_step_diff_classifies_mutation_changed_path_direct_compile_as_standalone_candidate(
+    tmp_path: Path,
+) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "summary": "Success. Updated files:\nA src/generated_runner.c\nDiffstat: +1/-0",
+                "source_mutation": {
+                    "changed_count": 1,
+                    "changed_paths": ["src/generated_runner.c"],
+                    "effect_kinds": ["file_write"],
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target generated_runner.c"},
+                "command": "gcc -O2 -o /app/target generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["ambiguous_source_paths"] == ["src/generated_runner.c"]
+    assert provenance["direct_artifact_builds"][0]["source_path"] == "src/generated_runner.c"
+
+
+def test_hot_path_step_diff_prefers_direct_build_over_existing_source_update(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Update File: src/main.c",
+                            "@@",
+                            "-return 1;",
+                            "+return 0;",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "gcc -O2 -o /app/target src/generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["updated_existing_paths"] == ["src/main.c"]
+
+
+def test_hot_path_step_diff_classifies_real_build_config_updates_as_connected(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Update File: cmake/toolchain.cmake",
+                            "@@",
+                            "-set(OPT 0)",
+                            "+set(OPT 1)",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            }
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "source_connected"
+
+
+def test_hot_path_step_diff_does_not_treat_build_output_paths_as_build_config(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** Update File: build/output.log",
+                            "@@",
+                            "-old",
+                            "+new",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "gcc -O2 -o /app/target src/generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["updated_existing_paths"] == []
+
+
+def test_hot_path_step_diff_classifies_insufficient_provenance_as_unknown(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {"tool": "exec_command", "arguments": {"cmd": "pytest -q"}, "command": "pytest -q"},
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "unknown"
+
+
+def test_hot_path_step_diff_classifies_added_support_header_included_by_existing_source_as_connected(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: include/support_mode.h",
+                            "+#define SUPPORT_MODE 1",
+                            "*** Update File: src/main.c",
+                            "@@",
+                            "+#include \"support_mode.h\"",
+                            "+int mode = SUPPORT_MODE;",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {"tool": "exec_command", "arguments": {"cmd": "make target"}, "command": "make target"},
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "source_connected"
+    assert any(item["kind"] == "updated_existing_file_references_added_file" for item in provenance["evidence"])
+
+
+def test_hot_path_step_diff_does_not_use_bare_stem_as_integration_reference(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: include/utils.h",
+                            "+#define UTILS 1",
+                            "*** Update File: src/main.c",
+                            "@@",
+                            "+int my_utils_mode = 1;",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            }
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "source_connected"
+    assert not any(item["kind"] == "updated_existing_file_references_added_file" for item in provenance["evidence"])
+
+
+def test_hot_path_step_diff_ignores_compiler_words_in_echo_or_script_text(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "echo gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "echo gcc -O2 -o /app/target src/generated_runner.c",
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "python - <<'PY'\nprint('gcc -o /app/target src/generated_runner.c')\nPY"},
+                "command": "python - <<'PY'\nprint('gcc -o /app/target src/generated_runner.c')\nPY",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "unknown"
+
+
+def test_hot_path_step_diff_ignores_compiler_text_inside_heredoc_script_write(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {
+                    "cmd": "\n".join(
+                        [
+                            "cat > build-generated.sh <<'SH'",
+                            "gcc -O2 -o /app/target src/generated_runner.c",
+                            "SH",
+                        ]
+                    )
+                },
+                "command": "\n".join(
+                    [
+                        "cat > build-generated.sh <<'SH'",
+                        "gcc -O2 -o /app/target src/generated_runner.c",
+                        "SH",
+                    ]
+                ),
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "unknown"
+
+
+def test_hot_path_step_diff_does_not_match_added_source_by_colliding_basename_path(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: lib/main.c",
+                            "+int replacement(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target src/main.c"},
+                "command": "gcc -O2 -o /app/target src/main.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "unknown"
 
 
 def test_hot_path_step_diff_can_compare_claude_code_reference(tmp_path: Path) -> None:

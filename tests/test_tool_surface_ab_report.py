@@ -169,6 +169,8 @@ def test_tool_surface_ab_report_compares_profiles_on_same_snapshot(tmp_path: Pat
     assert candidate["probe_count_before_first_write"] == 1
     assert candidate["command_count_before_first_write"] == 1
     assert candidate["mutation_count"] == 1
+    assert candidate["source_integration_provenance_classification"] == "unknown"
+    assert report["comparison"]["candidate_source_integration_provenance"] == "unknown"
     assert candidate["first_verifier_turn"] == 1
     assert report["comparison"]["candidate_render_leak_ok"] is True
 

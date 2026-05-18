@@ -8,7 +8,9 @@ explain why that decision was likely made.
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
+import re
 from typing import Any, Mapping
 
 from ..model_backends import call_model_json, load_model_auth, model_backend_default_base_url
@@ -17,6 +19,7 @@ from ..model_backends import call_model_json, load_model_auth, model_backend_def
 _MUTATION_TOOLS = frozenset({"apply_patch", "edit_file", "write_file"})
 DEFAULT_DECISION_REPLAY_MODEL = "gpt-5.5"
 DEFAULT_DECISION_REPLAY_BACKEND = "codex"
+DEFAULT_COUNTERFACTUAL_NEXT_ACTION_MODEL = DEFAULT_DECISION_REPLAY_MODEL
 DEFAULT_ANALYSIS_QUESTIONS = (
     "What should the original coding agent have done instead for this task?",
     (
@@ -27,6 +30,11 @@ DEFAULT_ANALYSIS_QUESTIONS = (
         "What generic change would reduce this failure without overfitting to this "
         "specific benchmark task?"
     ),
+)
+DEFAULT_COUNTERFACTUAL_ANALYSIS_QUESTION = (
+    "At the selected decision point, would these changed instructions likely "
+    "change the agent's next action? Predict the next action category and the "
+    "smallest visible evidence for that prediction."
 )
 
 
@@ -113,6 +121,180 @@ def decision_replay_prompt(packet: Mapping[str, Any]) -> str:
         "tool outputs, and patch text in this packet.\n\n"
         "PACKET:\n"
         f"{json.dumps(packet, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+def build_counterfactual_next_action_packet(
+    artifact_root: str | Path,
+    *,
+    decision_sequence: int | None = None,
+    context_items: int = 16,
+    counterfactual_instructions: tuple[str, ...] | list[str],
+    analysis_question: str | None = None,
+    expected_good: tuple[str, ...] | list[str] | None = None,
+    expected_bad: tuple[str, ...] | list[str] | None = None,
+) -> dict[str, Any]:
+    """Build a packet for predicting whether prompt/tool-contract changes alter a next action."""
+
+    cleaned_instructions = _clean_text_values(counterfactual_instructions)
+    if not cleaned_instructions:
+        raise ValueError("at least one counterfactual instruction is required")
+
+    replay_packet = build_decision_replay_packet(
+        artifact_root,
+        decision_sequence=decision_sequence,
+        context_items=context_items,
+        analysis_questions=(),
+    )
+    decision = _mapping(replay_packet.get("decision"))
+    selected_sequence = _int(decision.get("sequence"))
+
+    packet = {
+        "schema_version": 1,
+        "diagnostic": "counterfactual_next_action",
+        "artifact_root": replay_packet.get("artifact_root"),
+        "provider_requests_path": replay_packet.get("provider_requests_path"),
+        "transcript_path": replay_packet.get("transcript_path"),
+        "selected_sequence": selected_sequence,
+        "original_decision": _action_summary(decision),
+        "provider_visible": replay_packet.get("provider_visible") or {},
+        "context_before_decision": replay_packet.get("context_before_decision") or [],
+        "counterfactual_instructions": cleaned_instructions,
+        "counterfactual_prompt_digest": _counterfactual_digest(cleaned_instructions),
+        "analysis_question": (analysis_question or DEFAULT_COUNTERFACTUAL_ANALYSIS_QUESTION).strip(),
+        "expected_good_categories": _clean_text_values(expected_good or ()),
+        "expected_bad_categories": _clean_text_values(expected_bad or ()),
+        "prediction_output_contract": {
+            "selected_sequence": selected_sequence,
+            "original_decision": "compact summary of the observed original next action",
+            "counterfactual_prompt_digest": "repeat packet.counterfactual_prompt_digest",
+            "predicted_next_action": {
+                "tool_name": "predicted tool name or none",
+                "command_or_patch_summary": "short visible action summary",
+                "target_paths": ["paths the predicted action would touch, if any"],
+                "category": "one compact category string",
+            },
+            "expected_category_match": "good | bad | unknown",
+            "likely_effect": "short explanation of whether and how the next action would change",
+            "evidence_from_context": ["brief visible evidence strings"],
+            "confidence": "low | medium | high",
+        },
+    }
+    return packet
+
+
+def counterfactual_next_action_prompt(packet: Mapping[str, Any]) -> str:
+    """Render a counterfactual next-action packet as a prompt for the analysis model."""
+
+    return (
+        "You are reviewing a saved AI coding-agent transcript for a lightweight "
+        "counterfactual next-action diagnostic.\n"
+        "At the selected_sequence, the original_decision is the observed next action. "
+        "Assume the agent reached the same state before that decision, but the "
+        "counterfactual_instructions were present in the prompt/tool contract.\n\n"
+        "Return only a short JSON object with these keys: selected_sequence, "
+        "original_decision, counterfactual_prompt_digest, predicted_next_action, "
+        "expected_category_match, likely_effect, evidence_from_context, confidence.\n"
+        "predicted_next_action must contain tool_name, command_or_patch_summary, "
+        "target_paths, and category. expected_category_match must be good, bad, or "
+        "unknown based on packet.expected_good_categories and packet.expected_bad_categories.\n\n"
+        "Do not provide hidden chain-of-thought. Use only concise, visible evidence "
+        "from the provider-visible prompt/tool contract, context_before_decision, "
+        "and the observed original_decision. Do not infer from events that happened "
+        "after the selected decision.\n\n"
+        "PACKET:\n"
+        f"{json.dumps(packet, ensure_ascii=False, indent=2)}\n"
+    )
+
+
+def write_counterfactual_next_action_artifacts(
+    artifact_root: str | Path,
+    *,
+    out_prompt: str | Path,
+    decision_sequence: int | None = None,
+    context_items: int = 16,
+    counterfactual_instructions: tuple[str, ...] | list[str],
+    analysis_question: str | None = None,
+    expected_good: tuple[str, ...] | list[str] | None = None,
+    expected_bad: tuple[str, ...] | list[str] | None = None,
+) -> dict[str, Any]:
+    """Write the counterfactual prompt and return the model-ready packet."""
+
+    packet = build_counterfactual_next_action_packet(
+        artifact_root,
+        decision_sequence=decision_sequence,
+        context_items=context_items,
+        counterfactual_instructions=counterfactual_instructions,
+        analysis_question=analysis_question,
+        expected_good=expected_good,
+        expected_bad=expected_bad,
+    )
+    out_prompt_path = Path(out_prompt)
+    out_prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    out_prompt_path.write_text(counterfactual_next_action_prompt(packet), encoding="utf-8")
+    return packet
+
+
+def ask_counterfactual_next_action_model(
+    packet: Mapping[str, Any],
+    *,
+    auth_json: str | Path,
+    model: str = DEFAULT_COUNTERFACTUAL_NEXT_ACTION_MODEL,
+    model_backend: str = DEFAULT_DECISION_REPLAY_BACKEND,
+    base_url: str = "",
+    timeout: float = 180.0,
+) -> dict[str, Any]:
+    """Ask a model to predict the next action under counterfactual instructions."""
+
+    auth_path = str(Path(auth_json).expanduser())
+    auth = load_model_auth(model_backend, auth_path)
+    resolved_base_url = base_url or model_backend_default_base_url(model_backend)
+    response = call_model_json(
+        model_backend,
+        auth,
+        counterfactual_next_action_prompt(packet),
+        model or DEFAULT_COUNTERFACTUAL_NEXT_ACTION_MODEL,
+        resolved_base_url,
+        timeout,
+    )
+    if not isinstance(response, dict):
+        raise ValueError("counterfactual next-action model response must be a JSON object")
+    return _normalize_counterfactual_response(packet, response)
+
+
+def counterfactual_next_action(
+    artifact_root: str | Path,
+    *,
+    auth_json: str | Path,
+    decision_sequence: int | None = None,
+    context_items: int = 16,
+    counterfactual_instructions: tuple[str, ...] | list[str],
+    analysis_question: str | None = None,
+    expected_good: tuple[str, ...] | list[str] | None = None,
+    expected_bad: tuple[str, ...] | list[str] | None = None,
+    model: str = DEFAULT_COUNTERFACTUAL_NEXT_ACTION_MODEL,
+    model_backend: str = DEFAULT_DECISION_REPLAY_BACKEND,
+    base_url: str = "",
+    timeout: float = 180.0,
+) -> dict[str, Any]:
+    """Build a counterfactual packet and return the model's JSON prediction."""
+
+    packet = build_counterfactual_next_action_packet(
+        artifact_root,
+        decision_sequence=decision_sequence,
+        context_items=context_items,
+        counterfactual_instructions=counterfactual_instructions,
+        analysis_question=analysis_question,
+        expected_good=expected_good,
+        expected_bad=expected_bad,
+    )
+    return ask_counterfactual_next_action_model(
+        packet,
+        auth_json=auth_json,
+        model=model,
+        model_backend=model_backend,
+        base_url=base_url,
+        timeout=timeout,
     )
 
 
@@ -216,6 +398,108 @@ def _compact_transcript_item(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _action_summary(item: Mapping[str, Any]) -> dict[str, Any]:
+    text = str(item.get("text") or "")
+    tool_name = str(item.get("tool_name") or "")
+    summary = {
+        "sequence": item.get("sequence"),
+        "turn_id": item.get("turn_id"),
+        "kind": item.get("kind"),
+        "tool_name": item.get("tool_name"),
+        "status": item.get("status"),
+        "is_error": item.get("is_error"),
+        "command_or_patch_summary": _command_or_patch_summary(tool_name, text),
+        "target_paths": _target_paths(tool_name, text),
+        "category": _action_category(tool_name, item.get("kind")),
+        "text": _truncate(text, 1600),
+    }
+    return summary
+
+
+def _command_or_patch_summary(tool_name: str, text: str) -> str:
+    parsed = _json_mapping(text)
+    if tool_name == "exec_command":
+        command = parsed.get("cmd") or parsed.get("command") or text
+        return _truncate(str(command), 600)
+    if tool_name in _MUTATION_TOOLS or "*** Begin Patch" in text:
+        paths = _target_paths(tool_name, text)
+        if paths:
+            return _truncate(f"patch touching {', '.join(paths)}", 600)
+        return _truncate(text, 600)
+    return _truncate(text, 600)
+
+
+def _target_paths(tool_name: str, text: str) -> list[str]:
+    if tool_name != "exec_command" and "*** Begin Patch" in text:
+        paths = []
+        for line in text.splitlines():
+            match = re.match(r"\*\*\* (?:Add|Update|Delete) File: (.+)", line)
+            if match:
+                paths.append(match.group(1).strip())
+        return sorted(dict.fromkeys(paths))
+    parsed = _json_mapping(text)
+    path_values = parsed.get("paths") or parsed.get("target_paths")
+    if isinstance(path_values, list):
+        return [str(path) for path in path_values if str(path).strip()]
+    return []
+
+
+def _action_category(tool_name: str, kind: object) -> str:
+    if tool_name in _MUTATION_TOOLS:
+        return "workspace_mutation"
+    if tool_name == "exec_command":
+        return "shell_command"
+    if "read" in tool_name or tool_name in {"open", "find", "ls"}:
+        return "read_or_inspect"
+    if not tool_name and not kind:
+        return "unknown"
+    return "other_tool_action"
+
+
+def _counterfactual_digest(instructions: list[str]) -> str:
+    payload = json.dumps(instructions, ensure_ascii=False, sort_keys=True)
+    return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _clean_text_values(values: tuple[str, ...] | list[str]) -> list[str]:
+    cleaned = []
+    for value in values:
+        text = str(value).strip()
+        if text:
+            cleaned.append(text)
+    return cleaned
+
+
+def _json_mapping(text: str) -> Mapping[str, Any]:
+    try:
+        value = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, Mapping) else {}
+
+
+def _normalize_counterfactual_response(
+    packet: Mapping[str, Any],
+    response: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized = dict(response)
+    normalized.setdefault("selected_sequence", packet.get("selected_sequence"))
+    normalized.setdefault("original_decision", packet.get("original_decision"))
+    normalized.setdefault("counterfactual_prompt_digest", packet.get("counterfactual_prompt_digest"))
+    if "predicted_next_action" not in normalized:
+        normalized["predicted_next_action"] = {
+            "tool_name": "",
+            "command_or_patch_summary": "",
+            "target_paths": [],
+            "category": "unknown",
+        }
+    normalized.setdefault("expected_category_match", "unknown")
+    normalized.setdefault("likely_effect", "")
+    normalized.setdefault("evidence_from_context", [])
+    normalized.setdefault("confidence", "low")
+    return normalized
+
+
 def _analysis_questions(extra_questions: tuple[str, ...] | list[str] | None) -> list[str]:
     questions = list(DEFAULT_ANALYSIS_QUESTIONS)
     for question in extra_questions or ():
@@ -267,10 +551,17 @@ def _truncate(text: str, limit: int) -> str:
 
 __all__ = [
     "DEFAULT_ANALYSIS_QUESTIONS",
+    "DEFAULT_COUNTERFACTUAL_ANALYSIS_QUESTION",
+    "DEFAULT_COUNTERFACTUAL_NEXT_ACTION_MODEL",
     "DEFAULT_DECISION_REPLAY_BACKEND",
     "DEFAULT_DECISION_REPLAY_MODEL",
     "ask_decision_replay_model",
+    "ask_counterfactual_next_action_model",
     "build_decision_replay_packet",
+    "build_counterfactual_next_action_packet",
+    "counterfactual_next_action",
+    "counterfactual_next_action_prompt",
     "decision_replay_prompt",
+    "write_counterfactual_next_action_artifacts",
     "write_decision_replay_artifacts",
 ]

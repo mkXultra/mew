@@ -27,6 +27,11 @@ from ..agent_trace import (
 HOT_PATH_STEP_DIFF_SCHEMA_VERSION = 1
 HOT_PATH_OBSERVABILITY_REPORT_KIND = "m6_24_hot_path_observability"
 NOT_LIVE_POLICY = "Do not use this diagnostic to force a next action."
+SOURCE_INTEGRATION_PROVENANCE_VALUES = (
+    "source_connected",
+    "standalone_replacement_candidate",
+    "unknown",
+)
 
 INTENT_CATEGORIES = (
     "source_scan",
@@ -136,6 +141,73 @@ SOURCE_FILE_SUFFIXES = frozenset(
         ".toml",
         ".xml",
         ".md",
+    }
+)
+PROVENANCE_SOURCE_FILE_SUFFIXES = frozenset(
+    {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cxx",
+        ".h",
+        ".hpp",
+        ".hh",
+        ".py",
+        ".pyi",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".mjs",
+        ".cjs",
+        ".rs",
+        ".go",
+        ".java",
+        ".kt",
+        ".kts",
+        ".rb",
+        ".php",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".fish",
+        ".pl",
+        ".pm",
+        ".lua",
+        ".swift",
+        ".scala",
+        ".cs",
+        ".fs",
+        ".fsx",
+        ".ml",
+        ".mli",
+        ".ex",
+        ".exs",
+        ".erl",
+        ".hrl",
+        ".clj",
+        ".cljs",
+        ".sql",
+    }
+)
+BUILD_CONFIG_FILE_NAMES = frozenset(
+    {
+        "makefile",
+        "gnumakefile",
+        "cmakelists.txt",
+        "package.json",
+        "pyproject.toml",
+        "setup.py",
+        "cargo.toml",
+        "go.mod",
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        "meson.build",
+        "sconstruct",
+        "workspace",
+        "build",
+        "build.bazel",
     }
 )
 
@@ -335,6 +407,7 @@ def format_hot_path_step_diff_markdown(report: Mapping[str, object]) -> str:
         ("Process polls before first mutation", "process_poll_count_before_first_mutation"),
         ("First mutation step", "first_mutation_step_index"),
         ("First mutation turn", "first_mutation_turn"),
+        ("Source integration provenance", "source_integration_provenance_classification"),
         ("First verifier step", "first_verifier_step_index"),
         ("First verifier turn", "first_verifier_turn"),
         ("Total seconds", "total_seconds"),
@@ -380,6 +453,30 @@ def format_hot_path_step_diff_markdown(report: Mapping[str, object]) -> str:
             )
     else:
         lines.append("- No pairwise comparisons were emitted.")
+
+    lines.extend(["", "## Source Integration Provenance", ""])
+    lines.extend(
+        [
+            "| Agent | Classification | Reason | Added paths | Updated paths | Direct builds | Evidence count |",
+            "|---|---|---|---|---|---|---:|",
+        ]
+    )
+    for agent, agent_summary in (
+        ("codex", codex_summary),
+        ("claude_code", claude_code_summary),
+        ("mew", mew_summary),
+    ):
+        if not agent_summary and agent == "claude_code":
+            continue
+        provenance = _mapping(agent_summary.get("source_integration_provenance"))
+        lines.append(
+            f"| `{agent}` | `{_markdown_escape(str(provenance.get('classification') or 'unknown'))}` | "
+            f"{_markdown_escape(str(provenance.get('reason') or ''))} | "
+            f"{_markdown_escape(_compact_markdown_list(provenance.get('added_source_paths')))} | "
+            f"{_markdown_escape(_compact_markdown_list(provenance.get('updated_existing_paths')))} | "
+            f"{_markdown_escape(_compact_direct_builds_for_markdown(provenance.get('direct_artifact_builds')))} | "
+            f"{len([item for item in provenance.get('evidence') or [] if isinstance(item, Mapping)])} |"
+        )
 
     lines.extend(["", "## Divergence Summary", ""])
     for item in report.get("divergence_summary") or []:
@@ -801,6 +898,11 @@ def _normalize_tool_steps(events: Sequence[Mapping[str, Any]], *, agent: str) ->
             kinds = merged.get("source_mutation_effect_kinds") or merged.get("side_effect_kinds")
             if isinstance(kinds, list):
                 step["source_mutation_effect_kinds"] = [str(kind) for kind in kinds]
+        provenance_mutations = _source_provenance_mutations(
+            [{**step, "arguments": _json_safe_mapping(merged.get("arguments"))}]
+        )
+        if provenance_mutations:
+            step["source_provenance_mutations"] = provenance_mutations
         if intent in {"internal_gate", "blocked_return"}:
             step["lane_status"] = str(_mapping(merged.get("arguments")).get("lane_status") or "")
         steps.append(step)
@@ -1304,6 +1406,421 @@ def _tool_family(step: Mapping[str, object], *, intent: str) -> str:
     return "unknown"
 
 
+def classify_source_integration_provenance(steps: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    """Classify whether observed source edits look connected to the built artifact.
+
+    The classifier is intentionally conservative and artifact-only. It uses
+    visible tool arguments, patch headers, and build command text; it does not
+    replay model decisions or inspect the workspace.
+    """
+
+    real_steps = _real_tool_steps(steps)
+    mutations = _source_provenance_mutations(real_steps)
+    known_added_source = [
+        record for record in mutations if record["operation"] in {"add", "write"} and record["is_source"]
+    ]
+    ambiguous_source = [record for record in mutations if record["operation"] == "mutation" and record["is_source"]]
+    source_candidates = [*known_added_source, *ambiguous_source]
+    updated_existing = [
+        record
+        for record in mutations
+        if record["operation"] in {"update", "delete", "move", "edit"}
+        and (record["is_source"] or record["is_build_config"])
+    ]
+    integration_refs = _added_file_integration_refs(added_source=known_added_source, updated_existing=updated_existing)
+    direct_builds = _direct_artifact_builds_from_added_source(real_steps, source_candidates)
+
+    if direct_builds:
+        return {
+            "classification": "standalone_replacement_candidate",
+            "reason": "candidate_source_directly_compiled_to_output",
+            "added_source_paths": sorted({str(record["path"]) for record in source_candidates}),
+            "ambiguous_source_paths": sorted({str(record["path"]) for record in ambiguous_source}),
+            "updated_existing_paths": sorted({str(record["path"]) for record in updated_existing}),
+            "direct_artifact_builds": direct_builds,
+            "evidence": direct_builds[:5],
+            "diagnostic_only": True,
+        }
+
+    if updated_existing:
+        evidence = [_provenance_mutation_citation(record) for record in updated_existing[:5]]
+        evidence.extend(integration_refs[:5])
+        return {
+            "classification": "source_connected",
+            "reason": "observed_update_to_existing_source_or_build_config",
+            "added_source_paths": sorted({str(record["path"]) for record in source_candidates}),
+            "ambiguous_source_paths": sorted({str(record["path"]) for record in ambiguous_source}),
+            "updated_existing_paths": sorted({str(record["path"]) for record in updated_existing}),
+            "direct_artifact_builds": direct_builds,
+            "evidence": evidence,
+            "diagnostic_only": True,
+        }
+
+    return {
+        "classification": "unknown",
+        "reason": "insufficient_source_artifact_connection_evidence",
+        "added_source_paths": sorted({str(record["path"]) for record in source_candidates}),
+        "ambiguous_source_paths": sorted({str(record["path"]) for record in ambiguous_source}),
+        "updated_existing_paths": sorted({str(record["path"]) for record in updated_existing}),
+        "direct_artifact_builds": direct_builds,
+        "evidence": integration_refs[:5],
+        "diagnostic_only": True,
+    }
+
+
+def _source_provenance_mutations(steps: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+    for step in steps:
+        existing_records = step.get("source_provenance_mutations")
+        if isinstance(existing_records, list):
+            records.extend(dict(record) for record in existing_records if isinstance(record, Mapping))
+            continue
+        tool = str(step.get("tool") or step.get("tool_name") or "").casefold()
+        arguments = step.get("arguments") if isinstance(step.get("arguments"), Mapping) else {}
+        if tool == "apply_patch":
+            patch_records = _apply_patch_provenance_mutations(step, arguments)
+            if patch_records:
+                records.extend(patch_records)
+                continue
+        if tool in {"edit_file", "write_file"}:
+            path = _tool_path_argument(arguments)
+            if not path:
+                continue
+            operation = "edit" if tool == "edit_file" else "write"
+            records.append(_provenance_mutation_record(step, path=path, operation=operation, added_lines=[]))
+            continue
+        mutation = step.get("source_mutation") if isinstance(step.get("source_mutation"), Mapping) else {}
+        changed_paths = mutation.get("changed_paths") if isinstance(mutation, Mapping) else None
+        if isinstance(changed_paths, list):
+            for path in changed_paths:
+                records.append(_provenance_mutation_record(step, path=str(path), operation="mutation", added_lines=[]))
+    return records
+
+
+def _apply_patch_provenance_mutations(
+    step: Mapping[str, object],
+    arguments: Mapping[str, object],
+) -> list[dict[str, object]]:
+    patch_text = _patch_text_argument(arguments)
+    if not patch_text:
+        return []
+    records: list[dict[str, object]] = []
+    current_path = ""
+    current_operation = ""
+    current_added_lines: list[str] = []
+
+    def flush() -> None:
+        if not current_path or not current_operation:
+            return
+        records.append(
+            _provenance_mutation_record(
+                step,
+                path=current_path,
+                operation=current_operation,
+                added_lines=current_added_lines,
+            )
+        )
+
+    for line in patch_text.splitlines():
+        add_match = re.match(r"\*\*\* Add File:\s+(.+?)\s*$", line)
+        update_match = re.match(r"\*\*\* Update File:\s+(.+?)\s*$", line)
+        delete_match = re.match(r"\*\*\* Delete File:\s+(.+?)\s*$", line)
+        move_match = re.match(r"\*\*\* Move to:\s+(.+?)\s*$", line)
+        if add_match or update_match or delete_match or move_match:
+            flush()
+            current_path = str((add_match or update_match or delete_match or move_match).group(1)).strip()
+            if add_match:
+                current_operation = "add"
+            elif update_match:
+                current_operation = "update"
+            elif delete_match:
+                current_operation = "delete"
+            else:
+                current_operation = "move"
+            current_added_lines = []
+            continue
+        if current_path and line.startswith("+") and not line.startswith("+++"):
+            current_added_lines.append(line[1:])
+    flush()
+    return records
+
+
+def _provenance_mutation_record(
+    step: Mapping[str, object],
+    *,
+    path: str,
+    operation: str,
+    added_lines: Sequence[str],
+) -> dict[str, object]:
+    normalized = _normalize_provenance_path(path)
+    return {
+        "path": normalized,
+        "operation": operation,
+        "step_index": step.get("index") or step.get("step_index"),
+        "turn": step.get("turn") or step.get("turn_index"),
+        "tool": step.get("tool") or step.get("tool_name") or "",
+        "tool_id": step.get("tool_id") or step.get("source_event_id") or "",
+        "is_source": _is_provenance_source_path(normalized),
+        "is_build_config": _is_build_config_path(normalized),
+        "added_lines": list(added_lines[:80]),
+    }
+
+
+def _provenance_mutation_citation(record: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "kind": "source_mutation",
+        "path": record.get("path") or "",
+        "operation": record.get("operation") or "",
+        "step_index": record.get("step_index"),
+        "turn": record.get("turn"),
+        "tool": record.get("tool") or "",
+    }
+
+
+def _patch_text_argument(arguments: Mapping[str, object]) -> str:
+    for key in ("patch", "input", "patch_text"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value:
+            return value
+    lines = arguments.get("patch_lines")
+    if isinstance(lines, list):
+        return "\n".join(str(line) for line in lines)
+    return ""
+
+
+def _tool_path_argument(arguments: Mapping[str, object]) -> str:
+    for key in ("path", "file_path", "target_path"):
+        value = arguments.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
+def _added_file_integration_refs(
+    *,
+    added_source: Sequence[Mapping[str, object]],
+    updated_existing: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    refs: list[dict[str, object]] = []
+    for added in added_source:
+        added_path = str(added.get("path") or "")
+        if not added_path:
+            continue
+        needles = _path_reference_needles(added_path)
+        for updated in updated_existing:
+            added_lines = "\n".join(str(line) for line in updated.get("added_lines") or [])
+            if not added_lines:
+                continue
+            matched = next((needle for needle in needles if _text_references_path_needle(added_lines, needle)), "")
+            if matched:
+                refs.append(
+                    {
+                        "kind": "updated_existing_file_references_added_file",
+                        "added_path": added_path,
+                        "updated_path": updated.get("path") or "",
+                        "matched_text": matched,
+                        "step_index": updated.get("step_index"),
+                        "turn": updated.get("turn"),
+                        "tool": updated.get("tool") or "",
+                    }
+                )
+    return refs
+
+
+def _direct_artifact_builds_from_added_source(
+    steps: Sequence[Mapping[str, object]],
+    added_source: Sequence[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    added_paths = [str(record.get("path") or "") for record in added_source if record.get("path")]
+    if not added_paths:
+        return []
+    builds: list[dict[str, object]] = []
+    for step in steps:
+        command = _command_text(step) or str(step.get("command") or "")
+        if not command:
+            continue
+        match = _direct_artifact_build_match(command, added_paths)
+        if not match:
+            continue
+        builds.append(
+            {
+                "kind": "direct_compile_added_source_to_output",
+                "step_index": step.get("index") or step.get("step_index"),
+                "turn": step.get("turn") or step.get("turn_index"),
+                "tool": step.get("tool") or step.get("tool_name") or "",
+                "source_path": match["source_path"],
+                "output_path": match["output_path"],
+                "compiler": match["compiler"],
+                "command": _truncate(command, 240),
+            }
+        )
+    return builds
+
+
+def _direct_artifact_build_match(command: str, added_paths: Sequence[str]) -> dict[str, str]:
+    for segment in _shell_command_segments(_strip_heredoc_bodies(command)):
+        match = _direct_artifact_build_segment_match(segment, added_paths)
+        if match:
+            return match
+    return {}
+
+
+def _direct_artifact_build_segment_match(segment: str, added_paths: Sequence[str]) -> dict[str, str]:
+    try:
+        tokens = shlex.split(segment, posix=True)
+    except ValueError:
+        tokens = segment.split()
+    if not tokens:
+        return {}
+    compiler_index = _invoked_compiler_token_index(tokens)
+    compiler = tokens[compiler_index] if compiler_index is not None else ""
+    if not compiler:
+        return {}
+    output_path = _compiler_output_path(tokens)
+    if not output_path:
+        return {}
+    source_path = _matched_added_source_token(tokens, added_paths)
+    if not source_path:
+        return {}
+    return {"compiler": compiler, "source_path": source_path, "output_path": output_path}
+
+
+def _shell_command_segments(command: str) -> list[str]:
+    segments: list[str] = []
+    current: list[str] = []
+    quote = ""
+    escaped = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if escaped:
+            current.append(char)
+            escaped = False
+            index += 1
+            continue
+        if quote:
+            current.append(char)
+            if char == "\\" and quote == '"':
+                escaped = True
+            elif char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char == "\\":
+            current.append(char)
+            escaped = True
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            current.append(char)
+            quote = char
+            index += 1
+            continue
+        two = command[index : index + 2]
+        if char == "\n" or char == ";" or two in {"&&", "||"}:
+            segment = "".join(current).strip()
+            if segment:
+                segments.append(segment)
+            current = []
+            index += 2 if two in {"&&", "||"} else 1
+            continue
+        current.append(char)
+        index += 1
+    segment = "".join(current).strip()
+    if segment:
+        segments.append(segment)
+    return segments
+
+
+def _invoked_compiler_token_index(tokens: Sequence[str]) -> int | None:
+    index = 0
+    wrappers = {"command", "env", "sudo"}
+    while index < len(tokens):
+        token = tokens[index]
+        if token in wrappers:
+            index += 1
+            continue
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", token):
+            index += 1
+            continue
+        return index if _looks_like_compiler_token(token) else None
+    return None
+
+
+def _looks_like_compiler_token(token: str) -> bool:
+    base = token.rsplit("/", 1)[-1].casefold()
+    return bool(re.search(r"(?:^|[-_])(?:gcc|g\+\+|clang|clang\+\+|cc|c\+\+)$", base))
+
+
+def _compiler_output_path(tokens: Sequence[str]) -> str:
+    for index, token in enumerate(tokens):
+        if token == "-o" and index + 1 < len(tokens):
+            return tokens[index + 1]
+        if token.startswith("-o") and len(token) > 2:
+            return token[2:]
+    return ""
+
+
+def _matched_added_source_token(tokens: Sequence[str], added_paths: Sequence[str]) -> str:
+    normalized_tokens = {_normalize_provenance_path(token) for token in tokens}
+    for path in added_paths:
+        normalized = _normalize_provenance_path(path)
+        if normalized in normalized_tokens or f"./{normalized}" in normalized_tokens:
+            return path
+    basename_to_paths: dict[str, list[str]] = {}
+    for path in added_paths:
+        basename = Path(path).name
+        if basename:
+            basename_to_paths.setdefault(basename, []).append(path)
+    basename_only_source_tokens = {
+        token
+        for token in normalized_tokens
+        if "/" not in token and "\\" not in token and _is_provenance_source_path(token)
+    }
+    matches = [
+        paths[0]
+        for basename, paths in basename_to_paths.items()
+        if basename in basename_only_source_tokens and len(paths) == 1
+    ]
+    return matches[0] if len(matches) == 1 else ""
+
+
+def _path_reference_needles(path: str) -> list[str]:
+    normalized = _normalize_provenance_path(path)
+    name = Path(normalized).name
+    return [item for item in (normalized, f"./{normalized}", name) if item]
+
+
+def _text_references_path_needle(text: str, needle: str) -> bool:
+    if not text or not needle:
+        return False
+    pattern = rf"(?<![A-Za-z0-9_./-]){re.escape(needle)}(?![A-Za-z0-9_./-])"
+    return bool(re.search(pattern, text))
+
+
+def _normalize_provenance_path(path: str) -> str:
+    text = str(path or "").strip().strip("'\"")
+    text = text.replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
+def _is_provenance_source_path(path: str) -> bool:
+    normalized = _normalize_provenance_path(path).casefold()
+    if not normalized:
+        return False
+    return Path(normalized).suffix in PROVENANCE_SOURCE_FILE_SUFFIXES
+
+
+def _is_build_config_path(path: str) -> bool:
+    normalized = _normalize_provenance_path(path).casefold()
+    name = Path(normalized).name
+    if name in BUILD_CONFIG_FILE_NAMES:
+        return True
+    return name.endswith((".mk", ".cmake"))
+
+
 def _step_summary(steps: Sequence[Mapping[str, object]]) -> dict[str, object]:
     real_steps = _real_tool_steps(steps)
     first_mutation = _first_step(real_steps, lambda step: step.get("intent") == "mutation")
@@ -1316,6 +1833,7 @@ def _step_summary(steps: Sequence[Mapping[str, object]]) -> dict[str, object]:
     intent_counts = Counter(str(step.get("intent") or "") for step in steps)
     tool_counts = Counter(str(step.get("tool") or "") for step in real_steps)
     before_intent_counts = Counter(str(step.get("intent") or "") for step in before_first_mutation)
+    provenance = classify_source_integration_provenance(real_steps)
     return {
         "tool_step_count": len(real_steps),
         "sidecar_step_count": len(steps) - len(real_steps),
@@ -1336,6 +1854,8 @@ def _step_summary(steps: Sequence[Mapping[str, object]]) -> dict[str, object]:
         "first_verifier_turn": first_verifier.get("turn") if first_verifier else None,
         "first_verifier_tool": first_verifier.get("tool") if first_verifier else "",
         "first_verifier_elapsed_seconds": first_verifier.get("elapsed_seconds") if first_verifier else None,
+        "source_integration_provenance": provenance,
+        "source_integration_provenance_classification": provenance["classification"],
         "probe_count_before_first_mutation": sum(1 for step in before_first_mutation if step.get("intent") in PROBE_INTENTS),
         "probe_intent_counts_before_first_mutation": {
             intent: before_intent_counts.get(intent, 0) for intent in sorted(PROBE_INTENTS)
@@ -1472,6 +1992,17 @@ def _pairwise_comparisons(
                 "candidate_agent": "mew",
                 "selection": "default_primary" if reference_agent == "codex" else "default_secondary",
                 "comparable": comparable,
+                "source_integration_provenance": {
+                    "reference_classification": str(
+                        _mapping(reference_summary.get("source_integration_provenance")).get("classification")
+                        or "unknown"
+                    ),
+                    "candidate_classification": str(
+                        _mapping(candidate_summary.get("source_integration_provenance")).get("classification")
+                        or "unknown"
+                    ),
+                    "diagnostic_only": True,
+                },
                 "metric_deltas": {
                     "probe_count_before_mutation": _metric_delta(
                         reference_summary.get("probe_count_before_first_mutation"),
@@ -2215,6 +2746,35 @@ def _summary_cell(value: object) -> str:
     return _markdown_escape(_summary_value(value))
 
 
+def _compact_markdown_list(value: object, *, limit: int = 3) -> str:
+    if not isinstance(value, list):
+        return ""
+    items = [str(item) for item in value if str(item)]
+    if not items:
+        return ""
+    shown = items[:limit]
+    suffix = f", +{len(items) - limit} more" if len(items) > limit else ""
+    return ", ".join(f"`{item}`" for item in shown) + suffix
+
+
+def _compact_direct_builds_for_markdown(value: object, *, limit: int = 2) -> str:
+    if not isinstance(value, list):
+        return ""
+    rows = [item for item in value if isinstance(item, Mapping)]
+    if not rows:
+        return ""
+    parts: list[str] = []
+    for row in rows[:limit]:
+        source = str(row.get("source_path") or "")
+        output = str(row.get("output_path") or "")
+        compiler = str(row.get("compiler") or "")
+        if source or output:
+            detail = f"`{source}` -> `{output}`".strip()
+            parts.append(f"{detail} ({compiler})" if compiler else detail)
+    suffix = f", +{len(rows) - limit} more" if len(rows) > limit else ""
+    return ", ".join(parts) + suffix
+
+
 def _markdown_escape(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")
 
@@ -2240,7 +2800,9 @@ def _append_step_table(lines: list[str], steps: object) -> None:
 __all__ = [
     "HOT_PATH_STEP_DIFF_SCHEMA_VERSION",
     "INTENT_CATEGORIES",
+    "SOURCE_INTEGRATION_PROVENANCE_VALUES",
     "analyze_hot_path_step_diff",
+    "classify_source_integration_provenance",
     "format_hot_path_step_diff_markdown",
     "write_hot_path_step_diff_report",
 ]

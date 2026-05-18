@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+from .hot_path_step_diff import classify_source_integration_provenance
 from .native_tool_harness import _native_call_is_verifier
 from .native_transcript import (
     CALL_ITEM_KINDS,
@@ -153,6 +154,7 @@ def build_tool_surface_run_report(
     before_first_write = tuple(call for call in calls if first_write_sequence is None or call.sequence < first_write_sequence)
     failure_to_edit_latency = _failed_verifier_to_next_edit_latency(calls, outputs)
     render_metrics = _render_metrics(render_rows)
+    source_integration_provenance = classify_source_integration_provenance(_provenance_steps_from_calls(calls))
     provider_inventory_forbidden_ok = _provider_inventory_forbidden_ok(inventory_records)
     hidden_steering = _hidden_steering_markers(inventory_records)
     profile_id = str(tool_surface.get("profile_id") or "")
@@ -208,6 +210,8 @@ def build_tool_surface_run_report(
         "command_count_before_first_write": sum(1 for call in before_first_write if call.tool_name in COMMAND_TOOL_NAMES),
         "read_list_alias_count_before_first_write": sum(1 for call in before_first_write if call.tool_name in READ_LIST_ALIAS_TOOL_NAMES),
         "mutation_count": sum(1 for call in calls if call.tool_name in WRITE_TOOL_NAMES),
+        "source_integration_provenance": source_integration_provenance,
+        "source_integration_provenance_classification": source_integration_provenance["classification"],
         "first_verifier_latency": _call_latency(first_verifier),
         "first_verifier_turn": _turn_index(first_verifier),
         "failed_verifier_to_next_edit_latency": failure_to_edit_latency,
@@ -311,6 +315,16 @@ def _comparison_summary(
         "candidate_hidden_steering_marker_count": len(candidate.get("hidden_steering_markers") or []),
         "candidate_render_leak_ok": candidate.get("render_leak_ok") is True,
         "candidate_pairing_valid": candidate.get("pairing_valid") is True,
+        "source_integration_provenance_by_profile": {
+            str(row.get("profile_id") or ""): str(row.get("source_integration_provenance_classification") or "unknown")
+            for row in rows
+        },
+        "candidate_source_integration_provenance": str(
+            candidate.get("source_integration_provenance_classification") or "unknown"
+        ),
+        "standalone_replacement_candidate_count": sum(
+            1 for row in rows if row.get("source_integration_provenance_classification") == "standalone_replacement_candidate"
+        ),
     }
 
 
@@ -539,6 +553,38 @@ def _verifier_evidence_preserved(
     if any(output.evidence_refs or output.content_refs for output in verifier_outputs):
         return True
     return int(evidence_summary.get("known_tool_evidence_ref_count") or 0) > 0
+
+
+def _provenance_steps_from_calls(calls: tuple[NativeTranscriptItem, ...]) -> list[dict[str, object]]:
+    steps: list[dict[str, object]] = []
+    for index, call in enumerate(calls, 1):
+        arguments = _load_json_mapping_from_text(call.arguments_json_text)
+        steps.append(
+            {
+                "index": index,
+                "step_index": index,
+                "turn": _turn_index(call),
+                "turn_index": _turn_index(call),
+                "tool": call.tool_name,
+                "tool_name": call.tool_name,
+                "tool_id": call.call_id,
+                "source_event_id": call.call_id,
+                "arguments": arguments,
+                "command": str(arguments.get("cmd") or arguments.get("command") or ""),
+                "intent": "mutation" if call.tool_name in WRITE_TOOL_NAMES else "",
+            }
+        )
+    return steps
+
+
+def _load_json_mapping_from_text(text: str) -> dict[str, object]:
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
 
 
 def _accepted_finish_status(outputs: tuple[NativeTranscriptItem, ...]) -> str:
