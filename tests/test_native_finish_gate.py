@@ -185,6 +185,32 @@ def test_validate_closeout_command_allows_planner_read_only_inline_python() -> N
     assert validation.allowed is True
 
 
+def test_validate_closeout_command_allows_planner_local_import_with_dash_b() -> None:
+    command = (
+        "python3 -B -c \"import json, subprocess, algo; "
+        "assert subprocess.check_output(['git', 'status', '--porcelain'], text=True) == ''; "
+        "data=json.load(open('/app/examples.json')); "
+        "assert callable(algo.map); "
+        "assert all(algo.map(c['input']) == c['output'] for c in data)\""
+    )
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is True
+
+
+def test_validate_closeout_command_allows_planner_local_import_without_dash_b() -> None:
+    command = "python3 -c \"import algo; assert callable(algo.map)\""
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is True
+
+
 def test_validate_closeout_command_rejects_planner_inline_python_writes() -> None:
     command = "python3 -B -c \"import os; os.remove('/tmp/marker')\""
 
@@ -217,12 +243,31 @@ def test_validate_closeout_command_rejects_planner_inline_python_mutating_subpro
         "python3 -B -c \"import subprocess as sp; sp.run(['git', 'commit', '-m', 'done'])\"",
         "python3 -B -c \"import os; r = os.remove; r('/tmp/marker')\"",
         "python3 -B -c \"import os; getattr(os, 'remove')('/tmp/marker')\"",
+        "python3 -B -c \"from builtins import getattr as g; import os; g(os, 'remove')('/tmp/marker')\"",
+        "python3 -B -c \"import os; e = __builtins__.exec; e('os.remove(\\'/tmp/marker\\')')\"",
+        "python3 -B -c \"import os; g = __builtins__.getattr; g(os, 'remove')('/tmp/marker')\"",
+        "python3 -B -c \"import sys; sys.path.insert(0, '/tmp'); import algo\"",
+        "python3 -B -c \"import sys; sys.path.append('/tmp'); import algo\"",
         "python3 -B -c \"import pathlib; p = pathlib.Path('/tmp/marker'); w = p.write_text; w('x')\"",
         "python3 -B -c \"import pathlib; pathlib.Path('/tmp/marker').open('w')\"",
+        "python3 -B -c \"import pathlib; p = pathlib.Path('/tmp/marker'); p.open('w')\"",
+        "python3 -B -c \"m = 'w'; open('/tmp/marker', m)\"",
+        "python3 -B -c \"import pathlib; m = 'w'; pathlib.Path('/tmp/marker').open(m)\"",
         "python3 -B -c \"import subprocess; cmd = ['git', 'commit', '-m', 'done']; subprocess.run(cmd)\"",
+        "python3 -B -c \"import subprocess; subprocess.run(args=['git', 'commit', '-m', 'done'])\"",
+        "python3 -B -c \"import subprocess; subprocess.run(['curl', 'https://example.com'])\"",
+        "python3 -B -c \"import subprocess; subprocess.run(['cu' + 'rl', 'https://example.com'])\"",
+        "python3 -B -c \"import subprocess; subprocess.run(['git'] + ['commit', '-m', 'done'])\"",
+        "python3 -B -c \"import subprocess; subprocess.run(tuple(['git', 'commit', '-m', 'done']))\"",
+        "python3 -B -c \"import subprocess; subprocess.run(['sh', '-c', 'rm -rf build'])\"",
+        "python3 -B -c \"f = open; f('/tmp/marker', 'w')\"",
+        "python3 -B -c \"import subprocess; subprocess.run(['git', '-c', 'user.name=x', 'commit', '-m', 'done'])\"",
+        "python3 -B -c \"import subprocess; subprocess.run(['git', '--git-dir', '.git', 'commit', '-m', 'done'])\"",
         "python3 -B -c \"import sys; sys.exit()\"",
         "python3 -B -c \"exit()\"",
         "python3 -O -c \"assert False\"",
+        "python3 -OB -c \"assert False\"",
+        "PYTHONOPTIMIZE=1 python3 -c \"assert False\"",
     ),
 )
 def test_validate_closeout_command_rejects_planner_inline_python_bypasses(command: str) -> None:

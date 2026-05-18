@@ -688,6 +688,7 @@ def _unsafe_command_blockers(
     if first in _INLINE_EVALUATOR_TOKENS and any(token in {"-c", "-e"} for token in semantic_tokens):
         if not (
             allow_planner_read_only_inline_python
+            and not _python_asserts_disabled(tokens)
             and _is_read_only_planner_inline_python(semantic_tokens)
         ):
             blockers.append("closeout_command_inline_program")
@@ -721,7 +722,7 @@ def _unsafe_command_blockers(
 def _is_read_only_planner_inline_python(tokens: tuple[str, ...]) -> bool:
     if not tokens or _basename(tokens[0]) not in {"python", "python3"}:
         return False
-    if any(token in {"-O", "-OO"} for token in tokens):
+    if _python_asserts_disabled(tokens):
         return False
     code = _inline_python_code(tokens)
     if not code:
@@ -730,19 +731,24 @@ def _is_read_only_planner_inline_python(tokens: tuple[str, ...]) -> bool:
         tree = ast.parse(code)
     except SyntaxError:
         return False
+    aliases = _python_import_aliases(tree)
+    aliases.update(_python_assignment_aliases(tree, aliases))
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            if any(alias.asname for alias in node.names):
-                return False
-            if any(alias.name.split(".", 1)[0] not in _READ_ONLY_INLINE_PYTHON_IMPORT_ROOTS for alias in node.names):
+            if any(alias.name == "*" for alias in node.names):
                 return False
         elif isinstance(node, ast.ImportFrom):
-            return False
+            if any(alias.name == "*" for alias in node.names):
+                return False
         elif isinstance(node, ast.Call):
-            call_name = _python_call_name(node.func)
+            call_name = _python_call_name(node.func, aliases)
             if _python_call_name_is_unsafe(call_name):
                 return False
-            if call_name == "open" and _python_open_call_can_write(node):
+            method_open = call_name.endswith(".open") and call_name not in {"builtins.open", "__builtins__.open"}
+            if (call_name == "open" or call_name.endswith(".open")) and _python_open_call_can_write(
+                node,
+                method_open=method_open,
+            ):
                 return False
             if call_name.startswith("subprocess.") and (
                 _python_subprocess_call_uses_shell(node)
@@ -750,10 +756,10 @@ def _is_read_only_planner_inline_python(tokens: tuple[str, ...]) -> bool:
             ):
                 return False
         elif isinstance(node, ast.Assign):
-            if _python_assignment_value_is_unsafe(node.value):
+            if _python_assignment_value_is_unsafe(node.value, aliases):
                 return False
         elif isinstance(node, ast.AnnAssign):
-            if _python_assignment_value_is_unsafe(node.value):
+            if _python_assignment_value_is_unsafe(node.value, aliases):
                 return False
     return True
 
@@ -765,17 +771,69 @@ def _inline_python_code(tokens: tuple[str, ...]) -> str:
     return ""
 
 
-def _python_call_name(node: ast.AST) -> str:
+def _python_asserts_disabled(tokens: tuple[str, ...]) -> bool:
+    for token in tokens:
+        if token.startswith("PYTHONOPTIMIZE=") and token.split("=", 1)[1] not in {"", "0"}:
+            return True
+        if not token.startswith("-"):
+            continue
+        if token in {"-c", "-e", "-B"}:
+            continue
+        if "O" in token:
+            return True
+    return False
+
+
+def _python_import_aliases(tree: ast.AST) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".", 1)[0]
+                aliases[alias.asname or root] = root
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                name = f"{module}.{alias.name}" if module else alias.name
+                aliases[alias.asname or alias.name] = name
+    return aliases
+
+
+def _python_assignment_aliases(tree: ast.AST, aliases: Mapping[str, str]) -> dict[str, str]:
+    assigned: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        name = _python_call_name(node.value, {**aliases, **assigned})
+        if name:
+            assigned[target.id] = name
+    return assigned
+
+
+def _python_call_name(node: ast.AST, aliases: Mapping[str, str] | None = None) -> str:
     if isinstance(node, ast.Name):
-        return node.id
+        return (aliases or {}).get(node.id, node.id)
     if isinstance(node, ast.Attribute):
-        parent = _python_call_name(node.value)
+        parent = _python_call_name(node.value, aliases)
         return f"{parent}.{node.attr}" if parent else node.attr
+    if isinstance(node, ast.Call):
+        return _python_call_name(node.func, aliases)
     return ""
 
 
 def _python_call_name_is_unsafe(call_name: str) -> bool:
     if call_name in _UNSAFE_INLINE_PYTHON_CALLS:
+        return True
+    if call_name.startswith("builtins.") and call_name.split(".", 1)[1] in _UNSAFE_INLINE_PYTHON_CALLS:
+        return True
+    if call_name.startswith("__builtins__.") and call_name.split(".", 1)[1] in _UNSAFE_INLINE_PYTHON_CALLS:
+        return True
+    if call_name in {"sys.path.append", "sys.path.insert", "sys.path.extend"}:
         return True
     unsafe_suffixes = (
         ".mkdir",
@@ -792,29 +850,35 @@ def _python_call_name_is_unsafe(call_name: str) -> bool:
     return any(call_name.endswith(suffix) for suffix in unsafe_suffixes)
 
 
-def _python_open_call_can_write(node: ast.Call) -> bool:
+def _python_open_call_can_write(node: ast.Call, *, method_open: bool) -> bool:
     mode = ""
-    if len(node.args) == 1 and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
-        candidate = node.args[0].value
-        if candidate in {"w", "a", "x"} or any(marker in candidate for marker in ("w", "a", "x", "+")):
-            mode = candidate
-    if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str):
+    if method_open and node.args:
+        if not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, str):
+            return True
+        mode = node.args[0].value
+    if len(node.args) >= 2:
+        if not isinstance(node.args[1], ast.Constant) or not isinstance(node.args[1].value, str):
+            return True
         mode = node.args[1].value
     for keyword in node.keywords:
-        if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, str):
+        if keyword.arg == "mode":
+            if not isinstance(keyword.value, ast.Constant) or not isinstance(keyword.value.value, str):
+                return True
             mode = keyword.value.value
     if not mode:
         return False
     return any(marker in mode for marker in ("w", "a", "x", "+"))
 
 
-def _python_assignment_value_is_unsafe(value: ast.AST | None) -> bool:
+def _python_assignment_value_is_unsafe(value: ast.AST | None, aliases: Mapping[str, str] | None = None) -> bool:
     if value is None:
         return False
     if isinstance(value, ast.Attribute):
-        return _python_call_name_is_unsafe(_python_call_name(value))
+        return _python_call_name_is_unsafe(_python_call_name(value, aliases))
+    if isinstance(value, ast.Name):
+        return _python_call_name_is_unsafe(_python_call_name(value, aliases))
     if isinstance(value, ast.Call):
-        return _python_call_name_is_unsafe(_python_call_name(value.func))
+        return _python_call_name_is_unsafe(_python_call_name(value.func, aliases))
     return False
 
 
@@ -826,9 +890,13 @@ def _python_subprocess_call_uses_shell(node: ast.Call) -> bool:
 
 
 def _python_subprocess_call_mentions_mutating_command(node: ast.Call) -> bool:
-    if not node.args:
+    command_arg: ast.AST | None = node.args[0] if node.args else None
+    for keyword in node.keywords:
+        if keyword.arg == "args":
+            command_arg = keyword.value
+            break
+    if command_arg is None:
         return False
-    command_arg = node.args[0]
     if isinstance(command_arg, ast.Constant) and isinstance(command_arg.value, str):
         return _python_string_mentions_mutating_command(command_arg.value)
     if isinstance(command_arg, ast.Name):
@@ -838,8 +906,10 @@ def _python_subprocess_call_mentions_mutating_command(node: ast.Call) -> bool:
         for element in command_arg.elts:
             if isinstance(element, ast.Constant) and isinstance(element.value, str):
                 tokens.append(element.value)
+            else:
+                return True
         return _python_tokens_mention_mutating_command(tokens)
-    return False
+    return True
 
 
 def _python_string_mentions_mutating_command(value: str) -> bool:
@@ -854,7 +924,14 @@ def _python_tokens_mention_mutating_command(tokens: list[str]) -> bool:
     if not tokens:
         return False
     basenames = [_basename(token) for token in tokens]
-    if set(basenames) & (_SOURCE_MUTATION_TOKENS | _PACKAGE_INSTALL_TOKENS | _PRIVILEGED_TOKENS):
+    if set(basenames) & (
+        _SOURCE_MUTATION_TOKENS
+        | _PACKAGE_INSTALL_TOKENS
+        | (_NETWORK_TOKENS - {"git"})
+        | _BACKGROUND_TOKENS
+        | _SHELL_TOKENS
+        | _PRIVILEGED_TOKENS
+    ):
         return True
     for index, token in enumerate(basenames):
         if token != "git":
@@ -866,11 +943,23 @@ def _python_tokens_mention_mutating_command(tokens: list[str]) -> bool:
 
 
 def _first_git_subcommand(tokens: list[str]) -> str:
+    options_with_values = {
+        "-C",
+        "-c",
+        "--exec-path",
+        "--git-dir",
+        "--namespace",
+        "--super-prefix",
+        "--work-tree",
+    }
     index = 0
     while index < len(tokens):
         token = tokens[index]
-        if token == "-C":
+        if token in options_with_values:
             index += 2
+            continue
+        if any(token.startswith(f"{option}=") for option in options_with_values if option.startswith("--")):
+            index += 1
             continue
         if token.startswith("-"):
             index += 1
