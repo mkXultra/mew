@@ -95,6 +95,7 @@ class MewHarborRun:
     timeout_seconds: int
     timeout_reserve_seconds: int
     agent_timeout_multiplier: int
+    agent_setup_timeout_multiplier: int
     work_guidance: str
     install_command: str
     command_cwd: str = DEFAULT_COMMAND_CWD
@@ -320,6 +321,8 @@ def build_harbor_command(config: MewHarborRun) -> list[str]:
         "-y",
         "--agent-timeout-multiplier",
         str(config.agent_timeout_multiplier),
+        "--agent-setup-timeout-multiplier",
+        str(config.agent_setup_timeout_multiplier),
         "--jobs-dir",
         str(config.jobs_dir),
         "--agent-import-path",
@@ -793,6 +796,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=int)
     parser.add_argument("--timeout-reserve-seconds", type=int)
     parser.add_argument("--agent-timeout-multiplier", type=int, default=2)
+    parser.add_argument("--agent-setup-timeout-multiplier", type=int, default=4)
     parser.add_argument(
         "--work-guidance",
         action="append",
@@ -867,6 +871,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else mode_defaults.timeout_reserve_seconds
         ),
         agent_timeout_multiplier=args.agent_timeout_multiplier,
+        agent_setup_timeout_multiplier=args.agent_setup_timeout_multiplier,
         work_guidance=combine_work_guidance(work_guidance_fragments, mode_defaults.work_guidance),
         install_command=args.install_command,
         command_cwd=command_cwd_for_task(args.task_name, args.command_cwd),

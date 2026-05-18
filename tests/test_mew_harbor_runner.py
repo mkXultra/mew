@@ -39,6 +39,7 @@ def _config(tmp_path, **overrides):
         "timeout_seconds": 660,
         "timeout_reserve_seconds": 60,
         "agent_timeout_multiplier": 2,
+        "agent_setup_timeout_multiplier": 4,
         "work_guidance": DEFAULT_WORK_GUIDANCE,
         "install_command": "python3 -m pip install -e /mew",
         "run_mode": "step-check-10min",
@@ -261,6 +262,7 @@ def test_build_harbor_command_uses_mew_wrapper_mounts_and_timeout_shape(tmp_path
     ]
     assert command[command.index("--agent-import-path") + 1] == "mew_terminal_bench_agent:MewTerminalBenchAgent"
     assert "--agent" not in command
+    assert command[command.index("--agent-setup-timeout-multiplier") + 1] == "4"
     assert "timeout_seconds=660" in command
     assert "timeout_reserve_seconds=60" in command
     assert "command_cwd=/app" in command
@@ -282,6 +284,12 @@ def test_parser_accepts_command_cwd_override():
     args = build_parser().parse_args(["prove-plus-comm", "--command-cwd", "/workspace"])
 
     assert args.command_cwd == "/workspace"
+
+
+def test_parser_accepts_agent_setup_timeout_multiplier():
+    args = build_parser().parse_args(["make-mips-interpreter", "--agent-setup-timeout-multiplier", "6"])
+
+    assert args.agent_setup_timeout_multiplier == 6
 
 
 def test_command_cwd_for_task_uses_known_task_map():
