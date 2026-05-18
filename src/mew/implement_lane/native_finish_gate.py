@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
+import re
 import shlex
 from typing import Literal, Mapping
 
@@ -288,10 +289,10 @@ def validate_closeout_command(
 ) -> FinishCloseoutCommandValidation:
     """Validate a final-verifier command before dispatch.
 
-    This validator is intentionally conservative.  Later phases may replace the
-    string checks with parser metadata, but Phase 2 must already prevent obvious
-    self-approval, mutation, privilege, network, and daemon-style commands from
-    becoming the trusted hot closeout source.
+    This validator is intentionally conservative for configured/auto-detected
+    commands. Planner-generated verifiers are intentionally looser: the planner
+    is expected to generate a useful verifier, while this layer only blocks
+    clearly dangerous commands.
     """
 
     active_policy = policy or NativeFinishGatePolicy()
@@ -321,7 +322,7 @@ def validate_closeout_command(
     blockers = _unsafe_command_blockers(
         normalized,
         allow_shell=active_policy.allow_shell,
-        allow_planner_read_only_inline_python=command.source == "finish_verifier_planner",
+        allow_planner_blacklist_inline_python=command.source == "finish_verifier_planner",
     )
     if blockers:
         return FinishCloseoutCommandValidation(
@@ -566,7 +567,6 @@ _UNSAFE_INLINE_PYTHON_CALLS = frozenset(
         "compile",
         "eval",
         "exec",
-        "exit",
         "getattr",
         "importlib.import_module",
         "mkdir",
@@ -583,7 +583,7 @@ _UNSAFE_INLINE_PYTHON_CALLS = frozenset(
         "os.system",
         "os.truncate",
         "os.unlink",
-        "quit",
+        "object.__getattribute__",
         "pathlib.Path.mkdir",
         "pathlib.Path.rename",
         "pathlib.Path.replace",
@@ -602,9 +602,9 @@ _UNSAFE_INLINE_PYTHON_CALLS = frozenset(
         "shutil.copytree",
         "shutil.move",
         "shutil.rmtree",
-        "sys.exit",
         "touch",
         "unlink",
+        "vars",
         "write",
         "write_bytes",
         "write_text",
@@ -651,7 +651,9 @@ _SOURCE_MUTATION_TOKENS = frozenset(
         "truncate",
     }
 )
-_PACKAGE_INSTALL_TOKENS = frozenset({"apt", "apt-get", "brew", "dnf", "npm", "pip", "pip3", "pnpm", "yarn"})
+_PACKAGE_INSTALL_TOKENS = frozenset(
+    {"apt", "apt-get", "brew", "dnf", "npm", "pip", "pip3", "pipenv", "pnpm", "poetry", "uv", "yarn"}
+)
 _NETWORK_TOKENS = frozenset({"curl", "git", "hg", "scp", "ssh", "svn", "wget"})
 _BACKGROUND_TOKENS = frozenset({"daemon", "nohup"})
 _PRIVILEGED_TOKENS = frozenset({"doas", "sudo", "su"})
@@ -669,18 +671,21 @@ def _unsafe_command_blockers(
     command: str,
     *,
     allow_shell: bool,
-    allow_planner_read_only_inline_python: bool = False,
+    allow_planner_blacklist_inline_python: bool = False,
 ) -> tuple[str, ...]:
-    if _contains_unquoted_control(command, ("\n", "\r")):
+    if _contains_unquoted_control(command, ("\n", "\r")) and not allow_planner_blacklist_inline_python:
         return ("closeout_command_multiline",)
     trimmed = command.strip()
     normalized = " ".join(trimmed.split())
+    tokens = _split_command_tokens(trimmed)
+    semantic_tokens = _semantic_tokens(tokens)
+    if allow_planner_blacklist_inline_python:
+        return _dangerous_planner_command_blockers(trimmed, tokens, semantic_tokens)
+
     blockers: list[str] = []
     if normalized in _NOOP_COMMANDS:
         blockers.append("closeout_command_noop_success")
 
-    tokens = _split_command_tokens(trimmed)
-    semantic_tokens = _semantic_tokens(tokens)
     first = _basename(semantic_tokens[0]) if semantic_tokens else ""
     if first in _SELF_ACCEPTANCE_TOKENS:
         blockers.append("closeout_command_self_acceptance")
@@ -688,9 +693,9 @@ def _unsafe_command_blockers(
         blockers.append("closeout_command_weak_assertion")
     if first in _INLINE_EVALUATOR_TOKENS and any(token in {"-c", "-e"} for token in semantic_tokens):
         if not (
-            allow_planner_read_only_inline_python
+            allow_planner_blacklist_inline_python
             and not _python_asserts_disabled(tokens)
-            and _is_read_only_planner_inline_python(semantic_tokens)
+            and _planner_inline_python_has_no_dangerous_ops(semantic_tokens)
         ):
             blockers.append("closeout_command_inline_program")
     if first in _SHELL_TOKENS and not allow_shell:
@@ -720,7 +725,210 @@ def _unsafe_command_blockers(
     return tuple(dict.fromkeys(blockers))
 
 
-def _is_read_only_planner_inline_python(tokens: tuple[str, ...]) -> bool:
+_DANGEROUS_PLANNER_COMMAND_TOKENS = frozenset(
+    {
+        "chmod",
+        "chown",
+        "cp",
+        "dd",
+        "install",
+        "kill",
+        "killall",
+        "ln",
+        "mkfs",
+        "mount",
+        "mv",
+        "pkill",
+        "reboot",
+        "rm",
+        "rmdir",
+        "rsync",
+        "shutdown",
+        "shred",
+        "touch",
+        "truncate",
+        "umount",
+    }
+)
+_DANGEROUS_PLANNER_GIT_SUBCOMMANDS = _UNSAFE_INLINE_PYTHON_GIT_SUBCOMMANDS
+
+
+def _dangerous_planner_command_blockers(
+    command: str,
+    tokens: tuple[str, ...],
+    semantic_tokens: tuple[str, ...],
+) -> tuple[str, ...]:
+    blockers: list[str] = []
+    shell_tokens = _planner_shell_tokens(command)
+    if not shell_tokens:
+        if _command_string_mentions_dangerous_operation(command):
+            blockers.append("closeout_command_dangerous")
+        if _planner_string_mentions_network(command):
+            blockers.append("closeout_command_network")
+        if _planner_string_mentions_package_install(command):
+            blockers.append("closeout_command_package_install")
+        if any(marker in command.upper() for marker in _SECRET_MARKERS):
+            blockers.append("closeout_command_secret")
+        return tuple(dict.fromkeys(blockers))
+    if _planner_tokens_contain_background_operator(shell_tokens):
+        blockers.append("closeout_command_background")
+    for segment in _planner_command_segments(shell_tokens):
+        blockers.extend(_dangerous_planner_segment_blockers(segment))
+    if any(marker in command.upper() for marker in _SECRET_MARKERS):
+        blockers.append("closeout_command_secret")
+    heredoc_blocker = _planner_heredoc_inline_program_blocker(command)
+    if heredoc_blocker:
+        blockers.append(heredoc_blocker)
+    return tuple(dict.fromkeys(blockers))
+
+
+def _planner_shell_tokens(command: str) -> tuple[str, ...]:
+    normalized = command
+    if _contains_unquoted_control(command, ("\n", "\r")):
+        normalized = command.replace("\r", "\n").replace("\n", " ; ")
+    try:
+        lexer = shlex.shlex(normalized, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        return tuple(str(token) for token in lexer)
+    except ValueError:
+        return ()
+
+
+def _planner_command_segments(tokens: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    segments: list[tuple[str, ...]] = []
+    current: list[str] = []
+    for token in tokens:
+        if token in {"&&", "||", ";", "|"}:
+            if current:
+                segments.append(tuple(current))
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(tuple(current))
+    return tuple(segments)
+
+
+def _planner_tokens_contain_background_operator(tokens: tuple[str, ...]) -> bool:
+    return any(token == "&" for token in tokens)
+
+
+def _planner_heredoc_inline_program_blocker(command: str) -> str:
+    if "<<" not in command:
+        return ""
+    first_line = command.splitlines()[0] if command.splitlines() else command
+    try:
+        first_tokens = tuple(shlex.split(first_line))
+    except ValueError:
+        return "closeout_command_inline_program"
+    semantic = _semantic_tokens(first_tokens)
+    if not semantic or _basename(semantic[0]) not in _INLINE_EVALUATOR_TOKENS:
+        return ""
+    body = _extract_heredoc_body(command)
+    if body is None:
+        return "closeout_command_inline_program"
+    first = _basename(semantic[0])
+    if first in {"python", "python3"}:
+        return "" if _planner_inline_python_code_has_no_dangerous_ops(body) else "closeout_command_inline_program"
+    return "closeout_command_inline_program" if _command_string_mentions_dangerous_operation(body) else ""
+
+
+def _extract_heredoc_body(command: str) -> str | None:
+    match = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?\n(.*?)\n\1(?:\n|$)", command, re.S)
+    if not match:
+        return None
+    return match.group(2)
+
+
+def _dangerous_planner_segment_blockers(segment: tuple[str, ...]) -> tuple[str, ...]:
+    semantic = _semantic_tokens(segment)
+    if not semantic:
+        return ()
+    first = _basename(semantic[0])
+    blockers: list[str] = []
+    if first.startswith("$") or "${" in first:
+        blockers.append("closeout_command_dangerous")
+    if first in _SHELL_TOKENS:
+        nested = _shell_inline_script(semantic)
+        if nested:
+            blockers.extend(_dangerous_planner_command_blockers(nested, _split_command_tokens(nested), ()))
+        return tuple(dict.fromkeys(blockers))
+    if first in _INLINE_EVALUATOR_TOKENS and any(token in {"-c", "-e"} for token in semantic):
+        if _python_asserts_disabled(segment) or _planner_inline_program_mentions_dangerous_operation(semantic):
+            blockers.append("closeout_command_inline_program")
+    if first in _DANGEROUS_PLANNER_COMMAND_TOKENS:
+        blockers.append("closeout_command_dangerous")
+    if first == "sed" and any(token == "-i" or token.startswith("-i") for token in semantic):
+        blockers.append("closeout_command_dangerous")
+    if first == "find" and any(token == "-delete" for token in semantic):
+        blockers.append("closeout_command_dangerous")
+    if first == "find" and "-exec" in semantic and any(
+        _basename(token) in _DANGEROUS_PLANNER_COMMAND_TOKENS for token in semantic
+    ):
+        blockers.append("closeout_command_dangerous")
+    if first == "xargs" and any(_basename(token) in _DANGEROUS_PLANNER_COMMAND_TOKENS for token in semantic[1:]):
+        blockers.append("closeout_command_dangerous")
+    if first in _PACKAGE_INSTALL_TOKENS and _segment_mentions_package_install(semantic):
+        blockers.append("closeout_command_package_install")
+    if first == "python" or first == "python3":
+        if _python_module_invocation_mentions_package_install(semantic):
+            blockers.append("closeout_command_package_install")
+    if first in (_NETWORK_TOKENS - {"git"}):
+        blockers.append("closeout_command_network")
+    if first in _PRIVILEGED_TOKENS:
+        blockers.append("closeout_command_privileged")
+    if first in _BACKGROUND_TOKENS:
+        blockers.append("closeout_command_background")
+    if first == "git":
+        subcommand = _first_git_subcommand([_basename(token) for token in semantic[1:]])
+        if subcommand in _DANGEROUS_PLANNER_GIT_SUBCOMMANDS:
+            blockers.append("closeout_command_dangerous")
+        if subcommand in {"archive", "clone", "fetch", "ls-remote", "pull", "push", "remote", "submodule"}:
+            blockers.append("closeout_command_network")
+    return tuple(dict.fromkeys(blockers))
+
+
+def _token_after_flag(tokens: tuple[str, ...], flag: str) -> str:
+    for index, token in enumerate(tokens[:-1]):
+        if token == flag:
+            return tokens[index + 1]
+    return ""
+
+
+def _shell_inline_script(tokens: tuple[str, ...]) -> str:
+    for index, token in enumerate(tokens[:-1]):
+        if token == "-c":
+            return tokens[index + 1]
+        if token.startswith("-") and "c" in token[1:]:
+            return tokens[index + 1]
+    return ""
+
+
+def _segment_mentions_package_install(tokens: tuple[str, ...]) -> bool:
+    return any(token in {"add", "i", "install", "uninstall"} for token in tokens[1:])
+
+
+def _python_module_invocation_mentions_package_install(tokens: tuple[str, ...]) -> bool:
+    for index, token in enumerate(tokens[:-2]):
+        if token == "-m" and tokens[index + 1] in {"pip", "pip3"}:
+            return any(item in {"install", "uninstall"} for item in tokens[index + 2 :])
+    return False
+
+
+def _planner_inline_program_mentions_dangerous_operation(tokens: tuple[str, ...]) -> bool:
+    if not tokens:
+        return False
+    first = _basename(tokens[0])
+    if first in {"python", "python3"} and any(token in {"-c", "-e"} for token in tokens):
+        return not _planner_inline_python_has_no_dangerous_ops(tokens)
+    if first in {"node", "ruby"} and any(token in {"-c", "-e"} for token in tokens):
+        code = _inline_python_code(tokens)
+        return _command_string_mentions_dangerous_operation(code)
+    return False
+
+
+def _planner_inline_python_has_no_dangerous_ops(tokens: tuple[str, ...]) -> bool:
     if not tokens or _basename(tokens[0]) not in {"python", "python3"}:
         return False
     if _python_asserts_disabled(tokens):
@@ -728,20 +936,21 @@ def _is_read_only_planner_inline_python(tokens: tuple[str, ...]) -> bool:
     code = _inline_python_code(tokens)
     if not code:
         return False
+    return _planner_inline_python_code_has_no_dangerous_ops(code)
+
+
+def _planner_inline_python_code_has_no_dangerous_ops(code: str) -> bool:
     try:
         tree = ast.parse(code)
     except SyntaxError:
         return False
     aliases = _python_import_aliases(tree)
     aliases.update(_python_assignment_aliases(tree, aliases))
+    value_aliases = _python_assignment_string_sequences(tree)
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            if any(alias.name == "*" for alias in node.names):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Subscript):
                 return False
-        elif isinstance(node, ast.ImportFrom):
-            if any(alias.name == "*" for alias in node.names):
-                return False
-        elif isinstance(node, ast.Call):
             call_name = _python_call_name(node.func, aliases)
             if _python_call_name_is_unsafe(call_name):
                 return False
@@ -753,7 +962,7 @@ def _is_read_only_planner_inline_python(tokens: tuple[str, ...]) -> bool:
                 return False
             if call_name.startswith("subprocess.") and (
                 _python_subprocess_call_uses_shell(node)
-                or _python_subprocess_call_mentions_mutating_command(node)
+                or _python_subprocess_call_mentions_mutating_command(node, value_aliases)
             ):
                 return False
         elif isinstance(node, ast.Assign):
@@ -816,6 +1025,88 @@ def _python_assignment_aliases(tree: ast.AST, aliases: Mapping[str, str]) -> dic
     return assigned
 
 
+def _python_assignment_string_sequences(tree: ast.AST) -> dict[str, list[str]]:
+    assigned: dict[str, list[str]] = {}
+    body = getattr(tree, "body", ())
+    for node in body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            tokens = _python_static_string_sequence(node.value, assigned)
+            if tokens is not None:
+                assigned[node.targets[0].id] = tokens
+            continue
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            current = assigned.get(node.target.id)
+            addition = _python_static_string_sequence(node.value, assigned)
+            if current is not None and addition is not None:
+                assigned[node.target.id] = [*current, *addition]
+            else:
+                assigned.pop(node.target.id, None)
+            continue
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            _python_apply_string_sequence_mutation(node.value, assigned)
+    return assigned
+
+
+def _python_apply_string_sequence_mutation(call: ast.Call, assigned: dict[str, list[str]]) -> None:
+    if not isinstance(call.func, ast.Attribute) or not isinstance(call.func.value, ast.Name):
+        return
+    name = call.func.value.id
+    current = assigned.get(name)
+    if current is None:
+        return
+    method = call.func.attr
+    if method == "append" and len(call.args) == 1:
+        addition = _python_static_string_sequence(call.args[0], assigned)
+        if addition is not None and len(addition) == 1:
+            assigned[name] = [*current, addition[0]]
+            return
+    if method == "extend" and len(call.args) == 1:
+        addition = _python_static_string_sequence(call.args[0], assigned)
+        if addition is not None:
+            assigned[name] = [*current, *addition]
+            return
+    assigned.pop(name, None)
+
+
+def _python_static_string_sequence(node: ast.AST, assigned: Mapping[str, list[str]]) -> list[str] | None:
+    if isinstance(node, ast.Name):
+        return assigned.get(node.id)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        try:
+            return shlex.split(node.value)
+        except ValueError:
+            return node.value.split()
+    if isinstance(node, (ast.List, ast.Tuple)):
+        tokens: list[str] = []
+        for element in node.elts:
+            if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                tokens.append(element.value)
+            else:
+                nested = _python_static_string_sequence(element, assigned)
+                if nested is None:
+                    return None
+                tokens.extend(nested)
+        return tokens
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        if (
+            isinstance(node.left, ast.Constant)
+            and isinstance(node.left.value, str)
+            and isinstance(node.right, ast.Constant)
+            and isinstance(node.right.value, str)
+        ):
+            return [node.left.value + node.right.value]
+        left = _python_static_string_sequence(node.left, assigned)
+        right = _python_static_string_sequence(node.right, assigned)
+        if left is None or right is None:
+            return None
+        return [*left, *right]
+    if isinstance(node, ast.Call):
+        name = _python_call_name(node.func)
+        if name in {"list", "tuple"} and len(node.args) == 1:
+            return _python_static_string_sequence(node.args[0], assigned)
+    return None
+
+
 def _python_call_name(node: ast.AST, aliases: Mapping[str, str] | None = None) -> str:
     if isinstance(node, ast.Name):
         return (aliases or {}).get(node.id, node.id)
@@ -834,7 +1125,7 @@ def _python_call_name_is_unsafe(call_name: str) -> bool:
         return True
     if call_name.startswith("__builtins__.") and call_name.split(".", 1)[1] in _UNSAFE_INLINE_PYTHON_CALLS:
         return True
-    if call_name in {"sys.path.append", "sys.path.insert", "sys.path.extend"}:
+    if call_name.startswith(("http.client.", "requests.", "socket.", "urllib.request.", "urllib3.")):
         return True
     unsafe_suffixes = (
         ".mkdir",
@@ -890,7 +1181,10 @@ def _python_subprocess_call_uses_shell(node: ast.Call) -> bool:
     return False
 
 
-def _python_subprocess_call_mentions_mutating_command(node: ast.Call) -> bool:
+def _python_subprocess_call_mentions_mutating_command(
+    node: ast.Call,
+    value_aliases: Mapping[str, list[str]] | None = None,
+) -> bool:
     command_arg: ast.AST | None = node.args[0] if node.args else None
     for keyword in node.keywords:
         if keyword.arg == "args":
@@ -901,14 +1195,15 @@ def _python_subprocess_call_mentions_mutating_command(node: ast.Call) -> bool:
     if isinstance(command_arg, ast.Constant) and isinstance(command_arg.value, str):
         return _python_string_mentions_mutating_command(command_arg.value)
     if isinstance(command_arg, ast.Name):
-        return True
+        tokens = (value_aliases or {}).get(command_arg.id)
+        return True if tokens is None else _python_tokens_mention_mutating_command(tokens)
     if isinstance(command_arg, (ast.List, ast.Tuple)):
-        tokens: list[str] = []
-        for element in command_arg.elts:
-            if isinstance(element, ast.Constant) and isinstance(element.value, str):
-                tokens.append(element.value)
-            else:
-                return True
+        tokens = _python_static_string_sequence(command_arg, value_aliases or {})
+        if tokens is None:
+            return True
+        return _python_tokens_mention_mutating_command(tokens)
+    tokens = _python_static_string_sequence(command_arg, value_aliases or {})
+    if tokens is not None:
         return _python_tokens_mention_mutating_command(tokens)
     return True
 
@@ -919,6 +1214,36 @@ def _python_string_mentions_mutating_command(value: str) -> bool:
     except ValueError:
         tokens = value.split()
     return _python_tokens_mention_mutating_command(tokens)
+
+
+def _command_string_mentions_dangerous_operation(value: str) -> bool:
+    try:
+        tokens = shlex.split(value)
+    except ValueError:
+        tokens = value.split()
+    regex_tokens = re.findall(r"[A-Za-z0-9_./+-]+", value)
+    return (
+        _python_tokens_mention_mutating_command(tokens)
+        or _python_tokens_mention_mutating_command(regex_tokens)
+        or _planner_string_mentions_network(value)
+    )
+
+
+def _planner_string_mentions_network(value: str) -> bool:
+    lowered = value.lower()
+    if "http://" in lowered or "https://" in lowered:
+        return True
+    if "net/http" in lowered or "net::http" in lowered or "require('http')" in lowered or 'require("http")' in lowered:
+        return True
+    if "require('https')" in lowered or 'require("https")' in lowered:
+        return True
+    words = {_basename(token) for token in re.findall(r"[A-Za-z0-9_./+-]+", value)}
+    return bool(words & ((_NETWORK_TOKENS - {"git"}) | {"ls-remote"}))
+
+
+def _planner_string_mentions_package_install(value: str) -> bool:
+    words = {_basename(token) for token in re.findall(r"[A-Za-z0-9_./+-]+", value)}
+    return bool(words & _PACKAGE_INSTALL_TOKENS and words & {"add", "i", "install", "uninstall"})
 
 
 def _python_tokens_mention_mutating_command(tokens: list[str]) -> bool:

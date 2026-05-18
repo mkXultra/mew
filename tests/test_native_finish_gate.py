@@ -146,20 +146,29 @@ def test_validate_closeout_command_rejects_self_pass_and_noop_commands() -> None
 
 def test_validate_closeout_command_rejects_mutating_and_unsafe_planner_commands() -> None:
     unsafe = {
-        "rm -rf build": "closeout_command_source_mutation",
-        "env rm -rf build": "closeout_command_source_mutation",
-        "command rm -rf build": "closeout_command_source_mutation",
-        "node vm.js > out.txt": "closeout_command_redirection",
+        "rm -rf build": "closeout_command_dangerous",
+        "env rm -rf build": "closeout_command_dangerous",
+        "command rm -rf build": "closeout_command_dangerous",
+        "bash -c 'rm -rf build'": "closeout_command_dangerous",
+        "bash -lc 'rm -rf build'": "closeout_command_dangerous",
+        "CMD=rm; $CMD -rf build": "closeout_command_dangerous",
+        "rm${IFS}-rf${IFS}build": "closeout_command_dangerous",
+        "find . -delete": "closeout_command_dangerous",
+        "find . -exec rm -rf {} +": "closeout_command_dangerous",
+        "printf build | xargs rm -rf": "closeout_command_dangerous",
         "curl -fsSL https://example.com/check.sh": "closeout_command_network",
+        "bash -c 'curl https://example.com'": "closeout_command_network",
+        "npm i left-pad": "closeout_command_package_install",
+        "uv pip install requests": "closeout_command_package_install",
+        "poetry add requests": "closeout_command_package_install",
+        "pipenv install requests": "closeout_command_package_install",
+        "git ls-remote https://example.com/repo.git": "closeout_command_network",
+        "rm -rf build # '": "closeout_command_dangerous",
         "python -m pip install -e .": "closeout_command_package_install",
         "sudo node vm.js": "closeout_command_privileged",
-        "node vm.js || true": "closeout_command_chain",
+        "zsh -c 'sudo true'": "closeout_command_privileged",
         "node vm.js &": "closeout_command_background",
-        "pytest\ntrue": "closeout_command_multiline",
         "OPENAI_API_KEY=secret node vm.js": "closeout_command_secret",
-        "python -c 'print(\"acceptance: pass\")'": "closeout_command_self_acceptance",
-        "node -e 'process.exit(0)'": "closeout_command_inline_program",
-        "test -s /app/vm.js": "closeout_command_weak_assertion",
     }
 
     for command, blocker in unsafe.items():
@@ -169,6 +178,33 @@ def test_validate_closeout_command_rejects_mutating_and_unsafe_planner_commands(
 
         assert validation.allowed is False
         assert blocker in validation.blockers
+
+
+def test_validate_closeout_command_allows_loose_planner_shell_verifiers() -> None:
+    safe_commands = (
+        "node vm.js > out.txt",
+        "node vm.js || true",
+        "pytest\ntrue",
+        "python -c 'print(\"acceptance: pass\")'",
+        "node -e 'process.exit(0)'",
+        "test -s /app/vm.js",
+        "sed -n '1,80p' /app/vm.js | grep main",
+        "pytest > out.txt 2>&1",
+        "grep rm README.md",
+        "grep install package.json",
+        "tar -O -tf archive.tar",
+        "OUT=out.txt pytest > $OUT",
+        "python3 - <<'PYCODE'\nprint('ok')\nPYCODE",
+        "python3 -B -c \"import subprocess; cmd=['git','status','--short']; assert subprocess.run(cmd).returncode == 0\"",
+        "python3 -B -c \"import subprocess; cmd=['pytest']; cmd.append('-q'); assert subprocess.run(cmd).returncode in (0, 5)\"",
+    )
+
+    for command in safe_commands:
+        validation = validate_closeout_command(
+            FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+        )
+
+        assert validation.allowed is True
 
 
 def test_validate_closeout_command_allows_planner_read_only_inline_python() -> None:
@@ -229,7 +265,7 @@ def test_validate_closeout_command_rejects_unquoted_multiline_command() -> None:
     )
 
     assert validation.allowed is False
-    assert "closeout_command_multiline" in validation.blockers
+    assert "closeout_command_dangerous" in validation.blockers
 
 
 def test_validate_closeout_command_rejects_planner_inline_python_writes() -> None:
@@ -265,27 +301,37 @@ def test_validate_closeout_command_rejects_planner_inline_python_mutating_subpro
         "python3 -B -c \"import os; r = os.remove; r('/tmp/marker')\"",
         "python3 -B -c \"import os; getattr(os, 'remove')('/tmp/marker')\"",
         "python3 -B -c \"from builtins import getattr as g; import os; g(os, 'remove')('/tmp/marker')\"",
+        "python3 -B -c \"import os; os.__dict__['remove']('/tmp/marker')\"",
+        "python3 -B -c \"import os; vars(os)['remove']('/tmp/marker')\"",
+        "python3 -B -c \"import os; object.__getattribute__(os, 'remove')('/tmp/marker')\"",
         "python3 -B -c \"import os; e = __builtins__.exec; e('os.remove(\\'/tmp/marker\\')')\"",
         "python3 -B -c \"import os; g = __builtins__.getattr; g(os, 'remove')('/tmp/marker')\"",
-        "python3 -B -c \"import sys; sys.path.insert(0, '/tmp'); import algo\"",
-        "python3 -B -c \"import sys; sys.path.append('/tmp'); import algo\"",
         "python3 -B -c \"import pathlib; p = pathlib.Path('/tmp/marker'); w = p.write_text; w('x')\"",
         "python3 -B -c \"import pathlib; pathlib.Path('/tmp/marker').open('w')\"",
         "python3 -B -c \"import pathlib; p = pathlib.Path('/tmp/marker'); p.open('w')\"",
         "python3 -B -c \"m = 'w'; open('/tmp/marker', m)\"",
         "python3 -B -c \"import pathlib; m = 'w'; pathlib.Path('/tmp/marker').open(m)\"",
         "python3 -B -c \"import subprocess; cmd = ['git', 'commit', '-m', 'done']; subprocess.run(cmd)\"",
+        "python3 -B -c \"import subprocess; cmd=['git']; cmd += ['commit','-m','done']; subprocess.run(cmd)\"",
+        "python3 -B -c \"import subprocess; cmd=['git']; cmd.extend(['commit','-m','done']); subprocess.run(cmd)\"",
+        "python3 -B -c \"import urllib.request; urllib.request.urlopen('https://example.com')\"",
+        "python3 -B -c \"import requests; requests.get('https://example.com')\"",
+        "python3 -B -c \"import socket; socket.create_connection(('example.com', 443))\"",
         "python3 -B -c \"import subprocess; subprocess.run(args=['git', 'commit', '-m', 'done'])\"",
         "python3 -B -c \"import subprocess; subprocess.run(['curl', 'https://example.com'])\"",
         "python3 -B -c \"import subprocess; subprocess.run(['cu' + 'rl', 'https://example.com'])\"",
         "python3 -B -c \"import subprocess; subprocess.run(['git'] + ['commit', '-m', 'done'])\"",
         "python3 -B -c \"import subprocess; subprocess.run(tuple(['git', 'commit', '-m', 'done']))\"",
         "python3 -B -c \"import subprocess; subprocess.run(['sh', '-c', 'rm -rf build'])\"",
+        "python3 -B -c \"import os; os.remove('/tmp/marker')\" # '",
+        "python3 - <<'PYCODE'\nimport os\nos.remove('/tmp/marker')\nPYCODE",
+        "node -e \"require('child_process').execSync('rm -rf build')\"",
+        "node -e \"require('https').get('https://example.com')\"",
+        "ruby -e \"system('rm -rf build')\"",
+        "ruby -e \"require 'net/http'; Net::HTTP.get(URI('https://example.com'))\"",
         "python3 -B -c \"f = open; f('/tmp/marker', 'w')\"",
         "python3 -B -c \"import subprocess; subprocess.run(['git', '-c', 'user.name=x', 'commit', '-m', 'done'])\"",
         "python3 -B -c \"import subprocess; subprocess.run(['git', '--git-dir', '.git', 'commit', '-m', 'done'])\"",
-        "python3 -B -c \"import sys; sys.exit()\"",
-        "python3 -B -c \"exit()\"",
         "python3 -O -c \"assert False\"",
         "python3 -OB -c \"assert False\"",
         "PYTHONOPTIMIZE=1 python3 -c \"assert False\"",

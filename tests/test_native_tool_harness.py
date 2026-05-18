@@ -4867,7 +4867,7 @@ def test_native_harness_auto_detected_verifier_fallback_when_planner_rejects_pla
     assert closeout_args["finish_verifier_plan"]["source"] == "auto_detected_verifier"
     fallback = closeout_args["finish_verifier_plan"]["provenance"]["fallback_after_finish_verifier_planner"]
     assert fallback["status"] == "rejected"
-    assert fallback["reject_blockers"] == ["finish_verifier_noop_success"]
+    assert fallback["reject_blockers"] == ["finish_verifier_task_subject_missing"]
     assert result.metrics["finish_verifier_planner_decision_count"] == 1
     planner_decision = result.metrics["finish_verifier_planner_latest_decision"]
     assert planner_decision["status"] == "rejected"
@@ -4875,7 +4875,7 @@ def test_native_harness_auto_detected_verifier_fallback_when_planner_rejects_pla
     decision_path = artifact_root / "finish_verifier_planner_decisions.jsonl"
     rows = [json.loads(line) for line in decision_path.read_text(encoding="utf-8").splitlines()]
     assert rows[-1]["raw_plan"]["command"] == "true"
-    assert rows[-1]["reject_blockers"] == ["finish_verifier_noop_success"]
+    assert rows[-1]["reject_blockers"] == ["finish_verifier_task_subject_missing"]
     request_path = artifact_root / "finish_verifier_planner_requests.jsonl"
     request_rows = [json.loads(line) for line in request_path.read_text(encoding="utf-8").splitlines()]
     assert request_rows[-1]["request_hash"] == rows[-1]["request_hash"]
@@ -5322,21 +5322,11 @@ def test_codex_hot_path_finish_verifier_planner_uses_exec_command_surface(tmp_pa
 @pytest.mark.parametrize(
     "unsafe_command",
     (
-        "echo ACCEPTANCE_OK",
-        "python -c 'print(\"ACCEPTANCE_OK\")'",
-        "true # verifier",
-        "test 1 = 1",
-        "pytest || true",
-        "python -m pytest || exit 0",
-        "test -f vm.js; true",
-        "pytest | cat",
-        "test -f vm.js | cat",
         "pytest & true",
         "test -f vm.js & true",
-        "pytest\ntrue",
-        "test -f vm.js\ntrue",
         "touch verified && test -f verified",
         "sed -i s/ok/bad/ vm.js && test -f vm.js",
+        "rm -rf build && test -f vm.js",
     ),
 )
 def test_native_harness_finish_verifier_planner_rejects_unsafe_command(
@@ -5379,6 +5369,60 @@ def test_native_harness_finish_verifier_planner_rejects_unsafe_command(
     assert result.metrics["final_verifier_closeout_count"] == 0
     assert "closeout_verifier_not_run" in result.metrics["completion_resolver_latest_decision"]["blockers"]
     assert not any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+@pytest.mark.parametrize(
+    "loose_command",
+    (
+        "pytest || true",
+        "python -m pytest || exit 0",
+        "test -f vm.js; true",
+        "pytest | cat",
+        "test -f vm.js | cat",
+        "pytest\ntrue",
+        "test -f vm.js\ntrue",
+    ),
+)
+def test_native_harness_finish_verifier_planner_allows_loose_non_destructive_command(
+    tmp_path: Path,
+    loose_command: str,
+) -> None:
+    class LoosePlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            return {"command": loose_command, "reason": "loose verifier plan"}
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=LoosePlanningProvider(),
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert any("final-verifier-closeout" in item.call_id for item in result.transcript.items if item.call_id)
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
