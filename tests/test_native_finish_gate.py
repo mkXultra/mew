@@ -211,6 +211,27 @@ def test_validate_closeout_command_allows_planner_local_import_without_dash_b() 
     assert validation.allowed is True
 
 
+def test_validate_closeout_command_allows_planner_quoted_multiline_python() -> None:
+    command = "python3 -B -c 'import json\nassert json.loads(\"[1]\") == [1]\n'"
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is True
+
+
+def test_validate_closeout_command_rejects_unquoted_multiline_command() -> None:
+    command = "python3 -B -c 'assert True'\nrm -rf build"
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is False
+    assert "closeout_command_multiline" in validation.blockers
+
+
 def test_validate_closeout_command_rejects_planner_inline_python_writes() -> None:
     command = "python3 -B -c \"import os; os.remove('/tmp/marker')\""
 

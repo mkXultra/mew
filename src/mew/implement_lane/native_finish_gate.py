@@ -671,14 +671,15 @@ def _unsafe_command_blockers(
     allow_shell: bool,
     allow_planner_read_only_inline_python: bool = False,
 ) -> tuple[str, ...]:
-    if "\n" in command or "\r" in command:
+    if _contains_unquoted_control(command, ("\n", "\r")):
         return ("closeout_command_multiline",)
-    normalized = " ".join(command.strip().split())
+    trimmed = command.strip()
+    normalized = " ".join(trimmed.split())
     blockers: list[str] = []
     if normalized in _NOOP_COMMANDS:
         blockers.append("closeout_command_noop_success")
 
-    tokens = _split_command_tokens(normalized)
+    tokens = _split_command_tokens(trimmed)
     semantic_tokens = _semantic_tokens(tokens)
     first = _basename(semantic_tokens[0]) if semantic_tokens else ""
     if first in _SELF_ACCEPTANCE_TOKENS:
