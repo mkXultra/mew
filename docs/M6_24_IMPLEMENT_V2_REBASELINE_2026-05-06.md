@@ -137,7 +137,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `largest-eigenval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053` | proof_5 deferred until controller selects close proof |
 | `make-doom-for-mips` | 1/5 | pending after source-connected 0/1 speed proof; frame/visual pass but stdout/finish-closeout miss | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-doom-for-mips-speed-proof-ts-codex-hot-path-20260518-165842/2026-05-18__16-58-42/make-doom-for-mips__32HXn2D` | defer until generic bounded verifier closeout / long-running observable-output verifier design is selected, or another scoped task repeats the same class |
 | `make-mips-interpreter` | 3/5 | closed: proof-5 pass 4/5 after H5/codex_hot_path repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260515-141331` | H5 closed for this task; select next measured M6.24 scoped gap |
-| `merge-diff-arc-agi-task` | 5/5 | pending | none | run v2 speed_1 |
+| `merge-diff-arc-agi-task` | 5/5 | pass 1/1 after finish-verifier cwd repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-merge-diff-arc-agi-task-speed-proof-ts-codex-hot-path-20260518-220457/2026-05-18__22-04-57/merge-diff-arc-agi-task__G4aVv6C` | proof_5 deferred until controller selects close proof |
 | `openssl-selfsigned-cert` | 5/5 | pending | none | run v2 speed_1 |
 | `polyglot-c-py` | 5/5 | pending | none | run v2 speed_1 |
 | `polyglot-rust-c` | 4/5 | pending | none | run v2 speed_1 |
@@ -153,6 +153,16 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 
 ## Repair Notes
 
+- `merge-diff-arc-agi-task` speed proof initially hit an internal closeout
+  failure because `finish_verifier_planner` produced `cwd=/app/repo`, but the
+  native finish-verifier closeout path coerced that absolute cwd to `.`, causing
+  `ModuleNotFoundError: algo`. Commit `8ca62f1` preserved absolute planner cwd
+  through closeout without adding new planner safety hardening. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-merge-diff-arc-agi-task-speed-proof-ts-codex-hot-path-20260518-220457/2026-05-18__22-04-57/merge-diff-arc-agi-task__G4aVv6C`
+  scored external reward `1.0` with runner exceptions `0`, `work_exit_code=0`,
+  `stop_reason=finish`, native pairing valid, normalized trace total
+  `212.212s`, and end-to-end wall time about `5m29s`. Next scoped task:
+  `openssl-selfsigned-cert`.
 - `feal-differential-cryptanalysis` first v2 attempt
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
   scored `0.0` with runner errors `0` because `implement_v2` stopped on a

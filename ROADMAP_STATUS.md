@@ -90,9 +90,17 @@ long-running `node vm.js`; its stdout tail contained the expected
 Do not add Doom/MIPS-specific prompt, tool, or finish-gate rules from this
 artifact. Revisit `make-doom-for-mips` only after a generic bounded verifier
 closeout / long-running observable-output verifier design is selected, or if
-another scoped task repeats the same class. The next active M6.24 action is
-scoped rebaseline measurement: run `merge-diff-arc-agi-task` speed_1 with
-`codex_hot_path` and record the result before selecting another repair.
+another scoped task repeats the same class.
+
+2026-05-18 update: `merge-diff-arc-agi-task` speed proof passed after the
+finish-verifier planner cwd repair in commit `8ca62f1`. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-merge-diff-arc-agi-task-speed-proof-ts-codex-hot-path-20260518-220457/2026-05-18__22-04-57/merge-diff-arc-agi-task__G4aVv6C`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, and normalized
+trace total `212.212s`. Do not add planner safety/bypass hardening from this;
+the selected bug was cwd preservation. The next active M6.24 action is scoped
+rebaseline measurement: run `openssl-selfsigned-cert` speed_1 with
+`codex_hot_path`.
 
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
