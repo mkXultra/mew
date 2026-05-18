@@ -207,6 +207,9 @@ def test_phase6d0_codex_hot_path_developer_contract_fixture_matches_tools() -> N
     )
     assert "Do not create or edit source files with shell heredocs" in contract.rendered_text
     assert "shell is not the manual source editing API." in contract.rendered_text
+    assert "preserve the existing program structure" in contract.rendered_text
+    assert "nearest compiler, linker, test, or runtime diagnostic" in contract.rendered_text
+    assert "standalone surrogate unless the task explicitly asks" in contract.rendered_text
     assert "list_dir" not in contract.rendered_text
     expected_forbidden_terms = (
         "finish",
