@@ -397,16 +397,11 @@ API.
 
 Use write_stdin only to poll or interact with an existing exec_command session
 according to the profile's interactive-stdin capability.
-
-When working in an existing codebase, make focused changes that preserve the
-existing program structure.
-
-Prefer fixing the nearest compiler, linker, test, or runtime diagnostic in the
-relevant source or build files.
-
-Do not replace an existing program with a standalone surrogate unless the task
-explicitly asks for a replacement.
 ```
+
+Codex-like general coding discipline belongs in the cacheable
+`implement_v2_lane_base` section, not in this profile developer message. Keep
+this developer contract limited to tool-surface behavior.
 
 If optional `list_dir` is enabled, the same contract may add one sentence:
 

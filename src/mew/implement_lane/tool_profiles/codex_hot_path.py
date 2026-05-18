@@ -105,9 +105,6 @@ def codex_hot_path_developer_contract(
         "Use exec_command for inspection, builds, tests, probes, package-manager setup, and verification.",
         "Do not create or edit source files with shell heredocs, cat, printf, sed -i, perl -pi, Python file-writing scripts, or equivalent shell text-generation shortcuts.",
         "shell is not the manual source editing API.",
-        "When working in an existing codebase, make focused changes that preserve the existing program structure.",
-        "Prefer fixing the nearest compiler, linker, test, or runtime diagnostic in the relevant source or build files.",
-        "Do not replace an existing program with a standalone surrogate unless the task explicitly asks for a replacement.",
     )
     paragraphs = (
         "You are working through the codex_hot_path tool surface.",
@@ -121,9 +118,6 @@ def codex_hot_path_developer_contract(
             "Use write_stdin only to poll or interact with an existing exec_command session "
             "according to the profile's interactive-stdin capability."
         ),
-        required_phrases[4],
-        required_phrases[5],
-        required_phrases[6],
     )
     if "list_dir" in provider_tool_names:
         paragraphs += (
@@ -231,12 +225,16 @@ def codex_hot_path_prompt_sections(
 def _lane_base_section() -> PromptSection:
     return PromptSection(
         id="implement_v2_lane_base",
-        version="v0",
+        version="v1",
         title="Implement V2 Lane Base",
         content=(
             "You are implementing in a repository through native tool calls. "
             "Use the provider-native transcript as the live history, preserve "
-            "paired tool results, and continue until the requested implementation is complete."
+            "paired tool results, and continue until the requested implementation is complete. "
+            "Fix the problem at the root cause rather than applying surface-level patches when possible. "
+            "Keep changes consistent with the style of the existing codebase; changes should be minimal "
+            "and focused on the task. In an existing codebase, do exactly what the task asks with surgical "
+            "precision, respect the surrounding codebase, and do not overstep."
         ),
         stability=STABILITY_STATIC,
         cache_policy=CACHE_POLICY_CACHEABLE,

@@ -11409,9 +11409,15 @@ def test_codex_hot_path_prompt_metrics_hide_task_contract_section() -> None:
     coding_contract = next(
         section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_coding_contract"
     ).content
+    lane_base = next(
+        section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_lane_base"
+    ).content
     environment_context = next(
         section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_environment_context"
     )
+    assert "root cause rather than applying surface-level patches" in lane_base
+    assert "changes should be minimal and focused on the task" in lane_base
+    assert "surgical precision" in lane_base
     assert "minimal runnable candidate" not in coding_contract
     assert "missing source or artifact path" not in coding_contract
     assert "task_facts." not in coding_contract
