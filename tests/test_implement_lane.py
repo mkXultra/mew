@@ -11422,6 +11422,9 @@ def test_codex_hot_path_prompt_metrics_hide_task_contract_section() -> None:
     assert "missing source or artifact path" not in coding_contract
     assert "task_facts." not in coding_contract
     assert "fabricating replacement artifacts" in coding_contract
+    assert "source-connected build path" in coding_contract
+    assert "standalone replacements, stubs, or output-only surrogates" in coding_contract
+    assert "visible build, link, or runtime evidence" in coding_contract
     assert "Use apply_patch for source changes." in coding_contract
     assert "Use exec_command for builds, tests, probes, package-manager setup, and verification." in coding_contract
     assert "edit_file" not in coding_contract

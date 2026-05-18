@@ -186,6 +186,10 @@ def codex_hot_path_prompt_sections(
         f"{verify_sentence}"
         "Prefer modifying or connecting provided source over fabricating replacement artifacts "
         "unless the task explicitly asks for a standalone replacement. "
+        "When an existing application or source tree is supplied, derive and attempt a "
+        "source-connected build path before adding standalone replacements, stubs, or "
+        "output-only surrogates. Replacement or stub paths require visible build, link, "
+        "or runtime evidence that the supplied source path is blocked. "
         "Repair from the latest concrete failure shown in the transcript. "
         "When no further tool action is useful, provide a concise final response."
     )
