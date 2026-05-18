@@ -1,0 +1,1373 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M6.24 Tool Profile Developer Message - 日本語レビュー説明</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7f8;
+      --paper: #ffffff;
+      --ink: #1d2730;
+      --muted: #5c6874;
+      --line: #d8e0e5;
+      --soft: #eef4f6;
+      --soft-blue: #edf5ff;
+      --soft-green: #edf8f1;
+      --soft-amber: #fff6df;
+      --soft-red: #fff0ee;
+      --blue: #1e5d9a;
+      --teal: #0f766e;
+      --green: #28633d;
+      --amber: #8a5a14;
+      --red: #a33a31;
+      --purple: #6652a3;
+      --code-bg: #111827;
+      --code-ink: #e5edf7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+        "Yu Gothic", "YuGothic", "Noto Sans JP", "Meiryo", sans-serif;
+      line-height: 1.72;
+      letter-spacing: 0;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 0.18em;
+    }
+
+    code {
+      padding: 0.08rem 0.32rem;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #eef2f6;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      white-space: nowrap;
+    }
+
+    pre {
+      margin: 14px 0 0;
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      font: 13px/1.58 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    pre code {
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      white-space: pre;
+      font-size: inherit;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(230px, 288px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 26px 20px;
+      border-right: 1px solid var(--line);
+      background: #e9eef1;
+    }
+
+    aside h2 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+      line-height: 1.35;
+    }
+
+    aside p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.55;
+    }
+
+    nav {
+      display: grid;
+      gap: 4px;
+    }
+
+    nav a {
+      display: block;
+      padding: 7px 9px;
+      border-radius: 6px;
+      color: #34434e;
+      font-size: 0.9rem;
+      line-height: 1.35;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      background: rgba(30, 93, 154, 0.12);
+      color: #173d63;
+    }
+
+    main {
+      width: min(100%, 1220px);
+      padding: 42px clamp(22px, 5vw, 70px) 72px;
+    }
+
+    header {
+      padding-bottom: 26px;
+      margin-bottom: 30px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--teal);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
+    h1 {
+      max-width: 960px;
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.35rem);
+      line-height: 1.16;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 940px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 1.04rem;
+    }
+
+    section {
+      margin: 40px 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: clamp(1.35rem, 2.2vw, 1.9rem);
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 22px 0 9px;
+      font-size: 1.08rem;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    p {
+      max-width: 960px;
+      margin: 10px 0;
+    }
+
+    ul,
+    ol {
+      max-width: 980px;
+      margin: 10px 0;
+      padding-left: 1.35rem;
+    }
+
+    li {
+      margin: 5px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 0;
+      background: var(--paper);
+      font-size: 0.94rem;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf3f6;
+      color: #2c3b45;
+      font-weight: 700;
+    }
+
+    .panel {
+      margin: 14px 0;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .callout {
+      border-left: 4px solid var(--teal);
+      background: #f1f7f6;
+    }
+
+    .warning {
+      border-left-color: var(--amber);
+      background: var(--soft-amber);
+    }
+
+    .danger {
+      border-left-color: var(--red);
+      background: var(--soft-red);
+    }
+
+    .summary-grid,
+    .two-col,
+    .three-col {
+      display: grid;
+      gap: 14px;
+      margin: 16px 0;
+    }
+
+    .summary-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .two-col {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .three-col {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .card {
+      min-width: 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .card h3,
+    .card h4 {
+      margin-top: 0;
+    }
+
+    .card p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 0.94rem;
+      line-height: 1.62;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin: 14px 0 0;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 25px;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f2f5f7;
+      color: #35434e;
+      font-size: 0.78rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tag.good {
+      border-color: #b8d8c3;
+      background: var(--soft-green);
+      color: var(--green);
+    }
+
+    .tag.warn {
+      border-color: #e6cf91;
+      background: var(--soft-amber);
+      color: var(--amber);
+    }
+
+    .tag.stop {
+      border-color: #e5b6af;
+      background: var(--soft-red);
+      color: var(--red);
+    }
+
+    .label {
+      display: inline-block;
+      margin-bottom: 7px;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .diagram {
+      margin: 16px 0;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .flow.three {
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+    }
+
+    .flow.two {
+      grid-template-columns: 1fr auto 1fr;
+    }
+
+    .box {
+      min-height: 72px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f9fbfc;
+    }
+
+    .box strong {
+      display: block;
+      margin-bottom: 5px;
+      color: #22313b;
+      line-height: 1.35;
+    }
+
+    .box span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    .arrow {
+      color: var(--blue);
+      font-size: 1.45rem;
+      font-weight: 800;
+      line-height: 1;
+      text-align: center;
+    }
+
+    .request-compare {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 14px;
+      margin: 16px 0;
+    }
+
+    .request-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--paper);
+    }
+
+    .request-card h3 {
+      margin: 0;
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #edf3f6;
+      font-size: 1rem;
+    }
+
+    .request-card.target h3 {
+      background: var(--soft-green);
+      color: var(--green);
+    }
+
+    .request-card.current h3 {
+      background: var(--soft-amber);
+      color: var(--amber);
+    }
+
+    .request-stack {
+      display: grid;
+      gap: 10px;
+      padding: 15px;
+    }
+
+    .slot {
+      padding: 12px 13px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fafcfd;
+    }
+
+    .slot strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .slot p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    .slot.bad {
+      border-color: #e2c37e;
+      background: #fff9e9;
+    }
+
+    .slot.good {
+      border-color: #b7d8c3;
+      background: #f2fbf5;
+    }
+
+    .ownership {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin: 16px 0;
+    }
+
+    .owner-center {
+      grid-column: 1 / -1;
+      padding: 18px;
+      border: 2px solid #82b2ad;
+      border-radius: 8px;
+      background: #eef9f7;
+      text-align: center;
+    }
+
+    .owner-center strong {
+      display: block;
+      font-size: 1.18rem;
+      color: #114c46;
+    }
+
+    .owner-card {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .owner-card h3 {
+      margin: 0 0 8px;
+      color: #24323c;
+    }
+
+    .owner-card ul {
+      margin-bottom: 0;
+      padding-left: 1.1rem;
+      font-size: 0.93rem;
+      color: var(--muted);
+    }
+
+    .phase-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin: 16px 0;
+    }
+
+    .phase {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .phase h3 {
+      margin: 0 0 8px;
+      color: #1f3d54;
+    }
+
+    .phase p {
+      margin: 0 0 9px;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .phase .gate {
+      padding: 9px 10px;
+      border-radius: 6px;
+      background: #f1f5f8;
+      color: #32414c;
+      font-size: 0.9rem;
+      line-height: 1.55;
+    }
+
+    .checklist {
+      display: grid;
+      gap: 9px;
+      margin: 14px 0;
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+    }
+
+    .check::before {
+      content: "";
+      width: 18px;
+      height: 18px;
+      margin-top: 4px;
+      border: 2px solid var(--teal);
+      border-radius: 4px;
+      background: #f7fffc;
+    }
+
+    .check strong {
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    .check span {
+      color: var(--muted);
+      font-size: 0.93rem;
+    }
+
+    .mini-svg {
+      display: block;
+      width: 100%;
+      max-width: 900px;
+      height: auto;
+      margin: 12px auto 0;
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .footer {
+      margin-top: 46px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        display: block;
+      }
+
+      aside {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      nav {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .summary-grid,
+      .three-col,
+      .ownership,
+      .phase-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .owner-center {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 720px) {
+      main {
+        padding: 30px 18px 52px;
+      }
+
+      nav,
+      .summary-grid,
+      .two-col,
+      .three-col,
+      .request-compare,
+      .ownership,
+      .phase-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .flow,
+      .flow.two,
+      .flow.three {
+        grid-template-columns: 1fr;
+      }
+
+      .arrow {
+        transform: rotate(90deg);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <h2>レビュー目次</h2>
+      <p>原典 Markdown を、技術プロダクトオーナーが判断しやすい順に再構成した説明です。</p>
+      <nav>
+        <a href="#summary">要点</a>
+        <a href="#problem">解く問題</a>
+        <a href="#request-shape">リクエスト形状</a>
+        <a href="#ownership">Profile 所有</a>
+        <a href="#developer-role">developer role</a>
+        <a href="#previous-response">previous_response</a>
+        <a href="#contract">契約文の中身</a>
+        <a href="#legacy">legacy 分離</a>
+        <a href="#observability">観測と証跡</a>
+        <a href="#phases">Phase 6D</a>
+        <a href="#risks">リスク</a>
+        <a href="#reviewer">レビュー観点</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header>
+        <p class="eyebrow">Design 2026-05-17 / M6.24 / design only</p>
+        <h1>ToolSurfaceProfile が「ツール定義」と「developer 契約」を同時に所有する設計</h1>
+        <p class="lead">
+          この文書は、<code>codex_hot_path</code> の OpenAI/Codex 向けリクエストを
+          Codex CLI に近い形へ寄せるための設計です。生産コードの変更を許可する文書ではなく、
+          実装時の境界、証跡、レビューチェックを定義します。
+        </p>
+        <div class="tag-row">
+          <span class="tag good">対象: implement_v2 / codex_hot_path</span>
+          <span class="tag good">追加: role=developer input</span>
+          <span class="tag warn">pre-release: 後方互換不要</span>
+          <span class="tag stop">禁止: provider-visible finish 復活</span>
+        </div>
+      </header>
+
+      <section id="summary">
+        <h2>要点</h2>
+        <div class="summary-grid">
+          <article class="card">
+            <h3>1. ただのプロンプト追加ではない</h3>
+            <p>
+              <code>codex_hot_path</code> のツール行動契約は
+              <code>request_body.instructions</code> だけでなく、
+              <code>role=developer</code> の input item として送る。
+            </p>
+          </article>
+          <article class="card">
+            <h3>2. Profile が一体で所有</h3>
+            <p>
+              Provider-visible なツール schema と、それをどう使うかの developer 契約を
+              同じ <code>ToolSurfaceProfile</code> snapshot から出す。
+            </p>
+          </article>
+          <article class="card">
+            <h3>3. apply_patch 境界を明示</h3>
+            <p>
+              手動の source edit は <code>apply_patch</code>。
+              <code>exec_command</code> は inspection、build、test、probe、verification 用。
+            </p>
+          </article>
+          <article class="card">
+            <h3>4. continuation は deferred</h3>
+            <p>
+              現時点では <code>previous_response_id</code> / full retry が継続経路として未整備。
+              今は full/normal request で <code>role=developer</code> を必ず入れることに集中する。
+            </p>
+          </article>
+        </div>
+
+        <div class="panel callout">
+          <strong>この設計の判断ポイント:</strong>
+          reviewers が provider request JSON を見たときに、OpenAI/Codex の
+          <code>codex_hot_path</code> では <code>role=developer</code> item が存在し、
+          そこに profile-owned な edit/command 境界が見えること。
+        </div>
+      </section>
+
+      <section id="problem">
+        <h2>1. 何の問題を解くのか</h2>
+        <p>
+          現状の mew は、<code>codex_hot_path</code> で Codex 風の tool name
+          (<code>apply_patch</code>、<code>exec_command</code> など) を出せます。
+          しかし、そのツールをどう使うべきかという行動契約は
+          <code>request_body.instructions</code> に普通の instruction として混ざっています。
+        </p>
+        <p>
+          Codex CLI 参照実装では、base instructions、developer instructions、tool schema
+          が分かれています。この設計は、mew 側でもその transport 境界を揃えます。
+        </p>
+
+        <div class="diagram">
+          <div class="flow three">
+            <div class="box">
+              <strong>問題の症状</strong>
+              <span>ツール名は Codex 風だが、行動契約は developer role ではない。</span>
+            </div>
+            <div class="arrow">→</div>
+            <div class="box">
+              <strong>具体例</strong>
+              <span><code>exec_command</code> の heredoc / <code>cat &gt;</code> で source を生成してしまう。</span>
+            </div>
+            <div class="arrow">→</div>
+            <div class="box">
+              <strong>修正方針</strong>
+              <span>edit API と shell API の境界を developer role で provider-visible にする。</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="panel danger">
+            <h3>避けたい drift</h3>
+            <p>
+              tool schema は <code>codex_hot_path</code> なのに、行動契約が別の prompt
+              由来、古い contract 由来、または instructions-only 由来になる状態。
+            </p>
+          </div>
+          <div class="panel callout">
+            <h3>求める状態</h3>
+            <p>
+              「この profile が公開したツール」と「そのツールの使い方」が同一 snapshot
+              から来たことを hash と metadata で監査できる状態。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="request-shape">
+        <h2>2. 現在の mew request と target の違い</h2>
+        <p>
+          変更の中心は request body の置き場所です。base instructions は残せますが、
+          <code>codex_hot_path</code> の tool behavior contract は
+          OpenAI/Codex では developer-role input item でなければなりません。
+        </p>
+
+        <div class="request-compare">
+          <article class="request-card current">
+            <h3>現在の mew 形状</h3>
+            <div class="request-stack">
+              <div class="slot bad">
+                <strong><code>instructions</code></strong>
+                <p>profile prompt sections がここに描画される。tool behavior もここに入る。</p>
+              </div>
+              <div class="slot">
+                <strong><code>input</code></strong>
+                <p>先頭は raw user task / transcript items。developer item はない。</p>
+              </div>
+              <div class="slot">
+                <strong><code>tools</code></strong>
+                <p><code>ToolSurfaceSnapshot.tool_specs</code> から provider-visible tools を lower。</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="request-card target">
+            <h3>target: Codex-like 形状</h3>
+            <div class="request-stack">
+              <div class="slot">
+                <strong><code>instructions</code></strong>
+                <p>base instructions または lane base。tool behavior の唯一 carrier にしない。</p>
+              </div>
+              <div class="slot good">
+                <strong><code>input[0].role = "developer"</code></strong>
+                <p>同一 profile の developer tool behavior contract。</p>
+              </div>
+              <div class="slot">
+                <strong><code>input[1].role = "user"</code></strong>
+                <p><code>codex_hot_path</code> では raw task text。raw <code>task_contract</code> は入れない。</p>
+              </div>
+              <div class="slot good">
+                <strong><code>tools</code></strong>
+                <p>developer contract と同じ snapshot から lower された tools。</p>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <h3>Target request の最小イメージ</h3>
+        <pre><code>{
+  "instructions": "&lt;base instructions only, or profile-independent lane base&gt;",
+  "input": [
+    {
+      "role": "developer",
+      "content": [
+        { "type": "input_text", "text": "&lt;rendered codex_hot_path developer contract&gt;" }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        { "type": "input_text", "text": "&lt;raw task text for codex_hot_path&gt;" }
+      ]
+    }
+  ],
+  "tools": ["&lt;lowered tools from the same ToolSurfaceSnapshot&gt;"]
+}</code></pre>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Codex CLI 参照概念</th>
+              <th>mew の target</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>BaseInstructions</code></td>
+              <td><code>request_body.instructions</code>。ただし hot-path tool behavior の唯一 carrier にはしない。</td>
+            </tr>
+            <tr>
+              <td><code>developer_instructions</code></td>
+              <td><code>ToolSurfaceProfile</code> が選ぶ <code>DeveloperToolBehaviorContract</code>。</td>
+            </tr>
+            <tr>
+              <td><code>build_developer_update_item()</code></td>
+              <td><code>{"role":"developer","content":[...]}</code> を作る helper。</td>
+            </tr>
+            <tr>
+              <td><code>router.model_visible_specs()</code></td>
+              <td><code>ToolSurfaceSnapshot.tool_specs</code>。</td>
+            </tr>
+            <tr>
+              <td>provider-visible finish がない通常 Codex surface</td>
+              <td>mew は internal finish gate を維持し、<code>codex_hot_path</code> に <code>finish</code> tool を出さない。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="ownership">
+        <h2>3. ToolSurfaceProfile が所有するもの</h2>
+        <p>
+          この設計では、<code>ToolSurfaceProfile</code> は tool schema の一覧だけではなく、
+          それを model にどう使わせるかの developer 契約と、両者が同じ snapshot 由来である証跡を一体で所有します。
+        </p>
+
+        <div class="ownership">
+          <div class="owner-center">
+            <strong>selected ToolSurfaceProfile</strong>
+            <span>profile_id / profile_version / profile_hash</span>
+          </div>
+          <div class="owner-card">
+            <h3>Provider-visible tools</h3>
+            <ul>
+              <li>tool names</li>
+              <li>descriptions / schemas / ordering</li>
+              <li>strict/custom lowering policy</li>
+              <li>descriptor hashes</li>
+            </ul>
+          </div>
+          <div class="owner-card">
+            <h3>Developer contract</h3>
+            <ul>
+              <li><code>role=developer</code></li>
+              <li>tool behavior rules</li>
+              <li>provider tool names described by the contract</li>
+              <li>content hash / version</li>
+            </ul>
+          </div>
+          <div class="owner-card">
+            <h3>Metadata / audit</h3>
+            <ul>
+              <li>developer contract id</li>
+              <li>transport policy</li>
+              <li>wire visibility</li>
+              <li>fallback reason when applicable</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="panel warning">
+          <strong>重要:</strong>
+          <code>profile_hash</code> は descriptor/spec identity と developer contract identity
+          の両方を覆う必要があります。tool descriptor だけ、または developer contract だけが変わっても
+          hash に反映されないなら不完全です。
+        </div>
+
+        <h3>Snapshot に追加されるべき代表 metadata</h3>
+        <div class="three-col">
+          <div class="card">
+            <h4>identity</h4>
+            <p><code>developer_contract_id</code>、<code>developer_contract_version</code>、<code>developer_contract_hash</code></p>
+          </div>
+          <div class="card">
+            <h4>transport</h4>
+            <p><code>developer_contract_transport_policy</code>、<code>developer_contract_transport</code>、<code>developer_contract_wire_visible</code></p>
+          </div>
+          <div class="card">
+            <h4>tool match</h4>
+            <p><code>developer_contract_provider_tool_names</code> は option 適用後の <code>provider_tool_names</code> と一致。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="developer-role">
+        <h2>4. なぜ role=developer が重要なのか</h2>
+        <p>
+          目的は「強い言葉を instructions に足す」ことではありません。
+          Codex CLI と同じ層に tool behavior contract を置き、provider-visible な request artifact
+          でそれを検査できるようにすることです。
+        </p>
+
+        <svg class="mini-svg" viewBox="0 0 900 250" role="img" aria-label="base instructions, developer contract, tools separation diagram">
+          <defs>
+            <marker id="arrowhead" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+              <path d="M0,0 L10,4 L0,8 Z" fill="#1e5d9a"></path>
+            </marker>
+          </defs>
+          <rect x="25" y="28" width="240" height="72" rx="8" fill="#edf5ff" stroke="#b7cde4"></rect>
+          <text x="145" y="58" text-anchor="middle" font-size="18" font-weight="700" fill="#173d63">Base instructions</text>
+          <text x="145" y="82" text-anchor="middle" font-size="14" fill="#53616d">request.instructions</text>
+
+          <rect x="330" y="28" width="240" height="72" rx="8" fill="#edf8f1" stroke="#b8d8c3"></rect>
+          <text x="450" y="58" text-anchor="middle" font-size="18" font-weight="700" fill="#28633d">Developer contract</text>
+          <text x="450" y="82" text-anchor="middle" font-size="14" fill="#53616d">input[0].role = developer</text>
+
+          <rect x="635" y="28" width="240" height="72" rx="8" fill="#fff6df" stroke="#e6cf91"></rect>
+          <text x="755" y="58" text-anchor="middle" font-size="18" font-weight="700" fill="#8a5a14">Tool schema</text>
+          <text x="755" y="82" text-anchor="middle" font-size="14" fill="#53616d">request.tools</text>
+
+          <line x1="145" y1="114" x2="145" y2="175" stroke="#1e5d9a" stroke-width="2.4" marker-end="url(#arrowhead)"></line>
+          <line x1="450" y1="114" x2="450" y2="175" stroke="#1e5d9a" stroke-width="2.4" marker-end="url(#arrowhead)"></line>
+          <line x1="755" y1="114" x2="755" y2="175" stroke="#1e5d9a" stroke-width="2.4" marker-end="url(#arrowhead)"></line>
+
+          <rect x="85" y="180" width="730" height="46" rx="8" fill="#ffffff" stroke="#d8e0e5"></rect>
+          <text x="450" y="210" text-anchor="middle" font-size="16" font-weight="700" fill="#1d2730">
+            Provider request JSON で、どの層に何が入ったかを監査できる
+          </text>
+        </svg>
+
+        <div class="two-col">
+          <div class="panel callout">
+            <h3>OpenAI/Codex path の必須形</h3>
+            <p>
+              <code>supports_developer_role_input=true</code> かつ provider が OpenAI/Codex
+              なら、<code>request_body.input</code> に <code>role=developer</code> item を含め、
+              <code>developer_contract_transport=role_developer_input</code> を記録します。
+            </p>
+          </div>
+          <div class="panel warning">
+            <h3>許される fallback は 1 つだけ</h3>
+            <p>
+              provider が developer role を扱えない場合だけ、同じ contract text を
+              <code>instructions</code> に fold し、
+              <code>developer_contract_fallback_reason=provider_lacks_developer_role</code>
+              を記録します。OpenAI/Codex 実装ではこの fallback を使いません。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="previous-response">
+        <h2>5. previous_response_id / developer refresh の扱い</h2>
+        <p>
+          この設計では <code>developer refresh</code> を現時点の実装対象から外します。
+          理由は、今の mew では <code>previous_response_id</code> 継続が websocket 断で失敗し、
+          さらに full retry / full replay fallback も未実装だからです。守るべき継続経路がまだないため、
+          refresh を先に作ると M6.24 の本筋から外れます。
+        </p>
+
+        <div class="diagram">
+          <div class="flow three">
+            <div class="box">
+              <strong>現在の対象</strong>
+              <span>full / normal request を構築する。</span>
+            </div>
+            <div class="arrow">→</div>
+            <div class="box">
+              <strong>必須条件</strong>
+              <span><code>input[0]</code> に <code>role=developer</code> contract を入れる。</span>
+            </div>
+            <div class="arrow">→</div>
+            <div class="box">
+              <strong>deferred</strong>
+              <span><code>previous_response_id</code> refresh / full retry は後続マイルストーンで扱う。</span>
+            </div>
+          </div>
+        </div>
+
+        <h3>今の close gate から外すもの</h3>
+        <div class="panel warning">
+          <p>
+            2 turn 目以降の <code>role=developer refresh</code>、prefix/delta metrics、
+            <code>previous_response_developer_refresh</code> などは、今回の close gate ではありません。
+            今回は初回/full/normal request の provider-visible shape を Codex-like に固定します。
+          </p>
+        </div>
+
+        <div class="three-col">
+          <div class="card">
+            <h3>今やること</h3>
+            <p>
+              OpenAI/Codex の <code>codex_hot_path</code> request では、raw task の前に
+              profile-owned な <code>role=developer</code> contract を必ず置く。
+            </p>
+          </div>
+          <div class="card">
+            <h3>今やらないこと</h3>
+            <p>
+              websocket 断後の continuation、<code>previous_response_id</code> delta refresh、
+              full retry / full replay fallback はこの設計の現在実装範囲から外す。
+            </p>
+          </div>
+          <div class="card">
+            <h3>将来の条件</h3>
+            <p>
+              それらを実装する時は、再構築された request や refresh item にも
+              <code>role=developer</code> の行動契約を落とさない。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="contract">
+        <h2>6. codex_hot_path developer 契約の中身</h2>
+        <p>
+          developer message は短く、運用的であるべきです。WorkFrame、proof、finish gate、
+          evidence refs、task-specific な closeout pressure は入れません。
+        </p>
+
+        <div class="two-col">
+          <div class="panel callout">
+            <h3>最低限含めるルール</h3>
+            <ul>
+              <li><code>apply_patch</code> は manual source edits 用。</li>
+              <li><code>exec_command</code> は inspection、build、test、probe、package-manager setup、verification 用。</li>
+              <li>shell heredoc、<code>cat</code>、<code>printf</code>、<code>sed -i</code>、<code>perl -pi</code>、Python file-writing script などで source を作成・編集しない。</li>
+              <li>shell は build output 作成や tool 実行には使えるが、manual source editing API ではない。</li>
+              <li><code>write_stdin</code> は既存 <code>exec_command</code> session の poll / interaction 用。</li>
+              <li>optional <code>list_dir</code> が有効なら bounded directory listing 用であることを一文追加。</li>
+            </ul>
+          </div>
+          <div class="panel danger">
+            <h3>入れてはいけない内容</h3>
+            <ul>
+              <li><code>finish</code>、<code>final_status</code>、<code>summary</code>、<code>evidence_refs</code>、<code>task_done</code>。</li>
+              <li>default hot path にない legacy tool 名: <code>run_tests</code>、<code>run_command</code>、<code>read_file</code>、<code>search_text</code>、<code>glob</code>、<code>inspect_dir</code>。</li>
+              <li>WorkFrame、<code>next_action</code>、<code>required_next</code>、first-write pressure、proof projection、hidden sidecar state。</li>
+              <li>MIPS、Doom、VM、<code>/tmp/frame.bmp</code>、Terminal-Bench など benchmark-specific 文言。</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>契約文の最小イメージ</h3>
+        <pre><code>You are working through the codex_hot_path tool surface.
+
+Use apply_patch for manual source edits.
+
+Use exec_command for inspection, builds, tests, probes, package-manager setup,
+and verification.
+
+Do not create or edit source files with shell heredocs, cat, printf, sed -i,
+perl -pi, Python file-writing scripts, or equivalent shell text-generation
+shortcuts. Shell commands may create build outputs, run tools, install packages
+when permitted, and inspect files, but shell is not the manual source editing
+API.
+
+Use write_stdin only to poll or interact with an existing exec_command session
+according to the profile's interactive-stdin capability.</code></pre>
+      </section>
+
+      <section id="legacy">
+        <h2>7. mew_legacy は混ぜない</h2>
+        <p>
+          <code>mew_legacy</code> は別 profile です。既存挙動を保つか、将来別設計で legacy 専用
+          developer contract を持つことはできますが、<code>codex_hot_path</code> の契約を流用・merge・部分継承してはいけません。
+        </p>
+
+        <div class="request-compare">
+          <article class="request-card target">
+            <h3>codex_hot_path</h3>
+            <div class="request-stack">
+              <div class="slot good">
+                <strong>tool names</strong>
+                <p><code>apply_patch</code>、<code>exec_command</code>、<code>write_stdin</code>、optional <code>list_dir</code>。</p>
+              </div>
+              <div class="slot good">
+                <strong>developer contract</strong>
+                <p><code>codex_hot_path_developer_contract_v1</code> など、同 profile の契約。</p>
+              </div>
+            </div>
+          </article>
+          <article class="request-card current">
+            <h3>mew_legacy</h3>
+            <div class="request-stack">
+              <div class="slot">
+                <strong>tool names</strong>
+                <p><code>run_command</code>、<code>run_tests</code>、read tools、legacy finish behavior など。</p>
+              </div>
+              <div class="slot bad">
+                <strong>禁止される混在</strong>
+                <p>legacy request に hot-path contract id を入れない。hot-path request に legacy tool behavior text を入れない。</p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="observability">
+        <h2>8. 観測と証跡</h2>
+        <p>
+          現在の observability は維持し、developer contract の metadata を足します。
+          provider-visible request body がこの設計の主要な acceptance artifact です。
+        </p>
+
+        <div class="three-col">
+          <div class="card">
+            <h3>Request artifacts</h3>
+            <p>
+              <code>native-provider-requests.json</code> と
+              <code>provider_request_inventory.json</code> に contract id/hash、transport、
+              wire visibility、fallback reason、previous-response refresh を記録。
+            </p>
+          </div>
+          <div class="card">
+            <h3>Model-visible sections</h3>
+            <p>
+              <code>profile_developer_contract</code>、<code>raw_task</code>、
+              <code>native_transcript_delta</code>、<code>task_context_refresh</code>
+              を区別。
+            </p>
+          </div>
+          <div class="card">
+            <h3>Forbidden scan</h3>
+            <p>
+              developer message text も scan 対象。finish/evidence、WorkFrame、proof、
+              next-action、first-write、sidecar-control、benchmark text を検出。
+            </p>
+          </div>
+        </div>
+
+        <div class="panel callout">
+          <h3>維持されるもの</h3>
+          <p>
+            provider-native transcript、one-output-per-tool-call pairing、tool routes、
+            renderer metrics、proof/replay/source snapshot、internal finish gate は維持します。
+            developer message は request context であり、tool call と transcript pairing の参加者ではありません。
+          </p>
+        </div>
+      </section>
+
+      <section id="phases">
+        <h2>9. Phase 6D.0 から 6D.5</h2>
+        <p>
+          これは 2026-05-14 の Phase 0-5 を置き換えません。Phase 6D は追加の refinement であり、
+          6D.5 は既存 Phase 5 default-switch gate の再確認です。
+        </p>
+
+        <div class="phase-grid">
+          <article class="phase">
+            <h3>Phase 6D.0 - Static Contract Fixture</h3>
+            <p>profile-owned developer contract fixture を追加し、live behavior は変えない。</p>
+            <div class="gate">
+              Close gate: apply-patch/shell-boundary 文を含む。finish/evidence/WorkFrame/proof/next-action/task-specific 文言を含まない。tool names が descriptor fixture と一致。legacy 依存なし。
+            </div>
+          </article>
+
+          <article class="phase">
+            <h3>Phase 6D.1 - Profile Snapshot Ownership</h3>
+            <p><code>ToolSurfaceProfile</code> / <code>ToolSurfaceSnapshot</code> に contract identity、hash、transport policy、contract tool names を追加。</p>
+            <div class="gate">
+              Close gate: contract 変更で profile hash が変わる。descriptor hash は descriptor-only。request inventory に contract hash。tool names と contract tool names が同じ profile から出る。
+            </div>
+          </article>
+
+          <article class="phase">
+            <h3>Phase 6D.2 - OpenAI/Codex Role Transport</h3>
+            <p><code>codex_hot_path</code> tool behavior を instructions-only から <code>role=developer</code> input item へ移す。</p>
+            <div class="gate">
+              Close gate: first provider request で <code>input[0].role == "developer"</code>。required boundary text を含む。user task は後続の <code>role=user</code>。transport は <code>role_developer_input</code>。
+            </div>
+          </article>
+
+          <article class="phase">
+            <h3>Phase 6D.3 - Deferred Continuation Handling</h3>
+            <p>
+              <code>previous_response_id</code> developer refresh は今回は実装しない。
+              現在は full/normal request の <code>role=developer</code> 送信と、
+              no-developer-role provider fallback だけを扱う。
+            </p>
+            <div class="gate">
+              Close gate: OpenAI/Codex の full/normal request では developer contract が
+              <code>role=developer</code> として存在する。refresh 関連は block 条件にしない。
+              fallback は provider lacks developer role の場合だけで、OpenAI/Codex fixtures は使わない。
+            </div>
+          </article>
+
+          <article class="phase">
+            <h3>Phase 6D.4 - Legacy Separation And Leak Gates</h3>
+            <p>profile separation と forbidden-surface behavior を証明。</p>
+            <div class="gate">
+              Close gate: legacy request に hot-path contract がない。hot-path に legacy tool 名や finish が default で出ない。developer messages も forbidden scan 対象。internal finish/proof/evidence が developer text に漏れない。
+            </div>
+          </article>
+
+          <article class="phase">
+            <h3>Phase 6D.5 - Behavioral A/B Recheck</h3>
+            <p>fixed tool-surface A/B set と motivating <code>make-doom-for-mips</code> diagnostic を developer-role contract 付きで再確認。</p>
+            <div class="gate">
+              Close gate: request JSON、tool list、route/render records、transcript pairing、proof/source/internal finish artifacts がある。accepted traces に command-edit-boundary violation がない、または default-switch evidence を阻止する。
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="risks">
+        <h2>10. リスクと注意点</h2>
+        <div class="three-col">
+          <div class="panel danger">
+            <h3>contract / tool drift</h3>
+            <p>
+              tool schema と developer contract が別々に更新されると、model-visible な行動契約が実際の tool surface とずれます。
+              profile hash と tool-name一致テストで防ぎます。
+            </p>
+          </div>
+          <div class="panel warning">
+            <h3>continuation 実装時の contract 消失</h3>
+            <p>
+              今回は <code>previous_response_id</code> / full retry を実装しません。
+              将来それらを入れる時は、再構築 request や refresh item に
+              <code>role=developer</code> contract を必ず残す必要があります。
+            </p>
+          </div>
+          <div class="panel danger">
+            <h3>provider-visible finish の再混入</h3>
+            <p>
+              この設計は finish tool を戻しません。internal finish gate、proof、sidecar は sidecar-only のままです。
+            </p>
+          </div>
+          <div class="panel warning">
+            <h3>legacy との混在</h3>
+            <p>
+              <code>mew_legacy</code> の tool names や prompt behavior を hot path に混ぜると、比較と監査が崩れます。
+            </p>
+          </div>
+          <div class="panel danger">
+            <h3>shell source authoring</h3>
+            <p>
+              <code>cat &gt; source.c</code> や heredoc で source を生成して外部 reward に通る trace は、
+              default-switch evidence として clean に扱えません。
+            </p>
+          </div>
+          <div class="panel warning">
+            <h3>過剰な契約文</h3>
+            <p>
+              契約は短く運用的に保つ必要があります。WorkFrame、proof、benchmark 固有文言を入れると別の completion pressure になります。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="reviewer">
+        <h2>11. Reviewer checklist</h2>
+        <p>実装レビューでは、以下のどれかが false なら reject する前提です。</p>
+
+        <div class="checklist">
+          <div class="check">
+            <div>
+              <strong>OpenAI/Codex の <code>codex_hot_path</code> request に <code>role=developer</code> item がある。</strong>
+              <span>provider request JSON で直接確認できること。</span>
+            </div>
+          </div>
+          <div class="check">
+            <div>
+              <strong>developer message と provider-visible tools が同じ <code>ToolSurfaceProfile</code> snapshot 由来である。</strong>
+              <span>profile hash と metadata が両者の同一性を証明すること。</span>
+            </div>
+          </div>
+          <div class="check">
+            <div>
+              <strong>developer text に required boundary rules がある。</strong>
+              <span><code>apply_patch</code> manual edits、<code>exec_command</code> inspection/build/test/probe/verification、shell non-authoring boundary。</span>
+            </div>
+          </div>
+          <div class="check">
+            <div>
+              <strong>forbidden text がない。</strong>
+              <span>finish、evidence-ref、WorkFrame、proof、sidecar-control、next-action、first-write、task-specific benchmark language を含まない。</span>
+            </div>
+          </div>
+          <div class="check">
+            <div>
+              <strong>fallback は no-developer-role provider の exact instruction folding だけ。</strong>
+              <span>OpenAI/Codex fixtures は fallback を使わず、fallback reason を記録しない。</span>
+            </div>
+          </div>
+          <div class="check">
+            <div>
+              <strong><code>mew_legacy</code> が分離されている。</strong>
+              <span>legacy tools と <code>codex_hot_path</code> developer contract を混ぜない。</span>
+            </div>
+          </div>
+          <div class="check">
+            <div>
+              <strong>既存 observability と internal finish gate が維持されている。</strong>
+              <span>transcript pairing、tool rendering、route records、proof/replay/source snapshots、internal gate artifacts を壊さない。</span>
+            </div>
+          </div>
+          <div class="check">
+            <div>
+              <strong>shell-authored synthetic artifact が violation として見える。</strong>
+              <span><code>make-doom-for-mips</code> 型の <code>cat &gt;</code> / heredoc source authoring は clean default-switch evidence にならない。</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>実装対象ファイルの範囲感</h2>
+        <p>
+          原典は将来の実装影響として、
+          <code>tool_profiles/codex_hot_path.py</code>、
+          <code>tool_registry.py</code>、
+          <code>prompt.py</code>、
+          <code>native_tool_harness.py</code>、
+          <code>native_provider_adapter.py</code>、
+          provider-visible scan / A/B report / fastcheck 系、および関連 tests を挙げています。
+          この HTML は説明文書であり、生産コードは変更していません。
+        </p>
+        <p class="note">
+          Source: <code>docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md</code>
+        </p>
+      </section>
+
+      <p class="footer">
+        Standalone HTML / inline CSS only. 外部ネットワーク asset は使用していません。
+      </p>
+    </main>
+  </div>
+</body>
+</html>
