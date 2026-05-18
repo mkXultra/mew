@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-17
+Last updated: 2026-05-18
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -57,7 +57,7 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | ToolRegistry / Codex hot-path Phase 6 is implemented, reviewed, and committed through Phase 6C. Active next action is to run the post-Phase-6 make-doom-for-mips pre-speed / step-shape diagnostic, classify the result from artifacts, then return to the M6.24 Terminal-Bench proof loop. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | ToolRegistry / Codex hot-path Phase 6 and developer-role Phase 6D are implemented, committed, and behaviorally rechecked. `codex_hot_path` remains non-default: the latest A/B is comparable and leak-clean, but external reward / accepted-finish / reviewer gates still block default switching. |
 | 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
@@ -70,12 +70,56 @@ not mean every idea in every design note has shipped.
 Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
 
 Current controller mode:
-`m6_24_post_tool_registry_phase6_step_shape`.
+`m6_24_post_tool_profile_developer_message_reentry`.
 
 Current diagnostic mode:
-`phase6_complete__make_doom_pre_speed_next`.
+`phase6d_complete__return_to_m6_24_gap_loop`.
 
 Current reentry decision:
+2026-05-18 update: Tool profile developer-message Phase 6D from
+`docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
+for the scoped implementation/recheck gate:
+
+1. Phase 6D.0 committed as `dcad24d`: static `codex_hot_path` developer
+   contract fixture added.
+2. Phase 6D.1 committed as `8cf80d0`: tool-surface snapshot records
+   developer-contract metadata.
+3. Phase 6D.2 committed as `38941d7`: OpenAI/Codex `codex_hot_path` request
+   input starts with `role=developer` contract text before the raw user task.
+4. Phase 6D.3 committed as `cafdce6`: providers without developer-role input
+   support fold the same exact contract into `instructions` and record the
+   fallback reason; previous-response developer refresh remains explicitly
+   deferred.
+5. Phase 6D.4 committed as `06ce6ea`: developer-contract leak scan covers
+   profile-owned forbidden terms without reintroducing finish/evidence/WorkFrame
+   pressure.
+6. Phase 6D.5 repair committed as `8afaeaa`: provider-visible generic leak
+   scans no longer confuse ordinary source comments such as `TODO: Implement`
+   with internal `todo` state leakage.
+
+Behavioral recheck evidence:
+
+- Fake-native A/B smoke:
+  `tmp/m6_24_tool_profile_developer_message_phase6d5_smoke_after_todo_scan/`.
+  It is comparable and still blocks default-switch for expected reviewer /
+  accepted-finish reasons.
+- Live make-doom-for-mips A/B rerun:
+  `proof-artifacts/tool-surface-ab-diagnostic/m6-24-tool-profile-devmsg-make-doom-step-check-20260518-rerun1/`.
+  The report is `ab_comparable=true`; `codex_hot_path` has
+  `role_developer_input`, zero provider-visible forbidden leaks, tool surface
+  `apply_patch, exec_command, write_stdin`, first write at turn 19 after 16
+  probes, versus `mew_legacy` first write at turn 40 after 32 probes.
+  Default-switch remains blocked by `baseline_external_reward_not_one`,
+  `candidate_external_reward_not_one`, `candidate_accepted_finish_required`,
+  and `reviewer_acceptance_required`.
+
+Do not switch the default profile to `codex_hot_path` from this evidence. Treat
+Phase 6D as closed for request construction/profile separation, then return to
+the M6.24 gap loop. Any next `make-doom-for-mips` repair must be justified by
+Terminal-Bench failure analysis, not by re-opening developer-message transport
+or adding task-specific prompt wording.
+
+Historical prior state:
 2026-05-17 update: ToolRegistry / Codex hot-path Phase 6 from
 `docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md` is complete
 for the scoped implementation gate:
