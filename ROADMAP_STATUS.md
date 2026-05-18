@@ -98,8 +98,14 @@ finish-verifier planner cwd repair in commit `8ca62f1`. Evidence:
 The run scored external reward `1.0` with runner exceptions `0`,
 `work_exit_code=0`, `stop_reason=finish`, native pairing valid, and normalized
 trace total `212.212s`. Do not add planner safety/bypass hardening from this;
-the selected bug was cwd preservation. The next active M6.24 action is scoped
-rebaseline measurement: run `openssl-selfsigned-cert` speed_1 with
+the selected bug was cwd preservation.
+
+2026-05-18 update: `openssl-selfsigned-cert` speed proof also passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-openssl-selfsigned-cert-speed-proof-ts-codex-hot-path-20260518-222707/2026-05-18__22-27-08/openssl-selfsigned-cert__ifsvviC`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, and normalized
+trace total `110.838s`. No repair is selected from this pass. The next active
+M6.24 action is scoped rebaseline measurement: run `polyglot-c-py` speed_1 with
 `codex_hot_path`.
 
 2026-05-18 update: Tool profile developer-message Phase 6D from
