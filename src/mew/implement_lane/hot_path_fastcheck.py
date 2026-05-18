@@ -799,7 +799,10 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
             or inventory.get("previous_response_leading_refresh_item_count")
         )
         digest_wire_visible = bool(inventory.get("compact_sidecar_digest_wire_visible", True))
-        expected_sections = ["native_transcript_window"]
+        expected_sections = []
+        if inventory.get("developer_contract_transport") == "role_developer_input":
+            expected_sections.extend(["profile_developer_contract", "raw_task"])
+        expected_sections.append("native_transcript_window")
         if digest_wire_visible:
             expected_sections.append("compact_sidecar_digest")
         elif not suppressed_refresh_count or leading_refresh_count:

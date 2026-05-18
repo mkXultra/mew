@@ -963,6 +963,38 @@ def test_hot_path_fastcheck_replays_live_provider_request_body_shape(tmp_path):
     assert checks["native_provider_visible_state"]["status"] == "pass"
 
 
+def test_hot_path_fastcheck_accepts_codex_hot_path_developer_contract_sections(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript, prefix_item_count=2, live_shape=True)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    request = payload["requests"][0]
+    inventory = dict(request["provider_request_inventory"])
+    inventory.update(
+        {
+            "developer_contract_transport": "role_developer_input",
+            "developer_contract_wire_visible": True,
+            "model_visible_sections": [
+                "profile_developer_contract",
+                "raw_task",
+                "native_transcript_window",
+                "compact_sidecar_digest",
+            ],
+        }
+    )
+    request["provider_request_inventory"] = inventory
+    request_file.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_provider_visible_state"]["status"] == "pass"
+
+
 def test_hot_path_fastcheck_allows_task_source_todo_in_function_output(tmp_path):
     artifact = _write_native_artifact(tmp_path)
     transcript = _read_native_transcript(artifact)

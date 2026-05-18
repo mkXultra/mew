@@ -117,7 +117,19 @@ def test_codex_hot_path_provider_input_uses_raw_task_without_task_contract(tmp_p
     run_native_implement_v2(lane_input, provider=provider, max_turns=1)
 
     input_items = provider.requests[0]["input_items"]
-    assert input_items[0]["content"][0]["text"] == raw_task  # type: ignore[index]
+    assert input_items[0]["role"] == "developer"
+    developer_text = input_items[0]["content"][0]["text"]  # type: ignore[index]
+    assert "Use apply_patch for manual source edits." in developer_text
+    assert "Use exec_command for inspection, builds, tests, probes" in developer_text
+    assert "Do not create or edit source files with shell heredocs" in developer_text
+    assert "shell is not the manual source editing API." in developer_text
+    assert input_items[1]["role"] == "user"
+    assert input_items[1]["content"][0]["text"] == raw_task  # type: ignore[index]
+    instructions = str(provider.requests[0]["instructions"])
+    assert "Use apply_patch for source changes." not in instructions
+    assert "Use exec_command for builds, tests, probes" not in instructions
+    assert provider.requests[0]["provider_request_inventory"]["developer_contract_transport"] == "role_developer_input"
+    assert provider.requests[0]["provider_request_inventory"]["developer_contract_wire_visible"] is True
     rendered = json.dumps(input_items, ensure_ascii=False)
     assert "task_contract" not in rendered
     assert "completion_criteria" not in rendered
@@ -320,6 +332,48 @@ def test_live_native_runtime_calls_responses_provider_and_writes_artifacts(tmp_p
     forbidden = inventory_payload["provider_request_inventory"][0]["provider_visible_forbidden_fields"]
     assert forbidden["ok"] is True
     assert forbidden["detected"] == []
+
+
+def test_live_codex_hot_path_request_starts_with_developer_contract(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    live_turn = NativeResponsesStreamParseResult(
+        transcript=NativeTranscript(
+            lane_attempt_id="ws-native:task-native:implement_v2:native",
+            provider="openai",
+            model="gpt-5.5",
+        ),
+        response_id="resp-live-1",
+        status="completed",
+    )
+    raw_task = "Patch the provided source and run the verifier."
+    lane_input = _lane_input(
+        tmp_path,
+        artifact_dir=str(artifact_root),
+        task_contract={"description": raw_task},
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness.call_codex_native_responses_websocket",
+        return_value=live_turn,
+    ) as call:
+        run_live_native_implement_v2(
+            lane_input,
+            model_auth={"access_token": "x"},
+            base_url="https://example.invalid",
+            timeout=3,
+            max_turns=1,
+        )
+
+    descriptor = call.call_args.kwargs["descriptor"]
+    request_input = descriptor["request_body"]["input"]
+    assert request_input[0]["role"] == "developer"
+    developer_text = request_input[0]["content"][0]["text"]
+    assert "Use apply_patch for manual source edits." in developer_text
+    assert "Do not create or edit source files with shell heredocs" in developer_text
+    assert request_input[1]["role"] == "user"
+    assert request_input[1]["content"][0]["text"] == raw_task
+    assert "Use apply_patch for source changes." not in descriptor["request_body"]["instructions"]
 
 
 def test_live_native_request_keeps_write_file_for_hard_runtime_artifact_task(tmp_path: Path) -> None:

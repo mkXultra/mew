@@ -84,6 +84,7 @@ from .tool_guidance import (
     is_hard_runtime_artifact_task,
 )
 from .tool_profiles.mew_legacy import list_v2_tool_specs_for_task
+from .tool_profiles.codex_hot_path import codex_hot_path_developer_contract
 from .tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
     ToolSurfaceSnapshot,
@@ -4641,6 +4642,7 @@ def _request_descriptor(
         lane_input,
         provider_visible_transcript_items,
         compact_sidecar_digest=compact_sidecar_digest,
+        tool_surface=tool_surface,
     )
     instructions = _native_instructions(lane_input, tool_specs=tool_specs)
     forbidden_fields_report = build_provider_visible_forbidden_fields_report(
@@ -4657,6 +4659,23 @@ def _request_descriptor(
         compact_sidecar_digest_wire_visible=False,
     )
     provider_request_inventory["tool_surface"] = tool_surface.request_metadata()
+    if tool_surface.profile_id == CODEX_HOT_PATH_PROFILE_ID:
+        provider_request_inventory.update(
+            {
+                "developer_contract_id": tool_surface.developer_contract_id,
+                "developer_contract_version": tool_surface.developer_contract_version,
+                "developer_contract_hash": tool_surface.developer_contract_hash,
+                "developer_contract_transport": "role_developer_input",
+                "developer_contract_wire_visible": True,
+                "developer_contract_fallback_reason": "",
+            }
+        )
+        sections = list(provider_request_inventory.get("model_visible_sections") or ())
+        provider_request_inventory["model_visible_sections"] = [
+            "profile_developer_contract",
+            "raw_task",
+            *sections,
+        ]
     return {
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "transport_kind": "provider_native" if _provider_is_live(lane_input) else "fake_native",
@@ -4726,6 +4745,16 @@ def _native_instructions(
             "implement_v2_lane_state",
         }
     ]
+    if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
+        sections = [
+            section
+            for section in sections
+            if section.id
+            not in {
+                "implement_v2_coding_contract",
+                "implement_v2_environment_context",
+            }
+        ]
     rendered = render_prompt_sections(sections)
     if not any(spec.name == "write_file" for spec in tool_specs):
         return hide_unavailable_write_file_guidance(rendered)
@@ -4861,10 +4890,12 @@ def _responses_input_items(
     transcript_items: list[NativeTranscriptItem],
     *,
     compact_sidecar_digest: Mapping[str, object],
+    tool_surface: ToolSurfaceSnapshot,
 ) -> list[dict[str, object]]:
     task_facts = _provider_visible_task_facts(lane_input)
     if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
-        items: list[dict[str, object]] = [
+        items = [
+            *_profile_developer_input_items(tool_surface),
             {
                 "role": "user",
                 "content": [
@@ -4909,6 +4940,23 @@ def _responses_input_items(
         if converted:
             items.append(converted)
     return items
+
+
+def _profile_developer_input_items(tool_surface: ToolSurfaceSnapshot) -> list[dict[str, object]]:
+    if tool_surface.profile_id != CODEX_HOT_PATH_PROFILE_ID:
+        return []
+    contract = codex_hot_path_developer_contract(tool_specs=tool_surface.tool_specs)
+    return [
+        {
+            "role": "developer",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": contract.rendered_text,
+                }
+            ],
+        }
+    ]
 
 
 def _raw_task_provider_visible_text(lane_input: ImplementLaneInput) -> str:
