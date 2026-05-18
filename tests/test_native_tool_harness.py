@@ -664,6 +664,44 @@ def test_live_native_descriptor_preserves_codex_hot_path_tools(tmp_path: Path) -
     assert tool_names == ["apply_patch", "exec_command", "write_stdin"]
 
 
+def test_finish_verifier_planner_default_timeout_is_five_minutes(tmp_path: Path) -> None:
+    provider = NativeCodexResponsesProvider(
+        lane_input=_lane_input(tmp_path),
+        auth={"access_token": "token"},
+        base_url="https://example.invalid",
+        timeout=10,
+        model="gpt-5.5",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness._codex_api.call_codex_json",
+        return_value={"command": "pytest -q"},
+    ) as call_json:
+        result = provider.plan_finish_verifier_command({"task": {"description": "run tests"}})
+
+    assert result == {"command": "pytest -q"}
+    assert call_json.call_args.args[4] == 300.0
+
+
+def test_finish_verifier_planner_timeout_config_overrides_default(tmp_path: Path) -> None:
+    provider = NativeCodexResponsesProvider(
+        lane_input=_lane_input(tmp_path, finish_verifier_planner_timeout_seconds=12),
+        auth={"access_token": "token"},
+        base_url="https://example.invalid",
+        timeout=10,
+        model="gpt-5.5",
+    )
+
+    with patch(
+        "mew.implement_lane.native_tool_harness._codex_api.call_codex_json",
+        return_value={"command": "pytest -q"},
+    ) as call_json:
+        result = provider.plan_finish_verifier_command({"task": {"description": "run tests"}})
+
+    assert result == {"command": "pytest -q"}
+    assert call_json.call_args.args[4] == 12.0
+
+
 def test_codex_hot_path_exec_command_routes_to_managed_exec(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [

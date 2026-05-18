@@ -249,7 +249,7 @@ class _FinishVerifierCommandSafetyResult:
 class FinishVerifierPlannerLoopPolicy:
     enabled: bool
     max_turns: int = 3
-    max_wall_seconds: float = 30.0
+    max_wall_seconds: float = 300.0
     max_file_reads: int = 12
     max_searches: int = 8
     max_bytes_per_file: int = 20_000
@@ -500,7 +500,7 @@ class NativeCodexResponsesProvider:
         model = str(lane_config.get("finish_verifier_planner_model") or self.model or "gpt-5.5")
         timeout = _safe_float(
             lane_config.get("finish_verifier_planner_timeout_seconds"),
-            default=min(max(self.timeout, 1.0), 30.0),
+            default=300.0,
         )
         prompt = _finish_verifier_planner_prompt(request)
         return _codex_api.call_codex_json(
@@ -2522,7 +2522,7 @@ def _finish_verifier_planner_loop_request(
             max_turns=_planner_bounded_int(lane_config.get("finish_verifier_planner_max_turns"), 3, 1, 8),
             max_wall_seconds=_safe_float(
                 lane_config.get("finish_verifier_planner_timeout_seconds"),
-                default=30.0,
+                default=300.0,
             ),
             allowed_roots=tuple(str(root) for root in allowed_roots if str(root).strip()),
         ),
