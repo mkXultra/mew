@@ -13,8 +13,11 @@ import re
 
 from .native_tool_schema import stable_json_hash
 from .tool_profiles.codex_hot_path import (
+    CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID,
+    CODEX_HOT_PATH_DEVELOPER_CONTRACT_VERSION,
     CODEX_HOT_PATH_PROFILE_ID,
     CODEX_HOT_PATH_PROMPT_CONTRACT_ID,
+    codex_hot_path_developer_contract,
     codex_hot_path_tool_specs,
 )
 from .tool_profiles.mew_legacy import (
@@ -50,6 +53,9 @@ class ToolSurfaceProfile:
     profile_version: str
     prompt_contract_id: str
     render_policy_id: str
+    developer_contract_id: str = ""
+    developer_contract_version: str = ""
+    developer_contract_transport_policy: str = ""
     default_parallel_tool_calls: bool = True
     interactive_stdin: bool = False
 
@@ -58,6 +64,9 @@ class ToolSurfaceProfile:
             "profile_id": self.profile_id,
             "profile_version": self.profile_version,
             "prompt_contract_id": self.prompt_contract_id,
+            "developer_contract_id": self.developer_contract_id,
+            "developer_contract_version": self.developer_contract_version,
+            "developer_contract_transport_policy": self.developer_contract_transport_policy,
             "render_policy_id": self.render_policy_id,
             "default_parallel_tool_calls": self.default_parallel_tool_calls,
             "interactive_stdin": self.interactive_stdin,
@@ -111,6 +120,11 @@ class ToolSurfaceSnapshot:
     descriptor_hash: str
     route_table_hash: str
     render_policy_hash: str
+    developer_contract_id: str
+    developer_contract_version: str
+    developer_contract_hash: str
+    developer_contract_transport_policy: str
+    developer_contract_provider_tool_names: tuple[str, ...]
     parallel_tool_calls_requested: bool
     parallel_tool_calls_effective: bool
     interactive_stdin: bool
@@ -136,6 +150,13 @@ class ToolSurfaceSnapshot:
             "descriptor_hash": self.descriptor_hash,
             "route_table_hash": self.route_table_hash,
             "render_policy_hash": self.render_policy_hash,
+            "developer_contract_id": self.developer_contract_id,
+            "developer_contract_version": self.developer_contract_version,
+            "developer_contract_hash": self.developer_contract_hash,
+            "developer_contract_transport_policy": self.developer_contract_transport_policy,
+            "developer_contract_provider_tool_names": list(
+                self.developer_contract_provider_tool_names
+            ),
             "prompt_contract_id": self.prompt_contract_id,
             "parallel_tool_calls_requested": self.parallel_tool_calls_requested,
             "parallel_tool_calls_effective": self.parallel_tool_calls_effective,
@@ -158,6 +179,13 @@ class ToolSurfaceSnapshot:
             "descriptor_hash": self.descriptor_hash,
             "route_table_hash": self.route_table_hash,
             "render_policy_hash": self.render_policy_hash,
+            "developer_contract_id": self.developer_contract_id,
+            "developer_contract_version": self.developer_contract_version,
+            "developer_contract_hash": self.developer_contract_hash,
+            "developer_contract_transport_policy": self.developer_contract_transport_policy,
+            "developer_contract_provider_tool_names": list(
+                self.developer_contract_provider_tool_names
+            ),
             "prompt_contract_id": self.prompt_contract_id,
             "parallel_tool_calls_requested": self.parallel_tool_calls_requested,
             "parallel_tool_calls_effective": self.parallel_tool_calls_effective,
@@ -219,6 +247,9 @@ def build_tool_surface_snapshot(
         profile_id=MEW_LEGACY_PROFILE_ID,
         profile_version="v1",
         prompt_contract_id=MEW_LEGACY_PROMPT_CONTRACT_ID,
+        developer_contract_id="",
+        developer_contract_version="",
+        developer_contract_transport_policy="",
         render_policy_id="mew_legacy_result_cards_v1",
         default_parallel_tool_calls=True,
         interactive_stdin=False,
@@ -252,6 +283,11 @@ def build_tool_surface_snapshot(
         descriptor_hash=stable_json_hash(descriptor_payload),
         route_table_hash=stable_json_hash(route_payload),
         render_policy_hash=stable_json_hash(render_payload),
+        developer_contract_id="",
+        developer_contract_version="",
+        developer_contract_hash="",
+        developer_contract_transport_policy="",
+        developer_contract_provider_tool_names=(),
         parallel_tool_calls_requested=requested_parallel,
         parallel_tool_calls_effective=effective_parallel,
         interactive_stdin=profile.interactive_stdin,
@@ -269,6 +305,9 @@ def _codex_hot_path_snapshot(
         profile_id=CODEX_HOT_PATH_PROFILE_ID,
         profile_version="v1",
         prompt_contract_id=CODEX_HOT_PATH_PROMPT_CONTRACT_ID,
+        developer_contract_id=CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID,
+        developer_contract_version=CODEX_HOT_PATH_DEVELOPER_CONTRACT_VERSION,
+        developer_contract_transport_policy="role_developer_input_or_provider_fallback",
         render_policy_id="codex_hot_path_result_text_v1",
         default_parallel_tool_calls=True,
         interactive_stdin=False,
@@ -280,6 +319,8 @@ def _codex_hot_path_snapshot(
     if available_provider_tool_names is not None:
         names = {str(name) for name in available_provider_tool_names}
         specs = tuple(spec for spec in specs if spec.name in names)
+    developer_contract = codex_hot_path_developer_contract(tool_specs=specs)
+    developer_contract_hash = stable_json_hash(developer_contract.as_dict())
     entries = tuple(_codex_hot_path_entry(spec, profile) for spec in specs)
     descriptor_payload = [spec.as_dict() for spec in specs]
     route_payload = [entry.as_dict() for entry in entries]
@@ -287,6 +328,11 @@ def _codex_hot_path_snapshot(
         "profile_id": profile.profile_id,
         "render_policy_id": profile.render_policy_id,
         "provider_tool_names": [spec.name for spec in specs],
+    }
+    profile_payload = {
+        **profile.as_dict(),
+        "developer_contract_hash": developer_contract_hash,
+        "developer_contract_provider_tool_names": list(developer_contract.provider_tool_names),
     }
     requested_parallel = profile.default_parallel_tool_calls
     effective_parallel = requested_parallel and bool(provider_supports_parallel_tool_calls)
@@ -298,10 +344,15 @@ def _codex_hot_path_snapshot(
         provider_tool_names=tuple(spec.name for spec in specs),
         tool_specs=tuple(specs),
         entries=entries,
-        profile_hash=stable_json_hash(profile.as_dict()),
+        profile_hash=stable_json_hash(profile_payload),
         descriptor_hash=stable_json_hash(descriptor_payload),
         route_table_hash=stable_json_hash(route_payload),
         render_policy_hash=stable_json_hash(render_payload),
+        developer_contract_id=developer_contract.contract_id,
+        developer_contract_version=developer_contract.contract_version,
+        developer_contract_hash=developer_contract_hash,
+        developer_contract_transport_policy=developer_contract.transport_policy,
+        developer_contract_provider_tool_names=developer_contract.provider_tool_names,
         parallel_tool_calls_requested=requested_parallel,
         parallel_tool_calls_effective=effective_parallel,
         interactive_stdin=profile.interactive_stdin,

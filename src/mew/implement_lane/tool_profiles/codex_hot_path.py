@@ -29,6 +29,7 @@ class DeveloperToolBehaviorContract:
     contract_version: str
     provider_tool_names: tuple[str, ...]
     rendered_text: str
+    transport_policy: str
     required_phrases: tuple[str, ...]
     forbidden_terms: tuple[str, ...]
 
@@ -40,6 +41,7 @@ class DeveloperToolBehaviorContract:
             "contract_version": self.contract_version,
             "provider_tool_names": list(self.provider_tool_names),
             "rendered_text": self.rendered_text,
+            "transport_policy": self.transport_policy,
             "required_phrases": list(self.required_phrases),
             "forbidden_terms": list(self.forbidden_terms),
         }
@@ -128,6 +130,7 @@ def codex_hot_path_developer_contract(
         contract_version=CODEX_HOT_PATH_DEVELOPER_CONTRACT_VERSION,
         provider_tool_names=provider_tool_names,
         rendered_text="\n\n".join(paragraphs),
+        transport_policy="role_developer_input_or_provider_fallback",
         required_phrases=required_phrases,
         forbidden_terms=(
             "finish",

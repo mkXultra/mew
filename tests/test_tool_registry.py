@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from mew.implement_lane.native_transcript import NativeTranscriptItem
+from mew.implement_lane.native_tool_schema import stable_json_hash
 from mew.implement_lane.tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
     MEW_LEGACY_PROFILE_ID,
@@ -146,6 +147,12 @@ def test_codex_hot_path_profile_exposes_codex_like_tools_only() -> None:
 
     assert snapshot.profile_id == CODEX_HOT_PATH_PROFILE_ID
     assert snapshot.prompt_contract_id == "codex_hot_path_prompt_v1"
+    assert snapshot.developer_contract_id == CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID
+    assert snapshot.developer_contract_version == "v1"
+    assert snapshot.developer_contract_hash.startswith("sha256:")
+    assert snapshot.developer_contract_transport_policy == "role_developer_input_or_provider_fallback"
+    assert snapshot.developer_contract_provider_tool_names == snapshot.provider_tool_names
+    assert snapshot.descriptor_hash == stable_json_hash([spec.as_dict() for spec in snapshot.tool_specs])
     assert snapshot.provider_tool_names == (
         "apply_patch",
         "exec_command",
@@ -163,6 +170,10 @@ def test_codex_hot_path_profile_exposes_codex_like_tools_only() -> None:
     assert route_by_name["exec_command"]["internal_kernel"] == "run_command"
     assert route_by_name["write_stdin"]["internal_kernel"] == "poll_command"
     assert route_by_name["write_stdin"]["availability_class"] == "active_session"
+    metadata = snapshot.request_metadata()
+    assert metadata["developer_contract_id"] == CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID
+    assert metadata["developer_contract_hash"] == snapshot.developer_contract_hash
+    assert metadata["developer_contract_provider_tool_names"] == list(snapshot.provider_tool_names)
 
 
 def test_codex_hot_path_profile_gates_list_dir_option() -> None:
@@ -177,6 +188,7 @@ def test_codex_hot_path_profile_gates_list_dir_option() -> None:
     )
 
     assert "list_dir" in snapshot.provider_tool_names
+    assert snapshot.developer_contract_provider_tool_names == snapshot.provider_tool_names
     route_by_name = {entry.provider_name: entry.as_dict() for entry in snapshot.entries}
     assert route_by_name["list_dir"]["internal_kernel"] == "inspect_dir"
 
@@ -243,6 +255,36 @@ def test_phase6d0_legacy_profile_does_not_import_codex_developer_contract() -> N
 
     assert "CODEX_HOT_PATH_DEVELOPER_CONTRACT_ID" not in legacy_profile
     assert "codex_hot_path_developer_contract" not in legacy_profile
+
+
+def test_phase6d1_codex_hot_path_profile_hash_covers_developer_contract() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"mode": "full", "tool_surface_profile_id": CODEX_HOT_PATH_PROFILE_ID},
+        task_contract={},
+        transcript_items=(),
+    )
+    changed_profile_payload = {
+        **snapshot.profile.as_dict(),
+        "developer_contract_hash": "sha256:changed",
+        "developer_contract_provider_tool_names": list(snapshot.provider_tool_names),
+    }
+
+    assert snapshot.profile_hash != stable_json_hash(snapshot.profile.as_dict())
+    assert snapshot.profile_hash != stable_json_hash(changed_profile_payload)
+
+
+def test_phase6d1_mew_legacy_has_no_codex_developer_contract_metadata() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
+        task_contract={},
+        transcript_items=(),
+    )
+
+    assert snapshot.developer_contract_id == ""
+    assert snapshot.developer_contract_version == ""
+    assert snapshot.developer_contract_hash == ""
+    assert snapshot.developer_contract_transport_policy == ""
+    assert snapshot.developer_contract_provider_tool_names == ()
 
 
 def test_phase6a_tool_registry_does_not_import_legacy_policy_for_descriptors() -> None:
