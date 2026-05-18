@@ -5284,6 +5284,61 @@ def test_native_harness_finish_verifier_planner_runs_after_model_verifier_comman
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_finish_verifier_planner_preserves_absolute_cwd(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    class PlanningProvider(NativeFakeProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {
+                                    "path": "repo/algo.py",
+                                    "content": "def map(value):\n    return value + 1\n",
+                                    "apply": True,
+                                    "create": True,
+                                },
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            return {
+                "command": f"test -f algo.py && {sys.executable} -c \"import algo; assert algo.map(1) == 2\"",
+                "cwd": str(repo),
+                "reason": "verify the generated module from its repository cwd",
+                "confidence": "high",
+            }
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            experimental_finish_verifier_planner=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=PlanningProvider(),
+        max_turns=1,
+    )
+
+    assert result.status == "completed", json.dumps(result.metrics, sort_keys=True, default=str)
+    decision = result.metrics["finish_verifier_planner_latest_decision"]
+    assert decision["accepted_plan"]["cwd"] == str(repo)
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["cwd"] == str(repo)
+    assert closeout_args["finish_verifier_plan"]["source"] == "finish_verifier_planner"
+
+
 def test_codex_hot_path_finish_verifier_planner_uses_exec_command_surface(tmp_path: Path) -> None:
     lane_input = _lane_input(
         tmp_path,

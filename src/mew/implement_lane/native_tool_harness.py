@@ -2758,7 +2758,7 @@ def _coerce_native_finish_verifier_plan_with_diagnostics(
             reject_blockers=safety.blockers,
         )
     cwd = str(value.get("cwd") or ".").strip() or "."
-    if "\x00" in cwd or "\n" in cwd or cwd.startswith("/"):
+    if "\x00" in cwd or "\n" in cwd:
         cwd = "."
     return _NativeFinishVerifierPlanCoercion(
         plan=_NativeFinishVerifierPlan(
