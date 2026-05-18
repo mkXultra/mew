@@ -129,7 +129,7 @@ _PLAIN_TEXT_FIELD_SET = frozenset(
 )
 _GENERIC_RENDERED_PATTERNS = {
     field: re.compile(
-        rf'(?i)(["\']{re.escape(field)}["\']\s*:|\b{re.escape(field)}\s*[:=]|<\s*{re.escape(field)}\s*>|^#+\s*{re.escape(field)}\b)',
+        rf'(?i)(["\']{re.escape(field)}["\']\s*:|<\s*{re.escape(field)}\s*>|^#+\s*{re.escape(field)}\b)',
         re.MULTILINE,
     )
     for field in GENERIC_RENDERED_FORBIDDEN_FIELDS

@@ -42,7 +42,7 @@ def test_generic_forbidden_words_are_not_rejected_as_plain_prose() -> None:
 @pytest.mark.parametrize(
     ("text", "field"),
     (
-        ("todo=patch src/app.py", "todo"),
+        ('{"todo": "patch src/app.py"}', "todo"),
         ("<frontier>incomplete</frontier>", "frontier"),
         ("## WorkFrame\nrequired_next: patch", "WorkFrame"),
         ('Return JSON with "tool_calls": []', "tool_calls"),
@@ -52,6 +52,14 @@ def test_generic_forbidden_words_fail_as_rendered_state_markers(text: str, field
     violations = scan_forbidden_provider_visible({"instructions": text})
 
     assert field in fields_from_forbidden_violations(violations)
+
+
+def test_generic_todo_comments_in_tool_output_are_not_state_leaks() -> None:
+    text = "stdout:\n  // TODO: Implement stat syscall\n  console.warn('SYS_stat not implemented');"
+
+    violations = scan_forbidden_provider_visible({"tool_output": text})
+
+    assert fields_from_forbidden_violations(violations) == []
 
 
 def test_proof_is_allowed_as_task_domain_text_but_not_as_structural_key() -> None:
