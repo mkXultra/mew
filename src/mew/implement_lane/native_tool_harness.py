@@ -4644,7 +4644,11 @@ def _request_descriptor(
         compact_sidecar_digest=compact_sidecar_digest,
         tool_surface=tool_surface,
     )
-    instructions = _native_instructions(lane_input, tool_specs=tool_specs)
+    instructions = _native_instructions(
+        lane_input,
+        tool_specs=tool_specs,
+        tool_surface=tool_surface,
+    )
     forbidden_fields_report = build_provider_visible_forbidden_fields_report(
         input_items=input_items,
         instructions=instructions,
@@ -4659,23 +4663,25 @@ def _request_descriptor(
         compact_sidecar_digest_wire_visible=False,
     )
     provider_request_inventory["tool_surface"] = tool_surface.request_metadata()
-    if tool_surface.profile_id == CODEX_HOT_PATH_PROFILE_ID:
+    developer_transport = _profile_developer_transport(lane_input, tool_surface)
+    if developer_transport["developer_contract_id"]:
         provider_request_inventory.update(
             {
-                "developer_contract_id": tool_surface.developer_contract_id,
-                "developer_contract_version": tool_surface.developer_contract_version,
-                "developer_contract_hash": tool_surface.developer_contract_hash,
-                "developer_contract_transport": "role_developer_input",
-                "developer_contract_wire_visible": True,
-                "developer_contract_fallback_reason": "",
+                "developer_contract_id": developer_transport["developer_contract_id"],
+                "developer_contract_version": developer_transport["developer_contract_version"],
+                "developer_contract_hash": developer_transport["developer_contract_hash"],
+                "developer_contract_transport": developer_transport["developer_contract_transport"],
+                "developer_contract_wire_visible": developer_transport["developer_contract_wire_visible"],
+                "developer_contract_fallback_reason": developer_transport["developer_contract_fallback_reason"],
             }
         )
         sections = list(provider_request_inventory.get("model_visible_sections") or ())
-        provider_request_inventory["model_visible_sections"] = [
-            "profile_developer_contract",
-            "raw_task",
-            *sections,
-        ]
+        leading_sections = (
+            ["profile_developer_contract", "raw_task"]
+            if developer_transport["developer_contract_transport"] == "role_developer_input"
+            else ["raw_task"]
+        )
+        provider_request_inventory["model_visible_sections"] = [*leading_sections, *sections]
     return {
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "transport_kind": "provider_native" if _provider_is_live(lane_input) else "fake_native",
@@ -4729,9 +4735,12 @@ def _native_instructions(
     lane_input: ImplementLaneInput,
     *,
     tool_specs: tuple[ImplementLaneToolSpec, ...] | None = None,
+    tool_surface: ToolSurfaceSnapshot | None = None,
 ) -> str:
     if tool_specs is None:
         tool_specs = _native_tool_specs_for_request(lane_input, ())
+    if tool_surface is None:
+        tool_surface = _tool_surface_snapshot_for_request(lane_input, ())
     sections = [
         section
         for section in build_implement_v2_prompt_sections(
@@ -4756,6 +4765,12 @@ def _native_instructions(
             }
         ]
     rendered = render_prompt_sections(sections)
+    if (
+        tool_surface.profile_id == CODEX_HOT_PATH_PROFILE_ID
+        and not _profile_developer_role_supported(lane_input)
+    ):
+        contract = codex_hot_path_developer_contract(tool_specs=tool_surface.tool_specs)
+        rendered = f"{rendered.rstrip()}\n\n{contract.rendered_text}" if rendered.strip() else contract.rendered_text
     if not any(spec.name == "write_file" for spec in tool_specs):
         return hide_unavailable_write_file_guidance(rendered)
     return rendered
@@ -4895,7 +4910,7 @@ def _responses_input_items(
     task_facts = _provider_visible_task_facts(lane_input)
     if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
         items = [
-            *_profile_developer_input_items(tool_surface),
+            *_profile_developer_input_items(lane_input, tool_surface),
             {
                 "role": "user",
                 "content": [
@@ -4942,8 +4957,13 @@ def _responses_input_items(
     return items
 
 
-def _profile_developer_input_items(tool_surface: ToolSurfaceSnapshot) -> list[dict[str, object]]:
+def _profile_developer_input_items(
+    lane_input: ImplementLaneInput,
+    tool_surface: ToolSurfaceSnapshot,
+) -> list[dict[str, object]]:
     if tool_surface.profile_id != CODEX_HOT_PATH_PROFILE_ID:
+        return []
+    if not _profile_developer_role_supported(lane_input):
         return []
     contract = codex_hot_path_developer_contract(tool_specs=tool_surface.tool_specs)
     return [
@@ -4957,6 +4977,37 @@ def _profile_developer_input_items(tool_surface: ToolSurfaceSnapshot) -> list[di
             ],
         }
     ]
+
+
+def _profile_developer_transport(
+    lane_input: ImplementLaneInput,
+    tool_surface: ToolSurfaceSnapshot,
+) -> dict[str, object]:
+    if tool_surface.profile_id != CODEX_HOT_PATH_PROFILE_ID:
+        return {
+            "developer_contract_id": "",
+            "developer_contract_version": "",
+            "developer_contract_hash": "",
+            "developer_contract_transport": "",
+            "developer_contract_wire_visible": False,
+            "developer_contract_fallback_reason": "",
+        }
+    role_supported = _profile_developer_role_supported(lane_input)
+    return {
+        "developer_contract_id": tool_surface.developer_contract_id,
+        "developer_contract_version": tool_surface.developer_contract_version,
+        "developer_contract_hash": tool_surface.developer_contract_hash,
+        "developer_contract_transport": "role_developer_input" if role_supported else "instructions_folded",
+        "developer_contract_wire_visible": True,
+        "developer_contract_fallback_reason": "" if role_supported else "provider_lacks_developer_role",
+    }
+
+
+def _profile_developer_role_supported(lane_input: ImplementLaneInput) -> bool:
+    value = lane_input.lane_config.get("supports_developer_role_input", True)
+    if isinstance(value, str):
+        return value.strip().casefold() not in {"0", "false", "no", "off"}
+    return bool(value)
 
 
 def _raw_task_provider_visible_text(lane_input: ImplementLaneInput) -> str:

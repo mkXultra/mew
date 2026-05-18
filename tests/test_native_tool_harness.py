@@ -137,6 +137,33 @@ def test_codex_hot_path_provider_input_uses_raw_task_without_task_contract(tmp_p
     assert "Hidden compiled objective" not in rendered
 
 
+def test_codex_hot_path_folds_developer_contract_when_role_input_unsupported(tmp_path: Path) -> None:
+    provider = NativeFakeProvider.from_item_batches(
+        [[fake_finish("finish-1", {"outcome": "blocked", "summary": "stop"}, output_index=0)]]
+    )
+    raw_task = "Patch the provided source."
+    lane_input = _lane_input(
+        tmp_path,
+        task_contract={"description": raw_task},
+        tool_surface_profile_id=CODEX_HOT_PATH_PROFILE_ID,
+        supports_developer_role_input=False,
+    )
+
+    run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    request = provider.requests[0]
+    input_items = request["input_items"]
+    assert input_items[0]["role"] == "user"
+    assert input_items[0]["content"][0]["text"] == raw_task  # type: ignore[index]
+    instructions = str(request["instructions"])
+    assert "Use apply_patch for manual source edits." in instructions
+    assert "shell is not the manual source editing API." in instructions
+    inventory = request["provider_request_inventory"]
+    assert inventory["developer_contract_transport"] == "instructions_folded"
+    assert inventory["developer_contract_wire_visible"] is True
+    assert inventory["developer_contract_fallback_reason"] == "provider_lacks_developer_role"
+
+
 def test_native_task_description_includes_goal_and_objective(tmp_path: Path) -> None:
     lane_input = _lane_input(
         tmp_path,

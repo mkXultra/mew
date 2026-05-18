@@ -57,6 +57,7 @@ class NativeProviderCapabilities:
     provider: str = "openai"
     supports_native_tool_calls: bool = True
     supports_streaming: bool = True
+    supports_developer_role_input: bool = True
     supports_custom_freeform_tools: bool = True
     supports_encrypted_reasoning: bool = True
     supports_parallel_tool_calls: bool = True
@@ -69,6 +70,7 @@ class NativeProviderCapabilities:
             "provider": self.provider,
             "supports_native_tool_calls": self.supports_native_tool_calls,
             "supports_streaming": self.supports_streaming,
+            "supports_developer_role_input": self.supports_developer_role_input,
             "supports_custom_freeform_tools": self.supports_custom_freeform_tools,
             "supports_encrypted_reasoning": self.supports_encrypted_reasoning,
             "supports_parallel_tool_calls": self.supports_parallel_tool_calls,
@@ -151,6 +153,11 @@ def build_responses_request_descriptor(
         capabilities=schema_caps,
     )
     input_payload = [dict(item) for item in input_items]
+    instructions, input_payload, developer_role_decisions = _apply_developer_role_capability(
+        instructions=instructions,
+        input_payload=input_payload,
+        capabilities=caps,
+    )
     request_body: dict[str, object] = {
         "model": model,
         "instructions": instructions,
@@ -211,6 +218,7 @@ def build_responses_request_descriptor(
         in request_body.get("include", []),
         "stateless_reasoning_carry_forward": bool(refs_used),
         "apply_patch_transport": _apply_patch_transport(lowered_tools),
+        **developer_role_decisions,
     }
     if tool_surface_metadata:
         capability_decisions["tool_surface_profile_id"] = tool_surface_metadata.get(
@@ -258,6 +266,60 @@ def build_responses_request_descriptor(
         {key: value for key, value in descriptor.items() if key != "descriptor_hash"}
     )
     return descriptor
+
+
+def _apply_developer_role_capability(
+    *,
+    instructions: str,
+    input_payload: list[dict[str, object]],
+    capabilities: NativeProviderCapabilities,
+) -> tuple[str, list[dict[str, object]], dict[str, object]]:
+    developer_items = [item for item in input_payload if str(item.get("role") or "") == "developer"]
+    decisions: dict[str, object] = {
+        "developer_role_input_supported": capabilities.supports_developer_role_input,
+        "developer_role_input_count": len(developer_items),
+        "developer_contract_transport": "role_developer_input" if developer_items else "",
+        "developer_contract_wire_visible": bool(developer_items),
+        "developer_contract_fallback_reason": "",
+    }
+    if capabilities.supports_developer_role_input or not developer_items:
+        return instructions, input_payload, decisions
+
+    developer_text = "\n\n".join(
+        text for item in developer_items if (text := _input_item_text(item))
+    )
+    folded_instructions = instructions
+    if developer_text:
+        folded_instructions = (
+            f"{instructions.rstrip()}\n\n{developer_text}"
+            if instructions.strip()
+            else developer_text
+        )
+    non_developer_payload = [
+        item for item in input_payload if str(item.get("role") or "") != "developer"
+    ]
+    decisions.update(
+        {
+            "developer_contract_transport": "instructions_folded",
+            "developer_contract_wire_visible": bool(developer_text),
+            "developer_contract_fallback_reason": "provider_lacks_developer_role",
+        }
+    )
+    return folded_instructions, non_developer_payload, decisions
+
+
+def _input_item_text(item: Mapping[str, object]) -> str:
+    chunks = item.get("content")
+    if not isinstance(chunks, (list, tuple)):
+        return ""
+    texts: list[str] = []
+    for chunk in chunks:
+        if not isinstance(chunk, Mapping):
+            continue
+        text = chunk.get("text")
+        if isinstance(text, str) and text.strip():
+            texts.append(text.strip())
+    return "\n".join(texts)
 
 
 def apply_previous_response_delta(

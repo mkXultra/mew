@@ -30,6 +30,7 @@ from mew.implement_lane.native_transcript import (
     native_transcript_hash,
 )
 from mew.implement_lane.tool_profiles.mew_legacy import list_v2_base_tool_specs
+from mew.implement_lane.tool_profiles.codex_hot_path import codex_hot_path_developer_contract
 from mew.implement_lane.tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
     build_tool_surface_snapshot,
@@ -235,6 +236,41 @@ def test_request_descriptor_lowers_codex_hot_path_tool_schemas() -> None:
     assert "session_id" in write_stdin_schema["parameters"]["properties"]  # type: ignore[index]
     assert "required" not in exec_schema["parameters"]  # type: ignore[operator]
     assert "required" not in write_stdin_schema["parameters"]  # type: ignore[operator]
+
+
+def test_request_descriptor_folds_developer_contract_when_provider_lacks_developer_role() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"mode": "full", "tool_surface_profile_id": CODEX_HOT_PATH_PROFILE_ID},
+        task_contract={},
+        transcript_items=(),
+    )
+    contract = codex_hot_path_developer_contract(tool_specs=snapshot.tool_specs)
+    descriptor = build_responses_request_descriptor(
+        model="gpt-5.5",
+        instructions="Native implement_v2 instructions.",
+        input_items=[
+            {
+                "role": "developer",
+                "content": [{"type": "input_text", "text": contract.rendered_text}],
+            },
+            _input_item(),
+        ],
+        transcript_window=[{"sequence": 1, "kind": "input_message"}],
+        tool_specs=snapshot.tool_specs,
+        capabilities=NativeProviderCapabilities(supports_developer_role_input=False),
+        provider_request_id="req-no-developer-role",
+        tool_surface_snapshot=snapshot.request_metadata(),
+    )
+
+    request = descriptor["request_body"]
+    assert [item["role"] for item in request["input"]] == ["user"]  # type: ignore[index]
+    assert contract.rendered_text in request["instructions"]  # type: ignore[operator]
+    assert descriptor["capability_decisions"]["supports_developer_role_input"] is False  # type: ignore[index]
+    assert descriptor["capability_decisions"]["developer_contract_transport"] == "instructions_folded"  # type: ignore[index]
+    assert (
+        descriptor["capability_decisions"]["developer_contract_fallback_reason"]
+        == "provider_lacks_developer_role"
+    )
 
 
 def test_request_descriptor_records_apply_patch_json_fallback_when_custom_tools_unavailable() -> None:
