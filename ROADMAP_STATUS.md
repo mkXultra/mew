@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-18
+Last updated: 2026-05-19
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -107,6 +107,18 @@ The run scored external reward `1.0` with runner exceptions `0`,
 trace total `110.838s`. No repair is selected from this pass. The next active
 M6.24 action is scoped rebaseline measurement: run `polyglot-c-py` speed_1 with
 `codex_hot_path`.
+
+2026-05-19 update: `polyglot-c-py` speed proof passed after the Codex-like base
+instruction alignment in commit `1fd5bb5`. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-polyglot-c-py-speed-proof-ts-codex-hot-path-20260519-093837/2026-05-19__09-38-38/polyglot-c-py__uzB8B4M`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `333.842s`, first source mutation at `39.494s`, `25` model turns,
+and `24` tool calls/results. The model cleaned the temporary compiled
+`/app/polyglot/cmain` validation artifact and confirmed only `main.py.c`
+remained before finish. No repair is selected from this pass. The next active
+M6.24 action is scoped rebaseline measurement: run `polyglot-rust-c` speed_1
+with `codex_hot_path`.
 
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete

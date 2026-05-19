@@ -139,7 +139,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `make-mips-interpreter` | 3/5 | closed: proof-5 pass 4/5 after H5/codex_hot_path repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260515-141331` | H5 closed for this task; select next measured M6.24 scoped gap |
 | `merge-diff-arc-agi-task` | 5/5 | pass 1/1 after finish-verifier cwd repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-merge-diff-arc-agi-task-speed-proof-ts-codex-hot-path-20260518-220457/2026-05-18__22-04-57/merge-diff-arc-agi-task__G4aVv6C` | proof_5 deferred until controller selects close proof |
 | `openssl-selfsigned-cert` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-openssl-selfsigned-cert-speed-proof-ts-codex-hot-path-20260518-222707/2026-05-18__22-27-08/openssl-selfsigned-cert__ifsvviC` | proof_5 deferred until controller selects close proof |
-| `polyglot-c-py` | 5/5 | pending | none | run v2 speed_1 |
+| `polyglot-c-py` | 5/5 | pass 1/1 after Codex-like base instruction alignment | `proof-artifacts/terminal-bench/harbor-smoke/mew-polyglot-c-py-speed-proof-ts-codex-hot-path-20260519-093837/2026-05-19__09-38-38/polyglot-c-py__uzB8B4M` | proof_5 deferred until controller selects close proof |
 | `polyglot-rust-c` | 4/5 | pending | none | run v2 speed_1 |
 | `prove-plus-comm` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204` | proof_5 deferred until controller selects close proof |
 | `pypi-server` | 5/5 | pending | none | run v2 speed_1 |
@@ -170,6 +170,17 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `110.838s`, total runtime about `3m35s`, `model_turns=6`, `tool_calls=6`,
   `tool_results=6`, and `first_source_mutation_seconds=30.419`. No repair was
   selected from this pass. Next scoped task: `polyglot-c-py`.
+- `polyglot-c-py` speed proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-polyglot-c-py-speed-proof-ts-codex-hot-path-20260519-093837/2026-05-19__09-38-38/polyglot-c-py__uzB8B4M`
+  scored external reward `1.0` with runner exceptions `0`, `work_exit_code=0`,
+  `stop_reason=finish`, native pairing valid, normalized trace total
+  `333.842s`, total runtime about `7m17s`, `model_turns=25`,
+  `tool_calls=24`, `tool_results=24`, and
+  `first_source_mutation_seconds=39.494`. The run is also behavioral evidence
+  for the Codex-like base instruction alignment: after compiling a temporary
+  `/app/polyglot/cmain` validation artifact, the model removed it and checked
+  that `/app/polyglot` contained only `main.py.c` before finish. No repair was
+  selected from this pass. Next scoped task: `polyglot-rust-c`.
 - `feal-differential-cryptanalysis` first v2 attempt
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
   scored `0.0` with runner errors `0` because `implement_v2` stopped on a
