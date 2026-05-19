@@ -162,6 +162,24 @@ messages, and `15` completed tool calls. No repair is selected from this pass.
 The next active M6.24 action is scoped rebaseline measurement: run
 `raman-fitting` speed_1 with `codex_hot_path`.
 
+2026-05-19 update: `raman-fitting` speed proof failed and a same-day Codex
+single-reference trace also failed. mew evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-raman-fitting-speed-proof-ts-codex-hot-path-20260519-221755/2026-05-19__22-17-55/raman-fitting__iBqkqoR`.
+Codex reference evidence:
+`proof-artifacts/terminal-bench/reference-trace/codex-raman-fitting-20260519-223304/2026-05-19__22-33-04/raman-fitting__aY7JuzW`.
+mew scored external reward `0.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `545.136s`, first source mutation at `478.777s`, `30` model
+messages, and `30` completed tool calls. Codex also scored `0.0`; it was
+faster and mutated earlier, but still failed the public numeric peak-fit
+verifier. Step diff:
+`tmp/raman-fitting-20260519-codex-vs-mew-step-diff.md`. Do not repair from
+this failed Codex trace as if it were a passing reference. The next active
+M6.24 action is classification: either collect a passing Codex reference for
+`raman-fitting`, or record/select a generic numeric-fitting /
+finish-verifier-planner gap before code changes. Do not advance to
+`regex-chess` until this is classified.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:
