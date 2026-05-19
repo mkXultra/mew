@@ -227,6 +227,17 @@ repair is selected from this pass. The scoped M6.24 speed_1 rebaseline table is
 now fully measured; the next active action is to compute/update the aggregate
 summary and select any close-proof candidates deliberately.
 
+2026-05-20 update: scoped M6.24 speed_1 aggregate snapshot is recorded in
+`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`. All `25/25` scoped tasks
+now have `implement_v2` evidence. Clean speed_1 passes are `22/25`, and
+`make-mips-interpreter` has a proof-5 pass above target (`4/5` against Codex
+target `3/5`). The two below-target rows are classified/deferred:
+`make-doom-for-mips` (`0/1` against target `1/5`) and `raman-fitting` (`0/1`
+against target `2/5`). No final selected row has an unexplained Harbor runner
+error, and no accepted active structural blocker remains open. The next active
+action is targeted close-proof validation, starting with `reshard-c4-data`
+proof_5 as the freshest generic finish-verifier temp cleanup repair surface.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:

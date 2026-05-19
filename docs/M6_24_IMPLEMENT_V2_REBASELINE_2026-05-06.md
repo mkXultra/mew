@@ -151,6 +151,37 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `schemelike-metacircular-eval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-schemelike-metacircular-eval-speed-proof-ts-codex-hot-path-20260519-235505/2026-05-19__23-55-06/schemelike-metacircular-eval__hF5ANcb` | proof_5 deferred until controller selects close proof |
 | `write-compressor` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-write-compressor-speed-proof-ts-codex-hot-path-20260520-002334/2026-05-20__00-23-35/write-compressor__CDB9pWH` | proof_5 deferred until controller selects close proof |
 
+## Aggregate Snapshot 2026-05-20
+
+The scoped `speed_1` rebaseline table is fully measured.
+
+- Scoped tasks with `implement_v2` evidence: `25/25`.
+- Clean speed_1 passes: `22/25`.
+- Closed proof-5 pass already above target: `make-mips-interpreter` (`4/5`
+  against Codex target `3/5`).
+- Deferred below-target rows: `make-doom-for-mips` (`0/1` against target
+  `1/5`) and `raman-fitting` (`0/1` against target `2/5`).
+- Unexplained Harbor runner errors in final selected rows: `0`.
+- Accepted active structural blockers: none. The two below-target rows have
+  written deferral routes and must not pull broad measurement into
+  task-specific repair without repeated generic evidence.
+
+Close-proof spending is now a deliberate controller decision, not an automatic
+next step. Prefer proof_5 only for:
+
+- recent generic repair surfaces that need variance validation, such as
+  finish-verifier temp cleanup (`reshard-c4-data`), service closeout
+  (`pypi-server`), cwd propagation (`merge-diff-arc-agi-task`), or base
+  instruction cleanup behavior (`polyglot-c-py`);
+- high-variance or slow-but-passing rows if the controller explicitly wants
+  stability data, such as `schemelike-metacircular-eval`;
+- final staged close evidence after the close gate is updated to account for
+  the two written deferrals.
+
+Recommended next action: run one targeted proof_5 on the freshest generic
+repair surface, `reshard-c4-data`, then update this aggregate snapshot with the
+result before spending any broader proof budget.
+
 ## Repair Notes
 
 - `merge-diff-arc-agi-task` speed proof initially hit an internal closeout
