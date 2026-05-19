@@ -129,6 +129,17 @@ and `10` tool calls/results. No repair is selected from this pass. The next
 active M6.24 action is scoped rebaseline measurement: run `pypi-server` speed_1
 with `codex_hot_path`.
 
+2026-05-19 update: `pypi-server` speed proof passed after the managed service
+closeout repair in commit `d1c83a0`. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-pypi-server-speed-proof-ts-codex-hot-path-20260519-210920/2026-05-19__21-09-20/pypi-server__hX5TKG4`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, native pairing valid, normalized trace total `123.491s`,
+first source mutation at `21.359s`, `11` model messages, and `11` completed
+tool calls. The finish verifier planner selected a local service plus package
+smoke command and final verifier closeout exited `0`. No repair is selected
+from this pass. The next active M6.24 action is scoped rebaseline measurement:
+run `pytorch-model-cli` speed_1 with `codex_hot_path`.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:

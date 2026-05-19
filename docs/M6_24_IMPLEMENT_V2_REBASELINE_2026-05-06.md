@@ -142,7 +142,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `polyglot-c-py` | 5/5 | pass 1/1 after Codex-like base instruction alignment | `proof-artifacts/terminal-bench/harbor-smoke/mew-polyglot-c-py-speed-proof-ts-codex-hot-path-20260519-093837/2026-05-19__09-38-38/polyglot-c-py__uzB8B4M` | proof_5 deferred until controller selects close proof |
 | `polyglot-rust-c` | 4/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-polyglot-rust-c-speed-proof-ts-codex-hot-path-20260519-100821/2026-05-19__10-08-22/polyglot-rust-c__3LDuqXw` | proof_5 deferred until controller selects close proof |
 | `prove-plus-comm` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204` | proof_5 deferred until controller selects close proof |
-| `pypi-server` | 5/5 | pending | none | run v2 speed_1 |
+| `pypi-server` | 5/5 | pass 1/1 after managed service closeout repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-pypi-server-speed-proof-ts-codex-hot-path-20260519-210920/2026-05-19__21-09-20/pypi-server__hX5TKG4` | proof_5 deferred until controller selects close proof |
 | `pytorch-model-cli` | 5/5 | pending | none | run v2 speed_1 |
 | `pytorch-model-recovery` | 5/5 | pending | none | run v2 speed_1 |
 | `raman-fitting` | 2/5 | pending | none | run v2 speed_1 |
@@ -189,6 +189,15 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `tool_calls=10`, `tool_results=10`, and
   `first_source_mutation_seconds=107.101`. No repair was selected from this
   pass. Next scoped task: `pypi-server`.
+- `pypi-server` speed proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-pypi-server-speed-proof-ts-codex-hot-path-20260519-210920/2026-05-19__21-09-20/pypi-server__hX5TKG4`
+  scored external reward `1.0` with runner exceptions `0`, `work_exit_code=0`,
+  native pairing valid, normalized trace total `123.491s`, total runtime about
+  `3m30s`, `message_count=11`, `tool_call_completed_count=11`, and
+  `first_source_mutation_seconds=21.359`. The finish verifier planner selected
+  a local service plus package smoke command and final verifier closeout exited
+  `0`. No repair was selected from this pass. Next scoped task:
+  `pytorch-model-cli`.
 - `feal-differential-cryptanalysis` first v2 attempt
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
   scored `0.0` with runner errors `0` because `implement_v2` stopped on a
