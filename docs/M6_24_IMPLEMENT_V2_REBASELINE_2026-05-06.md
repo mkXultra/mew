@@ -144,7 +144,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `prove-plus-comm` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204` | proof_5 deferred until controller selects close proof |
 | `pypi-server` | 5/5 | pass 1/1 after managed service closeout repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-pypi-server-speed-proof-ts-codex-hot-path-20260519-210920/2026-05-19__21-09-20/pypi-server__hX5TKG4` | proof_5 deferred until controller selects close proof |
 | `pytorch-model-cli` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-cli-speed-proof-ts-codex-hot-path-20260519-212202/2026-05-19__21-22-03/pytorch-model-cli__BEoBB7h` | proof_5 deferred until controller selects close proof |
-| `pytorch-model-recovery` | 5/5 | pending | none | run v2 speed_1 |
+| `pytorch-model-recovery` | 5/5 | pass 1/1 after local verifier disk retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-recovery-speed-proof-ts-codex-hot-path-20260519-220142/2026-05-19__22-01-42/pytorch-model-recovery__S93LD2n` | proof_5 deferred until controller selects close proof |
 | `raman-fitting` | 2/5 | pending | none | run v2 speed_1 |
 | `regex-chess` | 5/5 | pending | none | run v2 speed_1 |
 | `reshard-c4-data` | 5/5 | pending | none | run v2 speed_1 |
@@ -206,6 +206,17 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `tool_call_completed_count=15`, and `first_source_mutation_seconds=90.743`.
   No repair was selected from this pass. Next scoped task:
   `pytorch-model-recovery`.
+- `pytorch-model-recovery` speed proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-recovery-speed-proof-ts-codex-hot-path-20260519-220142/2026-05-19__22-01-42/pytorch-model-recovery__S93LD2n`
+  scored external reward `1.0` with runner exceptions `0`, `work_exit_code=0`,
+  `stop_reason=finish`, native pairing valid, normalized trace total
+  `296.762s`, total runtime about `14m38s`, `message_count=13`,
+  `tool_call_completed_count=15`, and `first_source_mutation_seconds=169.994`.
+  The immediately previous local run at
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-recovery-speed-proof-ts-codex-hot-path-20260519-213756`
+  is infra-invalid local disk evidence: the external verifier exhausted
+  container space while extracting `torch==2.7.1`. No repair was selected from
+  the passing run. Next scoped task: `raman-fitting`.
 - `feal-differential-cryptanalysis` first v2 attempt
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
   scored `0.0` with runner errors `0` because `implement_v2` stopped on a

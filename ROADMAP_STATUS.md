@@ -149,6 +149,19 @@ messages, and `15` completed tool calls. No repair is selected from this pass.
 The next active M6.24 action is scoped rebaseline measurement: run
 `pytorch-model-recovery` speed_1 with `codex_hot_path`.
 
+2026-05-19 update: `pytorch-model-recovery` speed proof passed after an
+infra-invalid local disk retry. The first rerun after Docker restart scored
+`0.0` only because the external verifier exhausted container disk while
+extracting `torch==2.7.1`; it is not product miss evidence. After cache/Docker
+cleanup, the same task passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-recovery-speed-proof-ts-codex-hot-path-20260519-220142/2026-05-19__22-01-42/pytorch-model-recovery__S93LD2n`.
+The passing run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `296.762s`, first source mutation at `169.994s`, `13` model
+messages, and `15` completed tool calls. No repair is selected from this pass.
+The next active M6.24 action is scoped rebaseline measurement: run
+`raman-fitting` speed_1 with `codex_hot_path`.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:
