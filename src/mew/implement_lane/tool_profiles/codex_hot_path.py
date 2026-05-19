@@ -238,7 +238,11 @@ def _lane_base_section() -> PromptSection:
             "Fix the problem at the root cause rather than applying surface-level patches when possible. "
             "Keep changes consistent with the style of the existing codebase; changes should be minimal "
             "and focused on the task. In an existing codebase, do exactly what the task asks with surgical "
-            "precision, respect the surrounding codebase, and do not overstep."
+            "precision, respect the surrounding codebase, and do not overstep. "
+            "You and the user share one workspace, and your job is to collaborate with them until their "
+            "goal is genuinely handled. Keep edits closely scoped to the behavioral surface implied by "
+            "the request and surrounding code, and make sure your work, tool actions, and final answer "
+            "honor the user's request."
         ),
         stability=STABILITY_STATIC,
         cache_policy=CACHE_POLICY_CACHEABLE,
