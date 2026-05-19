@@ -147,7 +147,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `pytorch-model-recovery` | 5/5 | pass 1/1 after local verifier disk retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-recovery-speed-proof-ts-codex-hot-path-20260519-220142/2026-05-19__22-01-42/pytorch-model-recovery__S93LD2n` | proof_5 deferred until controller selects close proof |
 | `raman-fitting` | 2/5 | measured 0/1; pending/deferred; Codex single-reference also 0/1 | mew: `proof-artifacts/terminal-bench/harbor-smoke/mew-raman-fitting-speed-proof-ts-codex-hot-path-20260519-221755/2026-05-19__22-17-55/raman-fitting__iBqkqoR`; codex: `proof-artifacts/terminal-bench/reference-trace/codex-raman-fitting-20260519-223304/2026-05-19__22-33-04/raman-fitting__aY7JuzW`; diff: `tmp/raman-fitting-20260519-codex-vs-mew-step-diff.md` | no Raman-specific solver/prompt-polish; defer until generic numeric objective-grounding substrate is selected from repeated evidence |
 | `regex-chess` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-regex-chess-speed-proof-ts-codex-hot-path-20260519-225046/2026-05-19__22-50-46/regex-chess__hk9WB6R` | proof_5 deferred until controller selects close proof |
-| `reshard-c4-data` | 5/5 | pending | none | run v2 speed_1 |
+| `reshard-c4-data` | 5/5 | pass 1/1 after finish-verifier temp cleanup repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-reshard-c4-data-speed-proof-ts-codex-hot-path-20260519-234126/2026-05-19__23-41-26/reshard-c4-data__Ko5SG7s` | proof_5 deferred until controller selects close proof |
 | `schemelike-metacircular-eval` | 5/5 | pending | none | run v2 speed_1 |
 | `write-compressor` | 5/5 | pending | none | run v2 speed_1 |
 
@@ -247,6 +247,19 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `900.339s`, total runtime about `19m29s`, `message_count=29`,
   `tool_call_completed_count=34`, and first edit at `303.296s`. No repair was
   selected from this pass. Next scoped task: `reshard-c4-data`.
+- `reshard-c4-data` speed proof initially reached external reward `1.0` but
+  internal closeout failed because `finish_verifier_planner` rejected a valid
+  `/tmp` cleanup verifier as `closeout_command_dangerous`. Commit `5f15731`
+  narrowed planner cleanup safety to allow only exact
+  `/tmp/<single-literal-component>` cleanup paths while preserving unsafe `rm`
+  rejection. The rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-reshard-c4-data-speed-proof-ts-codex-hot-path-20260519-234126/2026-05-19__23-41-26/reshard-c4-data__Ko5SG7s`
+  scored external reward `1.0` with runner exceptions `0`,
+  `work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+  trace total `357.334s`, total runtime about `8m40s`, `model_turns=24`,
+  `tool_calls=24`, `tool_results=24`, and first source mutation at `218.459s`.
+  No further repair was selected. Next scoped task:
+  `schemelike-metacircular-eval`.
 - `feal-differential-cryptanalysis` first v2 attempt
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
   scored `0.0` with runner errors `0` because `implement_v2` stopped on a

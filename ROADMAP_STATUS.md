@@ -193,6 +193,20 @@ trace total `900.339s`, first edit at `303.296s`, `29` model messages, and
 active M6.24 action is scoped rebaseline measurement: run `reshard-c4-data`
 speed_1 with `codex_hot_path`.
 
+2026-05-19 update: `reshard-c4-data` speed proof passed after a generic
+finish-verifier temp cleanup safety repair. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-reshard-c4-data-speed-proof-ts-codex-hot-path-20260519-234126/2026-05-19__23-41-26/reshard-c4-data__Ko5SG7s`.
+The initial run reached external reward `1.0` but internal closeout failed
+because `finish_verifier_planner` rejected a valid `/tmp` cleanup verifier as
+`closeout_command_dangerous`. Commit `5f15731` narrowed planner cleanup safety
+to allow only exact `/tmp/<single-literal-component>` cleanup paths while
+preserving unsafe `rm` rejection. The rerun scored external reward `1.0` with
+runner exceptions `0`, `work_exit_code=0`, `stop_reason=finish`, native pairing
+valid, normalized trace total `357.334s`, first source mutation at `218.459s`,
+`24` model messages, and `24` completed tool calls/results. No further repair
+is selected from this pass. The next active M6.24 action is scoped rebaseline
+measurement: run `schemelike-metacircular-eval` speed_1 with `codex_hot_path`.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:
