@@ -140,6 +140,15 @@ smoke command and final verifier closeout exited `0`. No repair is selected
 from this pass. The next active M6.24 action is scoped rebaseline measurement:
 run `pytorch-model-cli` speed_1 with `codex_hot_path`.
 
+2026-05-19 update: `pytorch-model-cli` speed proof passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-cli-speed-proof-ts-codex-hot-path-20260519-212202/2026-05-19__21-22-03/pytorch-model-cli__BEoBB7h`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `146.702s`, first source mutation at `90.743s`, `15` model
+messages, and `15` completed tool calls. No repair is selected from this pass.
+The next active M6.24 action is scoped rebaseline measurement: run
+`pytorch-model-recovery` speed_1 with `codex_hot_path`.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:
