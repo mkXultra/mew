@@ -217,6 +217,16 @@ tool calls/results, and `62` typed edits. No repair is selected from this pass.
 The next active M6.24 action is scoped rebaseline measurement: run
 `write-compressor` speed_1 with `codex_hot_path`.
 
+2026-05-20 update: `write-compressor` speed proof passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-write-compressor-speed-proof-ts-codex-hot-path-20260520-002334/2026-05-20__00-23-35/write-compressor__CDB9pWH`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `231.513s`, total runtime about `5m24s`, first edit at `119.135s`,
+`13` model turns, `13` completed tool calls/results, and `3` typed edits. No
+repair is selected from this pass. The scoped M6.24 speed_1 rebaseline table is
+now fully measured; the next active action is to compute/update the aggregate
+summary and select any close-proof candidates deliberately.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:
