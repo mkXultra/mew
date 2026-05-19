@@ -83,6 +83,21 @@ ADVERTISED_ARTIFACT_SUFFIXES = frozenset(
         ".wasm",
     }
 )
+
+
+def _read_text_file_window(path: Path, *, max_chars: int, offset: int = 0, tail: bool = False) -> tuple[str, int]:
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            if tail:
+                start = max(0, size - max_chars)
+            else:
+                start = max(0, min(offset, size))
+            handle.seek(start)
+            data = handle.read(max_chars)
+    except OSError:
+        return "", 0
+    return data.decode("utf-8", errors="replace"), size
 SOURCE_MUTATION_TRACKED_SUFFIXES = frozenset(
     {
         "",
@@ -196,7 +211,7 @@ class ImplementV2ManagedExecRuntime:
         *,
         workspace: object,
         allowed_roots: tuple[str, ...] | list[str] | None = None,
-        max_active: int = 1,
+        max_active: int = 5,
         allow_shell: bool = False,
         run_command_available: bool = False,
         route_run_tests_shell_surface: bool = True,
@@ -277,6 +292,11 @@ class ImplementV2ManagedExecRuntime:
             cancelled.append(payload)
         return tuple(cancelled)
 
+    def cancel_command(self, command_run_id: str, *, reason: str) -> dict[str, object]:
+        payload = self.runner.cancel(reason=reason, command_run_id=command_run_id)
+        payload.update(_command_metadata_for_payload(self.command_metadata.get(str(payload.get("command_run_id") or ""), {})))
+        return payload
+
     def finalize_active_commands(self, *, timeout_seconds: float | None = None) -> tuple[dict[str, object], ...]:
         finalized = []
         while self.runner.active is not None:
@@ -294,6 +314,29 @@ class ImplementV2ManagedExecRuntime:
             payload.update(_command_metadata_for_payload(self.command_metadata.get(str(payload.get("command_run_id") or ""), {})))
             finalized.append(payload)
         return tuple(finalized)
+
+    def finalize_command(
+        self,
+        command_run_id: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, object]:
+        handle = self.runner.handles.get(command_run_id)
+        if handle is None:
+            raise RuntimeError(f"unknown command_run_id: {command_run_id}")
+        command_remaining = max(0.0, float(handle.timeout) - max(0.0, time.monotonic() - handle.started_monotonic))
+        if timeout_seconds is None:
+            effective_timeout = command_remaining
+        else:
+            effective_timeout = min(max(0.0, float(timeout_seconds)), command_remaining)
+        metadata = self.command_metadata.get(str(command_run_id or ""), {})
+        payload = self.runner.finalize(
+            timeout=effective_timeout,
+            command_run_id=command_run_id,
+            max_output_chars=_metadata_output_budget_chars(metadata),
+        )
+        payload.update(_command_metadata_for_payload(self.command_metadata.get(str(payload.get("command_run_id") or ""), {})))
+        return payload
 
     def poll_active_commands(self, *, wait_seconds: float | None = None) -> tuple[dict[str, object], ...]:
         """Poll active commands without forcing terminal closeout.
@@ -433,6 +476,11 @@ class ImplementV2ManagedExecRuntime:
             command_run_id=command_run_id,
             output_ref=output_ref,
             output_path=str(output_path),
+            file_backed_output=True,
+            allow_over_capacity=(
+                bool(args.get("controller_closeout"))
+                and str(call.provider_call_id or "").startswith("call-final-verifier-closeout-")
+            ),
         )
         self.output_paths[command_run_id] = str(output_path)
         self.command_metadata[command_run_id] = {
@@ -529,24 +577,30 @@ class ImplementV2ManagedExecRuntime:
         if command_run_id not in self.output_paths:
             raise ValueError(f"unknown command_run_id: {command_run_id}")
         output_path = Path(self.output_paths[command_run_id])
-        text = output_path.read_text(encoding="utf-8", errors="replace") if output_path.exists() else ""
+        stderr_path = Path(f"{output_path}.stderr")
         max_chars = int(_bounded_float(args.get("max_chars"), default=DEFAULT_V2_READ_RESULT_MAX_CHARS, minimum=1, maximum=50_000))
         offset = int(_bounded_float(args.get("offset"), default=0, minimum=0, maximum=1_000_000))
-        if bool(args.get("tail")):
-            content = text[-max_chars:]
-            offset = max(0, len(text) - len(content))
+        tail = bool(args.get("tail"))
+        stdout_text, stdout_chars = _read_text_file_window(output_path, max_chars=max_chars, offset=offset, tail=tail)
+        stderr_text, stderr_chars = _read_text_file_window(stderr_path, max_chars=max_chars, tail=tail)
+        if stderr_text:
+            text = f"stderr:\n{stderr_text.rstrip()}\nstdout:\n{stdout_text}" if stdout_text else f"stderr:\n{stderr_text}"
         else:
-            content = text[offset : offset + max_chars]
+            text = stdout_text
+        content = text[:max_chars]
         metadata = self.command_metadata.get(command_run_id, {})
         source_observer = metadata.get("source_observer") if isinstance(metadata, dict) else {}
         return {
             "command_id": str(metadata.get("command_id") or self.command_id_by_run_id.get(command_run_id) or ""),
             "command_run_id": command_run_id,
             "output_path": str(output_path),
+            **({"stderr_path": str(stderr_path)} if stderr_path.exists() else {}),
             "offset": offset,
             "content": content,
-            "chars": len(text),
-            "truncated": len(content) < len(text),
+            "chars": stdout_chars + stderr_chars,
+            "truncated": len(content) < len(text) or stdout_chars > len(stdout_text) or stderr_chars > len(stderr_text),
+            **({"stderr_preview": stderr_text[:max_chars]} if stderr_text else {}),
+            **({"stderr_chars": stderr_chars} if stderr_chars else {}),
             "status": "completed",
             **({"source_observer": dict(source_observer)} if isinstance(source_observer, dict) and source_observer else {}),
             **({"command_classification": dict(metadata["command_classification"])} if isinstance(metadata.get("command_classification"), dict) else {}),

@@ -16813,6 +16813,120 @@ def test_implement_v2_exec_lifecycle_can_use_known_command_run_id(tmp_path) -> N
     assert "done" in read_result.content[0]["content"]
 
 
+def test_implement_v2_read_command_output_includes_file_backed_stderr(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    lane_attempt_id = "lane-v2-exec"
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path))
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys, time; "
+                "print('visible stdout', flush=True); "
+                "print('visible stderr', file=sys.stderr, flush=True); "
+                "time.sleep(1)"
+            ),
+        ]
+    )
+    start_call = adapter.normalize_tool_calls(
+        lane_attempt_id=lane_attempt_id,
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 0.01},
+            },
+        ),
+    )[0]
+    try:
+        start_result = runtime.execute(start_call)
+        run_id = start_result.content[0]["command_run_id"]
+        time.sleep(0.1)
+        read_call = adapter.normalize_tool_calls(
+            lane_attempt_id=lane_attempt_id,
+            turn_index=2,
+            calls=(
+                {
+                    "provider_call_id": "call-2",
+                    "tool_name": "read_command_output",
+                    "arguments": {"command_run_id": run_id},
+                },
+            ),
+        )[0]
+
+        read_result = runtime.execute(read_call)
+    finally:
+        runtime.runner.cancel("test cleanup")
+
+    content = read_result.content[0]["content"]
+    assert start_result.status == "yielded"
+    assert "visible stdout" in content
+    assert "visible stderr" in content
+    assert read_result.content[0]["stderr_path"].endswith(".stderr")
+
+
+def test_implement_v2_read_command_output_surfaces_stderr_with_large_stdout(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    lane_attempt_id = "lane-v2-exec"
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path))
+    command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys, time; "
+                "sys.stdout.write('A' * 20000); sys.stdout.flush(); "
+                "sys.stderr.write('FATAL_ERROR_ON_STDERR\\n'); sys.stderr.flush(); "
+                "time.sleep(1)"
+            ),
+        ]
+    )
+    start_call = adapter.normalize_tool_calls(
+        lane_attempt_id=lane_attempt_id,
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 0.01},
+            },
+        ),
+    )[0]
+    try:
+        start_result = runtime.execute(start_call)
+        run_id = start_result.content[0]["command_run_id"]
+        time.sleep(0.1)
+        read_call = adapter.normalize_tool_calls(
+            lane_attempt_id=lane_attempt_id,
+            turn_index=2,
+            calls=(
+                {
+                    "provider_call_id": "call-2",
+                    "tool_name": "read_command_output",
+                    "arguments": {"command_run_id": run_id, "max_chars": 10_000},
+                },
+            ),
+        )[0]
+
+        read_result = runtime.execute(read_call)
+    finally:
+        runtime.runner.cancel("test cleanup")
+
+    payload = read_result.content[0]
+    assert start_result.status == "yielded"
+    assert "FATAL_ERROR_ON_STDERR" in payload["content"]
+    assert "FATAL_ERROR_ON_STDERR" in payload["stderr_preview"]
+    assert payload["truncated"] is True
+
+
 def test_implement_v2_live_json_auto_polls_yielded_verifier_without_extra_model_turn(tmp_path) -> None:
     calls = {"count": 0}
     command = shlex.join(
@@ -18031,6 +18145,100 @@ def test_implement_v2_exec_rejects_concurrent_side_effecting_command(tmp_path) -
     assert first.status == "yielded"
     assert second.status == "failed"
     assert "managed command is already running" in second.content[0]["reason"]
+
+
+def test_implement_v2_exec_allows_foreground_client_while_service_is_yielded(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path), max_active=2)
+    service_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "import time; from pathlib import Path; Path('ready.txt').write_text('ok', encoding='utf-8'); time.sleep(5)",
+        ]
+    )
+    client_command = shlex.join(
+        [
+            sys.executable,
+            "-c",
+            "\n".join(
+                [
+                    "import time",
+                    "from pathlib import Path",
+                    "deadline = time.time() + 2",
+                    "while time.time() < deadline and not Path('ready.txt').exists():",
+                    "    time.sleep(0.02)",
+                    "assert Path('ready.txt').read_text(encoding='utf-8') == 'ok'",
+                ]
+            ),
+        ]
+    )
+    service_call, client_call = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-service",
+                "tool_name": "run_command",
+                "arguments": {"command": service_command, "cwd": ".", "timeout": 10, "foreground_budget_seconds": 0.05},
+            },
+            {
+                "provider_call_id": "call-client",
+                "tool_name": "run_command",
+                "arguments": {"command": client_command, "cwd": ".", "timeout": 5, "foreground_budget_seconds": 1},
+            },
+        ),
+    )
+
+    try:
+        service = runtime.execute(service_call)
+        client = runtime.execute(client_call)
+    finally:
+        runtime.runner.cancel("test cleanup")
+
+    assert service.status == "yielded"
+    assert client.status == "completed"
+    assert client.content[0]["exit_code"] == 0
+
+
+def test_implement_v2_exec_finalize_active_commands_closes_all_yielded_commands(tmp_path) -> None:
+    from mew.implement_lane.exec_runtime import ImplementV2ManagedExecRuntime
+    from mew.implement_lane.provider import FakeProviderAdapter
+
+    adapter = FakeProviderAdapter()
+    runtime = ImplementV2ManagedExecRuntime(workspace=str(tmp_path), max_active=5)
+    command = shlex.join([sys.executable, "-c", "import time; time.sleep(5)"])
+    calls = adapter.normalize_tool_calls(
+        lane_attempt_id="lane-v2-exec",
+        turn_index=1,
+        calls=(
+            {
+                "provider_call_id": "call-1",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 10, "foreground_budget_seconds": 0.01},
+            },
+            {
+                "provider_call_id": "call-2",
+                "tool_name": "run_command",
+                "arguments": {"command": command, "cwd": ".", "timeout": 10, "foreground_budget_seconds": 0.01},
+            },
+        ),
+    )
+    try:
+        first = runtime.execute(calls[0])
+        second = runtime.execute(calls[1])
+
+        closed = runtime.finalize_active_commands(timeout_seconds=0)
+    finally:
+        runtime.runner.cancel("test cleanup")
+
+    assert first.status == "yielded"
+    assert second.status == "yielded"
+    assert len(closed) == 2
+    assert not runtime.runner._running_handles()
 
 
 def test_implement_v2_exec_cancel_yielded_command_is_interrupted(tmp_path) -> None:

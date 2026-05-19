@@ -194,6 +194,27 @@ class ToolboxTests(unittest.TestCase):
             self.assertIn("started", output_path.read_text(encoding="utf-8"))
             self.assertIn("done", output_path.read_text(encoding="utf-8"))
 
+    def test_managed_command_runner_file_backed_output_is_bounded_in_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "managed-output.log"
+            command = shlex.join(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stdout.write('A' * 1200000 + 'TAIL_MARKER'); sys.stdout.flush()",
+                ]
+            )
+            runner = ManagedCommandRunner(max_active=1)
+
+            runner.start(command, cwd=tmp, timeout=5, output_path=str(output_path), file_backed_output=True)
+            result = runner.finalize(timeout=5)
+
+            self.assertEqual(result["exit_code"], 0)
+            self.assertGreaterEqual(result["output_bytes"], 1_200_000)
+            self.assertTrue(result["output_truncated"])
+            self.assertLess(len(result["stdout"]), 50_000)
+            self.assertIn("TAIL_MARKER", result["stdout_tail"])
+
     def test_managed_command_runner_finalizes_nonzero_after_yield(self):
         with tempfile.TemporaryDirectory() as tmp:
             command = shlex.join(
@@ -254,7 +275,7 @@ class ToolboxTests(unittest.TestCase):
     def test_managed_command_runner_rejects_second_active_command(self):
         with tempfile.TemporaryDirectory() as tmp:
             command = shlex.join([sys.executable, "-c", "import time; time.sleep(0.2)"])
-            runner = ManagedCommandRunner()
+            runner = ManagedCommandRunner(max_active=1)
 
             runner.start(command, cwd=tmp, timeout=1)
             with self.assertRaisesRegex(RuntimeError, "already running"):

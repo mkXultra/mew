@@ -20,6 +20,7 @@ from pathlib import Path
 import re
 import shlex
 from typing import Literal, Mapping
+from urllib.parse import urlparse
 
 
 NATIVE_FINISH_GATE_SCHEMA_VERSION = 1
@@ -912,6 +913,8 @@ def _segment_mentions_package_install(tokens: tuple[str, ...]) -> bool:
 def _python_module_invocation_mentions_package_install(tokens: tuple[str, ...]) -> bool:
     for index, token in enumerate(tokens[:-2]):
         if token == "-m" and tokens[index + 1] in {"pip", "pip3"}:
+            if _python_tokens_are_read_only_package_probe(list(tokens[index:])):
+                return False
             return any(item in {"install", "uninstall"} for item in tokens[index + 2 :])
     return False
 
@@ -952,6 +955,8 @@ def _planner_inline_python_code_has_no_dangerous_ops(code: str) -> bool:
             if isinstance(node.func, ast.Subscript):
                 return False
             call_name = _python_call_name(node.func, aliases)
+            if _python_call_is_local_network_probe(call_name, node, aliases):
+                continue
             if _python_call_name_is_unsafe(call_name):
                 return False
             method_open = call_name.endswith(".open") and call_name not in {"builtins.open", "__builtins__.open"}
@@ -1142,6 +1147,38 @@ def _python_call_name_is_unsafe(call_name: str) -> bool:
     return any(call_name.endswith(suffix) for suffix in unsafe_suffixes)
 
 
+def _python_call_is_local_network_probe(call_name: str, node: ast.Call, aliases: Mapping[str, str]) -> bool:
+    if call_name == "urllib.request.urlopen":
+        return _python_call_has_local_url_arg(node)
+    if not call_name.startswith("urllib.request.urlopen."):
+        return False
+    methods = call_name.removeprefix("urllib.request.urlopen.").split(".")
+    if any(method not in {"read", "decode"} for method in methods):
+        return False
+    urlopen_children = [
+        child
+        for child in ast.walk(node)
+        if isinstance(child, ast.Call) and _python_call_name(child.func, aliases) == "urllib.request.urlopen"
+    ]
+    if not urlopen_children:
+        return True
+    return any(
+        _python_call_has_local_url_arg(child)
+        for child in urlopen_children
+    )
+
+
+def _python_call_has_local_url_arg(node: ast.Call) -> bool:
+    url_node: ast.AST | None = node.args[0] if node.args else None
+    for keyword in node.keywords:
+        if keyword.arg in {"url", "fullurl"}:
+            url_node = keyword.value
+            break
+    if not isinstance(url_node, ast.Constant) or not isinstance(url_node.value, str):
+        return False
+    return _is_local_http_url(url_node.value)
+
+
 def _python_open_call_can_write(node: ast.Call, *, method_open: bool) -> bool:
     mode = ""
     if method_open and node.args:
@@ -1170,6 +1207,9 @@ def _python_assignment_value_is_unsafe(value: ast.AST | None, aliases: Mapping[s
     if isinstance(value, ast.Name):
         return _python_call_name_is_unsafe(_python_call_name(value, aliases))
     if isinstance(value, ast.Call):
+        call_name = _python_call_name(value.func, aliases)
+        if _python_call_is_local_network_probe(call_name, value, aliases or {}):
+            return False
         return _python_call_name_is_unsafe(_python_call_name(value.func, aliases))
     return False
 
@@ -1250,6 +1290,8 @@ def _python_tokens_mention_mutating_command(tokens: list[str]) -> bool:
     if not tokens:
         return False
     basenames = [_basename(token) for token in tokens]
+    if _python_tokens_are_read_only_package_probe(tokens):
+        return False
     if set(basenames) & (
         _SOURCE_MUTATION_TOKENS
         | _PACKAGE_INSTALL_TOKENS
@@ -1266,6 +1308,89 @@ def _python_tokens_mention_mutating_command(tokens: list[str]) -> bool:
         if subcommand in _UNSAFE_INLINE_PYTHON_GIT_SUBCOMMANDS:
             return True
     return False
+
+
+def _python_tokens_are_read_only_package_probe(tokens: list[str]) -> bool:
+    basenames = [_basename(token) for token in tokens]
+    if "--dry-run" not in basenames:
+        return False
+    if not any(item in {"install", "i"} for item in basenames):
+        return False
+    if _python_tokens_include_pip_write_flag(tokens):
+        return False
+    if not _python_tokens_use_local_package_source(tokens):
+        return False
+    if basenames and basenames[0] in {"pip", "pip3"}:
+        return True
+    for index, token in enumerate(basenames[:-2]):
+        if token == "-m" and basenames[index + 1] in {"pip", "pip3"}:
+            return True
+    return False
+
+
+def _python_tokens_include_pip_write_flag(tokens: list[str]) -> bool:
+    write_flags = {
+        "--cache-dir",
+        "--log",
+        "--prefix",
+        "--report",
+        "--root",
+        "--src",
+        "--target",
+    }
+    return any(token in write_flags or any(token.startswith(f"{flag}=") for flag in write_flags) for token in tokens)
+
+
+def _python_tokens_use_local_package_source(tokens: list[str]) -> bool:
+    if any(_is_remote_package_reference(token) for token in tokens):
+        return False
+    source_values: list[str] = []
+    for flag in ("--index-url", "-i", "--extra-index-url", "--find-links", "-f"):
+        for index, token in enumerate(tokens):
+            if token == flag and index + 1 < len(tokens):
+                source_values.append(tokens[index + 1])
+            elif token.startswith(f"{flag}="):
+                source_values.append(token.split("=", 1)[1])
+    if any(value and not _is_local_package_source(value) for value in source_values):
+        return False
+    if source_values:
+        return True
+    return "--no-index" in tokens
+
+
+def _is_local_package_source(value: str) -> bool:
+    if _is_local_http_url(value):
+        return True
+    parsed = urlparse(value)
+    if parsed.scheme in {"", "file"}:
+        return True
+    return False
+
+
+def _is_remote_package_reference(value: str) -> bool:
+    candidate = str(value or "")
+    if candidate.startswith("--") and "=" in candidate:
+        candidate = candidate.split("=", 1)[1]
+    elif candidate.startswith(("-r", "-c")) and not candidate.startswith("--") and len(candidate) > 2:
+        candidate = candidate[2:]
+    parsed = urlparse(value)
+    if candidate != value:
+        parsed = urlparse(candidate)
+    if not parsed.scheme:
+        return False
+    if parsed.scheme in {"http", "https"}:
+        return not _is_local_http_url(candidate)
+    if parsed.scheme == "file":
+        return False
+    return "://" in candidate
+
+
+def _is_local_http_url(value: str) -> bool:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.hostname or "").lower()
+    return host in {"localhost", "127.0.0.1", "::1"}
 
 
 def _first_git_subcommand(tokens: list[str]) -> str:

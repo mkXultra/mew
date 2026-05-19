@@ -583,6 +583,7 @@ def run_native_implement_v2(
     exec_runtime = ImplementV2ManagedExecRuntime(
         workspace=workspace,
         allowed_roots=allowed_read_roots,
+        max_active=_native_exec_max_active(lane_config),
         allow_shell=bool(lane_config.get("allow_shell")),
         run_command_available=bool(lane_config.get("allow_shell") or lane_config.get("run_command_available")),
         source_write_tools_available=_native_tool_available("write_file", lane_input=lane_input, lane_config=lane_config),
@@ -718,15 +719,14 @@ def run_native_implement_v2(
         )
         if turn_timeout is not None:
             if turn_timeout < _NATIVE_MODEL_TIMEOUT_MIN_SECONDS:
-                active_closeout = _native_active_command_closeout(
+                active_closeouts = _native_active_command_closeouts(
                     lane_input,
                     lane_attempt_id=lane_attempt_id,
                     provider=provider,
                     exec_runtime=exec_runtime,
                     start_monotonic=start_monotonic,
                 )
-                if active_closeout is not None:
-                    active_call, active_result, active_latency = active_closeout
+                for active_call, active_result, active_latency in active_closeouts:
                     append_closeout_event(
                         _NativeCloseoutEvent(
                             kind="active_command",
@@ -736,6 +736,8 @@ def run_native_implement_v2(
                             reason="native active command closeout ran before low-budget provider turn",
                         )
                     )
+                if active_closeouts:
+                    active_result = active_closeouts[-1][1]
                     final_closeout = None
                     if active_result.status == "completed" and not _native_active_command_run_id(exec_runtime):
                         final_closeout = _native_final_verifier_closeout(
@@ -844,24 +846,6 @@ def run_native_implement_v2(
         )
         if not calls and _native_turn_has_assistant_message(turn_items):
             model_progress_fingerprint = _native_model_tool_progress_fingerprint(tuple(tool_results))
-            active_closeout = _native_active_command_closeout(
-                lane_input,
-                lane_attempt_id=lane_attempt_id,
-                provider=provider,
-                exec_runtime=exec_runtime,
-                start_monotonic=start_monotonic,
-            )
-            if active_closeout is not None:
-                active_call, active_result, active_latency = active_closeout
-                append_closeout_event(
-                    _NativeCloseoutEvent(
-                        kind="active_command",
-                        call=active_call,
-                        result=active_result,
-                        latency=active_latency,
-                        reason="native active command closeout ran before done candidate detection",
-                    )
-                )
             no_tool_reason = (
                 "no_tool_repeat"
                 if last_no_tool_continuation_progress_fingerprint
@@ -1238,6 +1222,15 @@ def run_native_implement_v2(
     )
 
 
+def _native_exec_max_active(lane_config: Mapping[str, object]) -> int:
+    raw = lane_config.get("exec_max_active") or lane_config.get("max_active_commands")
+    try:
+        parsed = int(raw) if raw not in (None, "") else 5
+    except (TypeError, ValueError):
+        parsed = 5
+    return max(1, min(parsed, 8))
+
+
 def run_unavailable_native_implement_v2(lane_input: ImplementLaneInput) -> ImplementLaneResult:
     """Return the production native-v2 unavailable result.
 
@@ -1612,26 +1605,25 @@ def _run_native_finish_time_closeouts(
     scoped_calls = list(tool_calls)
     scoped_results = list(tool_results)
 
-    active_closeout = _native_active_command_closeout(
-        lane_input,
-        lane_attempt_id=lane_attempt_id,
-        provider=provider,
-        exec_runtime=exec_runtime,
-        start_monotonic=start_monotonic,
-    )
-    if active_closeout is not None:
-        active_call, active_result, active_latency = active_closeout
-        event = _NativeCloseoutEvent(
-            kind="active_command",
-            call=active_call,
-            result=active_result,
-            latency=active_latency,
-            reason="native active command closeout ran during finish-time resolver evidence collection",
-        )
-        events.append(event)
-        scoped_calls.append(active_call)
-        scoped_results.append(active_result)
-        context = context.merge(_native_closeout_context_from_result(active_call, active_result))
+    def append_active_closeouts(reason: str) -> None:
+        nonlocal context
+        for active_call, active_result, active_latency in _native_active_command_closeouts(
+            lane_input,
+            lane_attempt_id=lane_attempt_id,
+            provider=provider,
+            exec_runtime=exec_runtime,
+            start_monotonic=start_monotonic,
+        ):
+            events.append(
+                _NativeCloseoutEvent(
+                    kind="active_command",
+                    call=active_call,
+                    result=active_result,
+                    latency=active_latency,
+                    reason=reason,
+                )
+            )
+            context = context.merge(_native_closeout_context_from_result(active_call, active_result))
 
     pending_mutation = _latest_native_source_mutation_without_later_verifier(
         tuple(scoped_calls),
@@ -1644,6 +1636,9 @@ def _run_native_finish_time_closeouts(
         source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
     )
     if not latest_mutation:
+        append_active_closeouts(
+            "native active command closeout ran during finish-time resolver evidence collection"
+        )
         return tuple(events), context
     no_run_context = _native_final_verifier_closeout_no_run_context(
         lane_input,
@@ -1653,6 +1648,9 @@ def _run_native_finish_time_closeouts(
         start_monotonic=start_monotonic,
     )
     if no_run_context is not None:
+        append_active_closeouts(
+            "native active command closeout ran during finish-time resolver evidence collection"
+        )
         return tuple(events), context.merge(no_run_context)
 
     closeout = _native_final_verifier_closeout(
@@ -1671,6 +1669,9 @@ def _run_native_finish_time_closeouts(
         done_candidate_id=done_candidate_id,
     )
     if closeout is None:
+        append_active_closeouts(
+            "native active command closeout ran during finish-time resolver evidence collection"
+        )
         return tuple(events), context.merge(
             _NativeCloseoutContext(
                 blockers=("closeout_verifier_not_run",),
@@ -1687,7 +1688,13 @@ def _run_native_finish_time_closeouts(
             reason="native final verifier closeout ran during finish-time resolver evidence collection",
         )
     )
-    return tuple(events), context.merge(_native_closeout_context_from_result(closeout_call, closeout_result))
+    closeout_context = _native_closeout_context_from_result(closeout_call, closeout_result)
+    if _native_final_verifier_passed(closeout_result):
+        return tuple(events), context.merge(closeout_context)
+    append_active_closeouts(
+        "native active command closeout ran after failed finish-time final verifier"
+    )
+    return tuple(events), context.merge(closeout_context)
 
 
 def _native_final_verifier_closeout_no_run_context(
@@ -1985,6 +1992,7 @@ def _native_active_command_closeout(
     provider: object,
     exec_runtime: ImplementV2ManagedExecRuntime,
     start_monotonic: float,
+    closeout_index: int = 0,
 ) -> tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]] | None:
     command_run_id = _native_active_command_run_id(exec_runtime)
     if not command_run_id:
@@ -1998,6 +2006,7 @@ def _native_active_command_closeout(
         turn_index=turn_index,
         command_run_id=command_run_id,
         timeout_seconds=budget,
+        closeout_index=closeout_index,
     )
     prior = ToolResultEnvelope(
         lane_attempt_id=lane_attempt_id,
@@ -2010,15 +2019,12 @@ def _native_active_command_closeout(
     )
     latency_start = time.monotonic()
     if budget < _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS:
-        payloads = exec_runtime.cancel_active_commands(
-            reason="native active command closeout budget exhausted before deterministic final verifier"
+        payload = exec_runtime.cancel_command(
+            command_run_id,
+            reason="native active command closeout budget exhausted before deterministic final verifier",
         )
     else:
-        payloads = exec_runtime.finalize_active_commands(timeout_seconds=budget)
-    payload = next(
-        (item for item in payloads if str(item.get("command_run_id") or "") == command_run_id),
-        payloads[0] if payloads else {"command_run_id": command_run_id, "status": "orphaned"},
-    )
+        payload = exec_runtime.finalize_command(command_run_id, timeout_seconds=budget)
     result = with_tool_route_decision(
         _tool_call_envelope_from_native_call(call, {"command_run_id": command_run_id}),
         exec_runtime.project_result_payload(prior, payload),
@@ -2036,6 +2042,32 @@ def _native_active_command_closeout(
     return call, result, latency
 
 
+def _native_active_command_closeouts(
+    lane_input: ImplementLaneInput,
+    *,
+    lane_attempt_id: str,
+    provider: object,
+    exec_runtime: ImplementV2ManagedExecRuntime,
+    start_monotonic: float,
+) -> tuple[tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]], ...]:
+    closeouts: list[tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]]] = []
+    closeout_index = 0
+    while _native_active_command_run_id(exec_runtime):
+        closeout = _native_active_command_closeout(
+            lane_input,
+            lane_attempt_id=lane_attempt_id,
+            provider=provider,
+            exec_runtime=exec_runtime,
+            start_monotonic=start_monotonic,
+            closeout_index=closeout_index,
+        )
+        if closeout is None:
+            break
+        closeouts.append(closeout)
+        closeout_index += 1
+    return tuple(closeouts)
+
+
 def _native_active_command_run_id(exec_runtime: ImplementV2ManagedExecRuntime) -> str:
     active = getattr(getattr(exec_runtime, "runner", None), "active", None)
     return str(getattr(active, "command_run_id", "") or "").strip()
@@ -2049,8 +2081,10 @@ def _native_active_command_closeout_call(
     turn_index: int,
     command_run_id: str,
     timeout_seconds: float,
+    closeout_index: int = 0,
 ) -> NativeTranscriptItem:
-    call_id = f"call-active-command-closeout-{turn_index:03d}"
+    suffix = f"-{closeout_index + 1}" if closeout_index else ""
+    call_id = f"call-active-command-closeout-{turn_index:03d}{suffix}"
     arguments = {
         "command_run_id": command_run_id,
         "wait_seconds": round(max(0.0, timeout_seconds), 3),
@@ -2062,7 +2096,7 @@ def _native_active_command_closeout_call(
         lane_attempt_id=lane_attempt_id,
         provider=str(getattr(provider, "provider", "") or "native-controller"),
         model=str(getattr(provider, "model", "") or lane_input.model or ""),
-        response_id=f"native-active-command-closeout-{turn_index}",
+        response_id=f"native-active-command-closeout-{turn_index}{suffix}",
         provider_item_id=f"item-{call_id}",
         output_index=0,
         kind="function_call",
@@ -2146,14 +2180,13 @@ def _native_final_verifier_closeout(
         ),
     )
     if result.status == "yielded":
-        finalized = exec_runtime.finalize_active_commands(timeout_seconds=budget)
-        for payload in finalized:
-            if str(payload.get("command_run_id") or "") == _command_run_id_from_result(result):
-                result = with_tool_route_decision(
-                    _tool_call_envelope_from_native_call(call, _arguments(call)[0]),
-                    exec_runtime.project_result_payload(result, payload),
-                )
-                break
+        command_run_id = _command_run_id_from_result(result)
+        if command_run_id:
+            payload = exec_runtime.finalize_command(command_run_id, timeout_seconds=budget)
+            result = with_tool_route_decision(
+                _tool_call_envelope_from_native_call(call, _arguments(call)[0]),
+                exec_runtime.project_result_payload(result, payload),
+            )
     latency_finished = time.monotonic()
     latency = {
         "call_id": call.call_id,
@@ -2808,6 +2841,71 @@ _FINISH_VERIFIER_SUBJECT_RE = re.compile(
     r"\.(?:py|pyx|pxd|js|ts|tsx|jsx|c|h|cc|cpp|hpp|rs|go|java|rb|php|lua|v|vo|ml|mli|sh|json|toml|yaml|yml|"
     r"txt|md|so|dylib|dll|exe|o|a|bmp|png|jpe?g|ppm|gif|svg)(?![A-Za-z0-9_./-])"
 )
+_FINISH_VERIFIER_IDENTIFIER_SUBJECT_RE = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z][A-Za-z0-9_-]{3,}(?![A-Za-z0-9_-])")
+_FINISH_VERIFIER_GENERIC_SUBJECT_WORDS = frozenset(
+    {
+        "acceptance",
+        "address",
+        "artifact",
+        "artifacts",
+        "assert",
+        "build",
+        "buildable",
+        "called",
+        "command",
+        "complete",
+        "completion",
+        "contain",
+        "contains",
+        "create",
+        "criteria",
+        "expected",
+        "exposes",
+        "file",
+        "files",
+        "float",
+        "floats",
+        "function",
+        "host",
+        "hosted",
+        "hosting",
+        "http",
+        "https",
+        "index",
+        "install",
+        "installable",
+        "installed",
+        "localhost",
+        "local",
+        "locally",
+        "must",
+        "number",
+        "numbers",
+        "objective",
+        "output",
+        "package",
+        "possible",
+        "prompt",
+        "python",
+        "required",
+        "returns",
+        "root",
+        "schema",
+        "server",
+        "should",
+        "simple",
+        "source",
+        "task",
+        "test",
+        "tests",
+        "that",
+        "their",
+        "this",
+        "using",
+        "version",
+        "with",
+    }
+)
 _PATH_LIKE_TOKEN_RE = re.compile(
     r"(?:/[\w@+.,:=~%/-]+|[\w@+.,:=~%-]+/[\w@+.,:=~%/-]+|"
     r"(?<![A-Za-z0-9_./-])[\w@+.-]+\."
@@ -3203,7 +3301,40 @@ def _finish_verifier_subject_terms(request: Mapping[str, object]) -> tuple[str, 
         for candidate in (term, basename):
             if len(candidate) >= 4 and candidate not in terms:
                 terms.append(candidate)
+    for source in _finish_verifier_semantic_subject_sources(request):
+        for match in _FINISH_VERIFIER_IDENTIFIER_SUBJECT_RE.finditer(source):
+            candidate = str(match.group(0) or "").strip().casefold()
+            if candidate in _FINISH_VERIFIER_GENERIC_SUBJECT_WORDS:
+                continue
+            if len(candidate) >= 4 and candidate not in terms:
+                terms.append(candidate)
     return tuple(terms[:80])
+
+
+def _finish_verifier_semantic_subject_sources(request: Mapping[str, object]) -> tuple[str, ...]:
+    task = request.get("task")
+    if not isinstance(task, Mapping):
+        return ()
+    sources: list[str] = []
+    for key in ("description", "goal", "objective"):
+        value = task.get(key)
+        if isinstance(value, str) and value.strip():
+            sources.append(value)
+    for key in ("completion_criteria", "legacy_acceptance_constraints"):
+        values = task.get(key)
+        if isinstance(values, (list, tuple)):
+            sources.extend(str(item) for item in values if str(item).strip())
+    contract = task.get("contract")
+    if isinstance(contract, Mapping):
+        for key in ("goal", "objective"):
+            value = contract.get(key)
+            if isinstance(value, str) and value.strip():
+                sources.append(value)
+        for key in ("completion_criteria", "acceptance_constraints"):
+            values = contract.get(key)
+            if isinstance(values, (list, tuple)):
+                sources.extend(str(item) for item in values if str(item).strip())
+    return tuple(sources)
 
 
 def _finish_verifier_planner_request(
@@ -3365,6 +3496,7 @@ def _native_final_verifier_closeout_call(
         "command": plan.command,
         "cwd": plan.cwd or ".",
         "use_shell": True,
+        "controller_closeout": True,
         "timeout": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
         "foreground_budget_seconds": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
         "command_intent": "finish_verifier",
