@@ -146,7 +146,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `pytorch-model-cli` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-cli-speed-proof-ts-codex-hot-path-20260519-212202/2026-05-19__21-22-03/pytorch-model-cli__BEoBB7h` | proof_5 deferred until controller selects close proof |
 | `pytorch-model-recovery` | 5/5 | pass 1/1 after local verifier disk retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-recovery-speed-proof-ts-codex-hot-path-20260519-220142/2026-05-19__22-01-42/pytorch-model-recovery__S93LD2n` | proof_5 deferred until controller selects close proof |
 | `raman-fitting` | 2/5 | measured 0/1; pending/deferred; Codex single-reference also 0/1 | mew: `proof-artifacts/terminal-bench/harbor-smoke/mew-raman-fitting-speed-proof-ts-codex-hot-path-20260519-221755/2026-05-19__22-17-55/raman-fitting__iBqkqoR`; codex: `proof-artifacts/terminal-bench/reference-trace/codex-raman-fitting-20260519-223304/2026-05-19__22-33-04/raman-fitting__aY7JuzW`; diff: `tmp/raman-fitting-20260519-codex-vs-mew-step-diff.md` | no Raman-specific solver/prompt-polish; defer until generic numeric objective-grounding substrate is selected from repeated evidence |
-| `regex-chess` | 5/5 | pending | none | run v2 speed_1 |
+| `regex-chess` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-regex-chess-speed-proof-ts-codex-hot-path-20260519-225046/2026-05-19__22-50-46/regex-chess__hk9WB6R` | proof_5 deferred until controller selects close proof |
 | `reshard-c4-data` | 5/5 | pending | none | run v2 speed_1 |
 | `schemelike-metacircular-eval` | 5/5 | pending | none | run v2 speed_1 |
 | `write-compressor` | 5/5 | pending | none | run v2 speed_1 |
@@ -240,6 +240,13 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `raman-fitting`-only prompt-polish cycle unless the generic numeric objective
   grounding substrate is explicitly selected from repeated evidence. Next scoped
   task: `regex-chess`.
+- `regex-chess` speed proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-regex-chess-speed-proof-ts-codex-hot-path-20260519-225046/2026-05-19__22-50-46/regex-chess__hk9WB6R`
+  scored external reward `1.0` with runner exceptions `0`, `work_exit_code=0`,
+  `stop_reason=finish`, native pairing valid, normalized trace total
+  `900.339s`, total runtime about `19m29s`, `message_count=29`,
+  `tool_call_completed_count=34`, and first edit at `303.296s`. No repair was
+  selected from this pass. Next scoped task: `reshard-c4-data`.
 - `feal-differential-cryptanalysis` first v2 attempt
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
   scored `0.0` with runner errors `0` because `implement_v2` stopped on a

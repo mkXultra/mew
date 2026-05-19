@@ -184,6 +184,15 @@ grounding substrate is explicitly selected from repeated evidence. The next
 active M6.24 action is scoped rebaseline measurement: run `regex-chess`
 speed_1 with `codex_hot_path`.
 
+2026-05-19 update: `regex-chess` speed proof passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-regex-chess-speed-proof-ts-codex-hot-path-20260519-225046/2026-05-19__22-50-46/regex-chess__hk9WB6R`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `900.339s`, first edit at `303.296s`, `29` model messages, and
+`34` completed tool calls. No repair is selected from this pass. The next
+active M6.24 action is scoped rebaseline measurement: run `reshard-c4-data`
+speed_1 with `codex_hot_path`.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:
