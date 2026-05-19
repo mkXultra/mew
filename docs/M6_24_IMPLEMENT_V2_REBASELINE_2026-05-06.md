@@ -145,7 +145,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `pypi-server` | 5/5 | pass 1/1 after managed service closeout repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-pypi-server-speed-proof-ts-codex-hot-path-20260519-210920/2026-05-19__21-09-20/pypi-server__hX5TKG4` | proof_5 deferred until controller selects close proof |
 | `pytorch-model-cli` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-cli-speed-proof-ts-codex-hot-path-20260519-212202/2026-05-19__21-22-03/pytorch-model-cli__BEoBB7h` | proof_5 deferred until controller selects close proof |
 | `pytorch-model-recovery` | 5/5 | pass 1/1 after local verifier disk retry | `proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-recovery-speed-proof-ts-codex-hot-path-20260519-220142/2026-05-19__22-01-42/pytorch-model-recovery__S93LD2n` | proof_5 deferred until controller selects close proof |
-| `raman-fitting` | 2/5 | measured 0/1; Codex single-reference also 0/1 | mew: `proof-artifacts/terminal-bench/harbor-smoke/mew-raman-fitting-speed-proof-ts-codex-hot-path-20260519-221755/2026-05-19__22-17-55/raman-fitting__iBqkqoR`; codex: `proof-artifacts/terminal-bench/reference-trace/codex-raman-fitting-20260519-223304/2026-05-19__22-33-04/raman-fitting__aY7JuzW`; diff: `tmp/raman-fitting-20260519-codex-vs-mew-step-diff.md` | do not repair from this failed Codex reference alone; either collect a passing Codex reference or select a generic numeric-fitting/finish-verifier gap before code changes |
+| `raman-fitting` | 2/5 | measured 0/1; pending/deferred; Codex single-reference also 0/1 | mew: `proof-artifacts/terminal-bench/harbor-smoke/mew-raman-fitting-speed-proof-ts-codex-hot-path-20260519-221755/2026-05-19__22-17-55/raman-fitting__iBqkqoR`; codex: `proof-artifacts/terminal-bench/reference-trace/codex-raman-fitting-20260519-223304/2026-05-19__22-33-04/raman-fitting__aY7JuzW`; diff: `tmp/raman-fitting-20260519-codex-vs-mew-step-diff.md` | no Raman-specific solver/prompt-polish; defer until generic numeric objective-grounding substrate is selected from repeated evidence |
 | `regex-chess` | 5/5 | pending | none | run v2 speed_1 |
 | `reshard-c4-data` | 5/5 | pending | none | run v2 speed_1 |
 | `schemelike-metacircular-eval` | 5/5 | pending | none | run v2 speed_1 |
@@ -232,9 +232,14 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   also scored `0.0`; it produced fewer steps and earlier mutation but still
   failed the same public verifier. Step diff:
   `tmp/raman-fitting-20260519-codex-vs-mew-step-diff.md`. Do not use this
-  failed Codex trace as a successful reference-step target. The next safe action
-  is to either collect a passing Codex reference for this task or classify a
-  generic numeric-fitting / finish-verifier-planner gap before code changes.
+  failed Codex trace as a successful reference-step target. Classification:
+  pending/deferred. The apparent direct fix is domain-specific Raman unit/model
+  inference (`x = 1e7 / x` before Lorentzian fitting), which would be a
+  task-specific repair or a new numeric/scientific objective-grounding
+  substrate. This matches prior SR-005 / Batch 1 guidance: do not spend another
+  `raman-fitting`-only prompt-polish cycle unless the generic numeric objective
+  grounding substrate is explicitly selected from repeated evidence. Next scoped
+  task: `regex-chess`.
 - `feal-differential-cryptanalysis` first v2 attempt
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
   scored `0.0` with runner errors `0` because `implement_v2` stopped on a

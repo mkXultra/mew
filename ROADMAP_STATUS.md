@@ -174,11 +174,15 @@ messages, and `30` completed tool calls. Codex also scored `0.0`; it was
 faster and mutated earlier, but still failed the public numeric peak-fit
 verifier. Step diff:
 `tmp/raman-fitting-20260519-codex-vs-mew-step-diff.md`. Do not repair from
-this failed Codex trace as if it were a passing reference. The next active
-M6.24 action is classification: either collect a passing Codex reference for
-`raman-fitting`, or record/select a generic numeric-fitting /
-finish-verifier-planner gap before code changes. Do not advance to
-`regex-chess` until this is classified.
+this failed Codex trace as if it were a passing reference. Classification:
+pending/deferred. The apparent direct fix is domain-specific Raman unit/model
+inference (`x = 1e7 / x` before Lorentzian fitting), which would be a
+task-specific repair or a new numeric/scientific objective-grounding substrate.
+This matches prior SR-005 / Batch 1 guidance: do not spend another
+`raman-fitting`-only prompt-polish cycle unless the generic numeric objective
+grounding substrate is explicitly selected from repeated evidence. The next
+active M6.24 action is scoped rebaseline measurement: run `regex-chess`
+speed_1 with `codex_hot_path`.
 
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
