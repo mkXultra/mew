@@ -207,6 +207,16 @@ valid, normalized trace total `357.334s`, first source mutation at `218.459s`,
 is selected from this pass. The next active M6.24 action is scoped rebaseline
 measurement: run `schemelike-metacircular-eval` speed_1 with `codex_hot_path`.
 
+2026-05-20 update: `schemelike-metacircular-eval` speed proof passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-schemelike-metacircular-eval-speed-proof-ts-codex-hot-path-20260519-235505/2026-05-19__23-55-06/schemelike-metacircular-eval__hF5ANcb`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `1315.698s`, total runtime about `26m27s`, first edit at
+`200.206s`, first verifier at `670.896s`, `105` model turns, `104` completed
+tool calls/results, and `62` typed edits. No repair is selected from this pass.
+The next active M6.24 action is scoped rebaseline measurement: run
+`write-compressor` speed_1 with `codex_hot_path`.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:

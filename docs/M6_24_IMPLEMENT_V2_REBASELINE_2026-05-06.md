@@ -148,7 +148,7 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
 | `raman-fitting` | 2/5 | measured 0/1; pending/deferred; Codex single-reference also 0/1 | mew: `proof-artifacts/terminal-bench/harbor-smoke/mew-raman-fitting-speed-proof-ts-codex-hot-path-20260519-221755/2026-05-19__22-17-55/raman-fitting__iBqkqoR`; codex: `proof-artifacts/terminal-bench/reference-trace/codex-raman-fitting-20260519-223304/2026-05-19__22-33-04/raman-fitting__aY7JuzW`; diff: `tmp/raman-fitting-20260519-codex-vs-mew-step-diff.md` | no Raman-specific solver/prompt-polish; defer until generic numeric objective-grounding substrate is selected from repeated evidence |
 | `regex-chess` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-regex-chess-speed-proof-ts-codex-hot-path-20260519-225046/2026-05-19__22-50-46/regex-chess__hk9WB6R` | proof_5 deferred until controller selects close proof |
 | `reshard-c4-data` | 5/5 | pass 1/1 after finish-verifier temp cleanup repair | `proof-artifacts/terminal-bench/harbor-smoke/mew-reshard-c4-data-speed-proof-ts-codex-hot-path-20260519-234126/2026-05-19__23-41-26/reshard-c4-data__Ko5SG7s` | proof_5 deferred until controller selects close proof |
-| `schemelike-metacircular-eval` | 5/5 | pending | none | run v2 speed_1 |
+| `schemelike-metacircular-eval` | 5/5 | pass 1/1 | `proof-artifacts/terminal-bench/harbor-smoke/mew-schemelike-metacircular-eval-speed-proof-ts-codex-hot-path-20260519-235505/2026-05-19__23-55-06/schemelike-metacircular-eval__hF5ANcb` | proof_5 deferred until controller selects close proof |
 | `write-compressor` | 5/5 | pending | none | run v2 speed_1 |
 
 ## Repair Notes
@@ -260,6 +260,15 @@ Do not count a run as v2 evidence unless the mew report/replay metadata records
   `tool_calls=24`, `tool_results=24`, and first source mutation at `218.459s`.
   No further repair was selected. Next scoped task:
   `schemelike-metacircular-eval`.
+- `schemelike-metacircular-eval` speed proof
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-schemelike-metacircular-eval-speed-proof-ts-codex-hot-path-20260519-235505/2026-05-19__23-55-06/schemelike-metacircular-eval__hF5ANcb`
+  scored external reward `1.0` with runner exceptions `0`,
+  `work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+  trace total `1315.698s`, total runtime about `26m27s`, `model_turns=105`,
+  `tool_calls=104`, `tool_results=104`, first tool at `2.256s`, first edit at
+  `200.206s`, first verifier at `670.896s`, and `62` typed edits. This is a
+  pass but remains a high-turn/high-edit run for later speed tuning if repeated.
+  No repair was selected from this pass. Next scoped task: `write-compressor`.
 - `feal-differential-cryptanalysis` first v2 attempt
   `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
   scored `0.0` with runner errors `0` because `implement_v2` stopped on a
