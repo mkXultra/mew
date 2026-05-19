@@ -120,6 +120,15 @@ remained before finish. No repair is selected from this pass. The next active
 M6.24 action is scoped rebaseline measurement: run `polyglot-rust-c` speed_1
 with `codex_hot_path`.
 
+2026-05-19 update: `polyglot-rust-c` speed proof also passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-polyglot-rust-c-speed-proof-ts-codex-hot-path-20260519-100821/2026-05-19__10-08-22/polyglot-rust-c__3LDuqXw`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `191.584s`, first source mutation at `107.101s`, `10` model turns,
+and `10` tool calls/results. No repair is selected from this pass. The next
+active M6.24 action is scoped rebaseline measurement: run `pypi-server` speed_1
+with `codex_hot_path`.
+
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
 for the scoped implementation/recheck gate:
