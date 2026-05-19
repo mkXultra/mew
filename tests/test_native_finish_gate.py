@@ -205,6 +205,8 @@ def test_validate_closeout_command_allows_loose_planner_shell_verifiers() -> Non
         "python3 - <<'PYCODE'\nprint('ok')\nPYCODE",
         "python3 -B -c \"import subprocess; cmd=['git','status','--short']; assert subprocess.run(cmd).returncode == 0\"",
         "python3 -B -c \"import subprocess; cmd=['pytest']; cmd.append('-q'); assert subprocess.run(cmd).returncode in (0, 5)\"",
+        "rm -rf /tmp/mew_finish_verify_out && pytest -q",
+        "rm -rf /tmp/mew_finish_verify_out /tmp/mew_finish_verify_tmp && python -m pytest -q",
     )
 
     for command in safe_commands:
@@ -213,6 +215,29 @@ def test_validate_closeout_command_allows_loose_planner_shell_verifiers() -> Non
         )
 
         assert validation.allowed is True
+
+
+def test_validate_closeout_command_rejects_planner_unsafe_temp_cleanup_paths() -> None:
+    unsafe_commands = (
+        "rm -rf /tmp",
+        "rm -rf /tmp/..",
+        "rm -rf /tmp/*",
+        "rm -rf /tmp/mew_finish_verify_out/",
+        "rm -rf /tmp/mew_finish_verify_out/sub",
+        "rm -rf /tmp/mew_finish_verify_out/../victim",
+        "rm -rf /tmp/mew_finish_verify_out/./sub",
+        "rm -rf $WORK",
+        "rm -rf build /tmp/mew_finish_verify_out",
+        "rm -rf -- -r /tmp/mew_finish_verify_out",
+    )
+
+    for command in unsafe_commands:
+        validation = validate_closeout_command(
+            FinishCloseoutCommand(command=command, source="finish_verifier_planner")
+        )
+
+        assert validation.allowed is False
+        assert "closeout_command_dangerous" in validation.blockers
 
 
 def test_validate_closeout_command_allows_planner_read_only_inline_python() -> None:

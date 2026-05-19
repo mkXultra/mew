@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
+import posixpath
 import re
 import shlex
 from typing import Literal, Mapping
@@ -858,7 +859,9 @@ def _dangerous_planner_segment_blockers(segment: tuple[str, ...]) -> tuple[str, 
     if first in _INLINE_EVALUATOR_TOKENS and any(token in {"-c", "-e"} for token in semantic):
         if _python_asserts_disabled(segment) or _planner_inline_program_mentions_dangerous_operation(semantic):
             blockers.append("closeout_command_inline_program")
-    if first in _DANGEROUS_PLANNER_COMMAND_TOKENS:
+    if first in {"rm", "rmdir"} and _planner_rm_segment_is_safe_temp_cleanup(semantic):
+        pass
+    elif first in _DANGEROUS_PLANNER_COMMAND_TOKENS:
         blockers.append("closeout_command_dangerous")
     if first == "sed" and any(token == "-i" or token.startswith("-i") for token in semantic):
         blockers.append("closeout_command_dangerous")
@@ -888,6 +891,48 @@ def _dangerous_planner_segment_blockers(segment: tuple[str, ...]) -> tuple[str, 
         if subcommand in {"archive", "clone", "fetch", "ls-remote", "pull", "push", "remote", "submodule"}:
             blockers.append("closeout_command_network")
     return tuple(dict.fromkeys(blockers))
+
+
+def _planner_rm_segment_is_safe_temp_cleanup(segment: tuple[str, ...]) -> bool:
+    """Allow planner verifiers to reset their own literal /tmp output dirs."""
+
+    if not segment:
+        return False
+    first = _basename(segment[0])
+    if first not in {"rm", "rmdir"}:
+        return False
+    operands: list[str] = []
+    end_of_options = False
+    for token in segment[1:]:
+        if not token:
+            return False
+        if not end_of_options and token == "--":
+            end_of_options = True
+            continue
+        if not end_of_options and token.startswith("-"):
+            allowed_flag_chars = set("rfvId")
+            if token == "-" or any(char not in allowed_flag_chars for char in token[1:]):
+                return False
+            continue
+        operands.append(token)
+    if not operands:
+        return False
+    return all(_planner_rm_operand_is_safe_temp_cleanup_path(operand) for operand in operands)
+
+
+def _planner_rm_operand_is_safe_temp_cleanup_path(path: str) -> bool:
+    if any(marker in path for marker in ("*", "?", "[", "]", "{", "}", "$", "`", "~")):
+        return False
+    if path.endswith(("/", "\\")):
+        return False
+    if posixpath.normpath(path) != path:
+        return False
+    if not path.startswith("/tmp/"):
+        return False
+    relative = path.removeprefix("/tmp/")
+    if not relative or relative in {".", ".."} or "/" in relative:
+        return False
+    return True
 
 
 def _token_after_flag(tokens: tuple[str, ...], flag: str) -> str:
