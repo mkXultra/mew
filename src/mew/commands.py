@@ -105,7 +105,6 @@ from .long_build_substrate import (
     planned_long_build_command_budget_stage,
 )
 from .memory import add_deep_memory, compact_memory, recall_memory
-from .durable_memory_projection import build_durable_memory_projection_dry_run
 from .metrics import DEFAULT_SAMPLE_LIMIT, build_observation_metrics, format_observation_metrics
 from .mew_first_calibration import (
     format_mew_first_calibration_report,
@@ -17431,41 +17430,6 @@ def _format_veto_log_entries(entries):
 
 
 def cmd_memory(args):
-    if getattr(args, "projection_dry_run", None):
-        if (
-            args.active
-            or args.add
-            or args.search
-            or args.compact
-            or args.list
-            or args.show
-            or args.resolve_source_path
-            or args.resolve_test_path
-            or args.reviewer_diffs
-            or args.veto
-            or args.veto_log
-        ):
-            print(
-                "mew: --projection-dry-run cannot be combined with --active, --add, --search, --compact, --list, --show, --resolve-source-path, --resolve-test-path, --reviewer-diffs, --veto, or --veto-log",
-                file=sys.stderr,
-            )
-            return 1
-        try:
-            report = build_durable_memory_projection_dry_run(
-                query=args.projection_dry_run,
-                limit=args.limit,
-                max_items=args.projection_max_items,
-                max_chars=args.projection_max_chars,
-            )
-        except ValueError as exc:
-            print(f"mew: {exc}", file=sys.stderr)
-            return 1
-        if args.json:
-            print(json.dumps(report, ensure_ascii=False, indent=2))
-        else:
-            print(_format_memory_projection_dry_run(report))
-        return 0
-
     if args.active:
         if (
             args.add
@@ -17775,40 +17739,6 @@ def cmd_memory(args):
         else:
             print("- none")
     return 0
-
-
-def _format_memory_projection_dry_run(report):
-    lines = [
-        "Durable memory projection dry run",
-        f"section_id: {report.get('section_id')}",
-        f"projection_allowed: {str(report.get('projection_allowed')).lower()}",
-        f"query: {report.get('query') or ''}",
-        f"returned: {len(report.get('returned_entry_ids') or [])} {report.get('returned_entry_ids') or []}",
-        f"projected: {len(report.get('projected_entry_ids') or [])} {report.get('projected_entry_ids') or []}",
-        f"chars: {report.get('candidate_projection_chars')}/{report.get('max_chars')}",
-        f"leak_scan: {(report.get('provider_visible_forbidden_fields') or {}).get('status')}",
-    ]
-    scan = report.get("provider_visible_forbidden_fields") or {}
-    if scan.get("hits"):
-        lines.append(f"leak_hits: {scan.get('hits')}")
-    items = report.get("candidate_projection_items") or []
-    if items:
-        lines.append("candidate_projection_items:")
-        for item in items:
-            lines.append(f"- {item.get('id')} [{item.get('kind')}] {item.get('content')}")
-    dropped = report.get("dropped_entry_ids_with_reason") or []
-    if dropped:
-        lines.append("dropped:")
-        for item in dropped:
-            lines.append(f"- {item.get('id')} [{item.get('kind')}] {item.get('drop_reason')}")
-    revise = report.get("revise_gate_results") or []
-    if revise:
-        lines.append("revise_gate_results:")
-        for item in revise:
-            status = item.get("status")
-            reason = item.get("drop_reason") or "ok"
-            lines.append(f"- {item.get('id')} [{item.get('kind')}] {status} {reason}")
-    return "\n".join(lines)
 
 def cmd_snapshot(args):
     allowed = args.allow_read or []

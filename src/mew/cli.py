@@ -1865,25 +1865,6 @@ def build_parser():
     memory_parser.add_argument("--reason", help="required veto reason for --veto")
     memory_parser.add_argument("--active", action="store_true", help="show typed memory that would be injected now")
     memory_parser.add_argument("--task-id", help="task id used to select active typed memory")
-    memory_parser.add_argument(
-        "--projection-dry-run",
-        dest="projection_dry_run",
-        help="select and revise a bounded implement_v2 durable-memory projection without injecting it",
-    )
-    memory_parser.add_argument(
-        "--projection-max-items",
-        dest="projection_max_items",
-        type=int,
-        default=3,
-        help="requested candidate projection items for --projection-dry-run; hard-capped at 3",
-    )
-    memory_parser.add_argument(
-        "--projection-max-chars",
-        dest="projection_max_chars",
-        type=int,
-        default=1200,
-        help="requested candidate projection chars for --projection-dry-run; hard-capped at 1200",
-    )
     memory_parser.add_argument("--limit", type=int, default=20, help="maximum search matches")
     memory_parser.add_argument("--json", action="store_true", help="print structured search results")
     memory_parser.add_argument("--add", help="add a deep memory entry")
