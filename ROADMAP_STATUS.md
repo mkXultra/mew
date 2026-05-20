@@ -84,11 +84,12 @@ as too time-expensive for the current decision. M6.25 is now active. The next
 work is to plan and execute Codex-plus resident advantage evidence while
 preserving the M6.24 baseline.
 
-2026-05-20 M6.25 plan: `docs/M6_25_RESIDENT_ADVANTAGE_PLAN_2026-05-20.md`
-defines the active phase order. Phase 0 is baseline/guard plus experiment
-ledger (`proof-artifacts/m6_25_resident_advantage_ledger.jsonl`). Phase 1 is a
-memory-light cold-vs-resident reentry comparison, starting with
-`reshard-c4-data` repair-reuse evidence. Do not run proof_5 as that experiment.
+2026-05-20 M6.25 implementation update: commits `f392111`, `f3ef986`,
+`71748e2`, and `016e102` fixed implement_v2 native defaults, added the
+`resident-golden-convention-recall` Harbor fixture, froze durable-coding memory
+rules, and implemented the sidecar-only durable-memory projection dry run.
+The next work is the resident campaign/ledger path around that fixture, not a
+return to M6.24 proof spending.
 
 ## M6.24 Close Summary
 
@@ -116,13 +117,19 @@ M6.25 proves Codex-plus resident advantage while preserving the M6.24 baseline. 
 Phase order:
 
 1. Baseline and guard: keep M6.24 closed, use `proof-artifacts/m6_25_resident_advantage_ledger.jsonl`, and define cold-vs-resident evidence axes.
-2. Memory-light reentry advantage: compare cold vs resident recovery on a small repair-reuse shape.
-3. Bounded read-only memory summary: add only if bounded, inspectable, and measurable.
-4. Read-only `MemoryExploreProvider` boundary.
-5. Provider cache transport behind default-off flags.
-6. Resident advantage report.
+2. Sidecar-only durable-memory dry run: implemented by `016e102`; use it to
+   select/revise/reject memory without provider-visible injection.
+3. Resident campaign/ledger: run paired cold/resident/stale evidence on the
+   committed Harbor fixture.
+4. Bounded read-only memory summary: add only if bounded, inspectable, and measurable.
+5. Read-only `MemoryExploreProvider` boundary.
+6. Provider cache transport behind default-off flags.
+7. Resident advantage report.
 
-Current next action: define the first M6.25 cold-vs-resident comparison shape. Use `reshard-c4-data` repair-reuse as the candidate only as a memory/reentry experiment, not as proof_5.
+Current next action: implement or design the resident campaign/ledger runner for
+`resident-golden-convention-recall`, using the sidecar-only projection dry run
+as the memory-selection primitive. Do not inject memory into ordinary
+`implement_v2` requests until the bounded experiment gate is explicit.
 
 ## Maintenance Rule
 
