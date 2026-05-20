@@ -166,21 +166,21 @@ The scoped `speed_1` rebaseline table is fully measured.
   written deferral routes and must not pull broad measurement into
   task-specific repair without repeated generic evidence.
 
-Close-proof spending is now a deliberate controller decision, not an automatic
-next step. Prefer proof_5 only for:
+Close-proof spending is now explicitly deferred by controller/user decision, not
+an automatic next step. The scoped table is complete enough for staged close:
+proof_5 is too time-expensive to spend here unless a later milestone reopens a
+specific variance question.
 
-- recent generic repair surfaces that need variance validation, such as
-  finish-verifier temp cleanup (`reshard-c4-data`), service closeout
-  (`pypi-server`), cwd propagation (`merge-diff-arc-agi-task`), or base
-  instruction cleanup behavior (`polyglot-c-py`);
-- high-variance or slow-but-passing rows if the controller explicitly wants
-  stability data, such as `schemelike-metacircular-eval`;
-- final staged close evidence after the close gate is updated to account for
-  the two written deferrals.
+Do not run `reshard-c4-data` proof_5 as the next action. The selected next
+action is to write the M6.24 staged close report, record that the two
+below-target rows are deferred with named generic triggers, and move active work
+to M6.25 if the staged close report satisfies the recorded gate.
 
-Recommended next action: run one targeted proof_5 on the freshest generic
-repair surface, `reshard-c4-data`, then update this aggregate snapshot with the
-result before spending any broader proof budget.
+This close does not claim full 5-trial Codex parity across all 25 tasks. It
+claims that `implement_v2` is good enough to exit the M6.24 measurement loop:
+`25/25` scoped tasks have evidence, `22/25` clean speed_1 rows passed, one
+proof_5 row already exceeds its Codex target, remaining misses are explicitly
+classified/deferred, and no active structural blocker remains open.
 
 ## Repair Notes
 

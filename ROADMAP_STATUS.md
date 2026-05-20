@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-19
+Last updated: 2026-05-20
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -57,8 +57,8 @@ not mean every idea in every design note has shipped.
 | 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
-| 6.24 Software/Coding Terminal-Bench Parity Campaign | `in_progress` | ToolRegistry / Codex hot-path Phase 6 and developer-role Phase 6D are implemented, committed, and behaviorally rechecked. `codex_hot_path` remains non-default: the latest A/B is comparable and leak-clean, but external reward / accepted-finish / reviewer gates still block default switching. |
-| 6.25 Codex-Plus Resident Advantage | `not_started` | Preserve parity while proving mew-native memory/reentry/repair and provider cache transport make it preferable to inhabit. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `done` | Staged close passed via `docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`: 25/25 scoped tasks have evidence, 22/25 clean speed_1 passes, `make-mips-interpreter` proof_5 exceeded target, and remaining below-target rows are classified/deferred. |
+| 6.25 Codex-Plus Resident Advantage | `in_progress` | Active focus: preserve the M6.24 baseline while proving mew-native persistence, reentry, memory, diagnosis, repair reuse, and provider-cache ergonomics. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
@@ -67,15 +67,23 @@ not mean every idea in every design note has shipped.
 
 ## Active Milestone
 
-Active work: **M6.24 Software/Coding Terminal-Bench Parity Campaign**.
+Active work: **M6.25 Codex-Plus Resident Advantage**.
 
 Current controller mode:
-`m6_24_post_tool_profile_developer_message_reentry`.
+`m6_25_resident_advantage_after_m6_24_staged_close`.
 
 Current diagnostic mode:
-`make_doom_pending_next_scoped_task`.
+`m6_24_proof5_deferred_m6_25_planning`.
 
 Current reentry decision:
+2026-05-20 update: M6.24 is staged-closed by
+`docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`. Do not run the previously
+selected `reshard-c4-data` proof_5 next; the user explicitly rejected that spend
+as too time-expensive for the current decision. M6.25 is now active. The next
+work is to plan and execute Codex-plus resident advantage evidence while
+preserving the M6.24 baseline.
+
+Historical M6.24 decision:
 2026-05-18 update: `make-doom-for-mips` is now pending evidence rather than
 the active repair target. The post-Phase-6D pre-speed and speed proof showed
 that current `codex_hot_path` no longer clearly drifts into the old standalone
@@ -234,9 +242,10 @@ now have `implement_v2` evidence. Clean speed_1 passes are `22/25`, and
 target `3/5`). The two below-target rows are classified/deferred:
 `make-doom-for-mips` (`0/1` against target `1/5`) and `raman-fitting` (`0/1`
 against target `2/5`). No final selected row has an unexplained Harbor runner
-error, and no accepted active structural blocker remains open. The next active
-action is targeted close-proof validation, starting with `reshard-c4-data`
-proof_5 as the freshest generic finish-verifier temp cleanup repair surface.
+error, and no accepted active structural blocker remains open. This initially
+selected targeted `reshard-c4-data` proof_5, but that selection is now
+superseded by the staged-close decision above. Do not spend proof_5 budget here
+unless a later M6.25 experiment explicitly reopens a named regression check.
 
 2026-05-18 update: Tool profile developer-message Phase 6D from
 `docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
@@ -1000,10 +1009,10 @@ Controller docs:
 - `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`
 - `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
 
-M6.24 reentry decision:
+Historical M6.24 reentry decision:
 
 ```text
-selected_lane=implement_v2 / codex_hot_path remains the active M6.24 execution
+selected_lane=implement_v2 / codex_hot_path was the active M6.24 execution
 shape. H5 terminal head+tail visibility, closeout/debug-cleanup handoff, and
 same-shape make-mips speed proof are green. The make-mips proof-5 close proof
 also passed `4/5` against frozen Codex target `3/5`. The next action is select
@@ -1018,10 +1027,10 @@ passed with exact replay and terminal-bench replay dogfood. This is historical
 pre-WorkFrame measurement evidence. The current decision is no longer
 "build-cython proof_5 now" or "continue the implement_v2 scoped rebaseline";
 the H5 make-mips proof-5 close proof recorded in
-`docs/M6_24_DECISION_LEDGER.md` is now closed. The current decision is next-gap
-selection inside M6.24.
+`docs/M6_24_DECISION_LEDGER.md` is now closed. This is historical context;
+current active focus is M6.25 after the M6.24 staged close report.
 
-## Active M6.24 Context
+## Historical M6.24 Context
 
 - M6.24 focuses only on the 25 Terminal-Bench 2.0 tasks returned by the
   `software-engineering,coding` filters.
@@ -1090,6 +1099,15 @@ action says to run a new `compile-compcert` speed proof, treat that as drift and
 re-read the scope doc plus decision ledger first.
 
 ## M6.24 Close Gate
+
+Status as of 2026-05-20: **staged-closed** via
+`docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`. The staged close intentionally
+does not claim full 5-trial parity across all 25 tasks. It closes the M6.24
+measurement loop because `25/25` scoped tasks have evidence, `22/25` clean
+`speed_1` rows passed, `make-mips-interpreter` proof_5 exceeded its frozen
+Codex target, the two below-target rows are classified/deferred, and no active
+structural blocker remains open. Do not run new M6.24 proof_5 work unless M6.25
+explicitly reopens a named regression check.
 
 Done when:
 
@@ -1283,9 +1301,8 @@ Useful historical files:
 ## Historical Roadmap Focus
 
 This section is retained as historical M6.24 context. It is no longer the active
-reentry guard after the 2026-05-17 ToolRegistry Phase 6 completion. The active
-next action is the post-Phase-6 `make-doom-for-mips` pre-speed / step-shape
-diagnostic described in the Active Milestone section above.
+reentry guard after the 2026-05-20 staged close. The active next action is M6.25
+resident-advantage planning and first evidence, not more M6.24 proof spending.
 
 Historical order before the Phase 6 pivot:
 
@@ -1301,5 +1318,5 @@ Historical order before the Phase 6 pivot:
    when touched, then decide whether one bounded diagnostic is allowed.
 4. If the gate was red, repair the native boundary/projection failure first. Do
    not add another model-visible frontier/todo/evidence projection as a shortcut.
-5. Keep M6.25 and M7+ pending until M6.24 reaches the scoped close gate or the
-   user explicitly changes the priority.
+5. M6.25 stayed pending until M6.24 reached the scoped close gate. That condition
+   is now satisfied by `docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`.
