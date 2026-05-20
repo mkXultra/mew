@@ -10,7 +10,7 @@ from mew.memory_debug import (
     recall_artifact,
     score_fixture_artifact,
 )
-from mew.memory_arena import score_memory_arena_artifact
+from mew.memory_arena import score_memory_arena_artifact, score_memory_arena_tool_artifact
 
 
 FORBIDDEN_RECALL_FIELDS = {
@@ -294,6 +294,8 @@ def test_memory_arena_score_compares_memory_modes_on_local_export(tmp_path):
     assert on["aggregate"]["expected_rows"] == 1
     assert on["aggregate"]["evidence_hit_rows"] == 1
     assert on["aggregate"]["recall_at_k"] == 1.0
+    assert on["aggregate"]["hit_at_1"] == 1.0
+    assert on["aggregate"]["mrr"] == 1.0
     assert stale["aggregate"]["expected_rows"] == 0
     assert stale["aggregate"]["stale_as_fresh_count"] == 0
     assert "memory arena score:" in on["summary"]
@@ -337,3 +339,92 @@ def test_memory_core_cli_memory_arena_score_writes_artifact(tmp_path):
     assert printed["operation"] == "memory_arena_score"
     assert printed["aggregate"]["recall_at_k"] == 1.0
     assert artifact["runner_config_hash"] == printed["runner_config_hash"]
+
+
+def test_memory_core_cli_memory_arena_tool_score_writes_artifact(tmp_path):
+    export = tmp_path / "memoryarena.json"
+    artifact_path = tmp_path / "arena-tool-artifact.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "formal-2",
+                    "questions": ["Remember lemma beta.", "Which lemma helps now?"],
+                    "answers": ["Lemma beta rewrites 0 + x to x.", "Use lemma beta."],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with redirect_stdout(StringIO()) as stdout:
+        code = main(
+            [
+                "memory-core",
+                "memory-arena-tool-score",
+                "--input",
+                str(export),
+                "--mode",
+                "memory_on",
+                "--artifact",
+                str(artifact_path),
+                "--json",
+            ]
+        )
+
+    printed = json.loads(stdout.getvalue())
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+
+    assert code == 0
+    assert printed["operation"] == "memory_arena_tool_score"
+    assert printed["tool_call_counts"]["memory_save:saved"] == 2
+    assert printed["tool_call_counts"]["memory_recall"] == 1
+    assert artifact["runner_config_hash"] == printed["runner_config_hash"]
+
+
+def test_memory_arena_tool_score_uses_save_then_recall_surface(tmp_path):
+    export = tmp_path / "memoryarena.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "travel-1",
+                    "backgrounds": [
+                        "Alice starts in Kyoto.",
+                        "Bob joins Alice after the first leg.",
+                    ],
+                    "questions": [
+                        "Plan Alice's first train.",
+                        "Which city should Bob join from?",
+                        "Which earlier plan should be reused?",
+                    ],
+                    "answers": [
+                        "Alice takes the train from Kyoto to Osaka.",
+                        "Bob should join from Osaka.",
+                        "Reuse the Kyoto to Osaka leg.",
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    off = score_memory_arena_tool_artifact(input_path=str(export), mode="memory_off")
+    on = score_memory_arena_tool_artifact(input_path=str(export), mode="memory_on")
+    stale = score_memory_arena_tool_artifact(input_path=str(export), mode="stale")
+
+    assert off["operation"] == "memory_arena_tool_score"
+    assert off["runner_boundary"]["native_memory_tool_harness"] is True
+    assert off["aggregate"]["expected_rows"] == 0
+    assert off["tool_call_counts"]["memory_save:skipped_memory_off"] == 3
+
+    assert on["aggregate"]["expected_rows"] == 2
+    assert on["aggregate"]["recall_at_k"] == 1.0
+    assert on["aggregate"]["hit_at_1"] == 1.0
+    assert on["tool_call_counts"]["memory_save:saved"] == 3
+    assert on["tool_call_counts"]["memory_recall"] == 2
+    assert on["row_results"][0]["query"].startswith("Bob joins Alice")
+
+    assert stale["aggregate"]["expected_rows"] == 0
+    assert stale["aggregate"]["stale_as_fresh_count"] == 0
+    assert stale["tool_call_counts"]["memory_save:saved"] == 3

@@ -17794,6 +17794,20 @@ def cmd_memory_core(args):
                 include_stale=bool(args.include_stale),
             )
             artifact["summary"] = format_memory_arena_summary(artifact)
+        elif action == "memory-arena-tool-score":
+            from .memory_arena import format_memory_arena_summary, score_memory_arena_tool_artifact
+
+            artifact = score_memory_arena_tool_artifact(
+                input_path=args.input,
+                hf_config=args.hf_config,
+                hf_split=args.hf_split,
+                hf_revision=args.hf_revision,
+                mode=args.mode,
+                limit_rows=args.limit_rows,
+                limit=args.limit,
+                include_stale=bool(args.include_stale),
+            )
+            artifact["summary"] = format_memory_arena_summary(artifact)
         else:
             print(f"mew: unknown memory-core subcommand: {action}", file=sys.stderr)
             return 1

@@ -590,6 +590,45 @@ not touch `implement_v2`, and does not use production prompt injection. The
 artifact records `runner_boundary`, `runner_config_hash`, row-level recall
 traces, and aggregate recall/staleness/latency metrics.
 
+The next MemoryArena mode uses an evaluation-only native memory tool harness:
+
+```bash
+./mew memory-core memory-arena-tool-score \
+  --input path/to/memoryarena-export.jsonl \
+  --mode memory_on \
+  --limit-rows 20 \
+  --artifact proof-artifacts/memory/memoryarena-tool-memory-on.json \
+  --json
+```
+
+This harness exposes only two simulated tools to the MemoryArena evaluator:
+
+- `memory_save(content)`: commit a prior session result as approved episodic
+  memory for the current row;
+- `memory_recall(query)`: query committed row memory before a later subtask.
+
+It is still not production memory integration. It does not call a model, does
+not touch `implement_v2`, and marks artifacts with
+`native_memory_tool_harness=true` and
+`gold_answer_simulated_agent_output=true`. The point is to test the
+`save -> recall` cycle shape before adding a real model or coding lane.
+
+The adapter must treat MemoryArena rows as multi-session tasks, not as
+train/test examples. The Hugging Face dataset exposes only a `test` split; the
+earlier `questions[]` inside each row act as the experience that future
+subtasks depend on. The adapter therefore records both direct seeded recall and
+tool-harness save/recall modes separately.
+
+Minimum rank metrics for both modes:
+
+- Recall@k;
+- Hit@1, Hit@3, Hit@5;
+- MRR;
+- stale-as-fresh count;
+- p50/p95 latency;
+- returned character p95;
+- per-run tool call counts for the tool harness.
+
 ### Harbor Resident-Memory Plan
 
 Use the `resident-golden-convention-recall` style task as the mew-specific

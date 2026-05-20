@@ -2024,6 +2024,22 @@ def build_parser():
     memory_core_arena.add_argument("--json", action="store_true", help="print machine-readable JSON")
     memory_core_arena.set_defaults(func=cmd_memory_core)
 
+    memory_core_arena_tools = memory_core_subparsers.add_parser(
+        "memory-arena-tool-score",
+        help="score MemoryArena-style save/recall through a native memory tool harness",
+    )
+    memory_core_arena_tools.add_argument("--input", help="local MemoryArena JSON or JSONL export")
+    memory_core_arena_tools.add_argument("--hf-config", help="optional Hugging Face MemoryArena config")
+    memory_core_arena_tools.add_argument("--hf-split", default="test", help="Hugging Face split when --hf-config is used")
+    memory_core_arena_tools.add_argument("--hf-revision", help="optional Hugging Face dataset revision")
+    memory_core_arena_tools.add_argument("--mode", required=True, choices=("memory_off", "memory_on", "stale"))
+    memory_core_arena_tools.add_argument("--limit-rows", type=int, default=0, help="maximum arena rows to score")
+    memory_core_arena_tools.add_argument("--limit", type=int, default=5, help="maximum recall results per query")
+    memory_core_arena_tools.add_argument("--include-stale", action="store_true", help="include stale entries in recall")
+    memory_core_arena_tools.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_arena_tools.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_arena_tools.set_defaults(func=cmd_memory_core)
+
     snapshot_parser = subparsers.add_parser("snapshot", help="refresh structured project snapshot memory")
     snapshot_parser.add_argument("--path", default=".", help="directory to inspect")
     snapshot_parser.add_argument(

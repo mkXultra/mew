@@ -34,6 +34,7 @@ class ArenaRow:
     row_id: str
     task_family: str
     background: str
+    backgrounds: Tuple[str, ...]
     questions: Tuple[str, ...]
     answers: Tuple[str, ...]
     raw: Mapping[str, Any]
@@ -154,15 +155,28 @@ def arena_row_from_mapping(raw: Mapping[str, Any], *, fallback_id: str) -> Optio
         answers = tuple("" for _ in questions)
     if len(answers) < len(questions):
         answers = answers + tuple("" for _ in range(len(questions) - len(answers)))
-    background = _text_from_value(
-        _first_present(raw, ("background", "context", "scenario", "profile", "memory", "shared_context"))
+    background_value = _first_present(
+        raw,
+        (
+            "background",
+            "backgrounds",
+            "context",
+            "scenario",
+            "profile",
+            "memory",
+            "shared_context",
+            "base_person",
+        ),
     )
+    backgrounds = _string_sequence(background_value)
+    background = backgrounds[0] if backgrounds else ""
     row_id = _clean_id(str(_first_present(raw, ("id", "task_id", "uid", "uuid")) or fallback_id))
     task_family = str(_first_present(raw, ("task_family", "category", "config", "domain")) or "memoryarena")
     return ArenaRow(
         row_id=row_id,
         task_family=task_family,
         background=background,
+        backgrounds=backgrounds,
         questions=tuple(questions),
         answers=tuple(answers[: len(questions)]),
         raw=raw,
@@ -182,7 +196,10 @@ def _string_sequence(value: Any) -> Tuple[str, ...]:
     if isinstance(value, str):
         return (value,)
     if isinstance(value, Mapping):
-        value = value.get("items") or value.get("turns") or value.get("questions") or value.get("data")
+        nested = value.get("items") or value.get("turns") or value.get("questions") or value.get("data")
+        if nested is None:
+            return (_text_from_value(value),)
+        value = nested
     if not isinstance(value, Iterable):
         return (_text_from_value(value),)
     items: List[str] = []
@@ -314,6 +331,7 @@ def score_memory_arena_row(
         result_data = result.to_dict()
         expected_ids = tuple(entry.entry_id for entry in entries if entry.staleness.state == "fresh")
         metrics = memory_result_metrics(result_data, expected_entry_ids=expected_ids)
+        metrics.update(arena_rank_metrics(result_data, expected_entry_ids=expected_ids))
         results.append(
             {
                 "task_family": row.task_family,
@@ -333,8 +351,16 @@ def score_memory_arena_row(
 
 
 def arena_query(row: ArenaRow, subtask_index: int) -> str:
-    parts = [row.background, arena_step_text(row.questions[subtask_index])]
+    parts = [arena_background(row, subtask_index), arena_step_text(row.questions[subtask_index])]
     return "\n".join(part for part in parts if part)
+
+
+def arena_background(row: ArenaRow, subtask_index: int) -> str:
+    if row.backgrounds:
+        if subtask_index < len(row.backgrounds):
+            return row.backgrounds[subtask_index]
+        return row.backgrounds[0]
+    return row.background
 
 
 def arena_step_text(question: str) -> str:
@@ -398,6 +424,272 @@ def arena_entries_for_mode(row: ArenaRow, *, mode: str, before_index: int) -> Tu
     return tuple(entries)
 
 
+@dataclass
+class MemoryArenaNativeToolHarness:
+    row: ArenaRow
+    mode: str
+    limit: int = 5
+    include_stale: bool = False
+
+    def __post_init__(self) -> None:
+        self.entries: List[MemoryEntry] = []
+        self.tool_calls: List[Dict[str, Any]] = []
+
+    def memory_recall(self, *, query: str, subtask_index: int) -> Dict[str, Any]:
+        system = MemorySystem(
+            InMemoryMemoryStore(
+                tuple(self.entries),
+                store_id=f"memoryarena-tool:{self.row.task_family}:{self.row.row_id}:{self.mode}:{subtask_index}",
+                index_id=f"memoryarena-tool:index:{self.row.row_id}:{self.mode}:{subtask_index}",
+            )
+        )
+        request = MemoryRecallRequest(
+            query=query,
+            scope=f"memoryarena:{self.row.task_family}:{self.row.row_id}",
+            memory_kinds=("episodic_task",),
+            limit=self.limit,
+            include_stale=self.include_stale,
+            budget=MemoryRecallBudget(max_results=self.limit),
+        )
+        result = system.recall(request).to_dict()
+        self.tool_calls.append(
+            {
+                "tool": "memory_recall",
+                "subtask_index": subtask_index,
+                "query_hash": stable_payload_hash({"query": query}),
+                "returned_entry_ids": [item.get("entry_id") for item in result.get("candidates") or []],
+                "trace_ref": result.get("trace_ref", ""),
+                "dropped": dict(result.get("dropped") or {}),
+            }
+        )
+        return result
+
+    def memory_save(self, *, subtask_index: int, content: str) -> Optional[str]:
+        if self.mode == "memory_off":
+            self.tool_calls.append(
+                {
+                    "tool": "memory_save",
+                    "subtask_index": subtask_index,
+                    "status": "skipped_memory_off",
+                }
+            )
+            return None
+        stale = self.mode == "stale"
+        entry = arena_memory_tool_entry(
+            self.row,
+            subtask_index=subtask_index,
+            content=content,
+            stale=stale,
+        )
+        self.entries.append(entry)
+        self.tool_calls.append(
+            {
+                "tool": "memory_save",
+                "subtask_index": subtask_index,
+                "status": "saved",
+                "entry_id": entry.entry_id,
+                "staleness": entry.staleness.state,
+                "content_hash": stable_payload_hash({"content": content}),
+            }
+        )
+        return entry.entry_id
+
+
+def arena_memory_tool_entry(
+    row: ArenaRow,
+    *,
+    subtask_index: int,
+    content: str,
+    stale: bool,
+) -> MemoryEntry:
+    question = row.questions[subtask_index] if subtask_index < len(row.questions) else ""
+    entry_id = f"arena-tool:{row.row_id}:session:{subtask_index}"
+    payload = {
+        "row_id": row.row_id,
+        "question": question,
+        "content": content,
+        "index": subtask_index,
+    }
+    source_ref = ProvenanceRef(
+        ref_id=f"{entry_id}:source",
+        ref_kind="memoryarena_tool_save",
+        artifact_path_or_uri=f"memoryarena://{row.row_id}/{subtask_index}/tool-save",
+        content_hash=f"sha256:{stable_payload_hash(payload)}",
+        producer="memory_arena_native_tool_harness",
+    )
+    proof_ref = ProvenanceRef(
+        ref_id=f"{entry_id}:proof",
+        ref_kind="memoryarena_gold_answer_simulated_agent_output",
+        artifact_path_or_uri=f"memoryarena://{row.row_id}/{subtask_index}/answer",
+        content_hash=f"sha256:{stable_payload_hash({'content': content})}",
+        producer="memory_arena_native_tool_harness",
+    )
+    staleness = (
+        Staleness(state="stale", reasons=("memory_arena_stale_mode",), invalidators=(source_ref,))
+        if stale
+        else Staleness()
+    )
+    return MemoryEntry(
+        entry_id=entry_id,
+        memory_kind="episodic_task",
+        scope=f"memoryarena:{row.task_family}:{row.row_id}",
+        title=f"MemoryArena native tool save {subtask_index}",
+        summary=content,
+        applicability=f"Use for later MemoryArena subtasks in row {row.row_id}.",
+        source_refs=(source_ref,),
+        proof_refs=(proof_ref,),
+        created_at="2026-05-20T00:00:00Z",
+        last_verified_at="2026-05-20T00:00:00Z",
+        validity="valid",
+        confidence=1.0,
+        staleness=staleness,
+    )
+
+
+def score_memory_arena_tool_artifact(
+    *,
+    input_path: Optional[str] = None,
+    hf_config: Optional[str] = None,
+    hf_split: str = "test",
+    hf_revision: Optional[str] = None,
+    mode: str,
+    limit_rows: int = 0,
+    limit: int = 5,
+    include_stale: bool = False,
+) -> Dict[str, Any]:
+    if mode not in MEMORY_MODES:
+        raise ValueError(f"memory mode must be one of: {', '.join(MEMORY_MODES)}")
+    rows = load_memory_arena_rows(
+        input_path=input_path,
+        hf_config=hf_config,
+        hf_split=hf_split,
+        hf_revision=hf_revision,
+        limit_rows=limit_rows,
+    )
+    started = time.perf_counter()
+    row_results: List[Dict[str, Any]] = []
+    tool_calls: List[Dict[str, Any]] = []
+    for row in rows:
+        result = score_memory_arena_tool_row(
+            row,
+            mode=mode,
+            limit=limit,
+            include_stale=include_stale,
+        )
+        row_results.extend(result["row_results"])
+        tool_calls.extend(result["tool_calls"])
+    artifact = {
+        "operation": "memory_arena_tool_score",
+        "dataset": MEMORY_ARENA_DATASET if hf_config else "",
+        "input_path": input_path or "",
+        "hf_config": hf_config or "",
+        "hf_split": hf_split,
+        "hf_revision": hf_revision or "",
+        "memory_mode": mode,
+        "limit_rows": limit_rows,
+        "rows_loaded": len(rows),
+        "queries_scored": len(row_results),
+        "runner_boundary": {
+            "memory_arena_style": True,
+            "native_memory_tool_harness": True,
+            "direct_memory_system": True,
+            "implement_v2_used": False,
+            "model_used": False,
+            "production_prompt_injection": False,
+            "gold_answer_simulated_agent_output": True,
+        },
+        "runner_config_hash": stable_payload_hash(
+            {
+                "input_path": input_path or "",
+                "hf_config": hf_config or "",
+                "hf_split": hf_split,
+                "hf_revision": hf_revision or "",
+                "mode": mode,
+                "limit_rows": limit_rows,
+                "limit": limit,
+                "include_stale": include_stale,
+                "tool_harness": "memory_save_recall_v0",
+            }
+        ),
+        "aggregate": aggregate_arena_results(row_results),
+        "tool_call_counts": aggregate_tool_calls(tool_calls),
+        "tool_calls": tool_calls,
+        "row_results": row_results,
+        "timing_ms": (time.perf_counter() - started) * 1000.0,
+    }
+    artifact["summary"] = format_memory_arena_summary(artifact)
+    return artifact
+
+
+def score_memory_arena_tool_row(
+    row: ArenaRow,
+    *,
+    mode: str,
+    limit: int,
+    include_stale: bool,
+) -> Dict[str, Any]:
+    harness = MemoryArenaNativeToolHarness(row=row, mode=mode, limit=limit, include_stale=include_stale)
+    row_results: List[Dict[str, Any]] = []
+    for subtask_index, question in enumerate(row.questions):
+        if subtask_index > 0:
+            query = arena_query(row, subtask_index)
+            expected_ids = tuple(entry.entry_id for entry in harness.entries if entry.staleness.state == "fresh")
+            result_data = harness.memory_recall(query=query, subtask_index=subtask_index)
+            metrics = memory_result_metrics(result_data, expected_entry_ids=expected_ids)
+            metrics.update(arena_rank_metrics(result_data, expected_entry_ids=expected_ids))
+            row_results.append(
+                {
+                    "task_family": row.task_family,
+                    "task_id": row.row_id,
+                    "subtask_index": subtask_index,
+                    "memory_mode": mode,
+                    "query": query,
+                    "expected_entry_ids": list(expected_ids),
+                    "memory_snapshot_hash": memory_snapshot_hash(tuple(harness.entries)),
+                    "recall_config_hash": recall_config_hash(
+                        {
+                            "query": query,
+                            "scope": f"memoryarena:{row.task_family}:{row.row_id}",
+                            "limit": limit,
+                            "include_stale": include_stale,
+                            "tool_harness": "memory_save_recall_v0",
+                        }
+                    ),
+                    "metrics": metrics,
+                    "debug_trace": recall_debug_trace(result_data, metrics),
+                    "result": result_data,
+                }
+            )
+        if subtask_index < len(row.answers):
+            content = arena_tool_memory_content(row, subtask_index)
+            harness.memory_save(subtask_index=subtask_index, content=content)
+    return {"row_results": tuple(row_results), "tool_calls": tuple(harness.tool_calls)}
+
+
+def arena_tool_memory_content(row: ArenaRow, subtask_index: int) -> str:
+    question = row.questions[subtask_index] if subtask_index < len(row.questions) else ""
+    answer = row.answers[subtask_index] if subtask_index < len(row.answers) else ""
+    parts = [
+        f"Question: {arena_step_text(question)}",
+        f"Answer: {answer}",
+    ]
+    background = arena_background(row, subtask_index)
+    if background:
+        parts.append(f"Background: {background}")
+    return "\n".join(parts)
+
+
+def aggregate_tool_calls(tool_calls: Sequence[Mapping[str, Any]]) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for call in tool_calls:
+        tool = str(call.get("tool") or "unknown")
+        counts[tool] = counts.get(tool, 0) + 1
+        status = str(call.get("status") or "")
+        if status:
+            counts[f"{tool}:{status}"] = counts.get(f"{tool}:{status}", 0) + 1
+    return counts
+
+
 def aggregate_arena_results(row_results: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     expected_rows = [
         item
@@ -412,20 +704,55 @@ def aggregate_arena_results(row_results: Sequence[Mapping[str, Any]]) -> Dict[st
     stale_as_fresh = 0
     latencies = []
     returned_chars = []
+    mrr_values = []
+    hit_at_1 = 0
+    hit_at_3 = 0
+    hit_at_5 = 0
     for item in row_results:
         metrics = item.get("metrics") or {}
         stale_as_fresh += int(metrics.get("stale_recall_count") or 0)
         latencies.append(float(metrics.get("latency_ms") or 0.0))
         returned_chars.append(int(metrics.get("returned_chars") or 0))
+        mrr_values.append(float(metrics.get("mrr") or 0.0))
+        hit_at_1 += 1 if metrics.get("hit_at_1") else 0
+        hit_at_3 += 1 if metrics.get("hit_at_3") else 0
+        hit_at_5 += 1 if metrics.get("hit_at_5") else 0
+    denominator = len(expected_rows) if expected_rows else 0
     return {
         "expected_rows": len(expected_rows),
         "evidence_hit_rows": len(hit_rows),
         "recall_at_k": (len(hit_rows) / len(expected_rows)) if expected_rows else 0.0,
+        "hit_at_1": (hit_at_1 / denominator) if denominator else 0.0,
+        "hit_at_3": (hit_at_3 / denominator) if denominator else 0.0,
+        "hit_at_5": (hit_at_5 / denominator) if denominator else 0.0,
+        "mrr": (sum(mrr_values) / denominator) if denominator else 0.0,
         "stale_as_fresh_count": stale_as_fresh,
         "latency_ms_p50": _percentile(latencies, 50),
         "latency_ms_p95": _percentile(latencies, 95),
         "returned_chars_p95": _percentile(returned_chars, 95),
         "queries_scored": len(row_results),
+    }
+
+
+def arena_rank_metrics(
+    result: Mapping[str, Any],
+    *,
+    expected_entry_ids: Sequence[str],
+) -> Dict[str, Any]:
+    candidates = list(result.get("candidates") or [])
+    candidate_ids = [str(item.get("entry_id") or "") for item in candidates]
+    expected = {str(entry_id) for entry_id in expected_entry_ids}
+    first_rank = 0
+    for index, entry_id in enumerate(candidate_ids, start=1):
+        if entry_id in expected:
+            first_rank = index
+            break
+    return {
+        "first_hit_rank": first_rank,
+        "hit_at_1": bool(first_rank and first_rank <= 1),
+        "hit_at_3": bool(first_rank and first_rank <= 3),
+        "hit_at_5": bool(first_rank and first_rank <= 5),
+        "mrr": (1.0 / first_rank) if first_rank else 0.0,
     }
 
 
