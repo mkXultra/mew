@@ -83,6 +83,12 @@ as too time-expensive for the current decision. M6.25 is now active. The next
 work is to plan and execute Codex-plus resident advantage evidence while
 preserving the M6.24 baseline.
 
+2026-05-20 M6.25 plan: `docs/M6_25_RESIDENT_ADVANTAGE_PLAN_2026-05-20.md`
+defines the active phase order. Phase 0 is baseline/guard plus experiment
+ledger (`proof-artifacts/m6_25_resident_advantage_ledger.jsonl`). Phase 1 is a
+memory-light cold-vs-resident reentry comparison, starting with
+`reshard-c4-data` repair-reuse evidence. Do not run proof_5 as that experiment.
+
 Historical M6.24 decision:
 2026-05-18 update: `make-doom-for-mips` is now pending evidence rather than
 the active repair target. The post-Phase-6D pre-speed and speed proof showed
