@@ -1,0 +1,1328 @@
+# Mew Roadmap Status
+
+Last updated: 2026-05-20
+
+This file is the compact operational roadmap dashboard for context reentry.
+Detailed history is intentionally archived instead of kept here.
+
+Detailed archives:
+
+- `docs/archive/ROADMAP_STATUS_through_M5_2026-04-20.md`
+- `docs/archive/ROADMAP_STATUS_detailed_2026-04-26.md`
+- `docs/archive/ROADMAP_STATUS_detailed_2026-05-03.md`
+
+Status vocabulary:
+
+- `not_started`: no meaningful implementation yet
+- `foundation`: supporting pieces exist, but the milestone's core user value is
+  not usable
+- `in_progress`: core implementation exists or is the active focus
+- `pending`: meaningful implementation exists, but the milestone is paused by a
+  higher-priority active milestone
+- `done`: the recorded close gate passed
+- `merged_into_*`: historical milestone folded into another milestone
+
+Important interpretation: `done` means the recorded close gate passed. It does
+not mean every idea in every design note has shipped.
+
+## Summary
+
+| Milestone | Status | Current Meaning |
+|---|---|---|
+| 1. Native Hands | `done` | Native work sessions can inspect, edit, verify, resume, and expose audit trails. |
+| 2. Interactive Parity | `done` | Cockpit/live/follow controls, approvals, compact output, interruption handling, and comparator evidence reached the gate. |
+| 3. Persistent Advantage | `done` | Reentry/comparator evidence plus long-gap proof shapes closed the gate. |
+| 4. True Recovery | `done` | Runtime/work-session effects can be classified and safely retried/requeued or surfaced for review. |
+| 5. Self-Improving Mew | `done` | Five consecutive no-rescue self-improvement loops passed with review and verification. |
+| 5.1 Trust & Safety Close-Out | `done` | Post-M5 hardening added adversarial review and safety hooks. |
+| 6. Body: Daemon & Persistent Presence | `done` | 4-hour daemon proof passed strict summary. |
+| 6.5 Self-Hosting Speed | `done` | Compact resident rerun produced a verified paired edit proposal with first THINK under 10s. |
+| 6.6 Coding Competence: Codex CLI Parity | `done` | Bootstrap, comparator slots, and frozen Codex CLI side-by-side batch passed with caveats. |
+| 6.7 Supervised Self-Hosting Loop | `done` | Reviewer-gated supervised iterations, reentry, and detached close-watch satisfied the gate. |
+| 6.8 Task Chaining: Supervised Self-Selection | `done` | Close gate passed via `docs/M6_8_CLOSE_GATE_AUDIT_2026-04-26.md`. |
+| 6.8.5 Selector Intelligence and Curriculum Integration | `done` | Close gate passed via `docs/M6_8_5_CLOSE_GATE_AUDIT_2026-04-26.md`. |
+| 6.9 Durable Coding Intelligence | `done` | Close gate passed via `docs/M6_9_CLOSE_GATE_AUDIT_2026-04-26.md`; Phase 4 moved to M6.8.5. |
+| 6.10 Execution Accelerators and Mew-First Reliability | `done` | Latest 10 attempts reached 7/10 clean-or-practical with classified failures. |
+| 6.11 Loop Stabilization | `done` | Core and residual hardening are closed; use its surfaces as diagnostics only. |
+| 6.12 Failure-Science Instrumentation | `done` | V0 read-only ledger/classifier/report surface is closed. |
+| 6.13 High-Effort Deliberation Lane | `done` | Close gate passed via `docs/M6_13_CLOSE_GATE_AUDIT_2026-04-26.md`. |
+| 6.14 Mew-First Failure Repair Gate | `done` | Follow-on SR-017 side-project write-batch normalizer repair is recorded. |
+| 6.15 Verified Closeout Redraft Repair | `merged_into_6.14` | Historical episode folded into M6.14. |
+| 6.16 Codex-Grade Implementation Lane | `done` | Close gate passed via `docs/M6_16_CLOSE_GATE_AUDIT_2026-04-27.md`. |
+| 6.17 Resident Meta Loop / Lane Chooser | `done` | Close gate passed via `docs/M6_17_CLOSE_GATE_AUDIT_2026-04-27.md`; v0 remains reviewer-gated. |
+| 6.18 Implementation Failure Diagnosis Gate | `done` | Close gate passed via `docs/M6_18_CLOSE_GATE_AUDIT_2026-04-27.md`. |
+| 6.19 Terminal-Bench Compatibility | `done` | mew and Codex both run bounded Harbor smoke with comparable artifacts. |
+| 6.20 Terminal-Bench Driven Implement-Lane Debugging | `done` | Fixed two-task terminal gate closed on current head: both selected tasks reached 5/5 with Harbor errors 0. |
+| 6.21 Terminal-Bench Codex Target Registry | `done` | Codex `0.121.0` / `gpt-5.5@openai` Terminal-Bench 2.0 leaderboard was frozen as JSON. |
+| 6.22 Terminal-Bench Curated Subset Parity | `done` | Close gate passed via `docs/M6_22_CLOSE_GATE_AUDIT_2026-04-28.md`. |
+| 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
+| 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
+| 6.24 Software/Coding Terminal-Bench Parity Campaign | `done` | Staged close passed via `docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`: 25/25 scoped tasks have evidence, 22/25 clean speed_1 passes, `make-mips-interpreter` proof_5 exceeded target, and remaining below-target rows are classified/deferred. |
+| 6.25 Codex-Plus Resident Advantage | `in_progress` | Active focus: preserve the M6.24 baseline while proving mew-native persistence, reentry, memory, diagnosis, repair reuse, and provider-cache ergonomics. |
+| 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
+| 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
+| 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
+| 10. Multi-Agent Residence | `not_started` | Multi-model shared residence remains future work. |
+| 11. Inner Life | `not_started` | Journal/dream/mood/self-memory continuity remains future work. |
+
+## Active Milestone
+
+Active work: **M6.25 Codex-Plus Resident Advantage**.
+
+Current controller mode:
+`m6_25_resident_advantage_after_m6_24_staged_close`.
+
+Current diagnostic mode:
+`m6_24_proof5_deferred_m6_25_planning`.
+
+Current reentry decision:
+2026-05-20 update: M6.24 is staged-closed by
+`docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`. Do not run the previously
+selected `reshard-c4-data` proof_5 next; the user explicitly rejected that spend
+as too time-expensive for the current decision. M6.25 is now active. The next
+work is to plan and execute Codex-plus resident advantage evidence while
+preserving the M6.24 baseline.
+
+2026-05-20 M6.25 plan: `docs/M6_25_RESIDENT_ADVANTAGE_PLAN_2026-05-20.md`
+defines the active phase order. Phase 0 is baseline/guard plus experiment
+ledger (`proof-artifacts/m6_25_resident_advantage_ledger.jsonl`). Phase 1 is a
+memory-light cold-vs-resident reentry comparison, starting with
+`reshard-c4-data` repair-reuse evidence. Do not run proof_5 as that experiment.
+
+Historical M6.24 decision:
+2026-05-18 update: `make-doom-for-mips` is now pending evidence rather than
+the active repair target. The post-Phase-6D pre-speed and speed proof showed
+that current `codex_hot_path` no longer clearly drifts into the old standalone
+synthetic-builder shape. The latest speed proof at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-doom-for-mips-speed-proof-ts-codex-hot-path-20260518-165842/2026-05-18__16-58-42/make-doom-for-mips__32HXn2D`
+scored reward `0.0` with runner errors `0`, but external verifier passed frame
+existence and visual similarity and failed only the stdout text capture.
+Internal closeout also timed out because `finish_verifier_planner` selected
+long-running `node vm.js`; its stdout tail contained the expected
+`I_InitGraphics: DOOM screen size: w x h: 320 x 200` line.
+
+Do not add Doom/MIPS-specific prompt, tool, or finish-gate rules from this
+artifact. Revisit `make-doom-for-mips` only after a generic bounded verifier
+closeout / long-running observable-output verifier design is selected, or if
+another scoped task repeats the same class.
+
+2026-05-18 update: `merge-diff-arc-agi-task` speed proof passed after the
+finish-verifier planner cwd repair in commit `8ca62f1`. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-merge-diff-arc-agi-task-speed-proof-ts-codex-hot-path-20260518-220457/2026-05-18__22-04-57/merge-diff-arc-agi-task__G4aVv6C`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, and normalized
+trace total `212.212s`. Do not add planner safety/bypass hardening from this;
+the selected bug was cwd preservation.
+
+2026-05-18 update: `openssl-selfsigned-cert` speed proof also passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-openssl-selfsigned-cert-speed-proof-ts-codex-hot-path-20260518-222707/2026-05-18__22-27-08/openssl-selfsigned-cert__ifsvviC`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, and normalized
+trace total `110.838s`. No repair is selected from this pass. The next active
+M6.24 action is scoped rebaseline measurement: run `polyglot-c-py` speed_1 with
+`codex_hot_path`.
+
+2026-05-19 update: `polyglot-c-py` speed proof passed after the Codex-like base
+instruction alignment in commit `1fd5bb5`. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-polyglot-c-py-speed-proof-ts-codex-hot-path-20260519-093837/2026-05-19__09-38-38/polyglot-c-py__uzB8B4M`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `333.842s`, first source mutation at `39.494s`, `25` model turns,
+and `24` tool calls/results. The model cleaned the temporary compiled
+`/app/polyglot/cmain` validation artifact and confirmed only `main.py.c`
+remained before finish. No repair is selected from this pass. The next active
+M6.24 action is scoped rebaseline measurement: run `polyglot-rust-c` speed_1
+with `codex_hot_path`.
+
+2026-05-19 update: `polyglot-rust-c` speed proof also passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-polyglot-rust-c-speed-proof-ts-codex-hot-path-20260519-100821/2026-05-19__10-08-22/polyglot-rust-c__3LDuqXw`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `191.584s`, first source mutation at `107.101s`, `10` model turns,
+and `10` tool calls/results. No repair is selected from this pass. The next
+active M6.24 action is scoped rebaseline measurement: run `pypi-server` speed_1
+with `codex_hot_path`.
+
+2026-05-19 update: `pypi-server` speed proof passed after the managed service
+closeout repair in commit `d1c83a0`. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-pypi-server-speed-proof-ts-codex-hot-path-20260519-210920/2026-05-19__21-09-20/pypi-server__hX5TKG4`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, native pairing valid, normalized trace total `123.491s`,
+first source mutation at `21.359s`, `11` model messages, and `11` completed
+tool calls. The finish verifier planner selected a local service plus package
+smoke command and final verifier closeout exited `0`. No repair is selected
+from this pass. The next active M6.24 action is scoped rebaseline measurement:
+run `pytorch-model-cli` speed_1 with `codex_hot_path`.
+
+2026-05-19 update: `pytorch-model-cli` speed proof passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-cli-speed-proof-ts-codex-hot-path-20260519-212202/2026-05-19__21-22-03/pytorch-model-cli__BEoBB7h`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `146.702s`, first source mutation at `90.743s`, `15` model
+messages, and `15` completed tool calls. No repair is selected from this pass.
+The next active M6.24 action is scoped rebaseline measurement: run
+`pytorch-model-recovery` speed_1 with `codex_hot_path`.
+
+2026-05-19 update: `pytorch-model-recovery` speed proof passed after an
+infra-invalid local disk retry. The first rerun after Docker restart scored
+`0.0` only because the external verifier exhausted container disk while
+extracting `torch==2.7.1`; it is not product miss evidence. After cache/Docker
+cleanup, the same task passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-pytorch-model-recovery-speed-proof-ts-codex-hot-path-20260519-220142/2026-05-19__22-01-42/pytorch-model-recovery__S93LD2n`.
+The passing run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `296.762s`, first source mutation at `169.994s`, `13` model
+messages, and `15` completed tool calls. No repair is selected from this pass.
+The next active M6.24 action is scoped rebaseline measurement: run
+`raman-fitting` speed_1 with `codex_hot_path`.
+
+2026-05-19 update: `raman-fitting` speed proof failed and a same-day Codex
+single-reference trace also failed. mew evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-raman-fitting-speed-proof-ts-codex-hot-path-20260519-221755/2026-05-19__22-17-55/raman-fitting__iBqkqoR`.
+Codex reference evidence:
+`proof-artifacts/terminal-bench/reference-trace/codex-raman-fitting-20260519-223304/2026-05-19__22-33-04/raman-fitting__aY7JuzW`.
+mew scored external reward `0.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `545.136s`, first source mutation at `478.777s`, `30` model
+messages, and `30` completed tool calls. Codex also scored `0.0`; it was
+faster and mutated earlier, but still failed the public numeric peak-fit
+verifier. Step diff:
+`tmp/raman-fitting-20260519-codex-vs-mew-step-diff.md`. Do not repair from
+this failed Codex trace as if it were a passing reference. Classification:
+pending/deferred. The apparent direct fix is domain-specific Raman unit/model
+inference (`x = 1e7 / x` before Lorentzian fitting), which would be a
+task-specific repair or a new numeric/scientific objective-grounding substrate.
+This matches prior SR-005 / Batch 1 guidance: do not spend another
+`raman-fitting`-only prompt-polish cycle unless the generic numeric objective
+grounding substrate is explicitly selected from repeated evidence. The next
+active M6.24 action is scoped rebaseline measurement: run `regex-chess`
+speed_1 with `codex_hot_path`.
+
+2026-05-19 update: `regex-chess` speed proof passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-regex-chess-speed-proof-ts-codex-hot-path-20260519-225046/2026-05-19__22-50-46/regex-chess__hk9WB6R`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `900.339s`, first edit at `303.296s`, `29` model messages, and
+`34` completed tool calls. No repair is selected from this pass. The next
+active M6.24 action is scoped rebaseline measurement: run `reshard-c4-data`
+speed_1 with `codex_hot_path`.
+
+2026-05-19 update: `reshard-c4-data` speed proof passed after a generic
+finish-verifier temp cleanup safety repair. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-reshard-c4-data-speed-proof-ts-codex-hot-path-20260519-234126/2026-05-19__23-41-26/reshard-c4-data__Ko5SG7s`.
+The initial run reached external reward `1.0` but internal closeout failed
+because `finish_verifier_planner` rejected a valid `/tmp` cleanup verifier as
+`closeout_command_dangerous`. Commit `5f15731` narrowed planner cleanup safety
+to allow only exact `/tmp/<single-literal-component>` cleanup paths while
+preserving unsafe `rm` rejection. The rerun scored external reward `1.0` with
+runner exceptions `0`, `work_exit_code=0`, `stop_reason=finish`, native pairing
+valid, normalized trace total `357.334s`, first source mutation at `218.459s`,
+`24` model messages, and `24` completed tool calls/results. No further repair
+is selected from this pass. The next active M6.24 action is scoped rebaseline
+measurement: run `schemelike-metacircular-eval` speed_1 with `codex_hot_path`.
+
+2026-05-20 update: `schemelike-metacircular-eval` speed proof passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-schemelike-metacircular-eval-speed-proof-ts-codex-hot-path-20260519-235505/2026-05-19__23-55-06/schemelike-metacircular-eval__hF5ANcb`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `1315.698s`, total runtime about `26m27s`, first edit at
+`200.206s`, first verifier at `670.896s`, `105` model turns, `104` completed
+tool calls/results, and `62` typed edits. No repair is selected from this pass.
+The next active M6.24 action is scoped rebaseline measurement: run
+`write-compressor` speed_1 with `codex_hot_path`.
+
+2026-05-20 update: `write-compressor` speed proof passed. Evidence:
+`proof-artifacts/terminal-bench/harbor-smoke/mew-write-compressor-speed-proof-ts-codex-hot-path-20260520-002334/2026-05-20__00-23-35/write-compressor__CDB9pWH`.
+The run scored external reward `1.0` with runner exceptions `0`,
+`work_exit_code=0`, `stop_reason=finish`, native pairing valid, normalized
+trace total `231.513s`, total runtime about `5m24s`, first edit at `119.135s`,
+`13` model turns, `13` completed tool calls/results, and `3` typed edits. No
+repair is selected from this pass. The scoped M6.24 speed_1 rebaseline table is
+now fully measured; the next active action is to compute/update the aggregate
+summary and select any close-proof candidates deliberately.
+
+2026-05-20 update: scoped M6.24 speed_1 aggregate snapshot is recorded in
+`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`. All `25/25` scoped tasks
+now have `implement_v2` evidence. Clean speed_1 passes are `22/25`, and
+`make-mips-interpreter` has a proof-5 pass above target (`4/5` against Codex
+target `3/5`). The two below-target rows are classified/deferred:
+`make-doom-for-mips` (`0/1` against target `1/5`) and `raman-fitting` (`0/1`
+against target `2/5`). No final selected row has an unexplained Harbor runner
+error, and no accepted active structural blocker remains open. This initially
+selected targeted `reshard-c4-data` proof_5, but that selection is now
+superseded by the staged-close decision above. Do not spend proof_5 budget here
+unless a later M6.25 experiment explicitly reopens a named regression check.
+
+2026-05-18 update: Tool profile developer-message Phase 6D from
+`docs/DESIGN_2026-05-17_M6_24_TOOL_PROFILE_DEVELOPER_MESSAGE.md` is complete
+for the scoped implementation/recheck gate:
+
+1. Phase 6D.0 committed as `dcad24d`: static `codex_hot_path` developer
+   contract fixture added.
+2. Phase 6D.1 committed as `8cf80d0`: tool-surface snapshot records
+   developer-contract metadata.
+3. Phase 6D.2 committed as `38941d7`: OpenAI/Codex `codex_hot_path` request
+   input starts with `role=developer` contract text before the raw user task.
+4. Phase 6D.3 committed as `cafdce6`: providers without developer-role input
+   support fold the same exact contract into `instructions` and record the
+   fallback reason; previous-response developer refresh remains explicitly
+   deferred.
+5. Phase 6D.4 committed as `06ce6ea`: developer-contract leak scan covers
+   profile-owned forbidden terms without reintroducing finish/evidence/WorkFrame
+   pressure.
+6. Phase 6D.5 repair committed as `8afaeaa`: provider-visible generic leak
+   scans no longer confuse ordinary source comments such as `TODO: Implement`
+   with internal `todo` state leakage.
+
+Behavioral recheck evidence:
+
+- Fake-native A/B smoke:
+  `tmp/m6_24_tool_profile_developer_message_phase6d5_smoke_after_todo_scan/`.
+  It is comparable and still blocks default-switch for expected reviewer /
+  accepted-finish reasons.
+- Live make-doom-for-mips A/B rerun:
+  `proof-artifacts/tool-surface-ab-diagnostic/m6-24-tool-profile-devmsg-make-doom-step-check-20260518-rerun1/`.
+  The report is `ab_comparable=true`; `codex_hot_path` has
+  `role_developer_input`, zero provider-visible forbidden leaks, tool surface
+  `apply_patch, exec_command, write_stdin`, first write at turn 19 after 16
+  probes, versus `mew_legacy` first write at turn 40 after 32 probes.
+  Default-switch remains blocked by `baseline_external_reward_not_one`,
+  `candidate_external_reward_not_one`, `candidate_accepted_finish_required`,
+  and `reviewer_acceptance_required`.
+
+Do not switch the default profile to `codex_hot_path` from this evidence. Treat
+Phase 6D as closed for request construction/profile separation, then return to
+the M6.24 gap loop. Any next `make-doom-for-mips` repair must be justified by
+Terminal-Bench failure analysis, not by re-opening developer-message transport
+or adding task-specific prompt wording.
+
+Historical prior state:
+2026-05-17 update: ToolRegistry / Codex hot-path Phase 6 from
+`docs/DESIGN_2026-05-14_M6_24_TOOL_REGISTRY_AND_CODEX_HOT_PATH.md` is complete
+for the scoped implementation gate:
+
+1. Phase 6A committed as `59f3734`: provider-visible descriptors/specs moved
+   into profile modules and `tool_registry.py` stopped using the legacy policy
+   module for provider-visible ownership.
+2. Phase 6B committed as `a79a9d2`: prompt tool/coding sections moved into
+   profile-owned prompt contracts selected by `ToolSurfaceSnapshot`.
+3. Phase 6C committed as `60a8471`: `tool_policy.py` was removed from the
+   implement-lane live path, non-provider-visible helper logic moved to
+   `tool_guidance.py`, and the old `tool_policy_index` artifact was renamed to
+   `tool_surface_index`.
+
+codex-ultra reviewed Phase 6C in session
+`019e35eb-d557-7020-bb11-579a928fdc8e` with `STATUS: APPROVE`.
+Focused validation passed: Phase 6 surface/registry/provider/harness tests,
+targeted `tests/test_implement_lane.py` selections, targeted
+`tests/test_commands.py` tool CLI selections, `tests/test_native_tool_harness.py`,
+scoped ruff, `git diff --check`, and `rg` gates for legacy policy imports.
+
+Do not restart Phase 6A/6B/6C after context compression. The next action is the
+post-Phase-6 same-shape `make-doom-for-mips` pre-speed / step-shape diagnostic
+with `codex_hot_path`, followed by artifact-based classification before any code
+change. Do not run broad Terminal-Bench measurement or add task-specific
+prompt/tool wording before that classification.
+
+H0 is measured. The saved-artifact report shows that mew reaches
+first-patch readiness early but does not convert those probe facts into a first
+mutation. H10 tested whether compact probe-derived `implementation_constraints`
+inside factual `task_facts` would compress exploration into a patch. It did
+not: mew still produced no source mutation and increased pre-mutation probes.
+The behavior change was reverted by `f9b0059`. Do not re-add task-facts
+constraints by intuition. The next experiment must explain why the model still
+uses repeated `exec_command` probes after readiness.
+H6 then tested whether the model can choose `apply_patch` at all under the
+`codex_hot_path` tool surface. The synthetic one-turn provider-native check
+passed: the first tool call was a custom `apply_patch` call in
+`proof-artifacts/m6_24_apply_patch_affordance/20260514T222246Z.json`. Therefore
+do not spend the next cycle tuning `apply_patch` wording or transport by
+intuition. The next measured experiment should target prompt/transcript/task
+shape salience or evidence-to-patch synthesis.
+The H1/H7 salience snapshot then analyzed the existing H10
+`native-provider-requests.json` without live execution. Result: 50/50 requests
+used a JSON envelope as the first user item, 50/50 exposed
+`compact_sidecar_digest`, and the first request section order started with
+`compact_sidecar_digest, lane` before `task_contract` and `task_facts`.
+Therefore the next behavior experiment is H1 only: make the provider-visible
+hot-path task payload task-first while keeping H7 sidecar visibility unchanged.
+Do not combine this with hiding the compact sidecar yet.
+H1 implementation now emits a plain task-first input item before the existing
+JSON support payload. The JSON support payload still contains
+`compact_sidecar_digest`, and compact sidecar visibility is intentionally
+unchanged. The fresh H1 diagnostic produced a first mutation where H10 produced
+none, so H1 is a partial keep. It is insufficient: mew still reached first
+mutation at step 45 after 43 probes, compared with Codex step 25 after 24
+probes. The next isolated experiment is H7: hide or compress
+`compact_sidecar_digest` from provider-visible hot-path input while preserving
+internal sidecar artifacts. Do not combine this with tool wording,
+`next_action`, WorkFrame steering, or threshold control.
+H7 implementation now keeps compact sidecar digest as hidden replay/proof
+artifact and removes it from the provider-visible task support payload.
+Fake-native smoke shows zero visible compact sidecar requests and hot-path
+fastcheck still passes from the hidden digest. codex-ultra re-review approved
+the implementation after two P1 fixes. The live H7 diagnostic also shows zero
+visible compact sidecar requests and zero scaffolding terms, but it did not
+improve step shape: mew first mutation was step 46 after 45 probes, compared
+with Codex step 25 after 24 probes and H1 step 45 after 43 probes. Keep H7 as
+resident hygiene, not as a performance win. Next isolated experiment: H4
+tool-result rendering / output salience. H4 changed only completed/failed
+command rendering toward Codex's `Exit code` / `Wall time` / `Output` shape.
+The renderer shape changed as intended, but the live run got worse: mew first
+mutation was step 73 after 71 probes, compared with Codex step 25 after 24
+probes and H7 step 46 after 45 probes. H4 was reverted by `84b79e6`.
+Do not reapply renderer-only command output changes by intuition. Next
+isolated experiment: H2 base/task instruction shape. Do not combine H2 with
+renderer changes, tool wording, `next_action`, WorkFrame steering, time
+pressure, or probe thresholds.
+H2 changed only the `codex_hot_path` visible base instructions to a shorter
+plain Codex-like coding-agent contract. The provider-visible shape was clean
+but the step shape regressed: mew first mutation was step 57 after 56 probes,
+compared with H7 step 46 after 45 probes and Codex step 25 after 24 probes.
+H2 was reverted by `e857456`. Do not reapply plain Codex-like base
+instructions by intuition. The next step is H3 continuity audit: prove whether
+`previous_response_id` plus delta input gives the model an effective
+Codex-like response-item history before changing more behavior.
+H3 continuity audit was added and run on both the H7 kept-behavior artifact
+and the H2 recent artifact. In both artifacts, every request after the first
+used `previous_response_id`, every auditable previous response id matched the
+prior turn's recorded response id, delta prefix plus wire input covered the
+saved logical input, response item JSONL matched `response_transcript.json`,
+and native call/output pairing was valid. Reasoning is carried by provider
+continuation rather than local replay, but this is an architectural dependency,
+not a demonstrated bug. Do not change continuity behavior without stronger
+evidence. This led to H5 output compaction audit.
+H5 output compaction audit was added and run on both H7 and H2 artifacts. It
+found a concrete output-visibility gap in matched provider outputs: H7 omitted
+222,303 chars and 2,682 critical source/binary/path/error/symbol facts; H2
+omitted 159,643 chars and 1,770 critical facts. This justifies a narrow
+output-visibility repair. It does not justify broad renderer wording,
+prompt/tool wording, continuity behavior, WorkFrame steering, probe thresholds,
+or time pressure changes.
+H5 repair 1 changes only the `codex_hot_path` terminal result renderer:
+bounded terminal output now preserves both early stream facts and final
+`stdout_tail` / `stderr_tail` facts instead of treating tail as an exclusive
+replacement for full `stdout` / `stderr`. codex-ultra review session
+`019e2963-8a57-72b2-85db-778328eea548` approved after the head-clipped
+stdout-plus-tail case was fixed. The bounded H5 repair 1 diagnostic then
+passed Harbor external reward `1.0` and matched Codex's first mutation step:
+Codex step 25 after 24 probes, mew step 25 after 18 probes. That run exposed
+an internal closeout issue: mew reported `implement_v2_failed` after finish
+attempts because source-grounding obligations for provided artifacts/source
+trees were not satisfied from provider-native `exec_command` evidence. That
+closeout/source-grounding issue was handled before the follow-up validation
+below. Do not add more prompt/tool wording based on the older closeout failure.
+The closeout and handoff path is now validated. Commit `3bd62da` added a
+diagnostic-only `--debug-cleanup /tmp/frame*.bmp` hook for
+`make-mips-interpreter` Harbor runs. The 2026-05-15 13:41 JST bounded run at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-134113/2026-05-15__13-41-14/make-mips-interpreter__rospwBf`
+reached Harbor external reward `1.0`, `work_exit_code=0`, valid native pairing,
+resolver block count `0`, and verifier `3/3` pass. `post_run_cleanup` removed
+`/tmp/frame.bmp` and `/tmp/frame_0000.bmp`; the new step diff shows mew first
+mutation step 26 after 25 probes versus Codex step 25 after 24 probes. Treat
+the H5 closeout/debug-cleanup handoff blocker as closed for this diagnostic.
+Do not implement a broad LLM cleanup planner or artifact lifecycle from this
+single diagnostic hook.
+The same-shape speed proof then passed as well. The 2026-05-15 13:59 JST run at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-speed-proof-ts-codex-hot-path-20260515-135942/2026-05-15__13-59-43/make-mips-interpreter__YiztSTx`
+reached `1/1` reward with exceptions `0`, runtime `9m19s`, `work_exit_code=0`,
+`stop_reason=finish`, valid native pairing (`36` calls / `36` outputs), and
+resolver block count `0`. The speed-proof step diff shows mew first mutation
+step 18 after 17 probes versus Codex step 25 after 24 probes. This makes
+`make-mips-interpreter` a close-proof candidate against frozen Codex target
+`3/5`.
+The proof-5 close proof then passed the frozen Codex target. The 2026-05-15
+14:13 JST run at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260515-141331/2026-05-15__14-13-32/result.json`
+scored `4/5`, mean `0.800`, exceptions `0`, Pass@2/4/5 `1.000`, and total
+runtime `42m33s`, exceeding the target `3/5`. The single failed trial
+`make-mips-interpreter__UiFm5aR` produced a valid-running VM but accepted a
+`320x200` BMP where the external verifier required `640x400`; record this as a
+future artifact-obligation / finish-verifier gap, not an H5 hot-path blocker.
+Do not continue H5 behavior polish from that single failure before selecting
+the next measured M6.24 gap.
+The 2026-05-16 same-shape rerun at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-proof-5-ts-codex-hot-path-20260516-192445/2026-05-16__19-24-45/result.json`
+also counts as OK for M6.24 scoring: it reached `4/5`, mean `0.800`, and
+Pass@2/4/5 `1.000`. Its only failed trial was provider transport continuity
+(`websocket error status=400 code=previous_response_not_found`) before any
+edit, not task-solving or finish-gate behavior. WebSocket retry/fallback work
+is out of this scoring slice, so do not reopen H5 or transport work from that
+miss.
+The `make-doom-for-mips` task-requirement / finish-gate diagnostic validated
+`task_contract_compiler` default-on: the provider-visible task included typed
+completion criteria, expected artifacts, verifier obligations, source
+requirements, and legacy string gates were disabled. The same-shape
+`step-check-10min` at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-doom-for-mips-step-check-10min-ts-codex-hot-path-20260515-193616`
+still scored `0.0`, but the miss is now generic typed finish-block
+continuation: native finish resolver blocked six bad finish attempts while the
+model kept claiming a synthetic artifact instead of turning the typed
+obligation failure into a concrete repair. Next repair only the generic
+finish-block continuation / typed-evidence projection path; do not add
+`make-doom-for-mips`-specific regex/string gates or spend `speed-proof` /
+`proof-5` first.
+
+The Internal Finish Gate production-route gate is now green. Commit `4819886`
+keeps the legacy `run_live_json_implement_v2` surface out of scope for this
+slice while proving the production native route cannot reach
+`run_live_json_implement_v2` / `implement_v2_model_json_tool_loop`. The Phase
+5/6 gate suite passed with `323 passed`, and
+`scripts/check_implement_v2_native_gate.py --source-root .` passed. Next return
+to exactly one same-shape `make-doom-for-mips` pre-speed / step-shape
+diagnostic; if it misses, classify artifact/replay/step-diff evidence before
+any code change. Do not delete the legacy model-JSON runner, run broad
+measurement, or add task-specific Doom/MIPS rules first.
+The governing docs are:
+
+- `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`
+- `docs/M6_24_DECISION_LEDGER.md`
+- `docs/DESIGN_2026-05-15_M6_24_HOT_PATH_OBSERVABILITY.md`
+- `docs/M6_24_HOT_PATH_STEP_DIFF_OBSERVABILITY.md`
+- `docs/REVIEW_2026-05-15_CODEX_HOT_PATH_DIVERGENCE_BEYOND_TOOL_IF.md`
+- `docs/REVIEW_2026-05-15_CODEX_VS_CLAUDE_EXPLORATION_TO_PATCH.md`
+
+Fixed execution order:
+
+1. H0 observability implementation is committed in `00c1b40` and `02fa165`.
+2. H0 was measured from saved artifacts only. Result:
+   - Codex readiness step 3 -> first mutation step 25.
+   - Claude Code readiness step 3 -> no mutation, long design/re-exploration
+     control pattern.
+   - mew readiness step 2 -> no mutation after 31 probes and 6
+     duplicate-after-readiness families.
+3. H0 decision: mew has enough early evidence, but fails to compress evidence
+   into patch constraints.
+4. H10 minimal implementation committed in `5cc6af7`. Focused validation
+   passed:
+   - `uv run pytest --no-testmon tests/test_native_tool_harness.py tests/test_hot_path_fastcheck.py tests/test_hot_path_step_diff.py -q`
+     -> 191 passed.
+   - `uv run ruff check src/mew/implement_lane/native_tool_harness.py tests/test_native_tool_harness.py`
+     -> passed.
+   - codex-ultra scoped review -> no blocking findings after alias and
+     source-mutating exec fixes.
+5. H10 bounded diagnostic:
+   - artifact:
+     `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-070200/2026-05-15__07-02-01/make-mips-interpreter__WD3uvwZ`
+   - score 0, 50 tool calls, no detected source mutation;
+   - analyzer: Codex first mutation step 25 after 24 probes; mew no mutation
+     after 50 probes;
+   - provider requests confirmed `implementation_constraints` appeared from
+     turn 2 and reached `source_plus_artifact_probe` by turn 8.
+6. H10 decision: revert. Commit `f9b0059` removes the behavior change. Next:
+   choose a new measured experiment from the H0/H10 evidence, not broad polish.
+7. H6 synthetic apply_patch affordance implementation and validation:
+   - added `scripts/check_apply_patch_affordance.py` and
+     `src/mew/implement_lane/apply_patch_affordance.py`;
+   - focused validation passed:
+     `uv run pytest --no-testmon tests/test_apply_patch_affordance.py -q`
+     and `uv run ruff check src/mew/implement_lane/apply_patch_affordance.py scripts/check_apply_patch_affordance.py tests/test_apply_patch_affordance.py`;
+   - live one-turn provider-native check passed with first tool
+     `apply_patch`.
+8. H1/H7 provider-visible salience analyzer:
+   - added `scripts/analyze_provider_visible_salience.py` and
+     `src/mew/implement_lane/provider_visible_salience.py`;
+   - saved-artifact report for H10:
+     `tmp/m6_24_h10_provider_visible_salience.md`;
+   - observed JSON envelope on every first user item, visible
+     `compact_sidecar_digest` on every request, and sidecar section order
+     before task content.
+9. H1 task-first provider shape implementation:
+   - live native requests now place a plain task summary first and the JSON
+     support payload second;
+   - support payload order is task-first:
+     `task_contract`, `task_facts`, `compact_sidecar_digest`, `workspace`,
+     `lane`;
+   - H7 is intentionally unchanged: compact sidecar remains visible.
+10. H1 fresh 10 minute diagnostic:
+   - artifact:
+     `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-080318/2026-05-15__08-03-18/make-mips-interpreter__ycVG6Vy`;
+   - provider-visible salience report:
+     `tmp/m6_24_h1_provider_visible_salience.md`;
+   - step-diff report:
+     `tmp/m6_24_h1_step_diff.md`;
+   - first input shape is now `plain_text` on all 47 saved provider requests;
+   - compact sidecar remains visible on all 47 saved requests;
+   - first mutation: Codex step 25 after 24 probes, mew step 45 after 43
+     probes;
+   - decision: partial keep H1; next isolate H7 sidecar visibility.
+11. H7 sidecar visibility implementation:
+   - provider-visible task support payload now contains only `task_contract`,
+     `task_facts`, `workspace`, and `lane`;
+   - hidden request artifact still stores `compact_sidecar_digest` for replay;
+   - provider request inventory sets
+     `compact_sidecar_digest_wire_visible=false`;
+   - focused tests passed:
+     `uv run pytest --no-testmon tests/test_provider_visible_salience.py tests/test_native_tool_harness.py tests/test_native_provider_adapter.py tests/test_hot_path_fastcheck.py tests/test_native_boundary_audit.py -q`
+     -> 217 passed after reviewer fixes;
+   - touched-file ruff passed;
+   - fake-native smoke:
+     `tmp/m6_24_h7_sidecar_hidden_smoke/candidate-codex-hot-path`;
+   - fake-native salience:
+     `tmp/m6_24_h7_smoke_provider_visible_salience.md`;
+   - fake-native fastcheck passed.
+   - reviewer P1 fixes included hidden digest preservation in live provider
+     descriptors and wire-leak detection in salience/fastcheck.
+12. H7 live diagnostic:
+   - commit: `f4599d0` (`Hide native sidecar digest from provider input`);
+   - artifact:
+     `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-084030/2026-05-15__08-40-31/make-mips-interpreter__rzaTQU9`;
+   - provider-visible salience:
+     `tmp/m6_24_h7_provider_visible_salience.md`;
+   - step diff:
+     `tmp/m6_24_h7_step_diff.md`;
+   - live requests with visible compact sidecar digest: 0/77;
+   - live scaffolding term occurrences: 0;
+   - first mutation: mew step 46 after 45 probes; Codex step 25 after 24
+     probes; H1 was step 45 after 43 probes;
+   - decision: keep H7 as resident hygiene, but move to H4 because it did not
+     improve the Codex step gap.
+13. H4 command-result rendering diagnostic:
+   - implementation commit: `2861090`
+     (`Align codex hot path command rendering`);
+   - revert commit: `84b79e6`
+     (`Revert "Align codex hot path command rendering"`);
+   - artifact:
+     `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-090940/2026-05-15__09-09-41/make-mips-interpreter__ABqTyhy`;
+   - provider-visible salience:
+     `tmp/m6_24_h4_provider_visible_salience.md`;
+   - step diff:
+     `tmp/m6_24_h4_step_diff.md`;
+   - first mutation: mew step 73 after 71 probes; Codex step 25 after 24
+     probes; H7 was step 46 after 45 probes;
+   - decision: measured failed/reverted; next isolate H2 base/task
+     instructions.
+14. H2 base/task instruction diagnostic:
+   - implementation commit: `e106ec6`
+     (`Use plain codex hot path instructions`);
+   - revert commit: `e857456`
+     (`Revert "Use plain codex hot path instructions"`);
+   - artifact:
+     `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-ts-codex-hot-path-20260515-094402/2026-05-15__09-44-03/make-mips-interpreter__Zj8YFQ3`;
+   - provider-visible salience:
+     `tmp/m6_24_h2_provider_visible_salience.md`;
+   - step diff:
+     `tmp/m6_24_h2_step_diff.md`;
+   - first mutation: mew step 57 after 56 probes; Codex step 25 after 24
+     probes; H7 was step 46 after 45 probes;
+   - decision: measured failed/reverted; next run H3 continuity audit before
+     any further behavior changes.
+15. H3 provider response continuity audit:
+   - analyzer:
+     `scripts/analyze_provider_continuity.py`;
+   - H7 reports:
+     `tmp/m6_24_h3_h7_provider_continuity.json` and
+     `tmp/m6_24_h3_h7_provider_continuity.md`;
+   - H2 reports:
+     `tmp/m6_24_h3_provider_continuity.json` and
+     `tmp/m6_24_h3_provider_continuity.md`;
+   - H7 result: 76/76 post-first requests used `previous_response_id`,
+     mismatches 0, delta coverage mismatches 0, pairing errors 0;
+   - H2 result: 80/80 post-first requests used `previous_response_id`,
+     mismatches 0, delta coverage mismatches 0, pairing errors 0;
+   - decision: keep analyzer, no continuity behavior change; next H5 output
+     compaction audit.
+16. H5 output compaction audit:
+   - analyzer:
+     `scripts/analyze_output_compaction.py`;
+   - H7 reports:
+     `tmp/m6_24_h5_h7_output_compaction.json` and
+     `tmp/m6_24_h5_h7_output_compaction.md`;
+   - H2 reports:
+     `tmp/m6_24_h5_h2_output_compaction.json` and
+     `tmp/m6_24_h5_h2_output_compaction.md`;
+   - H7 result: 41 matched tool outputs with critical fact loss, omitted
+     matched-output chars 222,303, lost critical facts 2,682;
+   - H2 result: 39 matched tool outputs with critical fact loss, omitted
+     matched-output chars 159,643, lost critical facts 1,770;
+   - decision: next targeted H5 output-visibility repair; do not broaden into
+     prompt/tool wording, continuity, WorkFrame, threshold, or time-pressure
+     changes.
+17. H5 repair 1:
+   - behavior change: `codex_hot_path` terminal renderer preserves bounded
+     head+tail output for `stdout` / `stderr`, including the real-shaped case
+     where `stdout` is already head-clipped and `stdout_tail` carries final
+     verifier/source facts;
+   - focused validation:
+     `uv run pytest --no-testmon tests/test_tool_result_renderer.py tests/test_native_tool_harness.py::test_codex_hot_path_exec_command_routes_to_managed_exec tests/test_native_tool_harness.py::test_codex_hot_path_exec_command_yielded_uses_terminal_session_shape tests/test_native_tool_harness.py::test_codex_hot_path_adapter_failures_use_terminal_renderer -q`
+     passed with 14 tests;
+   - reviewer: codex-ultra session
+     `019e2963-8a57-72b2-85db-778328eea548` returned `APPROVED`;
+   - next: run the bounded M6.24 measurement path before making another
+     behavior change.
+
+Older ToolRegistry / ToolSurfaceProfile A/B evidence remains useful historical
+context, but it no longer controls the immediate next action. Do not resume
+`speed_1`, `proof_5`, broad benchmark measurement, or ad hoc tool-output
+wording while targeted H5 output visibility is being isolated.
+
+Latest boundary: fake-native A/B smoke, live profile plumbing, conservative
+paired diagnostic runner, task cwd map, and fixed live A/B report comparability
+are committed. The accepted live item is
+`proof-artifacts/tool-surface-ab-diagnostic/prove-plus-comm-step-check-10min-20260514T130411Z/`:
+both children had external reward 1.0; rebuilt Phase 4 report is
+`ab_comparable=true`; reviewer codex-ultra session
+`019e26b8-7b1a-7e60-911f-faf37759e427` returned `ACCEPT_EVIDENCE`; reviewed
+Phase 5 gate is ready when reviewer acceptance is supplied. Caveat: this counts
+as one fixed A/B evidence item, not as permission to switch the default profile
+or run broad speed/proof-5. The internal `lane_status` / accepted finish status
+remained blocked for both profiles, while the wrapper's external verifier
+reward is authoritative for the task outcome in this diagnostic. Keep treating
+that as a closeout/evidence-citation caveat, not a task-success failure.
+The Phase 5 gate must block blocked candidate finish traces unless a
+reviewer-visible `external_reward_override_reason` is supplied; caveated
+external-reward evidence must never silently become clean default-switch
+evidence.
+
+`scripts/run_tool_surface_ab_diagnostic.py` remains the intended entry point for
+the smallest fixed live A/B set. It is single-pair only: it rejects
+proof-5/multi-trial runs, requires explicit real workspace/task identity for
+comparable default-switch evidence, and blocks the gate if either child
+diagnostic fails or lacks a passing external reward. If the selected
+Terminal-Bench item does not use `/app`, its actual workdir must come from the
+task cwd map so both profiles launch from the same task workspace;
+`--command-cwd` is an override, not the normal recovery path.
+
+Latest Codex-like hot-path validation:
+
+- Phase 0 contract/static gates: committed as `eee130d`, codex-ultra approved.
+- Phase 1A transcript/input collapse and Phase 1B tool surface/mutation path:
+  committed as `76f05ab`, codex-ultra approved.
+- Focused validation before commit: `750 passed` across native/tool/implement
+  and terminal-bench replay focused suites; ruff passed.
+- Fresh Phase 2 smoke artifact:
+  `proof-artifacts/m6_24_codex_like_hot_path/phase2-native-smoke-76f05ab/`.
+- Fresh fastcheck:
+  `uv run python scripts/check_implement_v2_hot_path.py --artifact proof-artifacts/m6_24_codex_like_hot_path/phase2-native-smoke-76f05ab --no-baseline`
+  returned `status=pass`.
+- Old proof artifacts may fail the new compact-digest replay because their
+  saved provider request shape predates `76f05ab`; treat that as historical
+  drift, not a current live-path failure.
+- Same-shape Phase 3 diagnostic
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-codex-like-hotpath-step-check-10min-20260513-1023/.../make-mips-interpreter__whSmZaL/`
+  did not pass the live step-shape gate: provider pairing was valid, forbidden
+  steering fields were absent, and transcript/digest were present, but the loop
+  timed out after 54 read/probe calls with no write/edit/apply_patch or
+  verifier. Classification:
+  `missing_mutation_affordance / first_write_latency`, not provider-visible
+  steering regression.
+- Current next action: `make-mips-interpreter` `proof-5` with
+  `codex_hot_path` is accepted for M6.24 scoring. The latest `4/5` miss was
+  provider WebSocket/`previous_response_id` transport, not task-solving. Do not
+  make another H5 behavior, finish-gate, prompt/tool, or WebSocket retry change
+  from that miss; continue with the next selected M6.24 gap.
+- The analyzer command shape is:
+  `uv run python scripts/analyze_hot_path_step_diff.py --codex-reference-root <codex-trial-root> --claude-code-reference-root <claude-code-trial-root> --mew-artifact-root <mew-artifact-root> --out-json tmp/hot-path-step-diff.json --out-md tmp/hot-path-step-diff.md`.
+- Do not restore live `next_action`, `required_next`, `first_write_due`, probe
+  thresholds, WorkFrame steering, or `apply_patch` wording tweaks as a
+  shortcut. Do not run another same-shape 10 minute `codex_hot_path`
+  step-check, `speed_1`, or `proof_5` before the next single hypothesis is
+  selected and has a bounded measurement plan.
+
+Latest phase status: Phase 0-6 of
+`docs/DESIGN_2026-05-13_M6_24_COMMAND_EDIT_BOUNDARY_REDESIGN.md` is implemented.
+Phase 0-1 landed as `90b42c9` / `38c9600`: deletion/quarantine map,
+canonical route decision schema, route artifacts, native/live route wiring, and
+route status. Phase 2 landed as `653e193`: typed source mutation artifacts,
+exact diff/snapshot refs through the implement_v2 artifact dir, typed mutation
+evidence refs for successful writes, structured path-policy recovery, and
+stale source precondition rejection. codex-ultra approved Phase 2 after three
+review passes; `uv run ruff check ...`, focused
+`uv run pytest --no-testmon -q tests/test_implement_lane.py
+tests/test_dogfood.py::DogfoodTests::test_run_dogfood_work_session_scenario`,
+and full `uv run pytest --no-testmon -q` passed with `3682 passed, 1 warning,
+112 subtests passed`. Phase 3 landed as `cd0c5a8`: parser-backed conservative
+shell metadata, tri-state `simple`/`too_complex`/`unavailable`, fail-closed
+bridge eligibility, strict malformed metadata handling, and metadata-only
+route projection. codex-ultra approved Phase 3 after three fix rounds; `uv run
+ruff check ...`, focused command-classification tests, `uv run pytest
+--no-testmon -q tests/test_implement_lane.py`, and full `uv run pytest
+--no-testmon -q` passed with `3696 passed, 1 warning, 112 subtests passed`.
+Phase 4 landed next: execute-route process observer snapshots/diffs, yielded
+lifecycle metadata, `process_source_observation` observer records instead of
+typed `source_tree_mutation` evidence, `run_command`/`run_tests` edit-shaped
+arg rejection, explicit finish-gate blocking for unaccounted process source
+observations, WorkFrame projection of observed paths, and tool-lab/native audit
+projection updates. codex-ultra approved Phase 4 in reviewer session
+`019e1f65-25f6-77f3-a3f0-c14fd7e79bed`; full `uv run pytest --no-testmon -q`
+passed with `3704 passed, 1 warning, 112 subtests passed`. Phase 5 is
+implemented locally: a one-entry `shell_invoked_apply_patch` bridge registry,
+exact quoted-heredoc/structured apply_patch bridge success through typed
+mutation runtime, original `run_command` pairing preservation, typed evidence
+refs/source diff refs on success, and fail-closed invalid-tool results for
+invalid patch, ambiguous multi-file patch, complex/nested/env/path-qualified
+apply_patch command segments, parser unavailable, policy rejection, and heredoc
+body false positives. codex-ultra reviewer session
+`019e1fba-53d6-70b0-a598-5c8e21b1ffbc` approved after adversarial bridge
+candidate fixes; `uv run pytest --no-testmon -q tests/test_implement_lane.py`
+passed with `521 passed`, and full `uv run pytest --no-testmon -q` passed with
+`3721 passed, 1 warning, 112 subtests passed`. Phase 6 is implemented locally:
+live `exec_runtime.py` no longer calls the Phase 0 shell mutation classifier
+gates for `run_tests` source mutation, `run_command` verifier+mutation
+compounds, same-path shell patches, shell-created source files, or broad
+source-exploration shell surfaces. Live `v2_runtime.py` no longer treats
+`run_command`/`run_tests` shell text as a prewrite source-mutation attempt and
+no longer converts historical shell-patch classifier failures into live
+write-repair locks. Shell-originated source changes now route as
+`process_runner` and are represented through Phase 4
+`process_source_observation` snapshot/diff side effects. Focused validation:
+`uv run ruff check src/mew/implement_lane/exec_runtime.py
+src/mew/implement_lane/v2_runtime.py tests/test_implement_lane.py
+tests/test_native_tool_harness.py tests/test_tool_harness_contract.py` passed;
+`uv run pytest --no-testmon -q tests/test_implement_lane.py
+tests/test_native_tool_harness.py tests/test_tool_harness_contract.py` passed
+with `606 passed`; `uv run pytest --no-testmon -q tests/test_implement_lane.py`
+passed with `526 passed`; and full `uv run pytest --no-testmon -q` passed with
+`3722 passed, 1 warning, 112 subtests passed`. codex-ultra reviewer session
+`019e1fe5-1926-7ea2-8534-8d5a33ba5cf2` approved with no findings.
+
+Current implementation rule:
+
+- Phase 0-1: `done` in `90b42c9`; interface is frozen:
+  old classifier deletion map, canonical `tool_route`, `process_lifecycle`,
+  route decision artifact, and narrow `invalid_tool_contract`.
+- Phase 2: `done` in `653e193`; typed mutation route diffs/evidence and
+  write/edit/apply_patch recovery payloads are closed.
+- Phase 3: `done` in `cd0c5a8`; parser-backed shell metadata is metadata-only
+  and fails closed for bridge and shortcut consumers.
+- Phase 4: `done`; process-runner observer snapshots/diffs and yielded
+  lifecycle metadata are implemented and reviewed.
+- Phase 5: `done` in `7d1a181`; the legacy shell-edit bridge registry has only
+  `shell_invoked_apply_patch` and fail-closes non-exact apply_patch shell
+  command segments without executing the shell edit.
+- Phase 6: `implemented/reviewed/validated`; live production routes no longer
+  call old shell mutation classifier entry points, and full-suite validation
+  passed.
+- Phase 7: deferred. Serial validation before speed remains valid only after
+  the Codex-like native hot-path contract gate is green.
+
+Superseded next action: the old
+`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md` Phase 0 action is
+historical. Current work must follow the H0 observability-first order above.
+Do not resume regex/shlex command-classifier polish, hard-runtime threshold
+polish, 10 minute step-shape, `speed_1`, `proof_5`, or broad measurement
+before H0 readiness/compression has been measured from saved artifacts.
+
+Phase 1 of
+`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md` is
+green. Native v2 keeps `NativeTranscript` / provider-native paired tool outputs
+as the source of truth, exposes only `native_transcript_window` plus bounded
+`compact_sidecar_digest` as dynamic provider input, and keeps full
+`persisted_lane_state`, ordinary repair `required_next`, and prescriptive
+`native_loop_control` policy text out of the default provider-visible path.
+The prewrite probe plateau repair was committed as `40264ff`; focused native
+validation and codex-ultra review were green. The follow-up bounded diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-122713` moved the failure
+class: paired native transcript evidence is valid (`59` calls / `59` outputs),
+the model wrote source at `194s`, ran `8` internal verifiers, and finished, but
+the external Terminal-Bench verifier failed because `/tmp/frame.bmp` was never
+created. The internal verifier had accepted nearby frame artifacts
+(`frames/frame000000.rgba` and `frame.ppm`) instead of the actual external
+acceptance surface. The first attempted repair (`a958586`) exposed `/tests` as
+a read root and guidance, but the follow-up diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-125506` falsified that
+hypothesis: `/tests` does not exist in the agent environment. Native finish
+gating was committed as `0c57d1a`, removing the false `/tests` guidance and
+routing provider-native `finish` calls through deterministic acceptance using
+task-extracted constraints. The follow-up diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-134343` proved the gate
+works: pairing stayed valid (`66` calls / `66` outputs), the premature finish
+was blocked, and the model continued with another verifier. The remaining gap
+was generic projection, not task-specific solver logic: the gate knew the exact
+external artifact obligation `/tmp/frame.bmp`, but the continuation turn
+verified nearby model-selected artifacts (`first_frame.bmp`,
+`frame_000000.bmp`) instead. Commit `90e5dd1` preserved exact typed and legacy
+finish-gate obligations, including artifact paths, in continuation prompts and
+recovery cards. The follow-up diagnostic
+`mew-make-mips-interpreter-step-check-10min-20260512-141746` proved that
+projection repair worked: the model's final verifier targeted `/tmp/frame.bmp`
+directly. The new generic gap is active managed-command lifecycle: that
+verifier yielded, then native final-verifier closeout tried to start another
+`run_command` while the yielded verifier was still active and failed with
+`a managed command is already running`. Current repair is to finalize or cancel
+any active verifier command before deterministic final-verifier closeout. Do
+not run `speed_1`, `proof_5`, or broad measurement until this lifecycle repair
+is committed and followed by one bounded same-shape native step-shape
+diagnostic.
+
+Scope:
+
+- M6.23.2 is closed. The full sequence passed:
+  Phase 1 lane isolation substrate, Phase 2 native tool-loop v0, Phase 3
+  read/search spike, Phase 4 managed exec, Phase 5 write/edit/apply_patch, and
+  Phase 6 M6.24 reentry A/B gate.
+- Phase 1 and Phase 2 are implemented. Phase 3 read/search v2 spike is
+  implemented, reviewed, and proved in
+  `docs/M6_23_2_PHASE3_READ_ONLY_PROOF_2026-05-05.md`.
+- Phase 4 managed exec v2 spike is implemented, reviewed, and proved in
+  `docs/M6_23_2_PHASE4_MANAGED_EXEC_PROOF_2026-05-05.md`.
+- Phase 5 write/edit/apply_patch v2 spike is implemented, reviewed, and proved
+  in `docs/M6_23_2_PHASE5_WRITE_APPROVAL_PROOF_2026-05-05.md`.
+- Phase 6 M6.24 reentry A/B gate is implemented, reviewed, and proved in
+  `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`.
+- `implement_v1` remains the compatibility/default lane, but it was not the
+  selected lane for the latest `build-cython-ext` same-shape speed/debug
+  attempt.
+- `implement_v2` is being rebuilt as a provider-native transcript runtime. The
+  old live `model_json` runtime is now explicit quarantine for legacy tests,
+  replay compatibility, and dogfood emulators only; it is not the selected
+  production v2 main path.
+- Provider-specific live native tool-call execution is wired. Tiny live
+  native-loop diagnostic
+  `proof-artifacts/m6_24_native_loop_gate_20260511_live_portable/` completed
+  through provider-native `inspect_dir -> write_file -> run_tests -> finish`,
+  emitted authoritative native artifacts, and passed
+  `scripts/check_implement_v2_native_gate.py`.
+- M6.24 live proof work may resume with one bounded native step-shape
+  diagnostic. The active proof lane is still `implement_v2`, and Phase 1
+  boundary validation is green: focused native projection/harness tests,
+  hot-path fastcheck, scoped ruff, `git diff --check`, and
+  `scripts/check_native_tool_loop_boundary.py` passed; codex-ultra review
+  session `019e198a-88e3-7962-886d-072a9b05d997` returned `STATUS: APPROVE`.
+  Historical `implement_v1`, model-JSON `implement_v2`, pre-native WorkFrame
+  results, and the tiny native-loop gate remain repair evidence but cannot
+  replace the next bounded native diagnostic.
+- The prior scoped rebaseline controller
+  (`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`) remains suspended until
+  the next bounded same-shape native diagnostic is examined.
+- The first true-v2 `build-cython-ext` speed attempt
+  `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215` is excluded from
+  product evidence: Docker failed before `mew` launched because the harness
+  used missing cwd `/workspace`. The task was rerun with `/app`.
+- The first task-correct `/app` true-v2 `build-cython-ext` run
+  `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-10min-appcwd` completed
+  in `4m43s` with runner errors `0`, but scored `0.0`. It is valid divergence
+  evidence, not a pass: v2 spent turns on tool-surface mismatches (`cmd`,
+  `argv`, compound shell strings, and edit aliases), then fixed Python files
+  but missed the sibling Cython `*.pyx`/`*.pxd` NumPy-alias frontier. Live
+  speed spending was stopped until that generic v2 I/F/frontier gap was
+  repaired and covered by focused UT plus replay/dogfood/emulator checks.
+- Current repair status: v2 tool-surface mismatch is repaired, true-v2
+  artifacts replay through `implement_v2/history.json` and
+  `proof-manifest.json`, and generic compiled/native Python compatibility
+  frontier guidance is present. The follow-up `/app` true-v2 run
+  `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0245-appcwd` moved the
+  gap: v2 applied the broad Python/Cython NumPy alias repair, then killed the
+  final rebuild/install/smoke command when `max_turns` closed the attempt.
+  The generic active-command closeout repair now drains a running managed
+  command within remaining wall budget on normal close and records terminal
+  evidence instead of immediately cancelling it. The current-head pre-speed
+  gate was run before the post-repair live proof; old v1 replay-only gates are
+  not enough for v2.
+- Post-closeout proof status: the current-head `/app` true-v2 run
+  `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout` passed
+  with reward `1.0`, runner errors `0`, runtime `4m52s`, `work_exit_code=0`,
+  `stop_reason=finish`, `selected_lane=implement_v2`, and external verifier
+  `11/11` passing. Exact replay and dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not as the whole M6.24 close
+  proof. Do not rerun the same speed_1 shape blindly.
+- `circuit-fibsqrt` true-v2 scoped rebaseline evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-circuit-fibsqrt-speed1-20260506-0335/mew-m6-24-v2-rebaseline-circuit-fibsqrt-speed1-20260506-0335/result.json`
+  scored `1.0` with runner errors `0`, runtime `5m59s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `3/3` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- `cobol-modernization` true-v2 scoped rebaseline evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-cobol-modernization-speed1-20260506-0348/mew-m6-24-v2-rebaseline-cobol-modernization-speed1-20260506-0348/result.json`
+  scored `1.0` with runner errors `0`, runtime `3m06s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `3/3` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- `distribution-search` true-v2 scoped rebaseline evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-distribution-search-speed1-20260506-0350/mew-m6-24-v2-rebaseline-distribution-search-speed1-20260506-0350/result.json`
+  scored `1.0` with runner errors `0`, runtime `6m52s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `4/4` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- `feal-differential-cryptanalysis` true-v2 scoped rebaseline evidence:
+  the first v2 attempt
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0359`
+  missed because `model_json_parse_error` was not replayable. The generic
+  repair now makes JSON extraction tolerate a valid leading object with
+  trailing text and records no-tool-call v2 model errors as replayable lane
+  failures. The same-shape rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0413-json-repair/mew-m6-24-v2-rebaseline-feal-differential-cryptanalysis-speed1-20260506-0413-json-repair/result.json`
+  scored `1.0` with runner errors `0`, runtime `5m48s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `1/1` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- `feal-linear-cryptanalysis` true-v2 scoped rebaseline evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-feal-linear-cryptanalysis-speed1-20260506-0426/mew-m6-24-v2-rebaseline-feal-linear-cryptanalysis-speed1-20260506-0426/result.json`
+  scored `1.0` with runner errors `0`, runtime `4m19s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `1/1` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- `fix-git` true-v2 scoped rebaseline evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-fix-git-speed1-20260506-0435/mew-m6-24-v2-rebaseline-fix-git-speed1-20260506-0435/result.json`
+  scored `1.0` with runner errors `0`, runtime `1m57s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `2/2` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- `hf-model-inference` true-v2 scoped rebaseline evidence:
+  the first two attempts were harness/infra-invalid before mew product scoring
+  because Docker image extraction failed with `no space left on device`. After
+  host Docker capacity was freed, the same-shape rerun
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030/mew-m6-24-v2-rebaseline-hf-model-inference-speed1-20260506-1030/result.json`
+  scored `1.0` with runner errors `0`, runtime `5m25s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `4/4` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- `kv-store-grpc` true-v2 scoped rebaseline evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050/mew-m6-24-v2-rebaseline-kv-store-grpc-speed1-20260506-1050/result.json`
+  scored `1.0` with runner errors `0`, runtime `2m27s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `7/7` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- `largest-eigenval` true-v2 scoped rebaseline evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053/mew-m6-24-v2-rebaseline-largest-eigenval-speed1-20260506-1053/result.json`
+  scored `1.0` with runner errors `0`, runtime `7m11s`, `work_exit_code=0`,
+  `stop_reason=finish`, `lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `provider=model_json`,
+  `replay_valid=true`, and external verifier `27/27` passing. Exact replay and
+  matching terminal-bench replay dogfood on the passing artifact also pass.
+  This counts as v2 rebaseline `speed_1` evidence, not close proof.
+- True-v2 canary evidence:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204/result.json`
+  scored `1.0` with runner errors `0`; the mew report recorded
+  `selected_lane=implement_v2`, `runtime_id=implement_v2_model_json_tool_loop`,
+  `lane_status=completed`, `work_exit_code=0`, replay-valid proof artifacts,
+  and no v1 planner call path.
+
+Controller docs:
+
+- `docs/DESIGN_2026-05-05_M6_23_2_LANE_ISOLATION_SUBSTRATE.md`
+- `docs/DESIGN_2026-05-05_M6_23_2_IMPLEMENT_V2_NATIVE_TOOL_LOOP.md`
+- `docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`
+- `docs/M6_23_2_PHASE3_READ_ONLY_PROOF_2026-05-05.md`
+- `docs/M6_23_2_PHASE4_MANAGED_EXEC_PROOF_2026-05-05.md`
+- `docs/M6_23_2_PHASE5_WRITE_APPROVAL_PROOF_2026-05-05.md`
+- `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`
+- `docs/DESIGN_2026-04-26_RESIDENT_LANE_ARCHITECTURE.md`
+
+Historical M6.24 reentry decision:
+
+```text
+selected_lane=implement_v2 / codex_hot_path was the active M6.24 execution
+shape. H5 terminal head+tail visibility, closeout/debug-cleanup handoff, and
+same-shape make-mips speed proof are green. The make-mips proof-5 close proof
+also passed `4/5` against frozen Codex target `3/5`. The next action is select
+the next measured M6.24 gap from the scoped task table.
+```
+
+Latest update: selected `build-cython-ext`, `circuit-fibsqrt`,
+`cobol-modernization`, `distribution-search`,
+`feal-differential-cryptanalysis`, `feal-linear-cryptanalysis`, `fix-git`,
+`hf-model-inference`, `kv-store-grpc`, and `largest-eigenval` v2 speed_1 runs
+passed with exact replay and terminal-bench replay dogfood. This is historical
+pre-WorkFrame measurement evidence. The current decision is no longer
+"build-cython proof_5 now" or "continue the implement_v2 scoped rebaseline";
+the H5 make-mips proof-5 close proof recorded in
+`docs/M6_24_DECISION_LEDGER.md` is now closed. This is historical context;
+current active focus is M6.25 after the M6.24 staged close report.
+
+## Historical M6.24 Context
+
+- M6.24 focuses only on the 25 Terminal-Bench 2.0 tasks returned by the
+  `software-engineering,coding` filters.
+- The authoritative scoped task list is
+  `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
+- The scoped rebaseline is
+  `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`.
+- The active hot-path hypothesis ledger is
+  `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`.
+- Fresh Codex/Claude Code reference traces for the active make-mips gap are
+  listed in `docs/M6_24_HOT_PATH_HYPOTHESIS_LEDGER.md`.
+- The current same-shape speed-proof artifact is
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-speed-proof-ts-codex-hot-path-20260515-135942/2026-05-15__13-59-43/make-mips-interpreter__YiztSTx`.
+- Previous all-registry and `compile-compcert` records are historical repair
+  evidence. They are not the active M6.24 close gate unless a later milestone
+  explicitly promotes a BuildOrchestrationLane benchmark.
+
+Controller docs:
+
+- `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
+- `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`
+- `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`
+- `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`
+- `docs/M6_24_REFERENCE_TRACE_BUILD_CYTHON_EXT_2026-05-05.md`
+- `docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md`
+- `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`
+- `docs/M6_24_DECISION_LEDGER.md`
+- `docs/M6_24_GAP_IMPROVEMENT_LOOP.md`
+- `docs/M6_24_GAP_BASELINE_2026-04-29.md`
+- `proof-artifacts/m6_24_gap_ledger.jsonl`
+
+Historical native-boundary-gated next action:
+
+```text
+M6.24 -> native responsibility-boundary Phase 4 green -> implement Phase 5 replay/fastcheck -> review/commit -> then decide whether one bounded native diagnostic is allowed before speed_1/proof_5
+```
+
+Older scoped-rebaseline, WorkFrame, diagnostic-runner, and native-loop rows
+remain historical evidence. They do not supersede the current H5
+`make-mips-interpreter` proof-5 close-proof decision.
+
+The 2026-05-07 same-shape `make-doom-for-mips` rerun after the finish-gate
+prior-failure repair is replayable and classified, but codex-ultra marked it
+`RECORD_AND_DEFER`: task strategy plus wall-budget limited runtime-artifact
+frontier, not a local loop-boundary bug. Do not spend another same-shape
+make-doom speed run without a generic frontier-throttling or strategy design.
+
+Historical pre-WorkFrame `make-mips-interpreter` note: the first v2 speed run
+exposed generic tool-contract friction and that repair was committed. The
+same-shape rerun at `20260507-1341-tool-contract-repair` moved past that bug
+but exposed a second generic expected-artifact contract normalization gap:
+stdout/stderr artifacts declared as `target: "stdout"` or `stream: "stdout"`
+were treated as path artifacts with no path, and model-facing check aliases
+were projected as default `exists` checks. That evidence helped motivate the
+WorkFrame proof gate; it is not an active instruction to resume the old repair
+or spend scoped measurement before the WorkFrame gate.
+
+The active repair target does not stay on `build-cython-ext`: its passing v2
+artifact `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout`
+still replays and dogfoods green on current head with `mew_exit_code=0` and
+external reward `1.0`. Do not rerun the same speed_1 shape blindly; any future
+`build-cython-ext` proof spend must be an explicit close-proof decision.
+
+Do not spend new M6.24 live proof budget on out-of-scope tasks. If the next
+action says to run a new `compile-compcert` speed proof, treat that as drift and
+re-read the scope doc plus decision ledger first.
+
+## M6.24 Close Gate
+
+Status as of 2026-05-20: **staged-closed** via
+`docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`. The staged close intentionally
+does not claim full 5-trial parity across all 25 tasks. It closes the M6.24
+measurement loop because `25/25` scoped tasks have evidence, `22/25` clean
+`speed_1` rows passed, `make-mips-interpreter` proof_5 exceeded its frozen
+Codex target, the two below-target rows are classified/deferred, and no active
+structural blocker remains open. Do not run new M6.24 proof_5 work unless M6.25
+explicitly reopens a named regression check.
+
+Done when:
+
+- the `implement_v2` native transcript rebuild has a green native-loop gate:
+  selected production v2 uses `implement_v2_native_transcript_loop`, provider
+  native tool calls and paired outputs are authoritative transcript artifacts,
+  legacy model-JSON v2 is limited to explicit quarantine tests/replay/emulators,
+  and proof metrics reject `model_json_main_path_detected=true`;
+- the `implement_v2` HOT_PATH_COLLAPSE design has explicit Phase 0-6 evidence:
+  before any same-shape 10 minute diagnostic, the HOT_PATH fastcheck passes.
+  Legacy WorkFrame artifacts must pass focused UT, saved-artifact replay,
+  prompt leak checks, sidecar/projection checks, latest-actionable-failure
+  shape checks, and a required hash-bound micro next-action check. Native
+  transcript artifacts must pass transcript/response-items/manifest consistency,
+  native trace summary, and native loop-control replay without requiring
+  legacy `history.json`;
+- all 25 scoped `software-engineering,coding` tasks have mew results with
+  `implement_v2` results, complete artifacts, and no unexplained Harbor runner
+  errors;
+- mew aggregate successes on the scoped 25-task cohort match or exceed the
+  frozen Codex target for the same tasks and trial counts, or an explicit staged
+  close gate is written after the scoped aggregate gap drops below the agreed
+  near-parity threshold;
+- every scoped task where mew is below Codex has a recorded classification and
+  either a selected repair route or a written decision to defer it;
+- every improvement-phase process change records current pain, expected benefit,
+  one-run trial boundary, rollback condition, and adopted/rejected decision;
+- no accepted structural blocker remains unaddressed while scoped measurement
+  continues.
+
+### M6.24 Native Boundary Status
+
+Status as of 2026-05-13: **superseded by Codex-like native hot path**. The native transcript rebuild design
+`docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md` gave
+mew a provider-native runtime. The responsibility-boundary design
+`docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`
+has been superseded by
+`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_NATIVE_HOT_PATH.md`, which keeps the
+Codex-like live path minimal while preserving mew sidecar proof/debug
+artifacts.
+
+Phase 0 boundary inventory/static audit is complete and committed as
+`3059cca`. It audits the current semantic-ish controls across
+`native_tool_harness.py`, `native_sidecar_projection.py`,
+`native_workframe_projection.py`, `exec_runtime.py`, and
+`execution_evidence.py`.
+
+The newer Codex-like hot-path work keeps the same safety boundary but removes
+provider-visible WorkFrame/required-next steering from the live path. See the
+active reentry decision above for current validation state.
+
+Native-loop gate evidence:
+
+- artifact root:
+  `proof-artifacts/m6_24_native_loop_gate_20260511_live_portable/`
+- work exit: `0`, stop reason: `finish`
+- runtime: `implement_v2_native_transcript_loop`
+- transport: `provider_native`, provider: `openai`, model: `gpt-5.5`
+- step shape: `inspect_dir -> write_file -> run_tests -> finish`
+- pairing: valid, `call_count=4`, `output_count=4`, `errors=[]`
+- first write: turn 2, about 26.3s
+- first verifier: turn 3, about 36.1s
+- native gate:
+  `uv run python scripts/check_implement_v2_native_gate.py --artifact proof-artifacts/m6_24_native_loop_gate_20260511_live_portable --json`
+  returned `ok=true`
+
+Remaining active gap: do not classify the latest bounded 10min native
+step-shape diagnostic as a solver failure. Provider request inventory now
+survives, but partial native transcript artifacts are still lost when a later
+provider turn times out. The repair is reviewed and ready to commit; after that,
+rerun and analyze one bounded native step-shape diagnostic.
+
+### M6.24 CODEX_LIKE_AFFORDANCE_COLLAPSE Status
+
+Status as of 2026-05-14: **Phase 4 active; Phase 5 pending**. The governing
+design is
+`docs/DESIGN_2026-05-13_M6_24_CODEX_LIKE_AFFORDANCE_COLLAPSE.md`.
+
+Current phase state:
+
+- Phase 0 static leak gates and caps: `done` via `879a581`.
+- Phase 1 prompt collapse: `done` via `6cd3a36`; provider-visible prompt is a
+  short coding contract plus task facts and compact factual context.
+- Phase 2 tool salience collapse: `done` via `ca6ca9b`; mutation/execution
+  tools are ordered and described ahead of read/search/probe tools.
+- Phase 3 apply_patch/edit primary mutation affordance: `done` via `672c82e`;
+  normal provider-native `apply_patch` uses custom/freeform transport with an
+  auditable JSON fallback.
+- Phase 4 compact editable tool outputs: `active`; output cards, command
+  output caps, task facts, lifecycle tool visibility, routed verifier evidence,
+  finish closeout evidence, and raw provider-visible tool-result redaction have
+  landed. Current fastcheck status: provider-visible leak gates pass, but
+  `native_trace_summary` remains yellow/fail on diagnostics without internal
+  verifier calls.
+- Phase 5 fastcheck plus 10 minute step-shape validation: `active/yellow`; do
+  not run broad `speed_1` or proof batches until one more targeted closeout or
+  verification-latency decision is made.
+
+Latest diagnostic context: after `ffb2db4`, the 2026-05-14
+`make-mips-interpreter` `step-check-10min` run at
+`proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-20260514-after-redaction`
+got external reward `1.0` with `previous_response_id`, task facts, and
+provider-visible forbidden-field inventory preserved. The failure shape moved
+from `0` writes to `1` source mutation: `apply_patch` created `vm.js` on turn
+10, but first edit latency was still high at `573.5s` versus the Codex
+reference `367.8s`, and internal verifier/finish did not run before the
+diagnostic boundary. Treat the next work as Codex-like latency/closeout polish,
+not as task-specific facts, WorkFrame, threshold, or hidden next-action
+steering.
+
+### M6.24 HOT_PATH_COLLAPSE Phase Status
+
+Status as of 2026-05-10: **implementation complete, proof gate pending**. The
+WorkFrame Phase 0-6 code path has been implemented, reviewed phase-by-phase,
+and committed through `3787e83`. HOT_PATH_COLLAPSE is still not closeable until
+the WorkFrame-native fastcheck/dogfood/emulator gate and one same-shape
+`step-check-10min` are recorded. Treat any reentry that jumps to `speed_1`,
+`proof_5`, or broad measurement before that gate as drift.
+
+Redesign note: after many same-shape polish commits across frontier/todo/
+evidence/contract/finish/closeout boundaries, a reviewed no-backward-
+compatibility WorkFrame redesign now exists at
+`docs/DESIGN_2026-05-10_M6_24_IMPLEMENT_V2_WORKFRAME_REDESIGN.md`, with
+paper-grounded support in
+`docs/REVIEW_2026-05-10_M6_24_WORKFRAME_LITERATURE_REVIEW.md`. The review loop
+resolved round-1 findings and round 2 returned no remaining `needs_fix`
+findings. Phases 0-6 were then implemented in small reviewed commits:
+`42a8012`, `6548669`, `57e7aff`, `c3ccfa9`, `3d28412`, `1fff2ab`, and
+`3787e83`. This supersedes older same-shape `step-check-10min` / `speed_1` /
+`proof_5` rows that predate the WorkFrame boundary.
+
+| Phase | Status | Current evidence / remaining gap |
+|---|---|---|
+| Phase 0 baseline/metrics | implemented/reviewed | `42a8012` introduced the WorkFrame schema, canonical reducer, invariant report, baseline fields, and fixture tests. |
+| Phase 1 prompt collapse | implemented/reviewed | `6548669` cut the ordinary prompt over to a single dynamic `implement_v2_workframe` section and removed normal prompt dependence on model-authored frontier state. |
+| Phase 2 latest actionable failure | implemented/reviewed | `57e7aff` routes latest failures through reducer-owned generic categories and `required_next`/`forbidden_next` rather than parallel frontier/todo prompt cards. |
+| Phase 3 sidecar-inferred execution contracts | implemented/reviewed | `c3ccfa9` keeps execution contracts, typed evidence, and oracle details sidecar-only while WorkFrame carries compact refs and obligations. |
+| Phase 4 patch/edit as mutation boundary | implemented/reviewed | `3d28412` makes source mutation and verifier freshness reducer-owned WorkFrame facts. |
+| Phase 5 finish cited evidence | implemented/reviewed | `1fff2ab` routes finish readiness and final verifier closeout deterministically through WorkFrame/sidecars instead of finish-continuation proof dumps. |
+| Phase 6 replay/dogfood/emulator/step-shape gate | implemented/reviewed; proof gate superseded | `3787e83` extends HOT_PATH fastcheck with WorkFrame replay, invariant, ref-policy, reentry, prompt-leak, hard-reject, and hash-bound micro checks. Focused validation passed (`454 passed`), scoped ruff passed, `git diff --check` passed, and codex-ultra reviewer session `019e0f86-d16a-7da3-ac92-2a39cb825ca6` returned `STATUS: APPROVE`. The WorkFrame proof-gate next action is superseded by the 2026-05-12 native responsibility-boundary Phase 1 gate. |
+
+Historical WorkFrame action: close the WorkFrame proof gate by repairing
+`transition_contract` hot-path patch-anchor/runtime-artifact-obligation handling
+and rerunning focused checks plus one same-shape diagnostic. This is not the
+current next action while
+`h5_closeout_cleanup_validated_next_gap_selection` is the newest M6.24 row. Do
+not resume this WorkFrame action until the H5 next-gap decision explicitly
+selects it again.
+
+WorkFrame variant benchmark note (2026-05-10): after Codex, Claude Code, and
+2025-2026 literature reviews of `tool result -> evidence/state -> next action`,
+the historical WorkFrame proof-gate strategy was to measure WorkFrame reducer
+variants before another long polish sequence. That strategy is superseded while
+`h5_closeout_cleanup_validated_next_gap_selection` is the newest M6.24 row. The retained lesson is architectural:
+if WorkFrame variants are revisited later, keep variant implementations isolated
+from tool runtime/provider loop/verifier changes and compare them with the same
+fastcheck, same diagnostic, and same analyzer.
+
+WorkFrame variant comparison result (2026-05-11): the same-shape
+`make-mips-interpreter` comparison is recorded in
+`docs/M6_24_WORKFRAME_VARIANT_COMPARISON_2026-05-11.md`. The initial comparison
+summary missed Terminal-Bench v2 rewards; commit `3a9c940` fixed reward and
+work-exit classification. Corrected result: all variants remain task-red
+(`reward=0.0`, `work_exit_code=1`), but `transition_contract` is the best
+default candidate and remains selected. `minimal` stays a comparator.
+`transcript_tool_nav` must not be promoted because it exceeded the WorkFrame
+size cap, never edited or verified, and used the largest prompt budget. Next
+repair is generic `transition_contract` hot-path work: turn patch-anchor
+mismatch into direct re-anchor or bounded rewrite action, preserve exact runtime
+artifact obligations from the latest verifier result while keeping internal
+WorkFrame artifact paths distinct from the external Terminal-Bench target, then
+run focused UT/fastcheck/micro checks followed by exactly one same-shape
+`transition_contract` 10 minute diagnostic and reference-step comparison.
+
+## Historical Evidence
+
+The long `compile-compcert` repair sequence, Long-Build Substrate work, Long
+Command Continuation work, and generic managed-exec decision remain valuable
+build-orchestration evidence. They are archived and linked from the controller
+docs, but they should not pull M6.24 back into an out-of-scope proof loop.
+
+Useful historical files:
+
+- `docs/DESIGN_2026-05-01_M6_24_LONG_BUILD_SUBSTRATE.md`
+- `docs/DESIGN_2026-05-02_M6_24_LONG_COMMAND_CONTINUATION.md`
+- `docs/M6_24_GENERIC_MANAGED_EXEC_DECISION_2026-05-03.md`
+- `docs/REVIEW_2026-05-03_CODEX_LONG_BUILD_BUDGET_PLANNING.md`
+- `docs/REVIEW_2026-05-03_CLAUDE_CODE_LONG_BUILD_BUDGET_PLANNING.md`
+- `docs/REVIEW_2026-05-03_FORGECODE_LONG_BUILD_BUDGET_PLANNING.md`
+
+## Historical Roadmap Focus
+
+This section is retained as historical M6.24 context. It is no longer the active
+reentry guard after the 2026-05-20 staged close. The active next action is M6.25
+resident-advantage planning and first evidence, not more M6.24 proof spending.
+
+Historical order before the Phase 6 pivot:
+
+1. The active M6.24 focus was native responsibility-boundary Phase 5 from
+   `docs/DESIGN_2026-05-12_M6_24_NATIVE_TOOL_LOOP_RESPONSIBILITY_BOUNDARY.md`.
+2. `docs/M6_24_DECISION_LEDGER.md` and the native boundary section above were
+   the reentry guard. They superseded older HOT_PATH polish, WorkFrame,
+   diagnostic-runner, or scoped-rebaseline rows that pointed directly to
+   `step-check-10min`, `speed_1`, `proof_5`, or broad measurement.
+3. The historical next order was: keep the native boundary intact, implement
+   replay / fastcheck for transcript, compact digest, resolver decision, and
+   closeout artifact invariants, run focused tests plus the native boundary audit
+   when touched, then decide whether one bounded diagnostic is allowed.
+4. If the gate was red, repair the native boundary/projection failure first. Do
+   not add another model-visible frontier/todo/evidence projection as a shortcut.
+5. M6.25 stayed pending until M6.24 reached the scoped close gate. That condition
+   is now satisfied by `docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`.

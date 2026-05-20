@@ -61,7 +61,9 @@ unless a later milestone explicitly moves that boundary.
 
 ## Current Position
 
-M1-M5 are closed as of 2026-04-20.
+M1-M6.24 are closed as of 2026-05-20. M6.24 is a staged close, not a
+full-proof sweep: it preserves the measured Terminal-Bench baseline and moves
+the active roadmap to M6.25.
 
 mew already has the beginning of a resident task/coding shell:
 
@@ -78,13 +80,14 @@ mew already has the beginning of a resident task/coding shell:
 - recovery surfaces
 - self-improvement loops with audit evidence
 
-The remaining gap is no longer "hands". The next gap is **body**.
+The remaining gap is no longer "hands" or Codex-like terminal operation. The
+next gap is **resident advantage**.
 
-Today, mew is still mostly summoned. A resident that only exists when invoked
-is a capable work room, not a place a model truly lives. The next roadmap arc
-therefore moves from task/coding inhabitability toward persistent presence,
-inbound senses, cross-project identity, human legibility, multi-agent
-residence, and inner continuity.
+Today, mew can perform task/coding work through `implement_v2`, but it still
+needs to prove that resident state, repair memory, reentry, and cache transport
+make it preferable to inhabit over Codex CLI. The next roadmap arc is M6.25:
+Codex-plus resident advantage, then inbound senses, cross-project identity,
+human legibility, multi-agent residence, and inner continuity.
 
 ## Milestone 1: Native Hands
 
