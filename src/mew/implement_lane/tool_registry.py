@@ -27,7 +27,7 @@ from .tool_profiles.mew_legacy import (
 )
 from .tool_specs import ImplementLaneToolSpec
 
-DEFAULT_TOOL_SURFACE_PROFILE_ID = MEW_LEGACY_PROFILE_ID
+DEFAULT_TOOL_SURFACE_PROFILE_ID = CODEX_HOT_PATH_PROFILE_ID
 TOOL_REGISTRY_SCHEMA_VERSION = 1
 
 PROCESS_LIFECYCLE_TOOL_NAMES = frozenset(
@@ -111,6 +111,8 @@ class ToolSurfaceSnapshot:
 
     schema_version: int
     profile: ToolSurfaceProfile
+    profile_default: bool
+    profile_selection_source: str
     profile_options: Mapping[str, object]
     mode: str
     provider_tool_names: tuple[str, ...]
@@ -145,6 +147,8 @@ class ToolSurfaceSnapshot:
         return {
             "schema_version": self.schema_version,
             "profile_id": self.profile_id,
+            "profile_default": self.profile_default,
+            "profile_selection_source": self.profile_selection_source,
             "profile_version": self.profile_version,
             "profile_hash": self.profile_hash,
             "descriptor_hash": self.descriptor_hash,
@@ -174,6 +178,8 @@ class ToolSurfaceSnapshot:
         return {
             "schema_version": self.schema_version,
             "profile_id": self.profile_id,
+            "profile_default": self.profile_default,
+            "profile_selection_source": self.profile_selection_source,
             "profile_version": self.profile_version,
             "profile_hash": self.profile_hash,
             "descriptor_hash": self.descriptor_hash,
@@ -196,16 +202,62 @@ class ToolSurfaceSnapshot:
         }
 
 
-def tool_surface_profile_id(lane_config: Mapping[str, object] | None) -> str:
-    """Return the explicit tool-surface profile id, defaulting to mew_legacy."""
+@dataclass(frozen=True)
+class ToolSurfaceProfileSelection:
+    """Canonical profile selection facts derived from explicit profile input."""
+
+    profile_id: str
+    profile_default: bool
+    selection_source: str
+
+
+def tool_surface_profile_selection(
+    lane_config: Mapping[str, object] | None,
+) -> ToolSurfaceProfileSelection:
+    """Return canonical profile selection facts.
+
+    Caller-supplied metadata such as ``tool_surface_profile_default`` is
+    observability output, not input authority. Only an explicit profile id can
+    override the default, and ``mew_legacy`` is always recorded as an opt-out.
+    """
 
     config = lane_config or {}
-    profile_id = str(
-        config.get("tool_surface_profile_id")
-        or config.get("tool_profile")
-        or DEFAULT_TOOL_SURFACE_PROFILE_ID
+    explicit_profile = str(
+        config.get("tool_surface_profile_id") or config.get("tool_profile") or ""
     ).strip()
-    return profile_id or DEFAULT_TOOL_SURFACE_PROFILE_ID
+    if not explicit_profile:
+        return ToolSurfaceProfileSelection(
+            profile_id=DEFAULT_TOOL_SURFACE_PROFILE_ID,
+            profile_default=True,
+            selection_source="default",
+        )
+    if (
+        explicit_profile == DEFAULT_TOOL_SURFACE_PROFILE_ID
+        and config.get("tool_surface_profile_default") is True
+        and str(config.get("tool_surface_profile_selection_source") or "").strip() == "default"
+    ):
+        return ToolSurfaceProfileSelection(
+            profile_id=DEFAULT_TOOL_SURFACE_PROFILE_ID,
+            profile_default=True,
+            selection_source="default",
+        )
+    if explicit_profile == MEW_LEGACY_PROFILE_ID:
+        return ToolSurfaceProfileSelection(
+            profile_id=MEW_LEGACY_PROFILE_ID,
+            profile_default=False,
+            selection_source="legacy_opt_out",
+        )
+    return ToolSurfaceProfileSelection(
+        profile_id=explicit_profile,
+        profile_default=False,
+        selection_source="work_guidance",
+    )
+
+
+def tool_surface_profile_id(lane_config: Mapping[str, object] | None) -> str:
+    """Return the active tool-surface profile id."""
+
+    return tool_surface_profile_selection(lane_config).profile_id
 
 
 def tool_surface_profile_options(
@@ -230,13 +282,16 @@ def build_tool_surface_snapshot(
 ) -> ToolSurfaceSnapshot:
     """Build a deterministic tool-surface snapshot for one provider request."""
 
-    profile_id = tool_surface_profile_id(lane_config)
+    selection = tool_surface_profile_selection(lane_config)
+    profile_id = selection.profile_id
     mode = str((lane_config or {}).get("mode") or "full")
     profile_options = tool_surface_profile_options(lane_config)
     if profile_id == CODEX_HOT_PATH_PROFILE_ID:
         return _codex_hot_path_snapshot(
             mode=mode,
             profile_options=profile_options,
+            profile_default=selection.profile_default,
+            profile_selection_source=selection.selection_source,
             available_provider_tool_names=available_provider_tool_names,
             provider_supports_parallel_tool_calls=provider_supports_parallel_tool_calls,
         )
@@ -255,7 +310,12 @@ def build_tool_surface_snapshot(
         interactive_stdin=False,
     )
     specs = mew_legacy_tool_specs_for_task(mode, task_contract=task_contract)
-    specs = _filter_mew_legacy_lifecycle_tools(specs, transcript_items)
+    preserve_requested_lifecycle = False
+    if available_provider_tool_names is not None:
+        names = {str(name) for name in available_provider_tool_names}
+        preserve_requested_lifecycle = bool(names & PROCESS_LIFECYCLE_TOOL_NAMES)
+    if not preserve_requested_lifecycle:
+        specs = _filter_mew_legacy_lifecycle_tools(specs, transcript_items)
     if available_provider_tool_names is not None:
         names = {str(name) for name in available_provider_tool_names}
         specs = tuple(spec for spec in specs if spec.name in names)
@@ -274,6 +334,8 @@ def build_tool_surface_snapshot(
     return ToolSurfaceSnapshot(
         schema_version=TOOL_REGISTRY_SCHEMA_VERSION,
         profile=profile,
+        profile_default=selection.profile_default,
+        profile_selection_source=selection.selection_source,
         profile_options=profile_options,
         mode=mode,
         provider_tool_names=tuple(spec.name for spec in specs),
@@ -298,6 +360,8 @@ def _codex_hot_path_snapshot(
     *,
     mode: str,
     profile_options: Mapping[str, object],
+    profile_default: bool,
+    profile_selection_source: str,
     available_provider_tool_names: Sequence[str] | None,
     provider_supports_parallel_tool_calls: bool,
 ) -> ToolSurfaceSnapshot:
@@ -339,6 +403,8 @@ def _codex_hot_path_snapshot(
     return ToolSurfaceSnapshot(
         schema_version=TOOL_REGISTRY_SCHEMA_VERSION,
         profile=profile,
+        profile_default=profile_default,
+        profile_selection_source=profile_selection_source,
         profile_options=effective_options,
         mode=mode,
         provider_tool_names=tuple(spec.name for spec in specs),
@@ -560,6 +626,40 @@ def _safe_int(value: object, *, default: int) -> int:
         return default
 
 
+def active_tool_specs_for_mode(
+    mode: str,
+    lane_config: Mapping[str, object] | None = None,
+) -> tuple[ImplementLaneToolSpec, ...]:
+    config = {"mode": mode}
+    if lane_config:
+        config.update(dict(lane_config))
+    return build_tool_surface_snapshot(lane_config=config).tool_specs
+
+
+def active_base_tool_specs(
+    lane_config: Mapping[str, object] | None = None,
+) -> tuple[ImplementLaneToolSpec, ...]:
+    config = {"mode": "full"}
+    if lane_config:
+        config.update(dict(lane_config))
+    return build_tool_surface_snapshot(lane_config=config).tool_specs
+
+
+def active_tool_specs_for_task(
+    mode: str,
+    *,
+    task_contract: object = None,
+    lane_config: Mapping[str, object] | None = None,
+) -> tuple[ImplementLaneToolSpec, ...]:
+    config = {"mode": mode}
+    if lane_config:
+        config.update(dict(lane_config))
+    return build_tool_surface_snapshot(
+        lane_config=config,
+        task_contract=task_contract,
+    ).tool_specs
+
+
 __all__ = [
     "CODEX_HOT_PATH_PROFILE_ID",
     "DEFAULT_TOOL_SURFACE_PROFILE_ID",
@@ -568,8 +668,13 @@ __all__ = [
     "TOOL_REGISTRY_SCHEMA_VERSION",
     "ToolRegistryEntry",
     "ToolSurfaceProfile",
+    "ToolSurfaceProfileSelection",
     "ToolSurfaceSnapshot",
+    "active_base_tool_specs",
+    "active_tool_specs_for_mode",
+    "active_tool_specs_for_task",
     "build_tool_surface_snapshot",
     "tool_surface_profile_id",
     "tool_surface_profile_options",
+    "tool_surface_profile_selection",
 ]

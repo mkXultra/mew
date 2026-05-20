@@ -19,8 +19,7 @@ DEFAULT_DATASET = "terminal-bench/terminal-bench-2"
 DEFAULT_JOBS_ROOT = Path("proof-artifacts/terminal-bench/harbor-smoke")
 DEFAULT_WORK_GUIDANCE = (
     "selected_lane=implement_v2 "
-    "write_integration_observation_detail=true "
-    "finish_verifier_planner=true"
+    "write_integration_observation_detail=true"
 )
 DEFAULT_INSTALL_COMMAND = (
     "apt-get update && apt-get install -y python3 python3-pip python3-venv "
@@ -421,6 +420,12 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
     )
     native_evidence_path = manifest_dir / native_evidence_ref if native_evidence_ref else None
     native_status = _native_artifact_status(manifest_dir)
+    planner_latest = (
+        metrics.get("finish_verifier_planner_latest_decision")
+        if isinstance(metrics.get("finish_verifier_planner_latest_decision"), dict)
+        else {}
+    )
+    model_json_main_path_detected = bool(metrics.get("model_json_main_path_detected"))
     return {
         "external_reward": extract_harbor_reward(result),
         "work_exit_code": report.get("work_exit_code"),
@@ -456,6 +461,32 @@ def collect_mew_trial_summary(task_dir: Path) -> dict[str, object]:
         "native_evidence_cited_ref_count": native_evidence.get("cited_evidence_ref_count"),
         "native_evidence_unresolved_cited_ref_count": native_evidence.get("unresolved_cited_evidence_ref_count"),
         "native_evidence_resolver_block_count": native_evidence.get("resolver_block_count"),
+        "native_runtime_id": manifest.get("runtime_id"),
+        "native_transport_kind": manifest.get("native_transport_kind") or metrics.get("native_transport_kind"),
+        "transport_kind": manifest.get("transport_kind") or metrics.get("transport_kind"),
+        "provider_native_tool_loop": bool(metrics.get("provider_native_tool_loop")),
+        "model_json_main_path_detected": model_json_main_path_detected,
+        "mixed_path_failure": bool(
+            model_json_main_path_detected
+            or manifest.get("runtime_id") == "implement_v2_model_json_tool_loop"
+            or str(manifest.get("transport_kind") or metrics.get("transport_kind") or "") in {"model_json", "legacy_model_json"}
+        ),
+        "tool_surface_profile_id": manifest.get("tool_surface_profile_id") or metrics.get("tool_surface_profile_id"),
+        "tool_surface_profile_selection_source": (
+            manifest.get("tool_surface_profile_selection_source")
+            or metrics.get("tool_surface_profile_selection_source")
+        ),
+        "tool_surface_profile_default": (
+            manifest.get("tool_surface_profile_default")
+            if manifest.get("tool_surface_profile_default") is not None
+            else metrics.get("tool_surface_profile_default")
+        ),
+        "tool_surface_profile_hash": manifest.get("tool_surface_profile_hash") or metrics.get("tool_surface_profile_hash"),
+        "finish_verifier_planner_enabled": metrics.get("finish_verifier_planner_enabled"),
+        "finish_verifier_planner_selection_source": metrics.get("finish_verifier_planner_selection_source"),
+        "finish_verifier_planner_request_count": metrics.get("finish_verifier_planner_request_count"),
+        "finish_verifier_planner_decision_count": metrics.get("finish_verifier_planner_decision_count"),
+        "finish_verifier_planner_selected": planner_latest.get("status") == "accepted",
         "proof_manifest_path": str(proof_manifest_path),
         "history_path": str(history_path),
         "transcript_path": str(transcript_path),
@@ -813,7 +844,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tool-surface-profile-id",
         default="",
-        help="ToolSurfaceProfile id to pass into implement_v2, e.g. mew_legacy or codex_hot_path.",
+        help=(
+            "Diagnostic implement_v2 tool-surface override. Omit for the codex_hot_path "
+            "default; use mew_legacy only as an explicit legacy opt-out."
+        ),
     )
     parser.add_argument("--install-command", default=DEFAULT_INSTALL_COMMAND)
     parser.add_argument(

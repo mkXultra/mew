@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .tool_profiles.mew_legacy import list_v2_base_tool_specs
+from .tool_registry import build_tool_surface_snapshot
 from .workframe import (
     WorkFrame,
     WorkFrameForbiddenNext,
@@ -271,7 +271,10 @@ def _fetchable_refs(workframe: WorkFrame) -> list[str]:
 def _active_tool_refs(inputs: WorkFrameInputs) -> tuple[str, ...]:
     names = inputs.baseline_metrics.get("provider_tool_names")
     if not isinstance(names, list) or not names:
-        names = [spec.name for spec in list_v2_base_tool_specs()]
+        names = [
+            spec.name
+            for spec in build_tool_surface_snapshot(lane_config={}).tool_specs
+        ]
     refs = [f"tool:{name}" for name in names if str(name)]
     return tuple(dict.fromkeys(refs))
 

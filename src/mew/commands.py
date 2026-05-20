@@ -7330,6 +7330,24 @@ def _work_guidance_bool_option(guidance, *names):
     return False
 
 
+def _work_guidance_has_option(guidance, *names):
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        if name in payload:
+            return True
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            if name in lane_config:
+                return True
+    text = str(guidance or "")
+    for name in names:
+        pattern = rf"(?:^|\s){re.escape(name)}\s*="
+        if re.search(pattern, text):
+            return True
+    return False
+
+
 def _work_guidance_string_option(guidance, *names):
     payload = _work_guidance_json_payload(guidance)
     for name in names:
@@ -7484,6 +7502,8 @@ def _work_guidance_task_contract_guidance(guidance):
         "tool_surface_profile_id",
         "tool_surface_profile",
         "tool_surface_profile_options",
+        "finish_verifier_planner_enabled",
+        "finish_verifier_planner_selection_source",
         "experimental_finish_verifier_planner",
         "finish_verifier_planner",
         "finish_verifier_planner_model",
@@ -7504,6 +7524,8 @@ def _work_guidance_task_contract_guidance(guidance):
         lane_config.pop("tool_surface_profile_id", None)
         lane_config.pop("tool_surface_profile", None)
         lane_config.pop("tool_surface_profile_options", None)
+        lane_config.pop("finish_verifier_planner_enabled", None)
+        lane_config.pop("finish_verifier_planner_selection_source", None)
         lane_config.pop("experimental_finish_verifier_planner", None)
         lane_config.pop("finish_verifier_planner", None)
         lane_config.pop("finish_verifier_planner_model", None)
@@ -7529,6 +7551,8 @@ def _strip_internal_work_guidance_options(guidance):
         "tool_surface_profile_id",
         "tool_surface_profile",
         "tool_surface_profile_options",
+        "finish_verifier_planner_enabled",
+        "finish_verifier_planner_selection_source",
         "experimental_finish_verifier_planner",
         "finish_verifier_planner",
         "finish_verifier_planner_model",
@@ -7822,14 +7846,31 @@ def _run_work_ai_implement_v2(
             "write_integration_observation_detail",
             "integration_observation_detail",
         ),
-        "experimental_finish_verifier_planner": _work_guidance_bool_option(
-            getattr(effective_args, "work_guidance", None),
-            "experimental_finish_verifier_planner",
-            "finish_verifier_planner",
-        ),
         "task_contract_compiler_enabled": bool(task_contract_compiler_enabled),
         "task_contract_compiler_status": str(task_contract_compiler_report.get("status") or ""),
     }
+    if _work_guidance_has_option(work_guidance, "finish_verifier_planner_enabled"):
+        lane_config["finish_verifier_planner_enabled"] = _work_guidance_bool_option(
+            work_guidance,
+            "finish_verifier_planner_enabled",
+        )
+    if _work_guidance_has_option(work_guidance, "finish_verifier_planner"):
+        lane_config["finish_verifier_planner"] = _work_guidance_bool_option(
+            work_guidance,
+            "finish_verifier_planner",
+        )
+    if _work_guidance_has_option(work_guidance, "experimental_finish_verifier_planner"):
+        lane_config["experimental_finish_verifier_planner"] = _work_guidance_bool_option(
+            work_guidance,
+            "experimental_finish_verifier_planner",
+        )
+    from .implement_lane.finish_verifier_planner_policy import finish_verifier_planner_policy
+
+    planner_policy = finish_verifier_planner_policy(lane_config)
+    lane_config.pop("finish_verifier_planner", None)
+    lane_config.pop("experimental_finish_verifier_planner", None)
+    lane_config["finish_verifier_planner_enabled"] = planner_policy.enabled
+    lane_config["finish_verifier_planner_selection_source"] = planner_policy.selection_source
     finish_verifier_planner_model = _work_guidance_string_option(
         getattr(effective_args, "work_guidance", None),
         "finish_verifier_planner_model",
@@ -7840,6 +7881,21 @@ def _run_work_ai_implement_v2(
         lane_config["tool_surface_profile_id"] = tool_surface_profile_id
     if tool_surface_profile_options:
         lane_config["tool_surface_profile_options"] = tool_surface_profile_options
+    from .implement_lane.tool_registry import tool_surface_profile_selection
+
+    profile_selection = tool_surface_profile_selection(lane_config)
+    lane_config["tool_surface_profile_id"] = profile_selection.profile_id
+    lane_config["tool_surface_profile_default"] = profile_selection.profile_default
+    lane_config["tool_surface_profile_selection_source"] = profile_selection.selection_source
+    implement_v2_runtime_metrics["tool_surface_profile_id"] = profile_selection.profile_id
+    implement_v2_runtime_metrics["tool_surface_profile_default"] = profile_selection.profile_default
+    implement_v2_runtime_metrics["tool_surface_profile_selection_source"] = (
+        profile_selection.selection_source
+    )
+    implement_v2_runtime_metrics["finish_verifier_planner_enabled"] = planner_policy.enabled
+    implement_v2_runtime_metrics["finish_verifier_planner_selection_source"] = (
+        planner_policy.selection_source
+    )
 
     lane_input = ImplementLaneInput(
         work_session_id=str(session_id),
@@ -16255,9 +16311,9 @@ def _print_json_or_text(result, as_json, text):
         print(text)
 
 def cmd_tool_specs(args):
-    from .implement_lane.tool_profiles.mew_legacy import list_v2_tool_specs_for_mode
+    from .implement_lane.tool_registry import active_tool_specs_for_mode
 
-    specs = [spec.as_dict() for spec in list_v2_tool_specs_for_mode(args.mode)]
+    specs = [spec.as_dict() for spec in active_tool_specs_for_mode(args.mode)]
     result = {
         "schema_version": 1,
         "mode": args.mode,

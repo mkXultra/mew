@@ -18,7 +18,7 @@ from .execution_evidence import (
     TYPED_ACCEPTANCE_SCHEMA_VERSION,
     VERIFIER_EVIDENCE_SCHEMA_VERSION,
 )
-from .tool_profiles.mew_legacy import list_v2_base_tool_specs, list_v2_tool_specs_for_mode
+from .tool_registry import active_tool_specs_for_mode, build_tool_surface_snapshot
 from .types import PROOF_MANIFEST_SCHEMA_VERSION, TOOL_CALL_SCHEMA_VERSION, TOOL_RESULT_SCHEMA_VERSION
 from .workframe import (
     WORKFRAME_CANONICALIZER_VERSION,
@@ -133,7 +133,10 @@ def build_substrate_inventory(repo_root: Path | str = ".") -> dict[str, Any]:
     """
 
     root = Path(repo_root).resolve()
-    tool_specs = [spec.as_dict() for spec in list_v2_base_tool_specs()]
+    tool_specs = [
+        spec.as_dict()
+        for spec in build_tool_surface_snapshot(lane_config={}).tool_specs
+    ]
     variants = [variant.__dict__.copy() for variant in list_workframe_variants()]
     proof_root = root / "proof-artifacts" / "terminal-bench"
     required_artifact_coverage = _required_artifact_coverage(proof_root)
@@ -147,7 +150,7 @@ def build_substrate_inventory(repo_root: Path | str = ".") -> dict[str, Any]:
             "hash": _stable_hash(tool_specs),
             "tools": tool_specs,
             "mode_surfaces": {
-                mode: [spec.name for spec in list_v2_tool_specs_for_mode(mode)]
+                mode: [spec.name for spec in active_tool_specs_for_mode(mode)]
                 for mode in ("read_only", "exec", "write", "implement")
             },
         },

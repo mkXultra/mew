@@ -33,6 +33,7 @@ from mew.implement_lane.tool_profiles.mew_legacy import list_v2_base_tool_specs
 from mew.implement_lane.tool_profiles.codex_hot_path import codex_hot_path_developer_contract
 from mew.implement_lane.tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
+    MEW_LEGACY_PROFILE_ID,
     build_tool_surface_snapshot,
 )
 
@@ -119,7 +120,9 @@ def test_request_descriptor_records_native_transport_hashes_headers_and_reasonin
     assert descriptor["capability_decisions"]["provider_native_tool_loop"] is True  # type: ignore[index]
     assert descriptor["capability_decisions"]["apply_patch_transport"] == "custom"  # type: ignore[index]
     assert descriptor["tool_spec_hash"] == provider_tool_spec_hash(
-        lower_implement_lane_tool_specs(list_v2_base_tool_specs())
+        lower_implement_lane_tool_specs(
+            build_tool_surface_snapshot(lane_config={}).tool_specs
+        )
     )
 
 
@@ -149,7 +152,7 @@ def test_request_descriptor_preserves_codex_like_tool_order_and_collapsed_descri
 def test_request_descriptor_records_tool_surface_metadata_without_changing_tools() -> None:
     tool_specs = list_v2_base_tool_specs()
     snapshot = build_tool_surface_snapshot(
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
         task_contract={},
         transcript_items=(),
         available_provider_tool_names=tuple(spec.name for spec in tool_specs),

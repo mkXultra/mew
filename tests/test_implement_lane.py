@@ -34,8 +34,6 @@ from mew.implement_lane import (
     describe_workframe_variant,
     list_implement_lane_runtime_views,
     list_workframe_variants,
-    list_v2_base_tool_specs,
-    list_v2_tool_specs_for_mode,
     project_workframe_with_variant,
     select_implement_lane_runtime,
     normalize_workframe_variant,
@@ -43,9 +41,26 @@ from mew.implement_lane import (
     validate_tool_result_pairing,
     validate_workframe_variant_name,
 )
-from mew.implement_lane.tool_profiles.mew_legacy import list_v2_tool_specs_for_task
+from mew.implement_lane.tool_profiles.mew_legacy import (
+    list_v2_base_tool_specs,
+    list_v2_tool_specs_for_mode,
+    list_v2_tool_specs_for_task,
+)
+from mew.implement_lane.tool_registry import MEW_LEGACY_PROFILE_ID
 from mew.implement_lane.provider import FakeProviderAdapter, FakeProviderToolCall
 from mew.implement_lane.legacy_shell_edit_bridge import bridge_registry_manifest
+from mew.implement_lane.finish_acceptance_helpers import (
+    _finish_acceptance_action,
+    _finish_evidence_refs,
+    _typed_finish_evidence_refs,
+    _typed_retired_legacy_blockers_for_bundle,
+)
+from mew.implement_lane.legacy_model_json_runtime import (
+    _frontier_evidence_registry,
+    _render_prompt_history_json,
+    _source_output_contract_from_tool_results,
+    run_live_json_implement_v2,
+)
 from mew.implement_lane.v2_runtime import (
     ModelTurnInput,
     _auto_finish_from_structured_final_verifier,
@@ -54,12 +69,9 @@ from mew.implement_lane.v2_runtime import (
     _deep_runtime_prewrite_probe_readiness,
     _deep_runtime_prewrite_probe_gate_result,
     _deep_runtime_prewrite_missing_probe,
-    _finish_acceptance_action,
-    _finish_evidence_refs,
     _finish_gate_history,
     _first_write_probe_threshold,
     _first_write_readiness_from_trace,
-    _frontier_evidence_registry,
     _frontier_failure_payload,
     _frontier_state_from_execution_contracts,
     _hard_runtime_frontier_progress_signature,
@@ -72,22 +84,17 @@ from mew.implement_lane.v2_runtime import (
     _PROVIDER_HISTORY_SOURCE_MUTATION_KEYS,
     _provider_visible_tool_call_for_history,
     _provider_visible_tool_result_for_history,
-    _render_prompt_history_json,
     _resident_sidecar_state_metrics,
     _required_patch_model_turn_budget_block,
     _shell_command_may_mutate_source_tree,
-    _source_output_contract_from_tool_results,
     _source_output_contract_probe_candidate_from_trace,
     _source_mutation_roots,
     _terminal_failure_reaction_turn_limit,
-    _typed_finish_evidence_refs,
-    _typed_retired_legacy_blockers_for_bundle,
     _workframe_sidecar_events_from_tool_results,
     _write_result_covers_source_tree_mutation,
     run_fake_exec_implement_v2,
     run_fake_read_only_implement_v2,
     run_fake_write_implement_v2,
-    run_live_json_implement_v2,
     run_unavailable_implement_v2,
 )
 from mew.implement_lane.prompt import build_implement_v2_workframe_debug_bundle
@@ -455,7 +462,10 @@ def test_transcript_tool_nav_uses_active_mode_tool_surface_for_recommendations()
         task_id="task-nav",
         workspace="/tmp/work",
         lane=IMPLEMENT_V2_LANE,
-        lane_config={"workframe_variant": "transcript_tool_nav"},
+        lane_config={
+            "workframe_variant": "transcript_tool_nav",
+            "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID,
+        },
         task_contract={"objective": "Repair the runtime failure."},
     )
     runtime_events = (
@@ -489,7 +499,11 @@ def test_transcript_tool_nav_respects_explicit_prompt_tool_surface_override() ->
         task_id="task-nav",
         workspace="/tmp/work",
         lane=IMPLEMENT_V2_LANE,
-        lane_config={"mode": "full", "workframe_variant": "transcript_tool_nav"},
+        lane_config={
+            "mode": "full",
+            "workframe_variant": "transcript_tool_nav",
+            "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID,
+        },
         task_contract={"objective": "Repair the runtime failure."},
     )
     runtime_events = (
@@ -581,7 +595,7 @@ def test_workframe_variant_is_not_rendered_from_task_contract_prompt() -> None:
             "workframe_variant": "current",
             "nested": {"required_next_action": "patch vm.js"},
         },
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
     )
 
     sections = build_implement_v2_prompt_sections(lane_input)
@@ -2085,7 +2099,7 @@ def test_implement_v2_surfaces_patch_tools_from_hard_runtime_prompt_before_probe
         task_contract={
             "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
         },
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
     )
 
     specs = _model_visible_tool_specs_for_turn(lane_input, prior_tool_calls=(), prior_tool_results=())
@@ -2135,7 +2149,7 @@ def test_implement_v2_tool_surface_keeps_write_file_for_generic_artifact_task(tm
         task_contract={
             "goal": "Create a small JSON report artifact at /tmp/output.json from the provided task summary."
         },
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
     )
 
     specs = _model_visible_tool_specs_for_turn(
@@ -6045,7 +6059,7 @@ def test_implement_v2_prompt_sections_include_compact_coding_contract() -> None:
         task_id="task-1",
         workspace="/tmp/work",
         lane=IMPLEMENT_V2_LANE,
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
     )
 
     sections = build_implement_v2_prompt_sections(lane_input)
@@ -6190,7 +6204,7 @@ def test_implement_v2_hard_runtime_live_json_prompt_keeps_write_file_creation_gu
         task_contract={
             "goal": "Implement a MIPS ELF interpreter/runtime in node and write a frame image from provided source."
         },
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
     )
     tool_specs = list_v2_tool_specs_for_task("full", task_contract=lane_input.task_contract)
 
@@ -11366,7 +11380,7 @@ def test_implement_v2_prompt_metrics_are_memory_light_by_default() -> None:
         workspace="/tmp/work",
         lane=IMPLEMENT_V2_LANE,
         task_contract={"objective": "inspect only"},
-        lane_config={"mode": "read_only"},
+        lane_config={"mode": "read_only", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
     )
 
     metrics = implement_v2_prompt_section_metrics(lane_input)
@@ -13128,7 +13142,7 @@ def test_implement_v2_prompt_read_only_mode_omits_tool_surface_section() -> None
         task_id="task-1",
         workspace="/tmp/work",
         lane=IMPLEMENT_V2_LANE,
-        lane_config={"mode": "read_only"},
+        lane_config={"mode": "read_only", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
     )
 
     sections = build_implement_v2_prompt_sections(lane_input)

@@ -47,7 +47,11 @@ from mew.implement_lane.native_transcript import (
 )
 from mew.implement_lane.native_workframe_projection import build_provider_visible_forbidden_fields_report
 from mew.implement_lane.tool_profiles.codex_hot_path import codex_hot_path_developer_contract
-from mew.implement_lane.tool_registry import CODEX_HOT_PATH_PROFILE_ID, build_tool_surface_snapshot
+from mew.implement_lane.tool_registry import (
+    CODEX_HOT_PATH_PROFILE_ID,
+    MEW_LEGACY_PROFILE_ID,
+    build_tool_surface_snapshot,
+)
 from mew.implement_lane.types import ImplementLaneInput, ToolResultEnvelope
 
 
@@ -55,6 +59,7 @@ def _lane_input(
     tmp_path: Path,
     *,
     task_contract: dict[str, object] | None = None,
+    omit_finish_verifier_planner_config: bool = False,
     **lane_config: object,
 ) -> ImplementLaneInput:
     config = {
@@ -63,7 +68,17 @@ def _lane_input(
         "allow_shell": True,
         "auto_approve_writes": True,
         "allow_legacy_provider_visible_finish": True,
+        "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID,
     }
+    if not omit_finish_verifier_planner_config and not any(
+        key in lane_config
+        for key in (
+            "finish_verifier_planner_enabled",
+            "finish_verifier_planner",
+            "experimental_finish_verifier_planner",
+        )
+    ):
+        config["finish_verifier_planner_enabled"] = False
     config.update(lane_config)
     return ImplementLaneInput(
         work_session_id="ws-native",
@@ -3363,6 +3378,31 @@ def test_native_harness_proof_manifest_replays_from_response_transcript(tmp_path
     manifest_without_resolver.pop("native_evidence_observation_sha256")
     manifest_without_resolver["metrics"] = dict(manifest_without_resolver["metrics"])
     manifest_without_resolver["metrics"].pop("native_evidence_observation")
+    observability_fields = (
+        "developer_contract_transport",
+        "tool_surface_profile_default",
+        "tool_surface_profile_hash",
+        "tool_surface_profile_id",
+        "tool_surface_profile_selection_source",
+    )
+    for field in observability_fields:
+        manifest_without_resolver.pop(field, None)
+    for field in (
+        *observability_fields,
+        "finish_verifier_planner_decision_count",
+        "finish_verifier_planner_enabled",
+        "finish_verifier_planner_request_count",
+        "finish_verifier_planner_selection_source",
+        "previous_response_delta_mode",
+        "previous_response_prefix_item_count",
+        "provider_request_count",
+        "provider_request_inventory_available",
+        "runtime_id",
+        "tool_surface_descriptor_hash",
+        "tool_surface_render_policy_hash",
+        "tool_surface_route_table_hash",
+    ):
+        manifest_without_resolver["metrics"].pop(field, None)
     assert manifest_without_resolver == expected
 
 
@@ -4625,6 +4665,113 @@ def test_native_harness_model_verifier_without_trusted_verifier_source_still_blo
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
+def test_native_harness_finish_verifier_planner_runs_by_default_when_eligible(tmp_path: Path) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        planner_requests: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+            self.planner_requests = []
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_requests.append(dict(request))
+            return {
+                "command": "node vm.js",
+                "cwd": ".",
+                "reason": "verify the file created by the implementation",
+                "confidence": "high",
+            }
+
+    provider = PlanningProvider()
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            omit_finish_verifier_planner_config=True,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert provider.planner_requests
+    read_policy = provider.planner_requests[0]["read_policy"]
+    assert read_policy["enabled"] is True  # type: ignore[index]
+    assert read_policy["selection_source"] == "default_enabled"  # type: ignore[index]
+    assert result.metrics["finish_verifier_planner_enabled"] is True
+    assert result.metrics["finish_verifier_planner_request_enabled"] is True
+    assert result.metrics["finish_verifier_planner_selection_source"] == "default_enabled"
+    assert result.metrics["planner_selection_source"] == "default_enabled"
+
+
+def test_native_harness_finish_verifier_planner_explicit_opt_out_is_observable(tmp_path: Path) -> None:
+    class PlanningProvider(NativeFakeProvider):
+        planner_requests: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            super().__init__(
+                NativeFakeProvider.from_item_batches(
+                    [
+                        [
+                            fake_call(
+                                "write-1",
+                                "write_file",
+                                {"path": "vm.js", "content": "console.log('ok')\n", "apply": True, "create": True},
+                                output_index=0,
+                            ),
+                            fake_finish("finish-1", {"outcome": "completed", "summary": "done"}, output_index=1),
+                        ]
+                    ]
+                ).responses
+            )
+            self.planner_requests = []
+
+        def plan_finish_verifier_command(self, request: dict[str, object]) -> dict[str, object]:
+            self.planner_requests.append(dict(request))
+            return {"command": "node vm.js", "reason": "should not run"}
+
+    provider = PlanningProvider()
+
+    result = run_native_implement_v2(
+        _lane_input(
+            tmp_path,
+            allow_verify=True,
+            verify_command="test -f vm.js",
+            verify_command_source="auto_detected",
+            finish_verifier_planner_enabled=False,
+            final_verifier_closeout_seconds=3,
+        ),
+        provider=provider,
+        max_turns=1,
+    )
+
+    assert result.status == "completed"
+    assert provider.planner_requests == []
+    assert result.metrics["finish_verifier_planner_enabled"] is False
+    assert result.metrics["finish_verifier_planner_request_enabled"] is False
+    assert result.metrics["finish_verifier_planner_selection_source"] == "explicit_disabled"
+    assert result.metrics["finish_verifier_planner_request_count"] == 0
+    closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
+    closeout_args = json.loads(closeout_call.arguments_json_text)
+    assert closeout_args["finish_verifier_plan"]["source"] == "auto_detected_verifier"
+
+
 def test_native_harness_finish_verifier_planner_runs_as_separate_agent(tmp_path: Path) -> None:
     class PlanningProvider(NativeFakeProvider):
         planner_requests: list[dict[str, object]]
@@ -5370,6 +5517,7 @@ def test_native_harness_explicit_verifier_precedes_planner(tmp_path: Path) -> No
 
     assert result.status == "completed"
     assert provider.planner_called is False
+    assert result.metrics["finish_verifier_planner_selection_source"] == "configured_verifier_precedence"
     closeout_call = next(item for item in result.transcript.items if item.call_id == "call-final-verifier-closeout-002")
     closeout_args = json.loads(closeout_call.arguments_json_text)
     assert closeout_args["command"] == "test -f vm.js"

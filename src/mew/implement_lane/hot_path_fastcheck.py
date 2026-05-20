@@ -49,8 +49,9 @@ from .native_transcript import (
 )
 from .native_transcript import native_function_call_argument_metrics, native_transcript_hash, validate_native_transcript_pairing
 from .tool_lab import resolve_implement_v2_manifest_path
+from .tool_registry import CODEX_HOT_PATH_PROFILE_ID, MEW_LEGACY_PROFILE_ID
 from .types import search_text_output_has_line_anchor
-from .v2_runtime import _render_prompt_history_json
+from .legacy_model_json_runtime import _render_prompt_history_json
 from .workframe import (
     WORKFRAME_RED_MAX_BYTES,
     WorkFrameInputs,
@@ -291,6 +292,13 @@ def _run_native_hot_path_fastcheck(
         checks.append(_check_native_loop_control_replay(transcript))
         checks.append(_check_native_search_text_anchor_projection(transcript))
         provider_requests = _native_provider_requests(artifact_path=artifact_path, manifest_path=manifest_path)
+        checks.append(_check_native_tool_surface_profile(manifest=manifest, provider_requests=provider_requests))
+        checks.append(
+            _check_native_tool_route_profile_observability(
+                manifest_path=manifest_path,
+                provider_requests=provider_requests,
+            )
+        )
         checks.append(_check_native_compact_digest_replay(provider_requests, fallback_transcript=transcript))
         checks.append(_check_native_provider_visible_state(provider_requests))
         checks.append(_check_native_previous_response_id(provider_requests))
@@ -327,6 +335,8 @@ def _run_native_hot_path_fastcheck(
                 _check("native_generation_observation", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_loop_control_replay", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_search_text_anchor_projection", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_tool_surface_profile", False, "native transcript is unreadable", {"skipped": True}),
+                _check("native_tool_route_profile_observability", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_compact_digest_replay", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_provider_visible_state", False, "native transcript is unreadable", {"skipped": True}),
                 _check("native_previous_response_id", False, "native transcript is unreadable", {"skipped": True}),
@@ -887,6 +897,161 @@ def _check_native_provider_visible_state(provider_requests: tuple[dict[str, obje
         else "provider-visible native request state drifted beyond native transcript window + compact digest",
         {"checked_requests": checked, "violations": violations[:10]},
     )
+
+
+def _check_native_tool_surface_profile(
+    *,
+    manifest: Mapping[str, object],
+    provider_requests: tuple[dict[str, object], ...],
+) -> HotPathCheck:
+    metrics = _safe_mapping(manifest.get("metrics"))
+    observations: list[dict[str, object]] = []
+    manifest_observation = _tool_surface_observation("manifest", manifest, metrics)
+    if manifest_observation:
+        observations.append(manifest_observation)
+    for index, request in enumerate(provider_requests, start=1):
+        request_observation = _tool_surface_observation(f"request:{index}", request)
+        if request_observation:
+            observations.append(request_observation)
+        inventory = _safe_mapping(request.get("provider_request_inventory"))
+        inventory_observation = _tool_surface_observation(f"inventory:{index}", _safe_mapping(inventory.get("tool_surface")))
+        if inventory_observation:
+            observations.append(inventory_observation)
+    if not provider_requests and not observations:
+        return _check(
+            "native_tool_surface_profile",
+            True,
+            "no native provider request artifact present; tool-surface profile gate skipped",
+            {"skipped": True},
+        )
+    errors: list[dict[str, object]] = []
+    for observation in observations:
+        profile_id = str(observation.get("profile_id") or "")
+        selection_source = str(observation.get("selection_source") or "")
+        profile_default = bool(observation.get("profile_default"))
+        if profile_default and profile_id != CODEX_HOT_PATH_PROFILE_ID:
+            errors.append({**observation, "reason": "default_profile_not_codex_hot_path"})
+        if profile_id == MEW_LEGACY_PROFILE_ID and (profile_default or selection_source != "legacy_opt_out"):
+            errors.append({**observation, "reason": "legacy_profile_without_explicit_opt_out"})
+        if profile_id and profile_id not in {CODEX_HOT_PATH_PROFILE_ID, MEW_LEGACY_PROFILE_ID}:
+            errors.append({**observation, "reason": "unknown_profile_id"})
+    if provider_requests and not observations:
+        errors.append({"reason": "provider_requests_missing_tool_surface_profile"})
+    ok = not errors
+    return _check(
+        "native_tool_surface_profile",
+        ok,
+        "native tool-surface profile is auditable and default profile is codex_hot_path"
+        if ok
+        else "native tool-surface profile is missing, non-default, or legacy without explicit opt-out",
+        {"observations": observations, "errors": errors[:10]},
+    )
+
+
+def _tool_surface_observation(
+    source: str,
+    value: Mapping[str, object],
+    fallback: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+    fallback = fallback or {}
+    profile_id = str(value.get("tool_surface_profile_id") or value.get("profile_id") or fallback.get("tool_surface_profile_id") or "")
+    if not profile_id:
+        return {}
+    return {
+        "source": source,
+        "profile_id": profile_id,
+        "profile_default": bool(value.get("tool_surface_profile_default", value.get("profile_default", fallback.get("tool_surface_profile_default", False)))),
+        "selection_source": str(
+            value.get("tool_surface_profile_selection_source")
+            or value.get("profile_selection_source")
+            or fallback.get("tool_surface_profile_selection_source")
+            or ""
+        ),
+        "profile_hash": str(value.get("tool_surface_profile_hash") or value.get("profile_hash") or fallback.get("tool_surface_profile_hash") or ""),
+        "descriptor_hash": str(
+            value.get("tool_surface_descriptor_hash") or value.get("descriptor_hash") or fallback.get("tool_surface_descriptor_hash") or ""
+        ),
+        "route_table_hash": str(
+            value.get("tool_surface_route_table_hash") or value.get("route_table_hash") or fallback.get("tool_surface_route_table_hash") or ""
+        ),
+    }
+
+
+def _check_native_tool_route_profile_observability(
+    *,
+    manifest_path: Path,
+    provider_requests: tuple[dict[str, object], ...],
+) -> HotPathCheck:
+    route_path = manifest_path.parent / "tool_routes.jsonl"
+    if not route_path.exists():
+        return _check(
+            "native_tool_route_profile_observability",
+            True,
+            "no tool route artifact present; route profile gate skipped",
+            {"skipped": True, "path": str(route_path)},
+        )
+    rows, error = _load_jsonl_objects(route_path)
+    if not rows:
+        return _check(
+            "native_tool_route_profile_observability",
+            not error,
+            "empty tool route artifact has no mixed-path routes"
+            if not error
+            else "tool route artifact is unreadable",
+            {"path": str(route_path), "load_error": error, "row_count": 0},
+        )
+    latest_surface = _latest_provider_request_tool_surface(provider_requests)
+    expected_profile_id = str(latest_surface.get("profile_id") or "")
+    expected_profile_hash = str(latest_surface.get("profile_hash") or "")
+    expected_route_hash = str(latest_surface.get("route_table_hash") or "")
+    mismatches: list[dict[str, object]] = []
+    for index, row in enumerate(rows, start=1):
+        declared_tool = str(row.get("declared_tool") or row.get("tool_name") or "").strip()
+        effective_tool = str(row.get("effective_tool") or "").strip()
+        if not declared_tool or not effective_tool:
+            mismatches.append({"row": index, "reason": "missing_declared_or_effective_tool"})
+        if expected_profile_id and str(row.get("tool_surface_profile_id") or "") != expected_profile_id:
+            mismatches.append(
+                {
+                    "row": index,
+                    "reason": "profile_id_mismatch",
+                    "expected": expected_profile_id,
+                    "observed": row.get("tool_surface_profile_id"),
+                }
+            )
+        if expected_profile_hash and str(row.get("tool_surface_profile_hash") or "") != expected_profile_hash:
+            mismatches.append({"row": index, "reason": "profile_hash_mismatch"})
+        if expected_route_hash and str(row.get("tool_surface_route_table_hash") or "") != expected_route_hash:
+            mismatches.append({"row": index, "reason": "route_table_hash_mismatch"})
+    ok = not error and not mismatches
+    return _check(
+        "native_tool_route_profile_observability",
+        ok,
+        "tool route artifact preserves declared/effective tools and profile hashes"
+        if ok
+        else "tool route artifact is stale or lacks profile/route observability",
+        {
+            "path": str(route_path),
+            "row_count": len(rows),
+            "load_error": error,
+            "expected_profile_id": expected_profile_id,
+            "expected_profile_hash": expected_profile_hash,
+            "expected_route_table_hash": expected_route_hash,
+            "mismatches": mismatches[:10],
+        },
+    )
+
+
+def _latest_provider_request_tool_surface(provider_requests: tuple[dict[str, object], ...]) -> dict[str, object]:
+    for request in reversed(provider_requests):
+        tool_surface = request.get("tool_surface")
+        if isinstance(tool_surface, Mapping):
+            return dict(tool_surface)
+        inventory = _safe_mapping(request.get("provider_request_inventory"))
+        tool_surface = inventory.get("tool_surface")
+        if isinstance(tool_surface, Mapping):
+            return dict(tool_surface)
+    return {}
 
 
 def _check_affordance_visibility_caps_fixture() -> HotPathCheck:

@@ -39,6 +39,8 @@ class ToolKernelConfig:
     max_active: int = 5
     read_result_max_chars: int | None = None
     surface_label: str = "tool"
+    tool_surface_profile_id: str = ""
+    available_tool_names: tuple[str, ...] = ()
 
 
 class ToolKernel:
@@ -152,13 +154,20 @@ class ToolKernel:
         return self.exec_runtime.poll_active_commands(wait_seconds=wait_seconds)
 
     def _available(self, tool_name: object) -> bool:
-        from .implement_lane.tool_profiles.mew_legacy import list_v2_tool_specs_for_task
+        from .implement_lane.tool_registry import active_tool_specs_for_task
 
-        return str(tool_name or "") in {
+        requested = str(tool_name or "")
+        if self.config.available_tool_names:
+            return requested in set(self.config.available_tool_names)
+        lane_config = {"mode": self.config.mode}
+        if self.config.tool_surface_profile_id:
+            lane_config["tool_surface_profile_id"] = self.config.tool_surface_profile_id
+        return requested in {
             spec.name
-            for spec in list_v2_tool_specs_for_task(
+            for spec in active_tool_specs_for_task(
                 self.config.mode,
                 task_contract=self.config.task_contract,
+                lane_config=lane_config,
             )
         }
 

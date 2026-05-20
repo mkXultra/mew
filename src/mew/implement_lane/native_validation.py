@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from typing import Mapping
 
 from ..work_lanes import IMPLEMENT_V2_LANE
+from .finish_verifier_planner_policy import finish_verifier_planner_policy
 from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID, NativeTranscript, NativeTranscriptItem
 from .native_transcript import native_proof_manifest_from_transcript, native_transcript_hash
 from .native_transcript import validate_native_transcript_pairing
 from .registry import get_implement_lane_runtime_view
+from .tool_registry import CODEX_HOT_PATH_PROFILE_ID, MEW_LEGACY_PROFILE_ID, build_tool_surface_snapshot
 
 
 NATIVE_VALIDATION_SCHEMA_VERSION = 1
@@ -59,6 +62,25 @@ def validate_native_loop_gate(
     runtime = get_implement_lane_runtime_view(IMPLEMENT_V2_LANE)
     checks["registry_native_runtime_id"] = runtime.runtime_id == IMPLEMENT_V2_NATIVE_RUNTIME_ID
     checks["registry_provider_native_loop"] = runtime.provider_native_tool_loop is True
+    default_surface = build_tool_surface_snapshot(lane_config={})
+    legacy_surface = build_tool_surface_snapshot(lane_config={"tool_surface_profile_id": MEW_LEGACY_PROFILE_ID})
+    planner_policy = finish_verifier_planner_policy({})
+    details["default_tool_surface"] = default_surface.request_metadata()
+    details["legacy_tool_surface_opt_out"] = legacy_surface.request_metadata()
+    details["finish_verifier_planner_policy"] = {
+        "enabled": planner_policy.enabled,
+        "selection_source": planner_policy.selection_source,
+    }
+    checks["default_tool_surface_profile_codex_hot_path"] = default_surface.profile_id == CODEX_HOT_PATH_PROFILE_ID
+    checks["default_tool_surface_profile_default"] = default_surface.profile_default is True
+    checks["planner_policy_default_enabled"] = (
+        planner_policy.enabled is True and planner_policy.selection_source == "default_enabled"
+    )
+    checks["legacy_tool_surface_explicit_opt_out"] = (
+        legacy_surface.profile_id == MEW_LEGACY_PROFILE_ID
+        and legacy_surface.profile_default is False
+        and legacy_surface.profile_selection_source == "legacy_opt_out"
+    )
 
     command_scan = _scan_command_route(source_path)
     details["command_route"] = command_scan
@@ -77,6 +99,11 @@ def validate_native_loop_gate(
     )
     checks["native_production_paths_no_legacy_symbols"] = not any(
         item.get("legacy_hits") for item in production_scan
+    )
+    planner_policy_scan = _scan_planner_policy_boundary_paths(source_path)
+    details["planner_policy_boundary_paths"] = planner_policy_scan
+    checks["native_production_paths_no_direct_planner_config_reads"] = not any(
+        item.get("planner_config_hits") for item in planner_policy_scan
     )
 
     fixture_manifest = native_proof_manifest_from_transcript(_validation_fixture_transcript())
@@ -166,6 +193,9 @@ def _legacy_public_surface_symbols() -> tuple[str, ...]:
         "FakeProviderAdapter",
         "FakeProviderToolCall",
         "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID",
+        "list_v2_base_tool_specs",
+        "list_v2_tool_specs_for_mode",
+        "list_v2_tool_specs_for_task",
     )
 
 
@@ -178,6 +208,7 @@ def _native_production_relative_paths() -> tuple[str, ...]:
         "src/mew/commands.py",
         "src/mew/implement_lane/__init__.py",
         "src/mew/implement_lane/registry.py",
+        "src/mew/implement_lane/provider.py",
         "src/mew/implement_lane/native_provider_adapter.py",
         "src/mew/implement_lane/native_tool_harness.py",
     )
@@ -189,7 +220,10 @@ def _native_production_banned_symbols() -> tuple[str, ...]:
     # input-filtering tests and are not the retired model-JSON implement loop.
     return (
         "JsonModelProviderAdapter",
+        'provider = "model_json"',
         "run_live_json_implement_v2",
+        "from .v2_runtime import",
+        "from mew.implement_lane.v2_runtime import",
         "_live_json_prompt",
         "_normalize_live_json_payload",
         "call_model_json_with_retries",
@@ -214,6 +248,90 @@ def _scan_native_production_paths(source_root: Path) -> tuple[dict[str, object],
             if symbol in text
         }
         scanned.append({"path": relative_path, "exists": True, "legacy_hits": hits})
+    return tuple(scanned)
+
+
+def _planner_policy_boundary_relative_paths() -> tuple[str, ...]:
+    return _native_production_relative_paths()
+
+
+def _planner_config_direct_read_keys() -> tuple[str, ...]:
+    return (
+        "finish_verifier_planner_enabled",
+        "finish_verifier_planner",
+        "experimental_finish_verifier_planner",
+    )
+
+
+class _PlannerConfigReadVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.hits: dict[str, int] = {}
+
+    def visit_Call(self, node: ast.Call) -> None:
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "lane_config"
+            and node.args
+        ):
+            key = _planner_config_key(node.args[0])
+            if key:
+                self._record(f'lane_config.get("{key}")')
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        if isinstance(node.ctx, ast.Load) and isinstance(node.value, ast.Name) and node.value.id == "lane_config":
+            key = _planner_config_key(node.slice)
+            if key:
+                self._record(f'lane_config["{key}"]')
+        self.generic_visit(node)
+
+    def visit_Compare(self, node: ast.Compare) -> None:
+        if (
+            len(node.ops) == 1
+            and isinstance(node.ops[0], (ast.In, ast.NotIn))
+            and len(node.comparators) == 1
+            and isinstance(node.comparators[0], ast.Name)
+            and node.comparators[0].id == "lane_config"
+        ):
+            key = _planner_config_key(node.left)
+            if key:
+                self._record(f'"{key}" in lane_config')
+        self.generic_visit(node)
+
+    def _record(self, label: str) -> None:
+        self.hits[label] = self.hits.get(label, 0) + 1
+
+
+def _planner_config_key(node: ast.AST) -> str:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        value = node.value
+        if value in _planner_config_direct_read_keys():
+            return value
+    return ""
+
+
+def _planner_config_direct_read_hits(text: str) -> dict[str, int]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {}
+    visitor = _PlannerConfigReadVisitor()
+    visitor.visit(tree)
+    return dict(visitor.hits)
+
+
+def _scan_planner_policy_boundary_paths(source_root: Path) -> tuple[dict[str, object], ...]:
+    scanned: list[dict[str, object]] = []
+    for relative_path in _planner_policy_boundary_relative_paths():
+        path = source_root / relative_path
+        if not path.exists():
+            scanned.append({"path": relative_path, "exists": False, "planner_config_hits": {}})
+            continue
+        text = path.read_text(encoding="utf-8")
+        hits = _planner_config_direct_read_hits(text)
+        scanned.append({"path": relative_path, "exists": True, "planner_config_hits": hits})
     return tuple(scanned)
 
 

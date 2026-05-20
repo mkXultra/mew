@@ -53,8 +53,7 @@ def test_mew_command_template_enables_implement_v2_and_observer_detail(tmp_path)
 
     assert (
         "selected_lane=implement_v2 "
-        "write_integration_observation_detail=true "
-        "finish_verifier_planner=true"
+        "write_integration_observation_detail=true"
     ) in template
     assert "--cwd {command_cwd_shell}" in template
     assert "--auth /codex-auth/auth.json" in template
@@ -123,7 +122,6 @@ def test_combine_work_guidance_keeps_diagnostic_defaults_and_adds_fragments():
     assert guidance == (
         "selected_lane=implement_v2 "
         "write_integration_observation_detail=true "
-        "finish_verifier_planner=true "
         "m6_24_step_shape_check=true"
     )
 
@@ -136,7 +134,6 @@ def test_combine_work_guidance_allows_explicit_key_override():
 
     assert (
         "write_integration_observation_detail=true "
-        "finish_verifier_planner=true "
         "selected_lane=other_lane extra=true"
     ) == guidance
 
@@ -149,7 +146,6 @@ def test_combine_work_guidance_allows_spaced_explicit_key_override():
 
     assert (
         "write_integration_observation_detail=true "
-        "finish_verifier_planner=true "
         "selected_lane = other_lane"
     ) == guidance
 
@@ -164,7 +160,6 @@ def test_combine_work_guidance_preserves_json_payload_shape_with_defaults():
 
     assert payload["selected_lane"] == "other_lane"
     assert payload["write_integration_observation_detail"] is True
-    assert payload["finish_verifier_planner"] is True
     assert payload["persisted_lane_state"] == {"lane_context_capsule": {"ok": True}}
 
 
@@ -419,11 +414,21 @@ def test_collect_mew_trial_summary_accepts_native_artifacts_at_task_root(tmp_pat
             {
                 "runtime_id": "implement_v2_native_transcript_loop",
                 "transport_kind": "provider_native",
+                "native_transport_kind": "provider_native",
+                "tool_surface_profile_id": "codex_hot_path",
+                "tool_surface_profile_selection_source": "default",
+                "tool_surface_profile_default": True,
+                "tool_surface_profile_hash": "sha256:profile",
                 "pairing": {"valid": True, "call_count": 1, "output_count": 1, "errors": []},
                 "metrics": {
                     "pairing_valid": True,
                     "provider_native_tool_loop": True,
                     "model_json_main_path_detected": False,
+                    "finish_verifier_planner_enabled": True,
+                    "finish_verifier_planner_selection_source": "default_enabled",
+                    "finish_verifier_planner_request_count": 1,
+                    "finish_verifier_planner_decision_count": 1,
+                    "finish_verifier_planner_latest_decision": {"status": "accepted"},
                     "native_evidence_observation": {
                         "artifact_ref": "native-evidence-observation.json",
                         "finish_claim_count": 1,
@@ -478,6 +483,19 @@ def test_collect_mew_trial_summary_accepts_native_artifacts_at_task_root(tmp_pat
     assert summary["native_evidence_observation_path"] == str(unknown_task / "native-evidence-observation.json")
     assert summary["native_evidence_finish_claim_count"] == 1
     assert summary["native_evidence_unresolved_cited_ref_count"] == 1
+    assert summary["native_runtime_id"] == "implement_v2_native_transcript_loop"
+    assert summary["native_transport_kind"] == "provider_native"
+    assert summary["provider_native_tool_loop"] is True
+    assert summary["model_json_main_path_detected"] is False
+    assert summary["mixed_path_failure"] is False
+    assert summary["tool_surface_profile_id"] == "codex_hot_path"
+    assert summary["tool_surface_profile_selection_source"] == "default"
+    assert summary["tool_surface_profile_default"] is True
+    assert summary["finish_verifier_planner_enabled"] is True
+    assert summary["finish_verifier_planner_selection_source"] == "default_enabled"
+    assert summary["finish_verifier_planner_request_count"] == 1
+    assert summary["finish_verifier_planner_decision_count"] == 1
+    assert summary["finish_verifier_planner_selected"] is True
     assert observer_detail_missing([summary]) is False
 
 

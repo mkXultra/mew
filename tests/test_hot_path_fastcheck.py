@@ -25,6 +25,7 @@ from mew.implement_lane.native_transcript import (
     write_native_evidence_observation,
     write_native_transcript_artifacts,
 )
+from mew.implement_lane.tool_registry import build_tool_surface_snapshot
 from mew.implement_lane.workframe import WorkFrameInputs, canonicalize_workframe_inputs, reduce_workframe
 from mew.implement_lane.workframe_variants import (
     canonicalize_common_workframe_inputs,
@@ -266,6 +267,11 @@ def _write_native_provider_request(
             task_contract=task_contract,
         ),
     )
+    tool_surface = build_tool_surface_snapshot(
+        lane_config={},
+        task_contract=task_contract,
+        transcript_items=prefix.items,
+    ).request_metadata()
     task_payload = {
         "task_contract": task_contract,
         "compact_sidecar_digest": digest,
@@ -293,7 +299,15 @@ def _write_native_provider_request(
         "turn_index": 1,
         "input_item_count": prefix_item_count,
         "provider_request_inventory": build_native_prompt_input_inventory(compact_sidecar_digest=digest),
+        "tool_surface": tool_surface,
+        "tool_surface_profile_id": tool_surface["profile_id"],
+        "tool_surface_profile_default": tool_surface["profile_default"],
+        "tool_surface_profile_selection_source": tool_surface["profile_selection_source"],
+        "tool_surface_profile_hash": tool_surface["profile_hash"],
+        "tool_surface_descriptor_hash": tool_surface["descriptor_hash"],
+        "tool_surface_route_table_hash": tool_surface["route_table_hash"],
     }
+    request["provider_request_inventory"]["tool_surface"] = tool_surface  # type: ignore[index]
     if live_shape:
         request["provider"] = transcript.provider
         request["model"] = transcript.model
@@ -323,6 +337,33 @@ def _write_native_provider_request(
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    manifest_path = artifact / "proof-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.update(
+        {
+            "tool_surface_profile_id": tool_surface["profile_id"],
+            "tool_surface_profile_default": tool_surface["profile_default"],
+            "tool_surface_profile_selection_source": tool_surface["profile_selection_source"],
+            "tool_surface_profile_hash": tool_surface["profile_hash"],
+            "tool_surface_descriptor_hash": tool_surface["descriptor_hash"],
+            "tool_surface_route_table_hash": tool_surface["route_table_hash"],
+            "native_transport_kind": "provider_native",
+        }
+    )
+    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    metrics.update(
+        {
+            "tool_surface_profile_id": tool_surface["profile_id"],
+            "tool_surface_profile_default": tool_surface["profile_default"],
+            "tool_surface_profile_selection_source": tool_surface["profile_selection_source"],
+            "tool_surface_profile_hash": tool_surface["profile_hash"],
+            "tool_surface_descriptor_hash": tool_surface["descriptor_hash"],
+            "tool_surface_route_table_hash": tool_surface["route_table_hash"],
+            "native_transport_kind": "provider_native",
+        }
+    )
+    manifest["metrics"] = metrics
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _read_native_transcript(artifact: Path) -> NativeTranscript:
@@ -948,6 +989,70 @@ def test_hot_path_fastcheck_replays_native_provider_request_compact_digest(tmp_p
     assert checks["native_affordance_visibility_caps"]["status"] == "pass"
     assert checks["native_compact_digest_replay"]["status"] == "pass"
     assert checks["native_provider_visible_state"]["status"] == "pass"
+    assert checks["native_tool_surface_profile"]["status"] == "pass"
+
+
+def test_hot_path_fastcheck_rejects_default_non_codex_tool_surface(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript)
+    request_file = artifact / "native-provider-requests.json"
+    payload = json.loads(request_file.read_text(encoding="utf-8"))
+    request = payload["requests"][0]
+    request["tool_surface"]["profile_id"] = "mew_legacy"
+    request["tool_surface"]["profile_default"] = True
+    request["tool_surface"]["profile_selection_source"] = "default"
+    request["tool_surface_profile_id"] = "mew_legacy"
+    request["tool_surface_profile_default"] = True
+    request["tool_surface_profile_selection_source"] = "default"
+    inventory = dict(request["provider_request_inventory"])
+    tool_surface = dict(inventory["tool_surface"])
+    tool_surface["profile_id"] = "mew_legacy"
+    tool_surface["profile_default"] = True
+    tool_surface["profile_selection_source"] = "default"
+    inventory["tool_surface"] = tool_surface
+    request["provider_request_inventory"] = inventory
+    request_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_tool_surface_profile"]["status"] == "fail"
+    assert any(
+        error["reason"] == "default_profile_not_codex_hot_path"
+        for error in checks["native_tool_surface_profile"]["details"]["errors"]
+    )
+
+
+def test_hot_path_fastcheck_rejects_tool_route_profile_hash_mismatch(tmp_path):
+    artifact = _write_native_artifact(tmp_path)
+    transcript = _read_native_transcript(artifact)
+    _write_native_provider_request(artifact, transcript)
+    request_payload = json.loads((artifact / "native-provider-requests.json").read_text(encoding="utf-8"))
+    tool_surface = request_payload["requests"][0]["tool_surface"]
+    route_path = artifact / "tool_routes.jsonl"
+    route_path.write_text(
+        json.dumps(
+            {
+                "declared_tool": "exec_command",
+                "effective_tool": "run_command",
+                "tool_surface_profile_id": tool_surface["profile_id"],
+                "tool_surface_profile_hash": "sha256:stale",
+                "tool_surface_route_table_hash": tool_surface["route_table_hash"],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_hot_path_fastcheck(artifact)
+
+    checks = {check["name"]: check for check in result["checks"]}
+    assert checks["native_tool_route_profile_observability"]["status"] == "fail"
+    assert checks["native_tool_route_profile_observability"]["details"]["mismatches"] == [
+        {"row": 1, "reason": "profile_hash_mismatch"}
+    ]
 
 
 def test_hot_path_fastcheck_replays_live_provider_request_body_shape(tmp_path):

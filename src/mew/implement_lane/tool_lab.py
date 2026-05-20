@@ -14,7 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .types import ImplementLaneInput, ToolCallEnvelope, ToolResultEnvelope
-from .v2_runtime import (
+from .legacy_model_json_tool_lab import (
     IMPLEMENT_V2_LANE,
     _first_write_readiness_from_trace,
     _provider_visible_tool_result_for_history,

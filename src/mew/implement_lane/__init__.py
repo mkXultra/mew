@@ -81,8 +81,6 @@ _EXPORTS: dict[str, tuple[str, str]] = {
     "implement_v2_prompt_section_metrics": ("mew.implement_lane.prompt", "implement_v2_prompt_section_metrics"),
     "lane_artifact_namespace": ("mew.implement_lane.transcript", "lane_artifact_namespace"),
     "list_implement_lane_runtime_views": ("mew.implement_lane.registry", "list_implement_lane_runtime_views"),
-    "list_v2_base_tool_specs": ("mew.implement_lane.tool_profiles.mew_legacy", "list_v2_base_tool_specs"),
-    "list_v2_tool_specs_for_mode": ("mew.implement_lane.tool_profiles.mew_legacy", "list_v2_tool_specs_for_mode"),
     "list_workframe_variants": ("mew.implement_lane.workframe_variants", "list_workframe_variants"),
     "native_artifact_contract": ("mew.implement_lane.native_transcript", "native_artifact_contract"),
     "native_function_call_argument_metrics": ("mew.implement_lane.native_transcript", "native_function_call_argument_metrics"),

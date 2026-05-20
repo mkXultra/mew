@@ -24,7 +24,7 @@ from .native_tool_schema import (
     strict_false_reasons,
 )
 from .native_transcript import NativeTranscript, NativeTranscriptItem
-from .tool_profiles.mew_legacy import list_v2_base_tool_specs
+from .tool_registry import build_tool_surface_snapshot
 from .tool_specs import ImplementLaneToolSpec
 
 NATIVE_PROVIDER_ADAPTER_SCHEMA_VERSION = 1
@@ -149,7 +149,11 @@ def build_responses_request_descriptor(
         supports_custom_freeform_tools=caps.supports_custom_freeform_tools
     )
     lowered_tools = lower_implement_lane_tool_specs(
-        tuple(tool_specs if tool_specs is not None else list_v2_base_tool_specs()),
+        tuple(
+            tool_specs
+            if tool_specs is not None
+            else build_tool_surface_snapshot(lane_config={}).tool_specs
+        ),
         capabilities=schema_caps,
     )
     input_payload = [dict(item) for item in input_items]
@@ -224,6 +228,12 @@ def build_responses_request_descriptor(
         capability_decisions["tool_surface_profile_id"] = tool_surface_metadata.get(
             "profile_id"
         )
+        capability_decisions["tool_surface_profile_default"] = tool_surface_metadata.get(
+            "profile_default"
+        )
+        capability_decisions["tool_surface_profile_selection_source"] = (
+            tool_surface_metadata.get("profile_selection_source")
+        )
         capability_decisions["tool_surface_profile_version"] = tool_surface_metadata.get(
             "profile_version"
         )
@@ -249,6 +259,10 @@ def build_responses_request_descriptor(
         "strict_false_reasons": strict_false_reasons(lowered_tools),
         "tool_surface": tool_surface_metadata,
         "tool_surface_profile_id": tool_surface_metadata.get("profile_id", ""),
+        "tool_surface_profile_default": tool_surface_metadata.get("profile_default", False),
+        "tool_surface_profile_selection_source": tool_surface_metadata.get(
+            "profile_selection_source", ""
+        ),
         "tool_surface_profile_version": tool_surface_metadata.get("profile_version", ""),
         "tool_surface_profile_hash": tool_surface_metadata.get("profile_hash", ""),
         "tool_surface_descriptor_hash": tool_surface_metadata.get("descriptor_hash", ""),

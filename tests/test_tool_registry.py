@@ -4,6 +4,7 @@ from mew.implement_lane.native_transcript import NativeTranscriptItem
 from mew.implement_lane.native_tool_schema import stable_json_hash
 from mew.implement_lane.tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
+    DEFAULT_TOOL_SURFACE_PROFILE_ID,
     MEW_LEGACY_PROFILE_ID,
     build_tool_surface_snapshot,
 )
@@ -14,9 +15,44 @@ from mew.implement_lane.tool_profiles.codex_hot_path import (
 )
 
 
+def test_default_tool_surface_profile_is_codex_hot_path() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={},
+        task_contract={},
+        transcript_items=(),
+    )
+
+    assert DEFAULT_TOOL_SURFACE_PROFILE_ID == CODEX_HOT_PATH_PROFILE_ID
+    assert snapshot.profile_id == CODEX_HOT_PATH_PROFILE_ID
+    assert snapshot.profile_default is True
+    assert snapshot.profile_selection_source == "default"
+    metadata = snapshot.request_metadata()
+    assert metadata["profile_default"] is True
+    assert metadata["profile_selection_source"] == "default"
+
+
+def test_explicit_default_metadata_preserves_default_profile_selection() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={
+            "tool_surface_profile_id": CODEX_HOT_PATH_PROFILE_ID,
+            "tool_surface_profile_default": True,
+            "tool_surface_profile_selection_source": "default",
+        },
+        task_contract={},
+        transcript_items=(),
+    )
+
+    assert snapshot.profile_id == CODEX_HOT_PATH_PROFILE_ID
+    assert snapshot.profile_default is True
+    assert snapshot.profile_selection_source == "default"
+    metadata = snapshot.request_metadata()
+    assert metadata["profile_default"] is True
+    assert metadata["profile_selection_source"] == "default"
+
+
 def test_mew_legacy_profile_preserves_default_tool_order_without_lifecycle() -> None:
     snapshot = build_tool_surface_snapshot(
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
         task_contract={},
         transcript_items=(),
     )
@@ -35,6 +71,8 @@ def test_mew_legacy_profile_preserves_default_tool_order_without_lifecycle() -> 
     ]
 
     assert snapshot.profile_id == MEW_LEGACY_PROFILE_ID
+    assert snapshot.profile_default is False
+    assert snapshot.profile_selection_source == "legacy_opt_out"
     assert snapshot.provider_tool_names == tuple(expected)
     assert [spec.name for spec in snapshot.tool_specs] == expected
     assert snapshot.prompt_contract_id == "mew_legacy_prompt_v1"
@@ -64,7 +102,7 @@ def test_mew_legacy_profile_exposes_lifecycle_tools_for_open_command() -> None:
     )
 
     snapshot = build_tool_surface_snapshot(
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
         task_contract={},
         transcript_items=transcript_items,
     )
@@ -88,7 +126,7 @@ def test_mew_legacy_profile_exposes_output_reader_for_completed_command() -> Non
     )
 
     snapshot = build_tool_surface_snapshot(
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
         task_contract={},
         transcript_items=transcript_items,
     )
@@ -115,7 +153,7 @@ def test_mew_legacy_profile_reads_completed_command_from_content_ref_only() -> N
     )
 
     snapshot = build_tool_surface_snapshot(
-        lane_config={"mode": "full"},
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
         task_contract={},
         transcript_items=transcript_items,
     )
@@ -123,6 +161,46 @@ def test_mew_legacy_profile_reads_completed_command_from_content_ref_only() -> N
     assert "read_command_output" in snapshot.provider_tool_names
     assert "poll_command" not in snapshot.provider_tool_names
     assert "cancel_command" not in snapshot.provider_tool_names
+
+
+def test_mew_legacy_profile_preserves_explicitly_requested_lifecycle_tools() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={"mode": "full", "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID},
+        task_contract={},
+        transcript_items=(),
+        available_provider_tool_names=(
+            "poll_command",
+            "cancel_command",
+            "read_command_output",
+        ),
+    )
+
+    assert snapshot.profile_id == MEW_LEGACY_PROFILE_ID
+    assert snapshot.provider_tool_names == (
+        "poll_command",
+        "cancel_command",
+        "read_command_output",
+    )
+
+
+def test_explicit_mew_legacy_ignores_spoofed_default_metadata() -> None:
+    snapshot = build_tool_surface_snapshot(
+        lane_config={
+            "mode": "full",
+            "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID,
+            "tool_surface_profile_default": True,
+            "tool_surface_profile_selection_source": "default",
+        },
+        task_contract={},
+        transcript_items=(),
+    )
+
+    assert snapshot.profile_id == MEW_LEGACY_PROFILE_ID
+    assert snapshot.profile_default is False
+    assert snapshot.profile_selection_source == "legacy_opt_out"
+    metadata = snapshot.request_metadata()
+    assert metadata["profile_default"] is False
+    assert metadata["profile_selection_source"] == "legacy_opt_out"
 
 
 def test_unknown_tool_surface_profile_fails_closed() -> None:

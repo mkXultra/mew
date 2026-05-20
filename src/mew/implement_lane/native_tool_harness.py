@@ -20,6 +20,11 @@ from .completion_resolver import (
     write_completion_resolver_artifacts,
 )
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
+from .finish_verifier_planner_policy import FinishVerifierPlannerPolicy, finish_verifier_planner_policy
+from .finish_acceptance_helpers import (
+    _acceptance_session_from_tool_results,
+    _finish_acceptance_action,
+)
 from .native_fake_provider import PHASE3_TRANSPORT_CHANGE, NativeFakeProvider
 from .native_finish_gate import (
     FinishCloseoutStatus,
@@ -83,7 +88,6 @@ from .tool_guidance import (
     hide_unavailable_write_file_guidance,
     is_hard_runtime_artifact_task,
 )
-from .tool_profiles.mew_legacy import list_v2_tool_specs_for_task
 from .tool_profiles.codex_hot_path import codex_hot_path_developer_contract
 from .tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
@@ -95,10 +99,6 @@ from .tool_specs import ImplementLaneToolSpec
 from .tool_result_renderer import render_observability_record, render_tool_result_for_profile
 from .tool_routes import route_records_from_results, with_tool_route_decision
 from .types import ImplementLaneInput, ImplementLaneResult, ToolCallEnvelope, ToolResultEnvelope
-from .v2_runtime import (
-    _acceptance_session_from_tool_results,
-    _finish_acceptance_action,
-)
 from .. import codex_api as _codex_api
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
 from ..acceptance import acceptance_done_gate_decision
@@ -248,6 +248,7 @@ class _FinishVerifierCommandSafetyResult:
 @dataclass(frozen=True)
 class FinishVerifierPlannerLoopPolicy:
     enabled: bool
+    selection_source: str = ""
     max_turns: int = 3
     max_wall_seconds: float = 300.0
     max_file_reads: int = 12
@@ -256,6 +257,13 @@ class FinishVerifierPlannerLoopPolicy:
     max_total_read_bytes: int = 120_000
     allowed_tools: tuple[str, ...] = ("inspect_dir", "read_file", "search_text", "glob")
     allowed_roots: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class _FinishVerifierPlannerEligibility:
+    policy: FinishVerifierPlannerPolicy
+    can_run: bool
+    selection_source: str
 
 
 @dataclass(frozen=True)
@@ -301,6 +309,8 @@ class FinishVerifierPlannerLoopRequest:
                 "latest_mutation": dict(self.latest_mutation),
                 "recent_tool_results": [dict(item) for item in self.recent_tool_results],
                 "read_policy": {
+                    "enabled": self.policy.enabled,
+                    "selection_source": self.policy.selection_source,
                     "allowed_tools": list(self.policy.allowed_tools),
                     "allowed_roots": list(self.policy.allowed_roots),
                     "max_turns": self.policy.max_turns,
@@ -1151,6 +1161,15 @@ def run_native_implement_v2(
 
     finish_verifier_planner_decisions = _provider_finish_verifier_planner_decisions(provider)
     finish_verifier_planner_requests = _provider_finish_verifier_planner_requests(provider)
+    planner_policy = finish_verifier_planner_policy(lane_config)
+    finish_verifier_planner_selection_source = _native_finish_verifier_planner_selection_source(
+        lane_input,
+        provider=provider,
+        lane_config=lane_config,
+        tool_results=tuple(tool_results),
+        decisions=finish_verifier_planner_decisions,
+        policy=planner_policy,
+    )
     metrics = {
         **_native_surface_for_provider(provider),
         "status": status,
@@ -1190,6 +1209,10 @@ def run_native_implement_v2(
         ),
         "finish_verifier_planner_decision_count": len(finish_verifier_planner_decisions),
         "finish_verifier_planner_request_count": len(finish_verifier_planner_requests),
+        "finish_verifier_planner_enabled": planner_policy.enabled,
+        "finish_verifier_planner_request_enabled": planner_policy.enabled,
+        "finish_verifier_planner_selection_source": finish_verifier_planner_selection_source,
+        "planner_selection_source": finish_verifier_planner_selection_source,
         "finish_verifier_planner_latest_decision": (
             dict(finish_verifier_planner_decisions[-1]) if finish_verifier_planner_decisions else {}
         ),
@@ -1202,6 +1225,7 @@ def run_native_implement_v2(
         paths = _write_native_artifacts(
             Path(artifact_root),
             transcript,
+            lane_input=lane_input,
             tool_results=tuple(tool_results),
             provider=provider,
             status=status,
@@ -1559,24 +1583,16 @@ def _native_tool_available(
     lane_input: ImplementLaneInput,
     lane_config: Mapping[str, object],
 ) -> bool:
-    if tool_surface_profile_id(lane_config) == CODEX_HOT_PATH_PROFILE_ID:
-        try:
-            snapshot = build_tool_surface_snapshot(
-                lane_config=lane_config,
-                task_contract=lane_input.task_contract,
-                transcript_items=(),
-            )
-        except ValueError:
-            return False
-        return str(tool_name or "") in set(snapshot.provider_tool_names)
-    mode = str(lane_config.get("mode") or "full").strip() or "full"
-    return str(tool_name or "") in {
-        spec.name
-        for spec in list_v2_tool_specs_for_task(
-            mode,
+    try:
+        snapshot = build_tool_surface_snapshot(
+            lane_config=lane_config,
             task_contract=lane_input.task_contract,
+            transcript_items=(),
+            available_provider_tool_names=(str(tool_name or ""),),
         )
-    }
+    except ValueError:
+        return False
+    return str(tool_name or "") in set(snapshot.provider_tool_names)
 
 
 def _legacy_provider_visible_finish_enabled(lane_config: Mapping[str, object]) -> bool:
@@ -2507,11 +2523,77 @@ def _native_finish_verifier_planner_can_run(
     lane_config: Mapping[str, object],
     tool_results: tuple[ToolResultEnvelope, ...],
 ) -> bool:
-    if not bool(lane_config.get("experimental_finish_verifier_planner")):
-        return False
+    return _native_finish_verifier_planner_eligibility(
+        lane_input,
+        provider=provider,
+        lane_config=lane_config,
+        tool_results=tool_results,
+    ).can_run
+
+
+def _native_finish_verifier_planner_eligibility(
+    lane_input: ImplementLaneInput,
+    *,
+    provider: object,
+    lane_config: Mapping[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    configured_verifier_precedence: bool = False,
+    policy: FinishVerifierPlannerPolicy | None = None,
+) -> _FinishVerifierPlannerEligibility:
+    planner_policy = policy or finish_verifier_planner_policy(lane_config)
+    if not planner_policy.enabled:
+        return _FinishVerifierPlannerEligibility(
+            policy=planner_policy,
+            can_run=False,
+            selection_source=planner_policy.selection_source,
+        )
+    if configured_verifier_precedence:
+        return _FinishVerifierPlannerEligibility(
+            policy=planner_policy,
+            can_run=False,
+            selection_source="configured_verifier_precedence",
+        )
     if not tool_results:
-        return False
-    return callable(getattr(provider, "plan_finish_verifier_command", None))
+        return _FinishVerifierPlannerEligibility(
+            policy=planner_policy,
+            can_run=False,
+            selection_source="not_eligible",
+        )
+    if not callable(getattr(provider, "plan_finish_verifier_command", None)):
+        return _FinishVerifierPlannerEligibility(
+            policy=planner_policy,
+            can_run=False,
+            selection_source="provider_missing",
+        )
+    return _FinishVerifierPlannerEligibility(
+        policy=planner_policy,
+        can_run=True,
+        selection_source=planner_policy.selection_source,
+    )
+
+
+def _native_finish_verifier_planner_selection_source(
+    lane_input: ImplementLaneInput,
+    *,
+    provider: object,
+    lane_config: Mapping[str, object],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    decisions: tuple[Mapping[str, object], ...],
+    policy: FinishVerifierPlannerPolicy | None = None,
+) -> str:
+    if decisions:
+        decision_source = str(decisions[-1].get("selection_source") or "").strip()
+        if decision_source:
+            return decision_source
+    eligibility = _native_finish_verifier_planner_eligibility(
+        lane_input,
+        provider=provider,
+        lane_config=lane_config,
+        tool_results=tool_results,
+        configured_verifier_precedence=bool(_configured_native_final_verifier_command(lane_input)),
+        policy=policy,
+    )
+    return eligibility.selection_source
 
 
 def _finish_verifier_planner_loop_request(
@@ -2527,6 +2609,7 @@ def _finish_verifier_planner_loop_request(
     allowed_roots = lane_config.get("allowed_read_roots")
     if not isinstance(allowed_roots, (list, tuple)):
         allowed_roots = (lane_input.workspace,)
+    planner_policy = finish_verifier_planner_policy(lane_config)
     latest_mutation = _latest_mutation_for_finish_verifier_planner(tool_results)
     task_contract = dict(lane_input.task_contract)
     legacy_contract = task.get("contract")
@@ -2551,7 +2634,8 @@ def _finish_verifier_planner_loop_request(
             tool_results=tool_results,
         ),
         policy=FinishVerifierPlannerLoopPolicy(
-            enabled=bool(lane_config.get("experimental_finish_verifier_planner")),
+            enabled=planner_policy.enabled,
+            selection_source=planner_policy.selection_source,
             max_turns=_planner_bounded_int(lane_config.get("finish_verifier_planner_max_turns"), 3, 1, 8),
             max_wall_seconds=_safe_float(
                 lane_config.get("finish_verifier_planner_timeout_seconds"),
@@ -3131,6 +3215,12 @@ def _finish_verifier_planner_record_with_authority(
     request: Mapping[str, object],
 ) -> dict[str, object]:
     item = dict(record)
+    read_policy = request.get("read_policy") if isinstance(request.get("read_policy"), Mapping) else {}
+    selection_source = str(read_policy.get("selection_source") or "").strip()
+    if selection_source:
+        item.setdefault("selection_source", selection_source)
+    if "enabled" in read_policy:
+        item.setdefault("request_enabled", bool(read_policy.get("enabled")))
     done_candidate_id = str(request.get("done_candidate_id") or "").strip()
     finish_call_id = str(request.get("finish_call_id") or "").strip()
     if done_candidate_id:
@@ -4837,6 +4927,8 @@ def _request_descriptor(
         "provider_request_inventory": provider_request_inventory,
         "tool_surface": tool_surface.request_metadata(),
         "tool_surface_profile_id": tool_surface.profile_id,
+        "tool_surface_profile_default": tool_surface.profile_default,
+        "tool_surface_profile_selection_source": tool_surface.profile_selection_source,
         "tool_surface_profile_version": tool_surface.profile_version,
         "tool_surface_profile_hash": tool_surface.profile_hash,
         "tool_surface_descriptor_hash": tool_surface.descriptor_hash,
@@ -4927,20 +5019,12 @@ def _tool_specs_from_request_descriptor(
         for name in (request_descriptor.get("provider_tool_names") or ())
         if str(name or "").strip()
     }
-    if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
-        snapshot = _tool_surface_snapshot_for_request(
-            lane_input,
-            (),
-            available_provider_tool_names=tuple(sorted(names)) if names else None,
-        )
-        return snapshot.tool_specs
-    specs = list_v2_tool_specs_for_task(
-        lane_input.lane_config.get("mode") or "full",
-        task_contract=lane_input.task_contract,
+    snapshot = _tool_surface_snapshot_for_request(
+        lane_input,
+        (),
+        available_provider_tool_names=tuple(sorted(names)) if names else None,
     )
-    if not names:
-        return _native_tool_specs_for_request(lane_input, ())
-    return tuple(spec for spec in specs if spec.name in names)
+    return snapshot.tool_specs
 
 
 def _native_tool_specs_for_request(
@@ -5931,6 +6015,7 @@ def _partial_failure_harness_result(
             paths = _write_native_artifacts(
                 Path(artifact_root),
                 transcript,
+                lane_input=lane_input,
                 tool_results=tool_results,
                 provider=provider,
                 done_candidates=done_candidates,
@@ -6064,6 +6149,13 @@ def _write_live_failure_artifacts(
     }
     request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     inventory_path.write_text(json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _patch_native_default_observability(
+        paths,
+        provider=provider,
+        lane_input=lane_input,
+        finish_verifier_planner_decisions=finish_verifier_planner_decisions,
+        finish_verifier_planner_requests=finish_verifier_planner_requests,
+    )
     return tuple(str(path) for path in (*paths.values(), request_path, inventory_path))
 
 
@@ -6459,6 +6551,7 @@ def _write_native_artifacts(
     root: Path,
     transcript: NativeTranscript,
     *,
+    lane_input: ImplementLaneInput | None = None,
     tool_results: tuple[ToolResultEnvelope, ...],
     provider: object,
     status: str = "",
@@ -6532,18 +6625,139 @@ def _write_native_artifacts(
         )
     )
     paths.update(_write_provider_request_artifacts(root, provider=provider, status=status, error=error))
-    if not isinstance(provider, NativeFakeProvider):
-        return paths
-    for key in ("transcript_metrics", "proof_manifest"):
-        path = paths[key]
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        payload["transport_kind"] = "fake_native"
-        payload["native_transport_kind"] = "provider_native"
-        if isinstance(payload.get("metrics"), dict):
-            payload["metrics"]["transport_kind"] = "fake_native"
-            payload["metrics"]["native_transport_kind"] = "provider_native"
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if isinstance(provider, NativeFakeProvider):
+        for key in ("transcript_metrics", "proof_manifest"):
+            path = paths[key]
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["transport_kind"] = "fake_native"
+            payload["native_transport_kind"] = "provider_native"
+            if isinstance(payload.get("metrics"), dict):
+                payload["metrics"]["transport_kind"] = "fake_native"
+                payload["metrics"]["native_transport_kind"] = "provider_native"
+            path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _patch_native_default_observability(
+        paths,
+        provider=provider,
+        lane_input=lane_input,
+        finish_verifier_planner_decisions=finish_verifier_planner_decisions,
+        finish_verifier_planner_requests=finish_verifier_planner_requests,
+    )
     return paths
+
+
+def _patch_native_default_observability(
+    paths: Mapping[str, Path],
+    *,
+    provider: object,
+    lane_input: ImplementLaneInput | None,
+    finish_verifier_planner_decisions: tuple[Mapping[str, object], ...],
+    finish_verifier_planner_requests: tuple[Mapping[str, object], ...],
+) -> None:
+    facts = _native_default_observability_facts(
+        provider,
+        lane_input=lane_input,
+        finish_verifier_planner_decisions=finish_verifier_planner_decisions,
+        finish_verifier_planner_requests=finish_verifier_planner_requests,
+    )
+    for key in ("proof_manifest", "transcript_metrics"):
+        path = paths.get(key)
+        if path is None or not path.exists():
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload.update(
+            {
+                field: facts[field]
+                for field in (
+                    "native_transport_kind",
+                    "tool_surface_profile_id",
+                    "tool_surface_profile_selection_source",
+                    "tool_surface_profile_default",
+                    "tool_surface_profile_hash",
+                    "developer_contract_transport",
+                )
+                if field in facts
+            }
+        )
+        metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+        metrics.update(facts)
+        payload["metrics"] = metrics
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _native_default_observability_facts(
+    provider: object,
+    *,
+    lane_input: ImplementLaneInput | None,
+    finish_verifier_planner_decisions: tuple[Mapping[str, object], ...],
+    finish_verifier_planner_requests: tuple[Mapping[str, object], ...],
+) -> dict[str, object]:
+    requests = _provider_request_records(provider)
+    latest_request = requests[-1] if requests else {}
+    latest_inventory = _mapping_or_empty(latest_request.get("provider_request_inventory"))
+    tool_surface = _latest_tool_surface_metadata(provider)
+    if not tool_surface and lane_input is not None:
+        tool_surface = build_tool_surface_snapshot(
+            lane_config=lane_input.lane_config,
+            task_contract=lane_input.task_contract,
+            transcript_items=(),
+        ).request_metadata()
+    planner_policy = finish_verifier_planner_policy(lane_input.lane_config if lane_input is not None else {})
+    latest_planner_request = (
+        _mapping_or_empty(finish_verifier_planner_requests[-1].get("request"))
+        if finish_verifier_planner_requests
+        else {}
+    )
+    latest_read_policy = _mapping_or_empty(latest_planner_request.get("read_policy"))
+    facts: dict[str, object] = {
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "native_transport_kind": "provider_native",
+        "provider_native_tool_loop": True,
+        "model_json_main_path_detected": False,
+        "provider_request_inventory_available": bool(requests),
+        "provider_request_count": len(requests),
+        "finish_verifier_planner_enabled": bool(latest_read_policy.get("enabled", planner_policy.enabled)),
+        "finish_verifier_planner_selection_source": str(
+            latest_read_policy.get("selection_source") or planner_policy.selection_source
+        ),
+        "finish_verifier_planner_request_count": len(finish_verifier_planner_requests),
+        "finish_verifier_planner_decision_count": len(finish_verifier_planner_decisions),
+        "previous_response_delta_mode": str(latest_request.get("previous_response_delta_mode") or "none"),
+        "previous_response_prefix_item_count": _safe_int(latest_request.get("input_item_count"), default=0),
+    }
+    if tool_surface:
+        facts.update(
+            {
+                "tool_surface_profile_id": str(tool_surface.get("profile_id") or ""),
+                "tool_surface_profile_selection_source": str(tool_surface.get("profile_selection_source") or ""),
+                "tool_surface_profile_default": bool(tool_surface.get("profile_default")),
+                "tool_surface_profile_hash": str(tool_surface.get("profile_hash") or ""),
+                "tool_surface_descriptor_hash": str(tool_surface.get("descriptor_hash") or ""),
+                "tool_surface_route_table_hash": str(tool_surface.get("route_table_hash") or ""),
+                "tool_surface_render_policy_hash": str(tool_surface.get("render_policy_hash") or ""),
+                "developer_contract_transport": str(
+                    latest_inventory.get("developer_contract_transport")
+                    or tool_surface.get("developer_contract_transport")
+                    or tool_surface.get("developer_contract_transport_policy")
+                    or ""
+                ),
+            }
+        )
+    return facts
+
+
+def _mapping_or_empty(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _latest_tool_surface_metadata(provider: object) -> dict[str, object]:
+    for request in reversed(_provider_request_records(provider)):
+        tool_surface = request.get("tool_surface")
+        if isinstance(tool_surface, Mapping):
+            return dict(tool_surface)
+        inventory = request.get("provider_request_inventory")
+        if isinstance(inventory, Mapping) and isinstance(inventory.get("tool_surface"), Mapping):
+            return dict(inventory["tool_surface"])  # type: ignore[index]
+    return {}
 
 
 def _write_native_tool_result_sidecars(

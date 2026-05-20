@@ -17,7 +17,10 @@ from .implement_lane.native_transcript import (
     validate_native_transcript_pairing,
 )
 from .implement_lane.types import ToolResultEnvelope
-from .implement_lane.v2_runtime import _frontier_evidence_registry, _source_output_contract_from_tool_results
+from .implement_lane.legacy_model_json_runtime import (
+    _frontier_evidence_registry,
+    _source_output_contract_from_tool_results,
+)
 from .timeutil import now_iso
 from .work_session import build_work_session_resume
 

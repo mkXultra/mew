@@ -8,7 +8,7 @@ from collections import defaultdict
 from typing import Any, Iterable
 
 from .execution_evidence import build_oracle_bundle, evidence_events_from_tool_payload
-from .tool_profiles.mew_legacy import list_v2_base_tool_specs
+from .tool_registry import build_tool_surface_snapshot
 from .tool_specs import ImplementLaneToolSpec
 from .tool_routes import tool_route_artifact_from_results
 from .types import ImplementLaneTranscriptEvent, ToolResultEnvelope
@@ -40,7 +40,11 @@ def build_tool_registry_artifact(
 ) -> dict[str, object]:
     """Build the provider-neutral tool registry artifact."""
 
-    specs = tuple(tool_specs if tool_specs is not None else list_v2_base_tool_specs())
+    specs = tuple(
+        tool_specs
+        if tool_specs is not None
+        else build_tool_surface_snapshot(lane_config={}).tool_specs
+    )
     tools = []
     for spec in specs:
         payload = spec.as_dict()

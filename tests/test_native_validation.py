@@ -28,6 +28,10 @@ def test_native_loop_gate_passes_static_route_and_fixture() -> None:
     assert result.ok is True
     assert result.checks["registry_native_runtime_id"] is True
     assert result.checks["registry_provider_native_loop"] is True
+    assert result.checks["default_tool_surface_profile_codex_hot_path"] is True
+    assert result.checks["default_tool_surface_profile_default"] is True
+    assert result.checks["planner_policy_default_enabled"] is True
+    assert result.checks["legacy_tool_surface_explicit_opt_out"] is True
     assert result.checks["command_route_no_live_json_call"] is True
     assert result.checks["package_surface_exists"] is True
     assert result.checks["native_production_paths_exist"] is True
@@ -41,6 +45,10 @@ def test_native_loop_gate_passes_static_route_and_fixture() -> None:
     assert result.checks["package_surface_no_FakeProviderAdapter"] is True
     assert result.checks["package_surface_no_FakeProviderToolCall"] is True
     assert result.checks["package_surface_no_LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID"] is True
+    assert result.checks["package_surface_no_list_v2_base_tool_specs"] is True
+    assert result.checks["package_surface_no_list_v2_tool_specs_for_mode"] is True
+    assert result.checks["package_surface_no_list_v2_tool_specs_for_task"] is True
+    assert result.checks["native_production_paths_no_direct_planner_config_reads"] is True
     assert result.checks["fixture_pairing_valid"] is True
 
 
@@ -130,6 +138,7 @@ def test_native_loop_gate_allows_internal_helper_model_call_in_native_harness(tm
         "src/mew/commands.py": "run_live_native_implement_v2()\n",
         "src/mew/implement_lane/__init__.py": "",
         "src/mew/implement_lane/registry.py": "",
+        "src/mew/implement_lane/provider.py": "",
         "src/mew/implement_lane/native_provider_adapter.py": "",
         "src/mew/implement_lane/native_tool_harness.py": "call_codex_json()\n",
     }
@@ -154,8 +163,9 @@ def test_native_loop_gate_rejects_legacy_symbols_in_native_production_paths(tmp_
         "src/mew/commands.py": "run_unavailable_native_implement_v2()\n",
         "src/mew/implement_lane/__init__.py": "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID\n",
         "src/mew/implement_lane/registry.py": "",
+        "src/mew/implement_lane/provider.py": "provider = \"model_json\"\n",
         "src/mew/implement_lane/native_provider_adapter.py": "run_live_json_implement_v2()\n",
-        "src/mew/implement_lane/native_tool_harness.py": "",
+        "src/mew/implement_lane/native_tool_harness.py": "from .v2_runtime import _finish_acceptance_action\n",
     }
     for relative_path, text in files.items():
         path = tmp_path / relative_path
@@ -172,3 +182,37 @@ def test_native_loop_gate_rejects_legacy_symbols_in_native_production_paths(tmp_
         item for item in production_paths if item["path"] == "src/mew/implement_lane/native_provider_adapter.py"
     )
     assert provider_scan["legacy_hits"] == {"run_live_json_implement_v2": 1}
+    harness_scan = next(
+        item for item in production_paths if item["path"] == "src/mew/implement_lane/native_tool_harness.py"
+    )
+    assert harness_scan["legacy_hits"] == {"from .v2_runtime import": 1}
+
+
+def test_native_loop_gate_rejects_direct_planner_config_reads_in_native_runtime(tmp_path) -> None:
+    files = {
+        "src/mew/commands.py": "run_live_native_implement_v2()\n",
+        "src/mew/implement_lane/__init__.py": "",
+        "src/mew/implement_lane/registry.py": "",
+        "src/mew/implement_lane/provider.py": "",
+        "src/mew/implement_lane/native_provider_adapter.py": "",
+        "src/mew/implement_lane/native_tool_harness.py": (
+            "def can_run(lane_config):\n"
+            "    return lane_config.get(\"finish_verifier_planner_enabled\")\n"
+        ),
+    }
+    for relative_path, text in files.items():
+        path = tmp_path / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    result = validate_native_loop_gate(source_root=tmp_path)
+
+    assert result.ok is False
+    assert result.checks["native_production_paths_no_direct_planner_config_reads"] is False
+    planner_scans = result.details["planner_policy_boundary_paths"]
+    harness_scan = next(
+        item for item in planner_scans if item["path"] == "src/mew/implement_lane/native_tool_harness.py"
+    )
+    assert harness_scan["planner_config_hits"] == {
+        'lane_config.get("finish_verifier_planner_enabled")': 1
+    }
