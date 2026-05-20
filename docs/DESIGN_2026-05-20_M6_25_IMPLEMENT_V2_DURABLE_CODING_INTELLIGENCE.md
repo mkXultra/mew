@@ -1,8 +1,16 @@
 # Design 2026-05-20 - M6.25 Implement V2 Durable Coding Intelligence
 
-Status: design only.
+Status: superseded for implementation; redesign required before code changes.
 
-Scope: adapt the older durable-coding-intelligence proposal to the current
+2026-05-20 decision: this document remains useful as a research-to-design
+mapping, but it is not active implementation authority. The first
+sidecar-only projection implementation that followed this design was reverted
+because the memory cycle, write cycle, injection point, and resident-campaign
+evidence contract were not visible enough for safe implementation. A successor
+design must explicitly define those mechanics before reintroducing any durable
+memory code or provider-visible memory projection.
+
+Original scope: adapt the older durable-coding-intelligence proposal to the current
 `implement_v2` native transcript, `codex_hot_path`, tool registry, internal
 finish gate, and sidecar-proof architecture. This document does not authorize
 source edits by itself.

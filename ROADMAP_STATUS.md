@@ -84,12 +84,14 @@ as too time-expensive for the current decision. M6.25 is now active. The next
 work is to plan and execute Codex-plus resident advantage evidence while
 preserving the M6.24 baseline.
 
-2026-05-20 M6.25 implementation update: commits `f392111`, `f3ef986`,
-`71748e2`, and `016e102` fixed implement_v2 native defaults, added the
-`resident-golden-convention-recall` Harbor fixture, froze durable-coding memory
-rules, and implemented the sidecar-only durable-memory projection dry run.
-The next work is the resident campaign/ledger path around that fixture, not a
-return to M6.24 proof spending.
+2026-05-20 M6.25 implementation update: commits `f392111`, `f3ef986`, and
+`71748e2` fixed implement_v2 native defaults, added the
+`resident-golden-convention-recall` Harbor fixture, and captured an initial
+durable-coding memory design. Commit `dfc5a9b` reverted the premature
+sidecar-only durable-memory projection dry-run implementation because the
+memory cycle, injection point, and campaign evidence contract require
+redesign. The next work is to keep the Harbor fixture, redesign durable memory
+mechanics, and only then reintroduce implementation behind explicit gates.
 
 ## M6.24 Close Summary
 
@@ -117,19 +119,23 @@ M6.25 proves Codex-plus resident advantage while preserving the M6.24 baseline. 
 Phase order:
 
 1. Baseline and guard: keep M6.24 closed, use `proof-artifacts/m6_25_resident_advantage_ledger.jsonl`, and define cold-vs-resident evidence axes.
-2. Sidecar-only durable-memory dry run: implemented by `016e102`; use it to
-   select/revise/reject memory without provider-visible injection.
-3. Resident campaign/ledger: run paired cold/resident/stale evidence on the
-   committed Harbor fixture.
-4. Bounded read-only memory summary: add only if bounded, inspectable, and measurable.
-5. Read-only `MemoryExploreProvider` boundary.
-6. Provider cache transport behind default-off flags.
-7. Resident advantage report.
+2. Durable memory redesign: define memory kinds, write cycle, retrieval cycle,
+   revise gate, injection point, and experiment gates before adding code.
+3. Sidecar-only durable-memory dry run: reintroduce only after the redesign
+   has an explicit close gate and does not inject memory into ordinary
+   `implement_v2` requests.
+4. Resident campaign/ledger: run paired cold/resident/stale evidence on the
+   committed Harbor fixture after the evidence contract is fixed.
+5. Bounded read-only memory summary: add only if bounded, inspectable, and measurable.
+6. Read-only `MemoryExploreProvider` boundary.
+7. Provider cache transport behind default-off flags.
+8. Resident advantage report.
 
-Current next action: implement or design the resident campaign/ledger runner for
-`resident-golden-convention-recall`, using the sidecar-only projection dry run
-as the memory-selection primitive. Do not inject memory into ordinary
-`implement_v2` requests until the bounded experiment gate is explicit.
+Current next action: redesign durable memory mechanics for M6.25 while keeping
+the Harbor fixture. Do not treat `docs/DESIGN_2026-05-20_M6_25_IMPLEMENT_V2_DURABLE_CODING_INTELLIGENCE.md`
+or the reverted `016e102` implementation as active implementation authority.
+Do not inject memory into ordinary `implement_v2` requests until the bounded
+experiment gate is explicit.
 
 ## Maintenance Rule
 
