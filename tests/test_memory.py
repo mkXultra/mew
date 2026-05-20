@@ -101,6 +101,24 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual(entry, "now: Preserve passive-first design.")
         self.assertEqual(state["memory"]["deep"]["decisions"], [entry])
 
+    def test_memory_command_prints_typed_memory_only_with_deep(self):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            try:
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["memory"]), 0)
+                plain_text = stdout.getvalue()
+
+                with redirect_stdout(StringIO()) as stdout, redirect_stderr(StringIO()):
+                    self.assertEqual(main(["memory", "--deep"]), 0)
+                deep_text = stdout.getvalue()
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertNotIn("typed_memory:", plain_text)
+        self.assertIn("typed_memory:", deep_text)
+
     def test_file_memory_backend_writes_typed_scoped_memory(self):
         with tempfile.TemporaryDirectory() as tmp:
             backend = FileMemoryBackend(tmp)

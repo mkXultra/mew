@@ -46,6 +46,7 @@ from .commands import (
     cmd_listen,
     cmd_log,
     cmd_memory,
+    cmd_memory_core,
     cmd_message,
     cmd_metrics,
     cmd_mood,
@@ -1958,6 +1959,54 @@ def build_parser():
     memory_parser.add_argument("--keep-recent", type=int, default=5, help="recent events to keep when compacting")
     memory_parser.add_argument("--dry-run", action="store_true", help="print compact note without changing state")
     memory_parser.set_defaults(func=cmd_memory)
+
+    memory_core_parser = subparsers.add_parser(
+        "memory-core",
+        help="debug and score the M6.25 MemorySystem core directly",
+    )
+    memory_core_subparsers = memory_core_parser.add_subparsers(dest="memory_core_action")
+    memory_core_parser.set_defaults(func=cmd_memory_core)
+
+    memory_core_recall = memory_core_subparsers.add_parser("recall", help="run direct MemorySystem recall")
+    memory_core_recall.add_argument("--store", required=True, help="JSON memory store with an entries array")
+    memory_core_recall.add_argument("--query", required=True, help="recall query text")
+    memory_core_recall.add_argument("--scope", default="", help="optional memory scope filter")
+    memory_core_recall.add_argument("--kind", action="append", default=[], help="memory kind filter; repeatable")
+    memory_core_recall.add_argument("--limit", type=int, default=5, help="maximum recall results")
+    memory_core_recall.add_argument("--include-stale", action="store_true", help="include stale and superseded entries")
+    memory_core_recall.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_recall.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_recall.set_defaults(func=cmd_memory_core)
+
+    memory_core_chain = memory_core_subparsers.add_parser("chain", help="run bounded direct chain expansion")
+    memory_core_chain.add_argument("--store", required=True, help="JSON memory store with an entries array")
+    memory_core_chain.add_argument("--entry", action="append", required=True, help="start entry id; repeatable")
+    memory_core_chain.add_argument("--max-depth", type=int, default=1, help="maximum chain depth")
+    memory_core_chain.add_argument("--max-fanout", type=int, default=5, help="maximum outgoing edges per node")
+    memory_core_chain.add_argument("--max-nodes", type=int, default=20, help="maximum chain nodes")
+    memory_core_chain.add_argument("--max-chars", type=int, default=4000, help="maximum returned node characters")
+    memory_core_chain.add_argument("--edge-kind", action="append", default=[], help="edge kind filter; repeatable")
+    memory_core_chain.add_argument("--include-stale", action="store_true", help="include stale and superseded entries")
+    memory_core_chain.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_chain.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_chain.set_defaults(func=cmd_memory_core)
+
+    memory_core_inspect = memory_core_subparsers.add_parser("inspect", help="inspect one durable memory entry")
+    memory_core_inspect.add_argument("--store", required=True, help="JSON memory store with an entries array")
+    memory_core_inspect.add_argument("--entry", required=True, help="entry id to inspect")
+    memory_core_inspect.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_inspect.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_inspect.set_defaults(func=cmd_memory_core)
+
+    memory_core_score = memory_core_subparsers.add_parser(
+        "score",
+        help="score a local memory fixture without running a model",
+    )
+    memory_core_score.add_argument("--fixture", required=True, help="local JSON memory fixture")
+    memory_core_score.add_argument("--mode", required=True, choices=("memory_off", "memory_on", "stale"))
+    memory_core_score.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_score.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_score.set_defaults(func=cmd_memory_core)
 
     snapshot_parser = subparsers.add_parser("snapshot", help="refresh structured project snapshot memory")
     snapshot_parser.add_argument("--path", default=".", help="directory to inspect")

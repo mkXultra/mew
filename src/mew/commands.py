@@ -17740,6 +17740,60 @@ def cmd_memory(args):
             print("- none")
     return 0
 
+
+def cmd_memory_core(args):
+    from .memory_debug import (
+        chain_artifact,
+        format_artifact_summary,
+        inspect_artifact,
+        recall_artifact,
+        score_fixture_artifact,
+        write_artifact,
+    )
+
+    action = getattr(args, "memory_core_action", None)
+    if not action:
+        print("mew: memory-core requires a subcommand", file=sys.stderr)
+        return 1
+    try:
+        if action == "recall":
+            artifact = recall_artifact(
+                store_path=args.store,
+                query=args.query,
+                scope=args.scope or "",
+                memory_kinds=args.kind or (),
+                limit=args.limit,
+                include_stale=bool(args.include_stale),
+            )
+        elif action == "chain":
+            artifact = chain_artifact(
+                store_path=args.store,
+                entry_ids=args.entry,
+                max_depth=args.max_depth,
+                max_fanout=args.max_fanout,
+                max_nodes=args.max_nodes,
+                max_chars=args.max_chars,
+                edge_kinds=args.edge_kind or (),
+                include_stale=bool(args.include_stale),
+            )
+        elif action == "inspect":
+            artifact = inspect_artifact(store_path=args.store, entry_id=args.entry)
+        elif action == "score":
+            artifact = score_fixture_artifact(fixture_path=args.fixture, mode=args.mode)
+        else:
+            print(f"mew: unknown memory-core subcommand: {action}", file=sys.stderr)
+            return 1
+        write_artifact(args.artifact, artifact)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(artifact, ensure_ascii=False, indent=2))
+    else:
+        print(format_artifact_summary(artifact))
+    return 0
+
+
 def cmd_snapshot(args):
     allowed = args.allow_read or []
     if not allowed:
