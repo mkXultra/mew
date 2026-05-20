@@ -22,7 +22,14 @@ def sha256(path: Path) -> str:
 def write_reward(payload: dict[str, object]) -> None:
     target_dir = reward_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / "reward.json").write_text(json.dumps(payload, indent=2) + "\n")
+    reward_value = float(payload.get("reward", 0.0))
+    reward_payload = {"reward": reward_value}
+    metrics_payload = {key: value for key, value in payload.items() if key != "reward"}
+    (target_dir / "reward.json").write_text(json.dumps(reward_payload, indent=2) + "\n")
+    if metrics_payload:
+        (target_dir / "resident-memory-metrics.json").write_text(
+            json.dumps(metrics_payload, indent=2, sort_keys=True) + "\n"
+        )
 
 
 def fail(message: str, *, extra: dict[str, float] | None = None) -> None:

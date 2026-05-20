@@ -75,8 +75,10 @@ Validated cases:
 | stale-memory | oracle | pass | pass |
 | stale-memory | known-bad | fail obsolete path | fail obsolete source path |
 
-All six verifier runs wrote `logs/verifier/reward.json` under their validation
-case directory.
+All six verifier runs wrote Harbor-facing `logs/verifier/reward.json` with
+exactly one key, `reward`, under their validation case directory. Detailed
+diagnostic metrics are written separately to
+`logs/verifier/resident-memory-metrics.json`.
 
 Known-bad failure excerpts:
 
@@ -89,7 +91,33 @@ stale-memory: VERIFIER_FAILURE: obsolete source path was written: src/golden_con
 Oracle reward JSON summaries:
 
 ```text
-seed-convention: {"reward": 1.0, "correctness": 1.0, "protected_files": 1.0}
-recall-convention: {"reward": 1.0, "correctness": 1.0, "protected_files": 1.0}
-stale-memory: {"reward": 1.0, "correctness": 1.0, "protected_files": 1.0, "current_layout": 1.0, "obsolete_path_not_written": 1.0}
+seed-convention: {"reward": 1.0}
+recall-convention: {"reward": 1.0}
+stale-memory: {"reward": 1.0}
+```
+
+Oracle resident-memory metrics summaries:
+
+```text
+seed-convention: {"correctness": 1.0, "protected_files": 1.0}
+recall-convention: {"correctness": 1.0, "protected_files": 1.0}
+stale-memory: {"correctness": 1.0, "protected_files": 1.0, "current_layout": 1.0, "obsolete_path_not_written": 1.0}
+```
+
+## Direct Harbor Oracle Smoke
+
+Command:
+
+```sh
+harbor run --path benchmarks/harbor/resident-golden-convention-recall --agent oracle -k 1 -n 1 --jobs-dir tmp/harbor-resident-oracle-smoke-fix --no-force-build --delete -y
+```
+
+Outcome:
+
+```text
+Trials: 1
+Exceptions: 0
+Mean: 1.000
+Reward: 1.0 count 1
+Results written to tmp/harbor-resident-oracle-smoke-fix/2026-05-20__16-51-50/result.json
 ```

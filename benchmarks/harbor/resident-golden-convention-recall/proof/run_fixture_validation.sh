@@ -44,6 +44,37 @@ run_case() {
     echo "expected ${step}/${solution_kind} to fail, got exit 0" >&2
     return 1
   fi
+
+  python3 - "${logs_dir}/reward.json" "${logs_dir}/resident-memory-metrics.json" "${expect}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+reward_path = Path(sys.argv[1])
+metrics_path = Path(sys.argv[2])
+expect = sys.argv[3]
+
+if not reward_path.exists():
+    raise SystemExit(f"missing reward.json: {reward_path}")
+reward = json.loads(reward_path.read_text())
+if list(reward.keys()) != ["reward"]:
+    raise SystemExit(f"reward.json must contain exactly one reward key, got {reward!r}")
+expected_reward = 1.0 if expect == "pass" else 0.0
+if reward["reward"] != expected_reward:
+    raise SystemExit(
+        f"reward.json reward mismatch: expected {expected_reward}, got {reward['reward']!r}"
+    )
+
+if not metrics_path.exists():
+    raise SystemExit(f"missing resident-memory-metrics.json: {metrics_path}")
+metrics = json.loads(metrics_path.read_text())
+if not isinstance(metrics, dict) or not metrics:
+    raise SystemExit(f"metrics file must contain a non-empty object, got {metrics!r}")
+if expect == "pass" and "failure" in metrics:
+    raise SystemExit(f"passing case should not record failure metrics, got {metrics!r}")
+if expect == "fail" and "failure" not in metrics:
+    raise SystemExit(f"failing case should record failure reason, got {metrics!r}")
+PY
 }
 
 run_case seed-convention phase-a-seed solution pass
