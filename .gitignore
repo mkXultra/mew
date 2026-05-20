@@ -10,6 +10,7 @@ artifacts/
 .codex-artifacts/
 proof-artifacts/
 proof-workspace/
+benchmarks/**/proof/validation-output/
 
 # Local-only reference links to external CLI implementations.
 references/fresh-cli/claude-code
