@@ -93,6 +93,13 @@ memory cycle, injection point, and campaign evidence contract require
 redesign. The next work is to keep the Harbor fixture, redesign durable memory
 mechanics, and only then reintroduce implementation behind explicit gates.
 
+2026-05-20 decision update: commit `f108aa0` added direct MemoryArena scoring
+for the memory core. Do not build an external Harbor resident campaign runner
+as the next step. It is not a useful resident-agent proof until memory is wired
+into `implement_v2` itself. Keep the Harbor fixture as a future benchmark, but
+defer Harbor memory-on/off campaign execution until the implement lane has a
+real, bounded, inspectable memory surface.
+
 ## M6.24 Close Summary
 
 M6.24 is staged-closed via `docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`.
@@ -121,20 +128,23 @@ Phase order:
 1. Baseline and guard: keep M6.24 closed, use `proof-artifacts/m6_25_resident_advantage_ledger.jsonl`, and define cold-vs-resident evidence axes.
 2. Durable memory redesign: define memory kinds, write cycle, retrieval cycle,
    revise gate, injection point, and experiment gates before adding code.
-3. Sidecar-only durable-memory dry run: reintroduce only after the redesign
-   has an explicit close gate and does not inject memory into ordinary
-   `implement_v2` requests.
-4. Resident campaign/ledger: run paired cold/resident/stale evidence on the
-   committed Harbor fixture after the evidence contract is fixed.
-5. Bounded read-only memory summary: add only if bounded, inspectable, and measurable.
+3. Implement-lane memory integration design: connect memory to `implement_v2`
+   only as a bounded, inspectable surface, not as ambient prompt policy.
+4. Bounded read-only memory summary or recall surface: add only if measurable
+   and if ordinary `implement_v2` requests can prove what memory was exposed.
+5. Resident campaign/ledger: run paired cold/resident/stale evidence on the
+   committed Harbor fixture only after the implement lane can actually use the
+   memory surface being evaluated.
 6. Read-only `MemoryExploreProvider` boundary.
 7. Provider cache transport behind default-off flags.
 8. Resident advantage report.
 
-Current next action: redesign durable memory mechanics for M6.25 while keeping
-the Harbor fixture. Do not treat `docs/DESIGN_2026-05-20_M6_25_IMPLEMENT_V2_DURABLE_CODING_INTELLIGENCE.md`
-or the reverted `016e102` implementation as active implementation authority.
-Do not inject memory into ordinary `implement_v2` requests until the bounded
+Current next action: after the cleanup controller settles, continue M6.25 by
+designing the implement-lane memory surface. Do not implement the Harbor
+resident campaign runner yet. Do not treat
+`docs/DESIGN_2026-05-20_M6_25_IMPLEMENT_V2_DURABLE_CODING_INTELLIGENCE.md` or
+the reverted `016e102` implementation as active implementation authority. Do
+not inject memory into ordinary `implement_v2` requests until the bounded
 experiment gate is explicit.
 
 ## Maintenance Rule

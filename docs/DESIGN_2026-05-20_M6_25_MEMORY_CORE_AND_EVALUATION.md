@@ -595,6 +595,13 @@ traces, and aggregate recall/staleness/latency metrics.
 Use the `resident-golden-convention-recall` style task as the mew-specific
 resident coding evaluation anchor.
 
+2026-05-20 decision update: keep this as a future evaluation anchor, but do
+not implement an external Harbor resident campaign runner as the next step.
+Running memory-on/off through an outside runner is not a strong enough proof
+until `implement_v2` has a real memory surface. The next active work is to
+connect memory to the implement lane in a bounded, inspectable way; Harbor
+resident evaluation resumes after that integration exists.
+
 The Harbor fixture should remain independently solvable by ordinary inspection.
 Memory is expected to improve speed, reliability, or stale-memory rejection,
 not to reveal hidden verifier answers.
@@ -606,7 +613,9 @@ Required Harbor comparisons:
 - Step B recall run with memory on, seeded only with approved durable memory.
 - Step C stale run with stale or misleading memory present.
 
-### Harbor Benchmark Evidence Delivery Channel
+### Deferred Harbor Benchmark Evidence Delivery Channel
+
+Status: deferred until implement-lane memory integration exists.
 
 Phase 3 has two separate activities:
 
