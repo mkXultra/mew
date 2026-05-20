@@ -567,6 +567,29 @@ Minimum MemoryArena-oriented questions:
 MemoryArena rows do not replace Harbor rows. They are a generic subsystem
 sanity check.
 
+Initial Phase 3 implementation command:
+
+```bash
+./mew memory-core memory-arena-score \
+  --input path/to/memoryarena-export.jsonl \
+  --mode memory_on \
+  --limit-rows 20 \
+  --artifact proof-artifacts/memory/memoryarena-memory-on.json \
+  --json
+```
+
+The command also supports `--mode memory_off` and `--mode stale`. It accepts a
+local JSON/JSONL export by default so the scoring loop stays deterministic in
+unit tests and offline debugging. Optional Hugging Face loading is exposed with
+`--hf-config`, `--hf-split`, and `--hf-revision`, but it intentionally depends
+on an environment that has the optional `datasets` package installed; the core
+mew package does not add that dependency yet.
+
+V0 scoring is a direct `MemorySystem` benchmark. It does not call a model, does
+not touch `implement_v2`, and does not use production prompt injection. The
+artifact records `runner_boundary`, `runner_config_hash`, row-level recall
+traces, and aggregate recall/staleness/latency metrics.
+
 ### Harbor Resident-Memory Plan
 
 Use the `resident-golden-convention-recall` style task as the mew-specific

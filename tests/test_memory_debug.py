@@ -10,6 +10,7 @@ from mew.memory_debug import (
     recall_artifact,
     score_fixture_artifact,
 )
+from mew.memory_arena import score_memory_arena_artifact
 
 
 FORBIDDEN_RECALL_FIELDS = {
@@ -254,3 +255,85 @@ def test_memory_core_cli_recall_prints_json_and_writes_artifact(tmp_path):
     assert printed["metrics"]["evidence_hits"] == []
     assert printed["metrics"]["evidence_hit_count"] == 0
     assert artifact["result"]["trace"]["request_hash"] == printed["result"]["trace"]["request_hash"]
+
+
+def test_memory_arena_score_compares_memory_modes_on_local_export(tmp_path):
+    export = tmp_path / "memoryarena.jsonl"
+    export.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "id": "shopping-1",
+                        "category": "bundled_shopping",
+                        "background": "The user is planning a gluten free cake order.",
+                        "questions": [
+                            "Choose a cake mix.",
+                            "Which cake mix should be used with the frosting bundle?",
+                        ],
+                        "answers": [
+                            "Use almond gluten free cake mix.",
+                            "Use almond gluten free cake mix with vanilla frosting.",
+                        ],
+                    }
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    off = score_memory_arena_artifact(input_path=str(export), mode="memory_off")
+    on = score_memory_arena_artifact(input_path=str(export), mode="memory_on")
+    stale = score_memory_arena_artifact(input_path=str(export), mode="stale")
+
+    assert off["operation"] == "memory_arena_score"
+    assert off["runner_boundary"]["implement_v2_used"] is False
+    assert off["aggregate"]["expected_rows"] == 0
+    assert on["rows_loaded"] == 1
+    assert on["queries_scored"] == 1
+    assert on["aggregate"]["expected_rows"] == 1
+    assert on["aggregate"]["evidence_hit_rows"] == 1
+    assert on["aggregate"]["recall_at_k"] == 1.0
+    assert stale["aggregate"]["expected_rows"] == 0
+    assert stale["aggregate"]["stale_as_fresh_count"] == 0
+    assert "memory arena score:" in on["summary"]
+
+
+def test_memory_core_cli_memory_arena_score_writes_artifact(tmp_path):
+    export = tmp_path / "memoryarena.json"
+    artifact_path = tmp_path / "arena-artifact.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "formal-1",
+                    "questions": ["Remember lemma alpha.", "Which lemma helps the proof?"],
+                    "answers": ["Lemma alpha rewrites x + 0 to x.", "Use lemma alpha."],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with redirect_stdout(StringIO()) as stdout:
+        code = main(
+            [
+                "memory-core",
+                "memory-arena-score",
+                "--input",
+                str(export),
+                "--mode",
+                "memory_on",
+                "--artifact",
+                str(artifact_path),
+                "--json",
+            ]
+        )
+
+    printed = json.loads(stdout.getvalue())
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+
+    assert code == 0
+    assert printed["operation"] == "memory_arena_score"
+    assert printed["aggregate"]["recall_at_k"] == 1.0
+    assert artifact["runner_config_hash"] == printed["runner_config_hash"]

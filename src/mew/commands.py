@@ -17780,6 +17780,20 @@ def cmd_memory_core(args):
             artifact = inspect_artifact(store_path=args.store, entry_id=args.entry)
         elif action == "score":
             artifact = score_fixture_artifact(fixture_path=args.fixture, mode=args.mode)
+        elif action == "memory-arena-score":
+            from .memory_arena import format_memory_arena_summary, score_memory_arena_artifact
+
+            artifact = score_memory_arena_artifact(
+                input_path=args.input,
+                hf_config=args.hf_config,
+                hf_split=args.hf_split,
+                hf_revision=args.hf_revision,
+                mode=args.mode,
+                limit_rows=args.limit_rows,
+                limit=args.limit,
+                include_stale=bool(args.include_stale),
+            )
+            artifact["summary"] = format_memory_arena_summary(artifact)
         else:
             print(f"mew: unknown memory-core subcommand: {action}", file=sys.stderr)
             return 1
