@@ -487,12 +487,37 @@ Close gate:
 
 ## Immediate Next Task
 
-Implement Phase A and Phase B before adding any model-in-loop MemoryArena
-agent.
+Implementation starts with a narrower short-term memory v0 before the full
+context builder. This intentionally avoids medium-term indexes, long-term
+durable memory promotion, graph retrieval, and production prompt injection.
+
+Short-term memory v0:
+
+- compress recent transcript/tool/reviewer evidence with an LLM into a small
+  schema;
+- keep the result session-local;
+- recall only compact cards;
+- expire cards by turn count or task end;
+- use it to learn the schema through Harbor/MemoryArena-style fixtures before
+  designing medium/long-term memory.
+
+The v0 schema is allowed to evolve while MemoryArena and Harbor experiments
+teach us which fields matter. It should remain small:
+
+```text
+kind: fact | decision | blocker | constraint | next_step | warning
+summary
+why_it_matters
+source_refs[]
+expires: turns:N | task_end | manual
+confidence
+```
+
+Implement Phase A-short-term before adding any model-in-loop MemoryArena agent
+or implement-lane memory injection.
 
 One-line chain:
 
 ```text
-M6.25 -> memory subsystem correctness -> MemoryContextBuilder contract + V0 fixtures
+M6.25 -> short-term memory correctness -> LLM compression schema + session-local recall fixtures
 ```
-
