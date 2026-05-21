@@ -5,60 +5,43 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
-import shlex
 import time
-from typing import Iterable, Literal, Mapping
+from typing import Iterable, Mapping
 
+from . import finish_verifier_planner as _finish_planner
+from . import native_completion_policy as _completion_policy
+from . import native_artifact_writer as _artifact_writer
+from . import native_request_builder as _request_builder
+from . import native_finish_closeout_policy as _closeout_policy
+from . import native_finish_gate as _finish_gate
 from .completion_resolver import (
     CompletionResolver,
     CompletionResolverDecision,
-    CompletionResolverInput,
-    FinishClaim,
-    write_completion_resolver_artifacts,
 )
 from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
-from .finish_verifier_planner_policy import FinishVerifierPlannerPolicy, finish_verifier_planner_policy
-from .finish_acceptance_helpers import (
-    _acceptance_session_from_tool_results,
-    _finish_acceptance_action,
-)
+from .finish_verifier_planner_policy import finish_verifier_planner_policy
+from .finish_acceptance_helpers import finish_typed_evidence_refs
 from .native_fake_provider import PHASE3_TRANSPORT_CHANGE, NativeFakeProvider
 from .native_finish_gate import (
-    FinishCloseoutStatus,
-    FinishCloseoutCommand,
-    FinishCloseoutCommandValidation,
-    NativeFinishCloseoutResult,
     NativeFinishGateDecision,
-    NativeFinishGatePolicy,
-    NativeFinishGateRequest,
-    decide_native_finish_from_closeout,
-    validate_closeout_command,
-    write_native_finish_gate_artifacts,
 )
 from .native_provider_adapter import (
     NativeResponsesStreamParseResult,
     apply_previous_response_delta,
-    build_custom_tool_call_output_input_item,
-    build_function_call_output_input_item,
-    build_responses_request_descriptor,
     call_codex_native_responses,
     call_codex_native_responses_websocket,
 )
 from .native_done_candidate import (
     NativeDoneCandidate,
     build_native_done_candidate,
-    write_native_done_candidate_artifacts,
 )
 from .native_ng_resume import (
     NativeNgResumeSignal,
     build_native_ng_resume_signal,
     native_ng_resume_input_item,
-    write_native_ng_resume_signal_artifacts,
 )
-from .native_sidecar_projection import build_compact_native_sidecar_digest
 from .native_transcript import (
     CALL_ITEM_KINDS,
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
@@ -68,27 +51,12 @@ from .native_transcript import (
     native_transcript_hash,
     normalize_codex_response_items,
     validate_native_transcript_pairing,
-    write_native_evidence_observation,
-    write_native_transcript_artifacts,
 )
-from .native_workframe_projection import (
-    build_native_prompt_input_inventory,
-    build_provider_visible_forbidden_fields_report,
-)
-from .prompt import build_implement_v2_prompt_sections
 from .read_runtime import READ_ONLY_TOOL_NAMES, execute_read_only_tool_call
-from .tool_harness_contract import (
-    build_evidence_ref_index_artifact,
-    build_evidence_sidecar_artifact,
-    build_tool_result_index_artifact,
-    tool_results_jsonl_lines,
-    write_jsonl,
-)
 from .tool_guidance import (
     hide_unavailable_write_file_guidance,
     is_hard_runtime_artifact_task,
 )
-from .tool_profiles.codex_hot_path import codex_hot_path_developer_contract
 from .tool_registry import (
     CODEX_HOT_PATH_PROFILE_ID,
     ToolSurfaceSnapshot,
@@ -96,14 +64,11 @@ from .tool_registry import (
     tool_surface_profile_id,
 )
 from .tool_specs import ImplementLaneToolSpec
-from .tool_result_renderer import render_observability_record, render_tool_result_for_profile
-from .tool_routes import route_records_from_results, with_tool_route_decision
+from .tool_result_renderer import render_tool_result_for_profile
+from .tool_routes import with_tool_route_decision
 from .types import ImplementLaneInput, ImplementLaneResult, ToolCallEnvelope, ToolResultEnvelope
 from .. import codex_api as _codex_api
 from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
-from ..acceptance import acceptance_done_gate_decision
-from ..config import DEFAULT_CODEX_REASONING_EFFORT
-from ..prompt_sections import render_prompt_sections
 
 
 PHASE3_NATIVE_TOOL_HARNESS_ID = "phase3_native_tool_harness_with_fake_provider"
@@ -134,11 +99,6 @@ _NG_DECISION_TOTAL_LIMIT = 3
 _INTERNAL_CLOSEOUT_CALL_PREFIXES = ("call-final-verifier-closeout-", "call-active-command-closeout-")
 _NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
 _NATIVE_MODEL_TIMEOUT_MIN_SECONDS = 30.0
-_FINISH_VERIFIER_PLANNER_DECISIONS_ATTR = "_mew_finish_verifier_planner_decisions"
-_FINISH_VERIFIER_PLANNER_DECISIONS_FILE = "finish_verifier_planner_decisions.jsonl"
-_FINISH_VERIFIER_PLANNER_REQUESTS_ATTR = "_mew_finish_verifier_planner_requests"
-_FINISH_VERIFIER_PLANNER_REQUESTS_FILE = "finish_verifier_planner_requests.jsonl"
-_RAW_FINISH_VERIFIER_PLAN_MISSING = object()
 _SOURCE_MUTATION_COMMAND_INTENTS = frozenset(
     {"implement", "implementation", "write", "edit", "mutation", "source_mutation"}
 )
@@ -187,167 +147,8 @@ class NativeImplementV2HarnessResult:
         )
 
 
-@dataclass(frozen=True)
-class _NativeCloseoutEvent:
-    kind: str
-    call: NativeTranscriptItem
-    result: ToolResultEnvelope
-    latency: dict[str, object]
-    reason: str
-
-
-@dataclass(frozen=True)
-class _NativeCloseoutContext:
-    closeout_refs: tuple[str, ...] = ()
-    fresh_verifier_refs: tuple[str, ...] = ()
-    planner_verified_finish_refs: tuple[str, ...] = ()
-    blockers: tuple[str, ...] = ()
-    missing_obligations: tuple[str, ...] = ()
-    unsafe_blockers: tuple[str, ...] = ()
-    budget_blockers: tuple[str, ...] = ()
-
-    def merge(self, other: "_NativeCloseoutContext") -> "_NativeCloseoutContext":
-        return _NativeCloseoutContext(
-            closeout_refs=tuple(dict.fromkeys((*self.closeout_refs, *other.closeout_refs))),
-            fresh_verifier_refs=tuple(dict.fromkeys((*self.fresh_verifier_refs, *other.fresh_verifier_refs))),
-            planner_verified_finish_refs=tuple(
-                dict.fromkeys((*self.planner_verified_finish_refs, *other.planner_verified_finish_refs))
-            ),
-            blockers=tuple(dict.fromkeys((*self.blockers, *other.blockers))),
-            missing_obligations=tuple(dict.fromkeys((*self.missing_obligations, *other.missing_obligations))),
-            unsafe_blockers=tuple(dict.fromkeys((*self.unsafe_blockers, *other.unsafe_blockers))),
-            budget_blockers=tuple(dict.fromkeys((*self.budget_blockers, *other.budget_blockers))),
-        )
-
-
-@dataclass(frozen=True)
-class _NativeFinishVerifierPlan:
-    command: str
-    cwd: str = "."
-    source: str = "configured"
-    reason: str = ""
-    confidence: str = ""
-    raw: Mapping[str, object] | None = None
-
-
-@dataclass(frozen=True)
-class _NativeFinishVerifierPlanCoercion:
-    plan: _NativeFinishVerifierPlan | None
-    status: str
-    reject_reason: str = ""
-    reject_blockers: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class _FinishVerifierCommandSafetyResult:
-    allowed: bool
-    reason: str
-    blockers: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class FinishVerifierPlannerLoopPolicy:
-    enabled: bool
-    selection_source: str = ""
-    max_turns: int = 3
-    max_wall_seconds: float = 300.0
-    max_file_reads: int = 12
-    max_searches: int = 8
-    max_bytes_per_file: int = 20_000
-    max_total_read_bytes: int = 120_000
-    allowed_tools: tuple[str, ...] = ("inspect_dir", "read_file", "search_text", "glob")
-    allowed_roots: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class _FinishVerifierPlannerEligibility:
-    policy: FinishVerifierPlannerPolicy
-    can_run: bool
-    selection_source: str
-
-
-@dataclass(frozen=True)
-class FinishVerifierPlannerLoopRequest:
-    lane_attempt_id: str
-    turn_id: str
-    task_id: str
-    task_description: str
-    task_contract: Mapping[str, object]
-    latest_mutation: Mapping[str, object]
-    recent_tool_results: tuple[Mapping[str, object], ...]
-    candidate_paths: tuple[str, ...]
-    policy: FinishVerifierPlannerLoopPolicy
-    finish_call_id: str = ""
-    done_candidate_id: str = ""
-    legacy_request: Mapping[str, object] | None = None
-
-    def as_planner_request(self) -> dict[str, object]:
-        base = dict(self.legacy_request or {})
-        requirement_source = dict(base)
-        requirement_source["task"] = {
-            "task_id": self.task_id,
-            "description": self.task_description,
-            "contract": dict(self.task_contract),
-        }
-        base.update(
-            {
-                "schema_version": 1,
-                "component": "FinishVerifierPlannerLoop",
-                "role": "independent_read_only_finish_verifier_planner",
-                "lane_attempt_id": self.lane_attempt_id,
-                "turn_id": self.turn_id,
-                "task": {
-                    "task_id": self.task_id,
-                    "description": self.task_description,
-                    "contract": dict(self.task_contract),
-                    "verify_command_source": (
-                        dict(base.get("task") or {}).get("verify_command_source")
-                        if isinstance(base.get("task"), Mapping)
-                        else ""
-                    ),
-                },
-                "latest_mutation": dict(self.latest_mutation),
-                "recent_tool_results": [dict(item) for item in self.recent_tool_results],
-                "read_policy": {
-                    "enabled": self.policy.enabled,
-                    "selection_source": self.policy.selection_source,
-                    "allowed_tools": list(self.policy.allowed_tools),
-                    "allowed_roots": list(self.policy.allowed_roots),
-                    "max_turns": self.policy.max_turns,
-                    "max_file_reads": self.policy.max_file_reads,
-                    "max_searches": self.policy.max_searches,
-                    "max_bytes_per_file": self.policy.max_bytes_per_file,
-                    "max_total_read_bytes": self.policy.max_total_read_bytes,
-                    "candidate_paths": list(self.candidate_paths),
-                },
-                "command_policy": {
-                    "available_execution_surface": "run_command",
-                    "allow_shell_execution": True,
-                    "shell_composition_blocked": True,
-                    "observable_requirements": list(_finish_verifier_observable_requirements(requirement_source)),
-                },
-                "output_contract": {
-                    "json_object": True,
-                    "required": ["status", "command", "cwd", "confidence", "rationale"],
-                    "meaning": "one non-mutating command that verifies current task completion",
-                },
-            }
-        )
-        if self.done_candidate_id:
-            base["done_candidate_id"] = self.done_candidate_id
-            base.pop("finish_call_id", None)
-        elif self.finish_call_id:
-            base["finish_call_id"] = self.finish_call_id
-        return base
-
-
-@dataclass(frozen=True)
-class FinishVerifierPlannerLoopResult:
-    status: Literal["selected", "no_plan", "rejected", "error", "timed_out"]
-    plan: _NativeFinishVerifierPlan | None
-    record: Mapping[str, object]
-    blockers: tuple[str, ...] = ()
-    reason: str = ""
+_NativeCloseoutEvent = _closeout_policy.NativeCloseoutEvent
+_NativeCloseoutContext = _closeout_policy.NativeCloseoutContext
 
 
 @dataclass
@@ -512,7 +313,7 @@ class NativeCodexResponsesProvider:
             lane_config.get("finish_verifier_planner_timeout_seconds"),
             default=300.0,
         )
-        prompt = _finish_verifier_planner_prompt(request)
+        prompt = _finish_planner.finish_verifier_planner_prompt(request)
         return _codex_api.call_codex_json(
             self.auth,
             prompt,
@@ -710,7 +511,7 @@ def run_native_implement_v2(
         )
         for closeout_event in closeout_events:
             append_closeout_event(closeout_event)
-        return _native_finish_gate_decision_from_done_candidate(
+        return _finish_gate.finish_gate_decision_from_done_candidate(
             done_candidate,
             lane_input=lane_input,
             lane_config=lane_config,
@@ -729,7 +530,7 @@ def run_native_implement_v2(
         )
         if turn_timeout is not None:
             if turn_timeout < _NATIVE_MODEL_TIMEOUT_MIN_SECONDS:
-                active_closeouts = _native_active_command_closeouts(
+                active_closeouts = _closeout_policy.native_active_command_closeouts(
                     lane_input,
                     lane_attempt_id=lane_attempt_id,
                     provider=provider,
@@ -749,8 +550,8 @@ def run_native_implement_v2(
                 if active_closeouts:
                     active_result = active_closeouts[-1][1]
                     final_closeout = None
-                    if active_result.status == "completed" and not _native_active_command_run_id(exec_runtime):
-                        final_closeout = _native_final_verifier_closeout(
+                    if active_result.status == "completed" and not _closeout_policy.native_active_command_run_id(exec_runtime):
+                        final_closeout = _closeout_policy.native_final_verifier_closeout(
                             lane_input,
                             lane_attempt_id=lane_attempt_id,
                             provider=provider,
@@ -773,8 +574,8 @@ def run_native_implement_v2(
                             reason="native final verifier closeout ran after low-budget active command closeout",
                         )
                         append_closeout_event(final_event)
-                        closeout_context = _native_closeout_context_from_result(closeout_call, closeout_result)
-                        native_decision = _native_finish_gate_decision_from_controller_closeout_event(
+                        closeout_context = _closeout_policy.native_closeout_context_from_result(closeout_call, closeout_result)
+                        native_decision = _finish_gate.finish_gate_decision_from_controller_closeout_event(
                             final_event,
                             lane_input=lane_input,
                             lane_config=lane_config,
@@ -1063,30 +864,46 @@ def run_native_implement_v2(
                 )
                 for closeout_event in closeout_events:
                     append_closeout_event(closeout_event)
-                native_decision = _native_finish_gate_decision_from_closeout_events(
+                native_decision = _finish_gate.finish_gate_decision_from_closeout_events(
                     call,
                     result,
                     lane_input=lane_input,
                     lane_config=lane_config,
                     transcript_items=tuple(items),
-                    request_descriptor=request_descriptor,
+                    compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
                     closeout_events=closeout_events,
                     closeout_context=closeout_context,
                 )
                 if native_decision is not None:
                     native_finish_gate_decisions.append(native_decision)
                     finish_gate_decision = native_decision.as_dict()
-                    result = _finish_result_with_native_finish_gate_decision(result, native_decision)
+                    result = _finish_gate.finish_result_with_native_finish_gate_decision(result, native_decision)
                 else:
+                    arguments, _ = _arguments(call)
+                    outcome = _native_finish_outcome(arguments)
+                    gate: dict[str, object] = {}
+                    finish_evidence_refs = _completion_policy.finish_arg_strings(arguments.get("evidence_refs"))
+                    finish_closeout_refs = _completion_policy.finish_arg_strings(arguments.get("closeout_refs"))
+                    finish_closeout_context = _closeout_policy.native_finish_supplied_closeout_context(
+                        tuple(dict.fromkeys((*finish_evidence_refs, *finish_closeout_refs))),
+                        tuple(tool_results),
+                        source_mutation_roots=_closeout_policy.native_source_mutation_roots(
+                            lane_input,
+                            Path(lane_input.workspace or "."),
+                        ),
+                    )
                     decision = resolver.resolve(
-                        _completion_resolver_input_from_finish(
+                        _completion_policy.build_completion_resolver_input_from_finish(
                             call,
                             result,
                             lane_input=lane_input,
                             transcript_items=tuple(items),
-                            request_descriptor=request_descriptor,
-                            prior_tool_results=tuple(tool_results),
+                            arguments=arguments,
+                            outcome=outcome,
+                            gate=gate,
+                            compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
                             closeout_context=closeout_context,
+                            finish_closeout_context=finish_closeout_context,
                         )
                     )
                     resolver_decisions.append(decision)
@@ -1134,7 +951,7 @@ def run_native_implement_v2(
                 }
             if call.kind == "finish_call" and _native_finish_gate_blocked(result):
                 finish_gate_block_count += 1
-                finish_gate_decision = _native_finish_gate_decision_payload(result)
+                finish_gate_decision = _legacy_finish_gate_payload(result)
             if call.kind == "finish_call" and _native_finish_authority_lane_status(result) == "completed":
                 accepted_finish = call
                 status = "completed"
@@ -1159,15 +976,16 @@ def run_native_implement_v2(
     if not validation.valid:
         raise InvalidNativeTranscriptError(f"invalid native transcript: {', '.join(validation.errors)}")
 
-    finish_verifier_planner_decisions = _provider_finish_verifier_planner_decisions(provider)
-    finish_verifier_planner_requests = _provider_finish_verifier_planner_requests(provider)
+    finish_verifier_planner_decisions = _finish_planner.provider_finish_verifier_planner_decisions(provider)
+    finish_verifier_planner_requests = _finish_planner.provider_finish_verifier_planner_requests(provider)
     planner_policy = finish_verifier_planner_policy(lane_config)
-    finish_verifier_planner_selection_source = _native_finish_verifier_planner_selection_source(
+    finish_verifier_planner_selection_source = _finish_planner.native_finish_verifier_planner_selection_source(
         lane_input,
         provider=provider,
         lane_config=lane_config,
         tool_results=tuple(tool_results),
         decisions=finish_verifier_planner_decisions,
+        configured_verifier_precedence=bool(_configured_native_final_verifier_command(lane_input)),
         policy=planner_policy,
     )
     metrics = {
@@ -1616,60 +1434,7 @@ def _run_native_finish_time_closeouts(
     start_monotonic: float,
     done_candidate_id: str = "",
 ) -> tuple[tuple[_NativeCloseoutEvent, ...], _NativeCloseoutContext]:
-    events: list[_NativeCloseoutEvent] = []
-    context = _NativeCloseoutContext()
-    scoped_calls = list(tool_calls)
-    scoped_results = list(tool_results)
-
-    def append_active_closeouts(reason: str) -> None:
-        nonlocal context
-        for active_call, active_result, active_latency in _native_active_command_closeouts(
-            lane_input,
-            lane_attempt_id=lane_attempt_id,
-            provider=provider,
-            exec_runtime=exec_runtime,
-            start_monotonic=start_monotonic,
-        ):
-            events.append(
-                _NativeCloseoutEvent(
-                    kind="active_command",
-                    call=active_call,
-                    result=active_result,
-                    latency=active_latency,
-                    reason=reason,
-                )
-            )
-            context = context.merge(_native_closeout_context_from_result(active_call, active_result))
-
-    pending_mutation = _latest_native_source_mutation_without_later_verifier(
-        tuple(scoped_calls),
-        tuple(scoped_results),
-        source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
-    )
-    latest_mutation = pending_mutation or _latest_native_source_mutation(
-        tuple(scoped_calls),
-        tuple(scoped_results),
-        source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
-    )
-    if not latest_mutation:
-        append_active_closeouts(
-            "native active command closeout ran during finish-time resolver evidence collection"
-        )
-        return tuple(events), context
-    no_run_context = _native_final_verifier_closeout_no_run_context(
-        lane_input,
-        provider=provider,
-        tool_results=tuple(scoped_results),
-        lane_config=lane_config,
-        start_monotonic=start_monotonic,
-    )
-    if no_run_context is not None:
-        append_active_closeouts(
-            "native active command closeout ran during finish-time resolver evidence collection"
-        )
-        return tuple(events), context.merge(no_run_context)
-
-    closeout = _native_final_verifier_closeout(
+    return _closeout_policy.run_finish_time_closeouts(
         lane_input,
         lane_attempt_id=lane_attempt_id,
         provider=provider,
@@ -1678,40 +1443,11 @@ def _run_native_finish_time_closeouts(
         allowed_read_roots=allowed_read_roots,
         allowed_write_roots=allowed_write_roots,
         lane_config=lane_config,
-        tool_calls=tuple(scoped_calls),
-        tool_results=tuple(scoped_results),
+        tool_calls=tool_calls,
+        tool_results=tool_results,
         start_monotonic=start_monotonic,
-        pending_mutation=latest_mutation,
         done_candidate_id=done_candidate_id,
     )
-    if closeout is None:
-        append_active_closeouts(
-            "native active command closeout ran during finish-time resolver evidence collection"
-        )
-        return tuple(events), context.merge(
-            _NativeCloseoutContext(
-                blockers=("closeout_verifier_not_run",),
-                missing_obligations=("strict_verifier_evidence",),
-            )
-        )
-    closeout_call, closeout_result, closeout_latency = closeout
-    events.append(
-        _NativeCloseoutEvent(
-            kind="final_verifier",
-            call=closeout_call,
-            result=closeout_result,
-            latency=closeout_latency,
-            reason="native final verifier closeout ran during finish-time resolver evidence collection",
-        )
-    )
-    closeout_context = _native_closeout_context_from_result(closeout_call, closeout_result)
-    if _native_final_verifier_passed(closeout_result):
-        return tuple(events), context.merge(closeout_context)
-    append_active_closeouts(
-        "native active command closeout ran after failed finish-time final verifier"
-    )
-    return tuple(events), context.merge(closeout_context)
-
 
 def _native_final_verifier_closeout_no_run_context(
     lane_input: ImplementLaneInput,
@@ -1721,89 +1457,32 @@ def _native_final_verifier_closeout_no_run_context(
     lane_config: Mapping[str, object],
     start_monotonic: float,
 ) -> _NativeCloseoutContext | None:
-    if not _native_final_verifier_closeout_allowed(lane_input, lane_config=lane_config):
-        return _NativeCloseoutContext(
-            unsafe_blockers=("closeout_verifier_not_permitted",),
-            missing_obligations=("strict_verifier_evidence",),
-        )
-    has_configured = bool(_configured_native_final_verifier_command(lane_input))
-    has_planner = _native_finish_verifier_planner_can_run(
+    return _closeout_policy.native_final_verifier_closeout_no_run_context(
         lane_input,
         provider=provider,
-        lane_config=lane_config,
         tool_results=tool_results,
+        lane_config=lane_config,
+        start_monotonic=start_monotonic,
     )
-    has_auto = _auto_detected_native_final_verifier_command(lane_input) is not None
-    if not has_configured and not has_planner and not has_auto:
-        return _NativeCloseoutContext(
-            blockers=("closeout_verifier_command_missing",),
-            missing_obligations=("strict_verifier_evidence",),
-        )
-    budget = _native_final_verifier_closeout_budget_seconds(lane_input, run_started=start_monotonic)
-    if budget < _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS:
-        return _NativeCloseoutContext(
-            budget_blockers=("closeout_verifier_budget_insufficient",),
-            missing_obligations=("strict_verifier_evidence",),
-        )
-    return None
 
 
 def _native_closeout_context_from_result(
     call: NativeTranscriptItem,
     result: ToolResultEnvelope,
 ) -> _NativeCloseoutContext:
-    refs = _native_closeout_refs(call, result)
-    if _native_final_verifier_passed(result):
-        return _NativeCloseoutContext(
-            closeout_refs=refs,
-            fresh_verifier_refs=refs,
-            planner_verified_finish_refs=refs if _native_call_uses_finish_verifier_planner(call) else (),
-        )
-    blocker = "closeout_verifier_failed"
-    payload = _native_result_payload(result)
-    status = str(payload.get("status") or result.status or "").casefold()
-    reason_text = result.natural_result_text().casefold()
-    if status in {"interrupted", "timeout", "timed_out", "yielded"} or "budget" in reason_text:
-        return _NativeCloseoutContext(
-            closeout_refs=refs,
-            budget_blockers=("closeout_verifier_budget_or_timeout",),
-            missing_obligations=("strict_verifier_evidence",),
-        )
-    return _NativeCloseoutContext(
-        closeout_refs=refs,
-        blockers=(blocker,),
-        missing_obligations=("strict_verifier_evidence",),
-    )
+    return _closeout_policy.native_closeout_context_from_result(call, result)
 
 
 def _native_closeout_refs(call: NativeTranscriptItem, result: ToolResultEnvelope) -> tuple[str, ...]:
-    refs = tuple(ref for ref in result.evidence_refs if _native_closeout_ref_is_completion_evidence(ref))
-    if refs:
-        return refs
-    return (f"native-closeout://{call.call_id}",)
+    return _closeout_policy.native_closeout_refs(call, result)
 
 
 def _native_call_uses_finish_verifier_planner(call: NativeTranscriptItem) -> bool:
-    arguments, error = _arguments(call)
-    if error:
-        return False
-    plan = arguments.get("finish_verifier_plan")
-    if not isinstance(plan, Mapping):
-        return False
-    return str(plan.get("source") or "").strip() == "finish_verifier_planner"
+    return _closeout_policy.native_call_uses_finish_verifier_planner(call)
 
 
 def _native_closeout_ref_is_completion_evidence(value: object) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return False
-    if text.startswith("implement-v2-exec://"):
-        return True
-    if "/command_run/" in text or "/tool_run_record/" in text or "/verifier_evidence/" in text:
-        return True
-    if "/failure_classification/" in text or "/structured_finish_gate/" in text:
-        return False
-    return False
+    return _closeout_policy.native_closeout_ref_is_completion_evidence(value)
 
 
 _NATIVE_FINISH_RESOLVABLE_CLOSEOUT_BLOCKERS = frozenset(
@@ -1818,189 +1497,6 @@ _NATIVE_EXPLICIT_ACCEPTANCE_PASS_RE = re.compile(
 )
 
 
-def _native_finish_supplied_closeout_context(
-    refs: tuple[str, ...],
-    prior_tool_results: tuple[ToolResultEnvelope, ...],
-    *,
-    source_mutation_roots: tuple[str, ...] = (),
-) -> _NativeCloseoutContext:
-    cited_refs = tuple(dict.fromkeys(str(ref or "").strip() for ref in refs if str(ref or "").strip()))
-    if not cited_refs:
-        return _NativeCloseoutContext()
-    completion_refs: list[str] = []
-    latest_mutation_index = _latest_native_source_mutation_result_index(
-        prior_tool_results,
-        source_mutation_roots=source_mutation_roots,
-    )
-    for index, result in enumerate(prior_tool_results, start=1):
-        if latest_mutation_index and index < latest_mutation_index:
-            continue
-        if not _native_prior_result_can_satisfy_verifier_evidence(result):
-            continue
-        result_completion_refs = _native_completion_refs_from_result(result)
-        if not result_completion_refs:
-            continue
-        if _native_finish_refs_cite_tool_result(cited_refs, result, result_completion_refs):
-            completion_refs.extend(result_completion_refs)
-    refs_tuple = tuple(dict.fromkeys(completion_refs))
-    if not refs_tuple:
-        return _NativeCloseoutContext()
-    return _NativeCloseoutContext(
-        closeout_refs=refs_tuple,
-        fresh_verifier_refs=refs_tuple,
-    )
-
-
-def _latest_native_source_mutation_result_index(
-    prior_tool_results: tuple[ToolResultEnvelope, ...],
-    *,
-    source_mutation_roots: tuple[str, ...],
-) -> int:
-    latest = 0
-    for index, result in enumerate(prior_tool_results, start=1):
-        if result.status == "completed" and _native_result_has_source_mutation(
-            result,
-            source_mutation_roots=source_mutation_roots,
-        ):
-            latest = index
-    return latest
-
-
-def _native_closeout_context_resolved_by_finish_evidence(
-    closeout_context: _NativeCloseoutContext,
-    finish_context: _NativeCloseoutContext,
-) -> _NativeCloseoutContext:
-    if not finish_context.fresh_verifier_refs:
-        return closeout_context
-    merged = closeout_context.merge(finish_context)
-    blockers = tuple(
-        blocker
-        for blocker in merged.blockers
-        if blocker not in _NATIVE_FINISH_RESOLVABLE_CLOSEOUT_BLOCKERS
-    )
-    removed_missing_closeout_blocker = len(blockers) != len(merged.blockers)
-    if removed_missing_closeout_blocker:
-        missing = tuple(item for item in merged.missing_obligations if item != "strict_verifier_evidence")
-    else:
-        missing = merged.missing_obligations
-    return _NativeCloseoutContext(
-        closeout_refs=merged.closeout_refs,
-        fresh_verifier_refs=merged.fresh_verifier_refs,
-        planner_verified_finish_refs=merged.planner_verified_finish_refs,
-        blockers=blockers,
-        missing_obligations=missing,
-        unsafe_blockers=merged.unsafe_blockers,
-        budget_blockers=merged.budget_blockers,
-    )
-
-
-def _native_prior_result_can_satisfy_verifier_evidence(result: ToolResultEnvelope) -> bool:
-    verifier_passed = _native_final_verifier_passed(result)
-    explicit_acceptance_pass = _native_result_has_explicit_acceptance_pass(result)
-    if not verifier_passed and not explicit_acceptance_pass:
-        return False
-    payload = _native_result_payload(result)
-    verifier = payload.get("verifier_evidence")
-    if isinstance(verifier, Mapping):
-        verdict = str(verifier.get("verdict") or "").casefold()
-        if verdict == "pass":
-            return True
-        if verdict in {"fail", "failed", "partial"}:
-            return False
-    contract = payload.get("execution_contract_normalized") or payload.get("execution_contract")
-    if _native_execution_contract_is_verifier_like(contract):
-        return True
-    if result.tool_name == "run_tests":
-        return True
-    if str(payload.get("command_intent") or "").strip().casefold() in {
-        "verify",
-        "verifier",
-        "verification",
-        "finish_verifier",
-        "test",
-        "acceptance",
-    }:
-        return True
-    if (
-        explicit_acceptance_pass
-        and _native_result_has_verifier_evidence_ref(result)
-        and _native_result_is_process_lifecycle_continuation(result)
-    ):
-        return True
-    return False
-
-
-def _native_completion_refs_from_result(result: ToolResultEnvelope) -> tuple[str, ...]:
-    refs = (*result.content_refs, *result.evidence_refs)
-    return tuple(ref for ref in refs if _native_closeout_ref_is_completion_evidence(ref))
-
-
-def _native_result_has_explicit_acceptance_pass(result: ToolResultEnvelope) -> bool:
-    payload = _native_result_payload(result)
-    if result.status != "completed" or result.is_error:
-        return False
-    if payload.get("exit_code") not in (0, "0"):
-        return False
-    for key in ("stdout_tail", "stdout", "text", "content"):
-        value = payload.get(key)
-        if isinstance(value, str) and _NATIVE_EXPLICIT_ACCEPTANCE_PASS_RE.search(value):
-            return True
-    return False
-
-
-def _native_result_has_verifier_evidence_ref(result: ToolResultEnvelope) -> bool:
-    refs = " ".join(str(ref or "") for ref in (*result.content_refs, *result.evidence_refs)).casefold()
-    return "verifier_evidence" in refs or "/verifier/" in refs
-
-
-def _native_result_is_process_lifecycle_continuation(result: ToolResultEnvelope) -> bool:
-    payload = _native_result_payload(result)
-    route = result.route_decision.get("tool_route") if isinstance(result.route_decision, Mapping) else ""
-    if str(route or "").strip() == "process_lifecycle" and result.tool_name in {
-        "write_stdin",
-        "poll_command",
-        "cancel_command",
-    }:
-        return True
-    return result.tool_name in {"write_stdin", "poll_command"} or str(
-        payload.get("internal_kernel") or payload.get("effective_tool_name") or ""
-    ).strip() == "poll_command"
-
-
-def _native_finish_refs_cite_tool_result(
-    refs: tuple[str, ...],
-    result: ToolResultEnvelope,
-    result_completion_refs: tuple[str, ...],
-) -> bool:
-    aliases = _native_tool_result_ref_aliases(result)
-    result_ref_set = set(result_completion_refs)
-    for ref in refs:
-        if ref in aliases or ref in result_ref_set:
-            return True
-    return False
-
-
-def _native_tool_result_ref_aliases(result: ToolResultEnvelope) -> set[str]:
-    aliases: set[str] = set()
-    for raw_id in (result.provider_call_id, result.mew_tool_call_id):
-        text = str(raw_id or "").strip()
-        if not text:
-            continue
-        aliases.add(text)
-        aliases.add(f"ev:tool_result:{text}")
-        aliases.add(f"tool-result:{text}")
-        aliases.add(f"tool_result:{text}")
-        aliases.add(f"tool-route:{text}")
-    provider_call_id = str(result.provider_call_id or "").strip()
-    if provider_call_id:
-        aliases.add(f"native:{provider_call_id}")
-    route_ref = result.route_decision.get("ref") if isinstance(result.route_decision, Mapping) else ""
-    route_ref_text = str(route_ref or "").strip()
-    if route_ref_text:
-        aliases.add(route_ref_text)
-    return aliases
-
-
 def _native_active_command_closeout(
     lane_input: ImplementLaneInput,
     *,
@@ -2010,52 +1506,14 @@ def _native_active_command_closeout(
     start_monotonic: float,
     closeout_index: int = 0,
 ) -> tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]] | None:
-    command_run_id = _native_active_command_run_id(exec_runtime)
-    if not command_run_id:
-        return None
-    budget = _native_final_verifier_closeout_budget_seconds(lane_input, run_started=start_monotonic)
-    turn_index = len(getattr(provider, "requests", []) or ()) + 1
-    call = _native_active_command_closeout_call(
+    return _closeout_policy.native_active_command_closeout(
         lane_input,
         lane_attempt_id=lane_attempt_id,
         provider=provider,
-        turn_index=turn_index,
-        command_run_id=command_run_id,
-        timeout_seconds=budget,
+        exec_runtime=exec_runtime,
+        start_monotonic=start_monotonic,
         closeout_index=closeout_index,
     )
-    prior = ToolResultEnvelope(
-        lane_attempt_id=lane_attempt_id,
-        provider_call_id=call.call_id,
-        mew_tool_call_id=f"native:{call.call_id}",
-        tool_name="poll_command",
-        status="yielded",
-        is_error=False,
-        content=({"command_run_id": command_run_id, "status": "yielded"},),
-    )
-    latency_start = time.monotonic()
-    if budget < _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS:
-        payload = exec_runtime.cancel_command(
-            command_run_id,
-            reason="native active command closeout budget exhausted before deterministic final verifier",
-        )
-    else:
-        payload = exec_runtime.finalize_command(command_run_id, timeout_seconds=budget)
-    result = with_tool_route_decision(
-        _tool_call_envelope_from_native_call(call, {"command_run_id": command_run_id}),
-        exec_runtime.project_result_payload(prior, payload),
-    )
-    latency_finished = time.monotonic()
-    latency = {
-        "call_id": call.call_id,
-        "tool_name": call.tool_name,
-        "turn_index": turn_index,
-        "queued_ms": 0,
-        "started_ms": round((latency_start - start_monotonic) * 1000, 3),
-        "first_output_ms": round((latency_finished - latency_start) * 1000, 3),
-        "finished_ms": round((latency_finished - latency_start) * 1000, 3),
-    }
-    return call, result, latency
 
 
 def _native_active_command_closeouts(
@@ -2066,27 +1524,17 @@ def _native_active_command_closeouts(
     exec_runtime: ImplementV2ManagedExecRuntime,
     start_monotonic: float,
 ) -> tuple[tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]], ...]:
-    closeouts: list[tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]]] = []
-    closeout_index = 0
-    while _native_active_command_run_id(exec_runtime):
-        closeout = _native_active_command_closeout(
-            lane_input,
-            lane_attempt_id=lane_attempt_id,
-            provider=provider,
-            exec_runtime=exec_runtime,
-            start_monotonic=start_monotonic,
-            closeout_index=closeout_index,
-        )
-        if closeout is None:
-            break
-        closeouts.append(closeout)
-        closeout_index += 1
-    return tuple(closeouts)
+    return _closeout_policy.native_active_command_closeouts(
+        lane_input,
+        lane_attempt_id=lane_attempt_id,
+        provider=provider,
+        exec_runtime=exec_runtime,
+        start_monotonic=start_monotonic,
+    )
 
 
 def _native_active_command_run_id(exec_runtime: ImplementV2ManagedExecRuntime) -> str:
-    active = getattr(getattr(exec_runtime, "runner", None), "active", None)
-    return str(getattr(active, "command_run_id", "") or "").strip()
+    return _closeout_policy.native_active_command_run_id(exec_runtime)
 
 
 def _native_active_command_closeout_call(
@@ -2099,26 +1547,14 @@ def _native_active_command_closeout_call(
     timeout_seconds: float,
     closeout_index: int = 0,
 ) -> NativeTranscriptItem:
-    suffix = f"-{closeout_index + 1}" if closeout_index else ""
-    call_id = f"call-active-command-closeout-{turn_index:03d}{suffix}"
-    arguments = {
-        "command_run_id": command_run_id,
-        "wait_seconds": round(max(0.0, timeout_seconds), 3),
-        "purpose": "finalize active managed command before starting any deterministic final verifier",
-    }
-    return NativeTranscriptItem(
-        sequence=0,
-        turn_id=f"turn-{turn_index}-active-command-closeout",
+    return _closeout_policy.native_active_command_closeout_call(
+        lane_input,
         lane_attempt_id=lane_attempt_id,
-        provider=str(getattr(provider, "provider", "") or "native-controller"),
-        model=str(getattr(provider, "model", "") or lane_input.model or ""),
-        response_id=f"native-active-command-closeout-{turn_index}{suffix}",
-        provider_item_id=f"item-{call_id}",
-        output_index=0,
-        kind="function_call",
-        call_id=call_id,
-        tool_name="poll_command",
-        arguments_json_text=json.dumps(arguments, sort_keys=True),
+        provider=provider,
+        turn_index=turn_index,
+        command_run_id=command_run_id,
+        timeout_seconds=timeout_seconds,
+        closeout_index=closeout_index,
     )
 
 
@@ -2138,82 +1574,21 @@ def _native_final_verifier_closeout(
     pending_mutation: Mapping[str, object] | None = None,
     done_candidate_id: str = "",
 ) -> tuple[NativeTranscriptItem, ToolResultEnvelope, dict[str, object]] | None:
-    effective_mutation = dict(pending_mutation or {})
-    if not effective_mutation:
-        effective_mutation = _latest_native_source_mutation_without_later_verifier(
-            tool_calls,
-            tool_results,
-            source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
-        )
-    if not effective_mutation:
-        effective_mutation = _latest_native_source_mutation(
-            tool_calls,
-            tool_results,
-            source_mutation_roots=_native_source_mutation_roots(lane_input, workspace),
-        )
-    if not effective_mutation:
-        return None
-    if not _native_final_verifier_closeout_allowed(lane_input, lane_config=lane_config):
-        return None
-    plan = _native_final_verifier_closeout_plan(
-        lane_input,
-        provider=provider,
-        lane_config=lane_config,
-        tool_results=tool_results,
-        done_candidate_id=done_candidate_id,
-    )
-    if plan is None:
-        return None
-    budget = _native_final_verifier_closeout_budget_seconds(lane_input, run_started=start_monotonic)
-    if budget < _FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS:
-        return None
-    turn_index = len(getattr(provider, "requests", []) or ()) + 1
-    call = _native_final_verifier_closeout_call(
+    return _closeout_policy.native_final_verifier_closeout(
         lane_input,
         lane_attempt_id=lane_attempt_id,
         provider=provider,
-        turn_index=turn_index,
-        lane_config=lane_config,
-        plan=plan,
-        timeout_seconds=budget,
-        pending_mutation=effective_mutation,
-    )
-    latency_start = time.monotonic()
-    result = _execute_native_call(
-        call,
-        lane_input=lane_input,
+        exec_runtime=exec_runtime,
         workspace=workspace,
         allowed_read_roots=allowed_read_roots,
         allowed_write_roots=allowed_write_roots,
         lane_config=lane_config,
-        exec_runtime=exec_runtime,
-        write_runtime=ImplementV2WriteRuntime(
-            workspace=workspace,
-            allowed_write_roots=allowed_write_roots,
-            approved_write_calls=(),
-            allow_governance_writes=bool(lane_config.get("allow_governance_writes")),
-            artifact_dir=lane_config.get("artifact_dir"),
-        ),
+        tool_calls=tool_calls,
+        tool_results=tool_results,
+        start_monotonic=start_monotonic,
+        pending_mutation=pending_mutation,
+        done_candidate_id=done_candidate_id,
     )
-    if result.status == "yielded":
-        command_run_id = _command_run_id_from_result(result)
-        if command_run_id:
-            payload = exec_runtime.finalize_command(command_run_id, timeout_seconds=budget)
-            result = with_tool_route_decision(
-                _tool_call_envelope_from_native_call(call, _arguments(call)[0]),
-                exec_runtime.project_result_payload(result, payload),
-            )
-    latency_finished = time.monotonic()
-    latency = {
-        "call_id": call.call_id,
-        "tool_name": call.tool_name,
-        "turn_index": turn_index,
-        "queued_ms": 0,
-        "started_ms": round((latency_start - start_monotonic) * 1000, 3),
-        "first_output_ms": round((latency_finished - latency_start) * 1000, 3),
-        "finished_ms": round((latency_finished - latency_start) * 1000, 3),
-    }
-    return call, result, latency
 
 
 def _native_final_verifier_closeout_allowed(
@@ -2221,11 +1596,7 @@ def _native_final_verifier_closeout_allowed(
     *,
     lane_config: Mapping[str, object],
 ) -> bool:
-    if not bool(lane_config.get("allow_verify")):
-        return False
-    if not bool(lane_config.get("allow_shell") or lane_config.get("run_command_available")):
-        return False
-    return bool(lane_input.workspace) and bool(_native_final_verifier_tool_name(lane_input, lane_config=lane_config))
+    return _closeout_policy.native_final_verifier_closeout_allowed(lane_input, lane_config=lane_config)
 
 
 def _native_final_verifier_tool_name(
@@ -2233,64 +1604,27 @@ def _native_final_verifier_tool_name(
     *,
     lane_config: Mapping[str, object],
 ) -> str:
-    for candidate in ("exec_command", "run_command"):
-        if _native_tool_available(candidate, lane_input=lane_input, lane_config=lane_config):
-            return candidate
-    return ""
+    return _closeout_policy.native_final_verifier_tool_name(lane_input, lane_config=lane_config)
 
 
 def _canonical_native_verify_command_source(value: object, *, default: str = "") -> str:
-    text = str(value or "").strip().casefold()
-    if text in {"auto", "auto_detected", "auto-detected", "auto_detected_verifier"}:
-        return "auto_detected_verifier"
-    if text in {"explicit", "configured", "configured_verifier", "manual", "user", "cli", "task", "task_contract"}:
-        return "configured_verifier"
-    return default
+    return _closeout_policy.canonical_native_verify_command_source(value, default=default)
 
 
 def _native_final_verifier_command_candidate(
     lane_input: ImplementLaneInput,
     *,
     wanted_source: str,
-) -> _NativeFinishVerifierPlan | None:
-    lane_command = str((lane_input.lane_config or {}).get("verify_command") or "").strip()
-    lane_source = _canonical_native_verify_command_source(
-        (lane_input.lane_config or {}).get("verify_command_source"),
-        default="configured_verifier" if lane_command else "",
-    )
-    for source_ref, source in (("lane_config.verify_command", lane_input.lane_config), ("task_contract.verify_command", lane_input.task_contract)):
-        command = str((source or {}).get("verify_command") or "").strip()
-        if not command:
-            continue
-        command_source = _canonical_native_verify_command_source(
-            (source or {}).get("verify_command_source"),
-            default="configured_verifier",
-        )
-        if (
-            source_ref == "task_contract.verify_command"
-            and "verify_command_source" not in (source or {})
-            and lane_command
-            and command == lane_command
-            and lane_source == "auto_detected_verifier"
-        ):
-            command_source = "auto_detected_verifier"
-        if command_source != wanted_source:
-            continue
-        return _NativeFinishVerifierPlan(
-            command=command,
-            source=command_source,
-            raw={"source_ref": source_ref, "verify_command_source": command_source},
-        )
-    return None
+) -> _finish_planner.FinishVerifierPlan | None:
+    return _closeout_policy.native_final_verifier_command_candidate(lane_input, wanted_source=wanted_source)
 
 
 def _configured_native_final_verifier_command(lane_input: ImplementLaneInput) -> str:
-    candidate = _native_final_verifier_command_candidate(lane_input, wanted_source="configured_verifier")
-    return candidate.command if candidate else ""
+    return _closeout_policy.configured_native_final_verifier_command(lane_input)
 
 
-def _auto_detected_native_final_verifier_command(lane_input: ImplementLaneInput) -> _NativeFinishVerifierPlan | None:
-    return _native_final_verifier_command_candidate(lane_input, wanted_source="auto_detected_verifier")
+def _auto_detected_native_final_verifier_command(lane_input: ImplementLaneInput) -> _finish_planner.FinishVerifierPlan | None:
+    return _closeout_policy.auto_detected_native_final_verifier_command(lane_input)
 
 
 def _native_final_verifier_closeout_plan(
@@ -2300,1223 +1634,22 @@ def _native_final_verifier_closeout_plan(
     lane_config: Mapping[str, object],
     tool_results: tuple[ToolResultEnvelope, ...],
     done_candidate_id: str = "",
-) -> _NativeFinishVerifierPlan | None:
-    configured = _native_final_verifier_command_candidate(lane_input, wanted_source="configured_verifier")
-    if configured is not None:
-        return configured
-    if not _native_finish_verifier_planner_can_run(
+) -> _finish_planner.FinishVerifierPlan | None:
+    return _closeout_policy.native_final_verifier_closeout_plan(
         lane_input,
         provider=provider,
         lane_config=lane_config,
         tool_results=tool_results,
-    ):
-        return _auto_detected_native_final_verifier_command(lane_input)
-    loop_request = _finish_verifier_planner_loop_request(
-        lane_input,
-        lane_config=lane_config,
-        tool_results=tool_results,
         done_candidate_id=done_candidate_id,
     )
-    request_hash = _finish_verifier_planner_request_hash(loop_request.as_planner_request())
-    loop_result = run_finish_verifier_planner_loop(
-        loop_request,
-        planner_provider=provider,
-    )
-    if loop_result.status == "error":
-        fallback, fallback_rejection = _safe_auto_detected_finish_verifier_fallback(
-            lane_input,
-            request=loop_request.as_planner_request(),
-        )
-        decision = dict(loop_result.record)
-        decision.setdefault("status", "error")
-        decision.setdefault("request_hash", request_hash)
-        if fallback is not None:
-            decision["fallback"] = _native_finish_verifier_plan_payload(fallback)
-            decision["fallback_source"] = fallback.source
-        elif fallback_rejection:
-            decision["fallback_rejection"] = dict(fallback_rejection)
-        else:
-            decision.setdefault("fallback", {})
-            decision.setdefault("fallback_source", "")
-        _record_finish_verifier_planner_decision(provider, decision)
-        _emit_progress(
-            getattr(provider, "progress", None),
-            f"finish_verifier_planner failed: {loop_result.reason or 'unknown'}; "
-            f"fallback={_native_finish_verifier_plan_source(fallback)}",
-        )
-        return _native_finish_verifier_plan_with_planner_fallback(fallback, decision)
-    if loop_result.status == "selected" and loop_result.plan is not None:
-        _record_finish_verifier_planner_decision(provider, loop_result.record)
-        return loop_result.plan
-    fallback, fallback_rejection = _safe_auto_detected_finish_verifier_fallback(
-        lane_input,
-        request=loop_request.as_planner_request(),
-    )
-    decision = dict(loop_result.record)
-    decision.setdefault("status", loop_result.status or "rejected")
-    decision.setdefault("request_hash", request_hash)
-    if loop_result.reason:
-        decision.setdefault("reject_reason", loop_result.reason)
-    if loop_result.blockers:
-        decision.setdefault("reject_blockers", list(loop_result.blockers))
-    if fallback is not None:
-        decision["fallback"] = _native_finish_verifier_plan_payload(fallback)
-        decision["fallback_source"] = fallback.source
-    elif fallback_rejection:
-        decision["fallback_rejection"] = dict(fallback_rejection)
-    else:
-        decision.setdefault("fallback", {})
-        decision.setdefault("fallback_source", "")
-    _record_finish_verifier_planner_decision(provider, decision)
-    _emit_progress(
-        getattr(provider, "progress", None),
-        "finish_verifier_planner rejected plan: "
-        f"{loop_result.reason or 'unknown'}; fallback={_native_finish_verifier_plan_source(fallback)}",
-    )
-    return _native_finish_verifier_plan_with_planner_fallback(fallback, decision)
 
 
 def _safe_auto_detected_finish_verifier_fallback(
     lane_input: ImplementLaneInput,
     *,
     request: Mapping[str, object],
-) -> tuple[_NativeFinishVerifierPlan | None, Mapping[str, object] | None]:
-    fallback = _auto_detected_native_final_verifier_command(lane_input)
-    if fallback is None:
-        return None, None
-    safety = _finish_verifier_command_safety(
-        fallback.command,
-        request=request,
-        require_observable_assertions=True,
-    )
-    if safety.allowed:
-        return fallback, None
-    return None, {
-        "source": fallback.source,
-        "command": fallback.command,
-        "reason": safety.reason,
-        "blockers": list(safety.blockers),
-    }
-
-
-def run_finish_verifier_planner_loop(
-    request: FinishVerifierPlannerLoopRequest,
-    *,
-    planner_provider: object,
-    read_dispatcher: object | None = None,
-    artifact_sink: object | None = None,
-) -> FinishVerifierPlannerLoopResult:
-    """Run the v0 finish-verifier planner component.
-
-    Phase 1 deliberately wraps the existing single-shot planner provider behind
-    the component contract. Later phases can replace the provider internals with
-    a multi-turn read-only tool loop without changing the harness boundary.
-    """
-
-    del read_dispatcher, artifact_sink
-    planner_request = request.as_planner_request()
-    request_hash = _finish_verifier_planner_request_hash(planner_request)
-    _record_finish_verifier_planner_request(planner_provider, planner_request, request_hash=request_hash)
-    if not request.policy.enabled:
-        record = _finish_verifier_planner_decision_record(
-            status="no_plan",
-            request_hash=request_hash,
-            reject_reason="finish verifier planner loop is disabled",
-            reject_blockers=("planner_loop_disabled",),
-        )
-        record = _finish_verifier_planner_record_with_authority(record, planner_request)
-        return FinishVerifierPlannerLoopResult(
-            status="no_plan",
-            plan=None,
-            record=record,
-            blockers=("planner_loop_disabled",),
-            reason="finish verifier planner loop is disabled",
-        )
-    planner = getattr(planner_provider, "plan_finish_verifier_command", None)
-    if not callable(planner):
-        record = _finish_verifier_planner_decision_record(
-            status="no_plan",
-            request_hash=request_hash,
-            reject_reason="planner provider has no plan_finish_verifier_command",
-            reject_blockers=("planner_provider_missing",),
-        )
-        record = _finish_verifier_planner_record_with_authority(record, planner_request)
-        return FinishVerifierPlannerLoopResult(
-            status="no_plan",
-            plan=None,
-            record=record,
-            blockers=("planner_provider_missing",),
-            reason="planner provider has no plan_finish_verifier_command",
-        )
-    try:
-        raw_plan = planner(planner_request)
-    except Exception as exc:
-        record = _finish_verifier_planner_decision_record(
-            status="error",
-            request_hash=request_hash,
-            error=str(exc),
-        )
-        record = _finish_verifier_planner_record_with_authority(record, planner_request)
-        return FinishVerifierPlannerLoopResult(
-            status="error",
-            plan=None,
-            record=record,
-            blockers=("planner_provider_error",),
-            reason=str(exc),
-        )
-    forbidden = _finish_verifier_planner_forbidden_tool_attempts(raw_plan, request.policy)
-    if forbidden:
-        record = _finish_verifier_planner_decision_record(
-            status="rejected",
-            request_hash=request_hash,
-            raw_plan=raw_plan,
-            reject_reason="planner attempted forbidden tool",
-            reject_blockers=forbidden,
-        )
-        record = _finish_verifier_planner_record_with_authority(record, planner_request)
-        return FinishVerifierPlannerLoopResult(
-            status="rejected",
-            plan=None,
-            record=record,
-            blockers=forbidden,
-            reason="planner attempted forbidden tool",
-        )
-    coercion = _coerce_native_finish_verifier_plan_with_diagnostics(
-        raw_plan,
-        request=planner_request,
-    )
-    if coercion.plan is None:
-        record = _finish_verifier_planner_decision_record(
-            status=coercion.status or "rejected",
-            request_hash=request_hash,
-            raw_plan=raw_plan,
-            reject_reason=coercion.reject_reason,
-            reject_blockers=coercion.reject_blockers,
-        )
-        record = _finish_verifier_planner_record_with_authority(record, planner_request)
-        return FinishVerifierPlannerLoopResult(
-            status="rejected" if coercion.status != "no_plan" else "no_plan",
-            plan=None,
-            record=record,
-            blockers=coercion.reject_blockers,
-            reason=coercion.reject_reason,
-        )
-    record = _finish_verifier_planner_decision_record(
-        status="accepted",
-        request_hash=request_hash,
-        raw_plan=raw_plan,
-        plan=coercion.plan,
-    )
-    record = _finish_verifier_planner_record_with_authority(record, planner_request)
-    return FinishVerifierPlannerLoopResult(
-        status="selected",
-        plan=coercion.plan,
-        record=record,
-        reason=coercion.plan.reason,
-    )
-
-
-def _native_finish_verifier_planner_can_run(
-    lane_input: ImplementLaneInput,
-    *,
-    provider: object,
-    lane_config: Mapping[str, object],
-    tool_results: tuple[ToolResultEnvelope, ...],
-) -> bool:
-    return _native_finish_verifier_planner_eligibility(
-        lane_input,
-        provider=provider,
-        lane_config=lane_config,
-        tool_results=tool_results,
-    ).can_run
-
-
-def _native_finish_verifier_planner_eligibility(
-    lane_input: ImplementLaneInput,
-    *,
-    provider: object,
-    lane_config: Mapping[str, object],
-    tool_results: tuple[ToolResultEnvelope, ...],
-    configured_verifier_precedence: bool = False,
-    policy: FinishVerifierPlannerPolicy | None = None,
-) -> _FinishVerifierPlannerEligibility:
-    planner_policy = policy or finish_verifier_planner_policy(lane_config)
-    if not planner_policy.enabled:
-        return _FinishVerifierPlannerEligibility(
-            policy=planner_policy,
-            can_run=False,
-            selection_source=planner_policy.selection_source,
-        )
-    if configured_verifier_precedence:
-        return _FinishVerifierPlannerEligibility(
-            policy=planner_policy,
-            can_run=False,
-            selection_source="configured_verifier_precedence",
-        )
-    if not tool_results:
-        return _FinishVerifierPlannerEligibility(
-            policy=planner_policy,
-            can_run=False,
-            selection_source="not_eligible",
-        )
-    if not callable(getattr(provider, "plan_finish_verifier_command", None)):
-        return _FinishVerifierPlannerEligibility(
-            policy=planner_policy,
-            can_run=False,
-            selection_source="provider_missing",
-        )
-    return _FinishVerifierPlannerEligibility(
-        policy=planner_policy,
-        can_run=True,
-        selection_source=planner_policy.selection_source,
-    )
-
-
-def _native_finish_verifier_planner_selection_source(
-    lane_input: ImplementLaneInput,
-    *,
-    provider: object,
-    lane_config: Mapping[str, object],
-    tool_results: tuple[ToolResultEnvelope, ...],
-    decisions: tuple[Mapping[str, object], ...],
-    policy: FinishVerifierPlannerPolicy | None = None,
-) -> str:
-    if decisions:
-        decision_source = str(decisions[-1].get("selection_source") or "").strip()
-        if decision_source:
-            return decision_source
-    eligibility = _native_finish_verifier_planner_eligibility(
-        lane_input,
-        provider=provider,
-        lane_config=lane_config,
-        tool_results=tool_results,
-        configured_verifier_precedence=bool(_configured_native_final_verifier_command(lane_input)),
-        policy=policy,
-    )
-    return eligibility.selection_source
-
-
-def _finish_verifier_planner_loop_request(
-    lane_input: ImplementLaneInput,
-    *,
-    lane_config: Mapping[str, object],
-    tool_results: tuple[ToolResultEnvelope, ...],
-    done_candidate_id: str = "",
-) -> FinishVerifierPlannerLoopRequest:
-    legacy_request = _finish_verifier_planner_request(lane_input, tool_results)
-    task = legacy_request.get("task") if isinstance(legacy_request.get("task"), Mapping) else {}
-    read_policy = legacy_request.get("read_policy") if isinstance(legacy_request.get("read_policy"), Mapping) else {}
-    allowed_roots = lane_config.get("allowed_read_roots")
-    if not isinstance(allowed_roots, (list, tuple)):
-        allowed_roots = (lane_input.workspace,)
-    planner_policy = finish_verifier_planner_policy(lane_config)
-    latest_mutation = _latest_mutation_for_finish_verifier_planner(tool_results)
-    task_contract = dict(lane_input.task_contract)
-    legacy_contract = task.get("contract")
-    if isinstance(legacy_contract, Mapping):
-        task_contract.update(dict(legacy_contract))
-    return FinishVerifierPlannerLoopRequest(
-        lane_attempt_id=_lane_attempt_id(lane_input),
-        turn_id="finish-verifier-planner",
-        finish_call_id="" if done_candidate_id else "finish",
-        done_candidate_id=done_candidate_id,
-        task_id=str(task.get("task_id") or lane_input.task_id),
-        task_description=str(task.get("description") or _native_task_description(lane_input)),
-        task_contract=task_contract,
-        latest_mutation=latest_mutation,
-        recent_tool_results=tuple(
-            item for item in legacy_request.get("recent_tool_results", ()) if isinstance(item, Mapping)
-        ),
-        candidate_paths=_finish_verifier_planner_candidate_paths(
-            lane_input,
-            latest_mutation=latest_mutation,
-            legacy_read_policy=read_policy,
-            tool_results=tool_results,
-        ),
-        policy=FinishVerifierPlannerLoopPolicy(
-            enabled=planner_policy.enabled,
-            selection_source=planner_policy.selection_source,
-            max_turns=_planner_bounded_int(lane_config.get("finish_verifier_planner_max_turns"), 3, 1, 8),
-            max_wall_seconds=_safe_float(
-                lane_config.get("finish_verifier_planner_timeout_seconds"),
-                default=300.0,
-            ),
-            allowed_roots=tuple(str(root) for root in allowed_roots if str(root).strip()),
-        ),
-        legacy_request=legacy_request,
-    )
-
-
-def _latest_mutation_for_finish_verifier_planner(
-    tool_results: tuple[ToolResultEnvelope, ...],
-) -> dict[str, object]:
-    for result in reversed(tool_results):
-        if result.status != "completed" or result.is_error:
-            continue
-        if result.tool_name not in {"write_file", "edit_file", "apply_patch", "run_command", "exec_command"}:
-            continue
-        payload = _native_result_payload(result)
-        paths: list[str] = []
-        for key in ("path", "target", "file", "output_path"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                paths.append(value)
-        return {
-            "provider_call_id": result.provider_call_id,
-            "tool_name": result.tool_name,
-            "status": result.status,
-            "paths": paths[:8],
-            "summary": result.natural_result_text(limit=500),
-        }
-    return {}
-
-
-def _finish_verifier_planner_candidate_paths(
-    lane_input: ImplementLaneInput,
-    *,
-    latest_mutation: Mapping[str, object],
-    legacy_read_policy: Mapping[str, object],
-    tool_results: tuple[ToolResultEnvelope, ...],
-) -> tuple[str, ...]:
-    workspace = Path(str(lane_input.workspace or ".")).expanduser().resolve(strict=False)
-    paths: list[str] = []
-    _extend_unique_paths(paths, legacy_read_policy.get("candidate_paths"), workspace=workspace, structured=True)
-    _extend_unique_paths(paths, latest_mutation.get("paths"), workspace=workspace, structured=True)
-    _extend_unique_paths(
-        paths,
-        _task_contract_candidate_paths(lane_input.task_contract, workspace=workspace),
-        workspace=workspace,
-        structured=True,
-    )
-    for result in reversed(tool_results[-8:]):
-        if result.status != "completed" or result.is_error:
-            continue
-        payload = _native_result_payload(result)
-        _extend_unique_paths(
-            paths,
-            _payload_candidate_paths(payload, workspace=workspace),
-            workspace=workspace,
-            structured=True,
-        )
-    return tuple(paths[:24])
-
-
-def _task_contract_candidate_paths(task_contract: object, *, workspace: Path) -> tuple[str, ...]:
-    if not isinstance(task_contract, Mapping):
-        return ()
-    paths: list[str] = []
-    for key in ("expected_artifact", "expected_artifacts", "artifact", "artifacts"):
-        _extend_unique_paths(paths, task_contract.get(key), workspace=workspace, structured=True)
-    for key in ("verify_command", "description", "guidance"):
-        _extend_unique_paths(paths, task_contract.get(key), workspace=workspace, structured=False)
-    return tuple(paths)
-
-
-def _payload_candidate_paths(payload: Mapping[str, object], *, workspace: Path) -> tuple[str, ...]:
-    paths: list[str] = []
-    for key in ("changed_paths", "path", "target", "file", "output_path"):
-        _extend_unique_paths(paths, payload.get(key), workspace=workspace, structured=True)
-    typed = payload.get("typed_source_mutation") if isinstance(payload.get("typed_source_mutation"), Mapping) else {}
-    _extend_unique_paths(paths, typed.get("changed_paths"), workspace=workspace, structured=True)
-    card = payload.get("mutation_output_card") if isinstance(payload.get("mutation_output_card"), Mapping) else {}
-    _extend_unique_paths(paths, card.get("changed_paths"), workspace=workspace, structured=True)
-    for key in (
-        "cwd",
-        "command",
-        "stdout",
-        "stderr",
-        "stdout_tail",
-        "stderr_tail",
-    ):
-        _extend_unique_paths(paths, payload.get(key), workspace=workspace, structured=False)
-    return tuple(paths)
-
-
-def _extract_paths_from_value(value: object, *, workspace: Path, structured: bool) -> tuple[str, ...]:
-    found: list[str] = []
-
-    def visit(item: object) -> None:
-        if isinstance(item, Mapping):
-            for key in ("path", "target", "file", "output_path", "name", "command", "cmd"):
-                visit(item.get(key))
-            return
-        if isinstance(item, (list, tuple)):
-            for child in item:
-                visit(child)
-            return
-        if not isinstance(item, str):
-            return
-        if structured:
-            cleaned = _normalize_finish_verifier_candidate_path(item, workspace=workspace, structured=True)
-            if cleaned:
-                found.append(cleaned)
-            return
-        for match in _PATH_LIKE_TOKEN_RE.findall(item):
-            cleaned = _normalize_finish_verifier_candidate_path(match, workspace=workspace, structured=False)
-            if cleaned:
-                found.append(cleaned)
-
-    visit(value)
-    return tuple(dict.fromkeys(found))
-
-
-def _extend_unique_paths(paths: list[str], value: object, *, workspace: Path, structured: bool = False) -> None:
-    for path in _extract_paths_from_value(value, workspace=workspace, structured=structured):
-        if path not in paths:
-            paths.append(path)
-
-
-def _normalize_finish_verifier_candidate_path(path: str, *, workspace: Path, structured: bool) -> str:
-    path = path.strip().strip("'\"`.,:;()[]{}")
-    if not path or len(path) > 240:
-        return ""
-    if path in {".", "..", "/", "/tmp", "/app"}:
-        return ""
-    if path.startswith(("http://", "https://", "file://")):
-        return ""
-    if "\x00" in path or "\n" in path or "\r" in path:
-        return ""
-    normalized = path
-    candidate = Path(path).expanduser()
-    if candidate.is_absolute():
-        try:
-            resolved = candidate.resolve(strict=False)
-            normalized = resolved.relative_to(workspace).as_posix()
-        except ValueError:
-            normalized = candidate.as_posix()
-    else:
-        normalized = Path(path).as_posix()
-    if normalized in {".", "..", "/", "/tmp", "/app"}:
-        return ""
-    if normalized.startswith("../") or normalized == "..":
-        return ""
-    if structured:
-        return normalized
-    return normalized if any(char in normalized for char in ("/", ".")) or normalized.startswith("/tmp/") else ""
-
-
-def _finish_verifier_planner_forbidden_tool_attempts(
-    value: object,
-    policy: FinishVerifierPlannerLoopPolicy,
-) -> tuple[str, ...]:
-    attempts = _finish_verifier_planner_tool_names(value)
-    if not attempts:
-        return ()
-    allowed = set(policy.allowed_tools)
-    blockers: list[str] = []
-    for tool_name in attempts:
-        if tool_name not in allowed:
-            blockers.append(f"planner_forbidden_tool:{tool_name}")
-    return tuple(dict.fromkeys(blockers))
-
-
-def _finish_verifier_planner_tool_names(value: object) -> tuple[str, ...]:
-    names: list[str] = []
-
-    def visit(item: object) -> None:
-        if isinstance(item, Mapping):
-            candidate = (
-                item.get("tool_name")
-                or item.get("name")
-                or item.get("tool")
-                or item.get("function_name")
-            )
-            if isinstance(candidate, str) and candidate.strip():
-                names.append(candidate.strip())
-            for key in ("tool_calls", "tool_call", "function_call", "calls", "actions"):
-                nested = item.get(key)
-                if isinstance(nested, (list, tuple)):
-                    for child in nested:
-                        visit(child)
-                elif isinstance(nested, Mapping):
-                    visit(nested)
-            function = item.get("function")
-            if isinstance(function, Mapping):
-                visit(function)
-        elif isinstance(item, (list, tuple)):
-            for child in item:
-                visit(child)
-
-    visit(value)
-    return tuple(dict.fromkeys(names))
-
-
-def _coerce_native_finish_verifier_plan(
-    value: object,
-    *,
-    request: Mapping[str, object] | None = None,
-) -> _NativeFinishVerifierPlan | None:
-    return _coerce_native_finish_verifier_plan_with_diagnostics(value, request=request).plan
-
-
-def _coerce_native_finish_verifier_plan_with_diagnostics(
-    value: object,
-    *,
-    request: Mapping[str, object] | None = None,
-) -> _NativeFinishVerifierPlanCoercion:
-    if not isinstance(value, Mapping):
-        return _NativeFinishVerifierPlanCoercion(
-            plan=None,
-            status="rejected",
-            reject_reason="planner output was not a JSON object",
-            reject_blockers=("planner_plan_not_mapping",),
-        )
-    command = str(value.get("command") or value.get("cmd") or "").strip()
-    safety = _finish_verifier_command_safety(
-        command,
-        request=request,
-        require_observable_assertions=False,
-    )
-    if not safety.allowed:
-        return _NativeFinishVerifierPlanCoercion(
-            plan=None,
-            status="rejected",
-            reject_reason=safety.reason,
-            reject_blockers=safety.blockers,
-        )
-    cwd = str(value.get("cwd") or ".").strip() or "."
-    if "\x00" in cwd or "\n" in cwd:
-        cwd = "."
-    return _NativeFinishVerifierPlanCoercion(
-        plan=_NativeFinishVerifierPlan(
-            command=command,
-            cwd=cwd,
-            source="finish_verifier_planner",
-            reason=str(value.get("reason") or value.get("rationale") or "").strip(),
-            confidence=str(value.get("confidence") or "").strip(),
-            raw=dict(value),
-        ),
-        status="accepted",
-    )
-
-
-_FINISH_VERIFIER_NOOP_COMMAND_RE = re.compile(
-    r"(?is)^\s*(?:true|:|exit\s+0|test\s+1\s*={1,2}\s*1|\[\s*1\s*={1,2}\s*1\s*\])\s*$"
-)
-_FINISH_VERIFIER_SELF_ACCEPTANCE_RE = re.compile(
-    r"(?i)\b(?:acceptance_ok|final_acceptance_ok|acceptance\s*:\s*pass)\b"
-)
-_FINISH_VERIFIER_MUTATION_RE = re.compile(
-    r"(?is)(?:^|[;&|]\s*)(?:rm|mv|cp|touch|mkdir|chmod|chown|truncate|install|tee)\b"
-    r"|\b(?:sed\s+-i|perl\s+-pi)\b"
-    r"|(?:^|[^<])>{1,2}(?!&)"
-)
-_FINISH_VERIFIER_GENERIC_TEST_RE = re.compile(
-    r"(?i)(?:^|[\s;&|()])(?:pytest|npm\s+test|pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test|make\s+(?:test|check)|"
-    r"prove|coqc|coqchk|mvn\s+test|gradle\s+test|tox|ruff\s+check|python\s+-m\s+pytest)(?:$|[\s;&|()])"
-)
-_FINISH_VERIFIER_STDOUT_REQUIREMENT_RE = re.compile(
-    r"(?i)\b(?:stdout|standard\s+output|terminal\s+output|expected\s+output|print(?:ed)?\s+output)\b"
-)
-_FINISH_VERIFIER_STDERR_REQUIREMENT_RE = re.compile(
-    r"(?i)\b(?:stderr|standard\s+error|error\s+output)\b"
-)
-_FINISH_VERIFIER_IMAGE_REQUIREMENT_RE = re.compile(
-    r"(?i)\b(?:frame|screenshot|image|bitmap)\b|\.(?:bmp|png|jpe?g|ppm|gif|svg)\b"
-)
-_FINISH_VERIFIER_FILE_REQUIREMENT_RE = re.compile(
-    r"(?i)\b(?:expected\s+artifact|artifact\s+path|output\s+file|created\s+file|saved\s+file)\b"
-)
-_FINISH_VERIFIER_ASSERTION_COMMAND_RE = re.compile(
-    r"(?i)(?:^|[\s;&|()])(?:grep|rg|awk|diff|cmp|stat|file|identify|sha(?:1|256)sum|wc)(?:$|[\s;&|()])"
-)
-_FINISH_VERIFIER_SUBJECT_RE = re.compile(
-    r"(?<![A-Za-z0-9_./-])(?:[A-Za-z0-9_.@+-]+/)*[A-Za-z0-9_.@+-]+"
-    r"\.(?:py|pyx|pxd|js|ts|tsx|jsx|c|h|cc|cpp|hpp|rs|go|java|rb|php|lua|v|vo|ml|mli|sh|json|toml|yaml|yml|"
-    r"txt|md|so|dylib|dll|exe|o|a|bmp|png|jpe?g|ppm|gif|svg)(?![A-Za-z0-9_./-])"
-)
-_FINISH_VERIFIER_IDENTIFIER_SUBJECT_RE = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z][A-Za-z0-9_-]{3,}(?![A-Za-z0-9_-])")
-_FINISH_VERIFIER_GENERIC_SUBJECT_WORDS = frozenset(
-    {
-        "acceptance",
-        "address",
-        "artifact",
-        "artifacts",
-        "assert",
-        "build",
-        "buildable",
-        "called",
-        "command",
-        "complete",
-        "completion",
-        "contain",
-        "contains",
-        "create",
-        "criteria",
-        "expected",
-        "exposes",
-        "file",
-        "files",
-        "float",
-        "floats",
-        "function",
-        "host",
-        "hosted",
-        "hosting",
-        "http",
-        "https",
-        "index",
-        "install",
-        "installable",
-        "installed",
-        "localhost",
-        "local",
-        "locally",
-        "must",
-        "number",
-        "numbers",
-        "objective",
-        "output",
-        "package",
-        "possible",
-        "prompt",
-        "python",
-        "required",
-        "returns",
-        "root",
-        "schema",
-        "server",
-        "should",
-        "simple",
-        "source",
-        "task",
-        "test",
-        "tests",
-        "that",
-        "their",
-        "this",
-        "using",
-        "version",
-        "with",
-    }
-)
-_PATH_LIKE_TOKEN_RE = re.compile(
-    r"(?:/[\w@+.,:=~%/-]+|[\w@+.,:=~%-]+/[\w@+.,:=~%/-]+|"
-    r"(?<![A-Za-z0-9_./-])[\w@+.-]+\."
-    r"(?:py|pyx|pxd|js|ts|tsx|jsx|c|h|cc|cpp|hpp|rs|go|java|rb|php|lua|v|vo|ml|mli|sh|json|toml|yaml|yml|"
-    r"txt|md|so|dylib|dll|exe|o|a|bmp|png|jpe?g|ppm|gif|svg)(?![A-Za-z0-9_./-]))"
-)
-
-
-def _finish_verifier_command_safe(
-    command: object,
-    *,
-    request: Mapping[str, object] | None = None,
-) -> bool:
-    return _finish_verifier_command_safety(command, request=request).allowed
-
-
-def _finish_verifier_command_safety(
-    command: object,
-    *,
-    request: Mapping[str, object] | None = None,
-    require_observable_assertions: bool = True,
-) -> _FinishVerifierCommandSafetyResult:
-    text = str(command or "").strip()
-    validation = validate_closeout_command(
-        FinishCloseoutCommand(command=text, source="finish_verifier_planner"),
-        NativeFinishGatePolicy(allowed_sources=("finish_verifier_planner",)),
-    )
-    requirements = _finish_verifier_observable_requirements(request)
-    if not validation.allowed:
-        mapped_blockers = tuple(_planner_safety_blocker(blocker) for blocker in validation.blockers)
-        if (
-            set(mapped_blockers) == {"finish_verifier_weak_assertion"}
-            and _finish_verifier_command_asserts_observables(text, requirements)
-        ):
-            validation = FinishCloseoutCommandValidation(
-                allowed=True,
-                command=validation.command,
-                reason="nontrivial observable assertion command",
-            )
-        else:
-            return _FinishVerifierCommandSafetyResult(
-                allowed=False,
-                reason=validation.reason,
-                blockers=mapped_blockers,
-            )
-    if (
-        require_observable_assertions
-        and requirements
-        and not _finish_verifier_command_asserts_observables(text, requirements)
-    ):
-        return _FinishVerifierCommandSafetyResult(
-            allowed=False,
-            reason="finish verifier command does not assert required task-visible observables",
-            blockers=("finish_verifier_observable_assertions_missing",),
-        )
-    if _FINISH_VERIFIER_GENERIC_TEST_RE.search(text):
-        return _FinishVerifierCommandSafetyResult(allowed=True, reason="generic test command")
-    if request is None:
-        return _FinishVerifierCommandSafetyResult(allowed=True, reason="no request subject to check")
-    if not _finish_verifier_command_mentions_task_subject(text, request):
-        return _FinishVerifierCommandSafetyResult(
-            allowed=False,
-            reason="finish verifier command does not mention a task subject",
-            blockers=("finish_verifier_task_subject_missing",),
-        )
-    return _FinishVerifierCommandSafetyResult(allowed=True, reason="mentions task subject")
-
-
-def _finish_verifier_observable_requirements(request: Mapping[str, object] | None) -> tuple[str, ...]:
-    if not isinstance(request, Mapping):
-        return ()
-    command_policy = request.get("command_policy")
-    if isinstance(command_policy, Mapping):
-        explicit = command_policy.get("observable_requirements")
-        if isinstance(explicit, (list, tuple)):
-            values = tuple(str(item).strip() for item in explicit if str(item).strip())
-            if values:
-                return tuple(dict.fromkeys(values))
-    requirements: list[str] = []
-    task = request.get("task")
-    task_contract: Mapping[str, object] = {}
-    task_text = ""
-    if isinstance(task, Mapping):
-        task_text = str(task.get("description") or "")
-        contract = task.get("contract")
-        if isinstance(contract, Mapping):
-            task_contract = contract
-    haystack = " ".join(
-        item
-        for item in (
-            task_text,
-            json.dumps(_json_safe_native(task_contract), ensure_ascii=False, sort_keys=True),
-            json.dumps(
-                _json_safe_native(request.get("recent_tool_results") or ()),
-                ensure_ascii=False,
-                sort_keys=True,
-            ),
-        )
-        if item
-    )
-    if _FINISH_VERIFIER_STDOUT_REQUIREMENT_RE.search(haystack):
-        requirements.append("stdout")
-    if _FINISH_VERIFIER_STDERR_REQUIREMENT_RE.search(haystack):
-        requirements.append("stderr")
-    if _FINISH_VERIFIER_IMAGE_REQUIREMENT_RE.search(haystack):
-        requirements.append("image_artifact")
-    if _FINISH_VERIFIER_FILE_REQUIREMENT_RE.search(haystack):
-        requirements.append("file_artifact")
-    if isinstance(task_contract, Mapping):
-        for key in ("expected_artifact", "expected_artifacts", "artifact", "artifacts"):
-            if task_contract.get(key) not in (None, "", [], (), {}):
-                requirements.append("file_artifact")
-                break
-    return tuple(dict.fromkeys(requirements))
-
-
-def _finish_verifier_command_asserts_observables(command: str, requirements: tuple[str, ...]) -> bool:
-    if not requirements:
-        return _finish_verifier_nontrivial_test_command(command)
-    if _FINISH_VERIFIER_GENERIC_TEST_RE.search(command):
-        return True
-    if _FINISH_VERIFIER_ASSERTION_COMMAND_RE.search(command):
-        return True
-    if _finish_verifier_nontrivial_test_command(command) and any(
-        item in {"file_artifact", "image_artifact"} for item in requirements
-    ):
-        return True
-    return False
-
-
-def _finish_verifier_nontrivial_test_command(command: str) -> bool:
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return False
-    if not tokens:
-        return False
-    if tokens[0] == "[" and tokens[-1:] == ["]"]:
-        tokens = ["test", *tokens[1:-1]]
-    if tokens[0] != "test":
-        return False
-    if len(tokens) < 3:
-        return False
-    expression = tokens[1:]
-    joined = " ".join(expression).strip()
-    if joined in {"1 = 1", "1 == 1"}:
-        return False
-    file_predicates = {"-e", "-f", "-s", "-r", "-x", "-d"}
-    if any(token in file_predicates for token in expression):
-        return any(_PATH_LIKE_TOKEN_RE.search(token) for token in expression if token not in file_predicates)
-    return any(_PATH_LIKE_TOKEN_RE.search(token) for token in expression)
-
-
-def _planner_safety_blocker(blocker: str) -> str:
-    return {
-        "closeout_verifier_command_missing": "finish_verifier_command_empty",
-        "closeout_command_empty": "finish_verifier_command_empty",
-        "closeout_command_noop_success": "finish_verifier_noop_success",
-        "closeout_command_self_acceptance": "finish_verifier_self_acceptance_marker",
-        "closeout_command_weak_assertion": "finish_verifier_weak_assertion",
-        "closeout_command_inline_program": "finish_verifier_inline_evaluator",
-        "closeout_command_shell_disallowed": "finish_verifier_shell_disallowed",
-        "closeout_command_source_mutation": "finish_verifier_mutating_command",
-        "closeout_command_package_install": "finish_verifier_package_install",
-        "closeout_command_network": "finish_verifier_network",
-        "closeout_command_privileged": "finish_verifier_privileged",
-        "closeout_command_background": "finish_verifier_background_process",
-        "closeout_command_redirection": "finish_verifier_redirection",
-        "closeout_command_chain": "finish_verifier_shell_composition",
-        "closeout_command_secret": "finish_verifier_secret",
-        "closeout_command_multiline": "finish_verifier_command_newline",
-    }.get(blocker, blocker)
-
-
-def _record_finish_verifier_planner_decision(provider: object, record: Mapping[str, object]) -> None:
-    existing = getattr(provider, _FINISH_VERIFIER_PLANNER_DECISIONS_ATTR, None)
-    if not isinstance(existing, list):
-        existing = []
-        try:
-            setattr(provider, _FINISH_VERIFIER_PLANNER_DECISIONS_ATTR, existing)
-        except Exception:
-            return
-    existing.append(dict(record))
-
-
-def _record_finish_verifier_planner_request(
-    provider: object,
-    request: Mapping[str, object],
-    *,
-    request_hash: str,
-) -> None:
-    existing = getattr(provider, _FINISH_VERIFIER_PLANNER_REQUESTS_ATTR, None)
-    if not isinstance(existing, list):
-        existing = []
-        try:
-            setattr(provider, _FINISH_VERIFIER_PLANNER_REQUESTS_ATTR, existing)
-        except Exception:
-            return
-    existing.append({"request_hash": request_hash, "request": _json_safe_native(dict(request))})
-
-
-def _provider_finish_verifier_planner_decisions(provider: object) -> tuple[Mapping[str, object], ...]:
-    existing = getattr(provider, _FINISH_VERIFIER_PLANNER_DECISIONS_ATTR, ())
-    if not isinstance(existing, list):
-        return ()
-    return tuple(item for item in existing if isinstance(item, Mapping))
-
-
-def _provider_finish_verifier_planner_requests(provider: object) -> tuple[Mapping[str, object], ...]:
-    existing = getattr(provider, _FINISH_VERIFIER_PLANNER_REQUESTS_ATTR, ())
-    if not isinstance(existing, list):
-        return ()
-    return tuple(item for item in existing if isinstance(item, Mapping))
-
-
-def _finish_verifier_planner_request_hash(request: Mapping[str, object]) -> str:
-    encoded = json.dumps(dict(request), ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
-
-
-def _finish_verifier_planner_record_with_authority(
-    record: Mapping[str, object],
-    request: Mapping[str, object],
-) -> dict[str, object]:
-    item = dict(record)
-    read_policy = request.get("read_policy") if isinstance(request.get("read_policy"), Mapping) else {}
-    selection_source = str(read_policy.get("selection_source") or "").strip()
-    if selection_source:
-        item.setdefault("selection_source", selection_source)
-    if "enabled" in read_policy:
-        item.setdefault("request_enabled", bool(read_policy.get("enabled")))
-    done_candidate_id = str(request.get("done_candidate_id") or "").strip()
-    finish_call_id = str(request.get("finish_call_id") or "").strip()
-    if done_candidate_id:
-        item["done_candidate_id"] = done_candidate_id
-        item.pop("finish_call_id", None)
-    elif finish_call_id:
-        item["finish_call_id"] = finish_call_id
-    return item
-
-
-def _finish_verifier_planner_value_hash(value: object) -> str:
-    encoded = json.dumps(_json_safe_native(value), ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
-
-
-def _finish_verifier_planner_decision_record(
-    *,
-    status: str,
-    request_hash: str,
-    raw_plan: object = _RAW_FINISH_VERIFIER_PLAN_MISSING,
-    plan: _NativeFinishVerifierPlan | None = None,
-    reject_reason: str = "",
-    reject_blockers: tuple[str, ...] = (),
-    fallback: _NativeFinishVerifierPlan | None = None,
-    error: str = "",
-) -> dict[str, object]:
-    record: dict[str, object] = {
-        "status": status,
-        "request_hash": request_hash,
-    }
-    if raw_plan is not _RAW_FINISH_VERIFIER_PLAN_MISSING:
-        record["raw_plan"] = _json_safe_native(raw_plan)
-        record["raw_plan_hash"] = _finish_verifier_planner_value_hash(raw_plan)
-    if plan is not None:
-        record["accepted_plan"] = _native_finish_verifier_plan_payload(plan)
-    if reject_reason:
-        record["reject_reason"] = reject_reason
-    if reject_blockers:
-        record["reject_blockers"] = list(reject_blockers)
-    if error:
-        record["error"] = error
-    if fallback is not None:
-        record["fallback"] = _native_finish_verifier_plan_payload(fallback)
-        record["fallback_source"] = fallback.source
-    else:
-        record["fallback"] = {}
-        record["fallback_source"] = ""
-    return record
-
-
-def _native_finish_verifier_plan_with_planner_fallback(
-    plan: _NativeFinishVerifierPlan | None,
-    planner_decision: Mapping[str, object],
-) -> _NativeFinishVerifierPlan | None:
-    if plan is None:
-        return None
-    raw = dict(plan.raw or {})
-    raw["fallback_after_finish_verifier_planner"] = {
-        key: value
-        for key, value in planner_decision.items()
-        if key
-        in {
-            "status",
-            "request_hash",
-            "raw_plan",
-            "reject_reason",
-            "reject_blockers",
-            "error",
-            "fallback_source",
-        }
-    }
-    return replace(plan, raw=raw)
-
-
-def _native_finish_verifier_plan_source(plan: _NativeFinishVerifierPlan | None) -> str:
-    return plan.source if plan is not None else "none"
-
-
-def _native_finish_verifier_plan_payload(plan: _NativeFinishVerifierPlan) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "command": plan.command,
-        "cwd": plan.cwd,
-        "source": plan.source,
-        "reason": plan.reason,
-        "confidence": plan.confidence,
-    }
-    if plan.raw:
-        payload["raw"] = _json_safe_native(dict(plan.raw))
-    return {key: value for key, value in payload.items() if value not in ("", {}, [], ())}
-
-
-def _json_safe_native(value: object) -> object:
-    try:
-        json.dumps(value, sort_keys=True, default=str)
-    except TypeError:
-        return repr(value)
-    if isinstance(value, Mapping):
-        return {str(key): _json_safe_native(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe_native(item) for item in value]
-    return value
-
-
-def _patch_proof_manifest_with_finish_verifier_planner_decisions(
-    manifest_path: Path,
-    *,
-    decision_path: Path,
-    records: tuple[Mapping[str, object], ...],
-    request_path: Path | None = None,
-    request_records: tuple[Mapping[str, object], ...] = (),
-) -> None:
-    manifest: dict[str, object] = {}
-    if manifest_path.exists():
-        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            manifest = loaded
-    digest = _file_sha256_native(decision_path)
-    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
-    manifest["finish_verifier_planner_decisions_ref"] = decision_path.name
-    manifest["finish_verifier_planner_decisions_sha256"] = digest
-    request_digest = ""
-    if request_path is not None:
-        request_digest = _file_sha256_native(request_path)
-        manifest["finish_verifier_planner_requests_ref"] = request_path.name
-        manifest["finish_verifier_planner_requests_sha256"] = request_digest
-    metrics["finish_verifier_planner_decisions"] = {
-        "artifact_ref": decision_path.name,
-        "artifact_sha256": digest,
-        "decision_count": len(records),
-        "accepted_count": sum(1 for record in records if record.get("status") == "accepted"),
-        "rejected_count": sum(1 for record in records if record.get("status") == "rejected"),
-        "error_count": sum(1 for record in records if record.get("status") == "error"),
-        "fallback_count": sum(1 for record in records if record.get("fallback_source")),
-    }
-    if request_path is not None:
-        metrics["finish_verifier_planner_requests"] = {
-            "artifact_ref": request_path.name,
-            "artifact_sha256": request_digest,
-            "request_count": len(request_records),
-        }
-    manifest["metrics"] = metrics
-    manifest_path.write_text(
-        json.dumps(_json_safe_native(manifest), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _file_sha256_native(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _finish_verifier_command_mentions_task_subject(command: str, request: Mapping[str, object]) -> bool:
-    terms = _finish_verifier_subject_terms(request)
-    if not terms:
-        return True
-    lowered = command.casefold()
-    return any(term in lowered for term in terms)
-
-
-def _finish_verifier_subject_terms(request: Mapping[str, object]) -> tuple[str, ...]:
-    haystack = json.dumps(dict(request), ensure_ascii=False, sort_keys=True)
-    terms = []
-    for match in _FINISH_VERIFIER_SUBJECT_RE.finditer(haystack):
-        term = str(match.group(0) or "").strip().casefold()
-        if not term or term.startswith("/"):
-            continue
-        basename = term.rsplit("/", 1)[-1]
-        for candidate in (term, basename):
-            if len(candidate) >= 4 and candidate not in terms:
-                terms.append(candidate)
-    for source in _finish_verifier_semantic_subject_sources(request):
-        for match in _FINISH_VERIFIER_IDENTIFIER_SUBJECT_RE.finditer(source):
-            candidate = str(match.group(0) or "").strip().casefold()
-            if candidate in _FINISH_VERIFIER_GENERIC_SUBJECT_WORDS:
-                continue
-            if len(candidate) >= 4 and candidate not in terms:
-                terms.append(candidate)
-    return tuple(terms[:80])
-
-
-def _finish_verifier_semantic_subject_sources(request: Mapping[str, object]) -> tuple[str, ...]:
-    task = request.get("task")
-    if not isinstance(task, Mapping):
-        return ()
-    sources: list[str] = []
-    for key in ("description", "goal", "objective"):
-        value = task.get(key)
-        if isinstance(value, str) and value.strip():
-            sources.append(value)
-    for key in ("completion_criteria", "legacy_acceptance_constraints"):
-        values = task.get(key)
-        if isinstance(values, (list, tuple)):
-            sources.extend(str(item) for item in values if str(item).strip())
-    contract = task.get("contract")
-    if isinstance(contract, Mapping):
-        for key in ("goal", "objective"):
-            value = contract.get(key)
-            if isinstance(value, str) and value.strip():
-                sources.append(value)
-        for key in ("completion_criteria", "acceptance_constraints"):
-            values = contract.get(key)
-            if isinstance(values, (list, tuple)):
-                sources.extend(str(item) for item in values if str(item).strip())
-    return tuple(sources)
-
-
-def _finish_verifier_planner_request(
-    lane_input: ImplementLaneInput,
-    tool_results: tuple[ToolResultEnvelope, ...],
-) -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "role": "independent_finish_verifier_planner",
-        "task": {
-            "task_id": lane_input.task_id,
-            "description": _native_task_description(lane_input),
-            "contract": _small_jsonable_mapping(lane_input.task_contract),
-            "verify_command_source": _canonical_native_verify_command_source(
-                (lane_input.lane_config or {}).get("verify_command_source")
-                or (lane_input.task_contract or {}).get("verify_command_source"),
-                default="",
-            ),
-        },
-        "workspace": ".",
-        "recent_tool_results": [
-            _finish_verifier_planner_tool_result_summary(index, result)
-            for index, result in enumerate(tool_results[-8:], start=max(1, len(tool_results) - 7))
-        ],
-        "output_contract": {
-            "json_object": True,
-            "required": ["command"],
-            "optional": ["cwd", "reason", "confidence"],
-            "meaning": "one non-mutating command that verifies task completion from the current workspace",
-        },
-        "forbidden": [
-            "Do not trust the implement agent's finish claim.",
-            "Do not output echo/printf/true/exit-0 self-acceptance commands.",
-            "Do not modify source files.",
-            "Return exactly one JSON object.",
-        ],
-    }
-
-
-def _finish_verifier_planner_tool_result_summary(index: int, result: ToolResultEnvelope) -> dict[str, object]:
-    payload = _native_result_payload(result)
-    return {
-        "index": index,
-        "tool_name": result.tool_name,
-        "status": result.status,
-        "exit_code": payload.get("exit_code"),
-        "command": str(payload.get("command") or "")[:500],
-        "command_intent": str(payload.get("command_intent") or "")[:80],
-        "summary": result.natural_result_text(limit=1200),
-        "content_refs": list(result.content_refs[:6]),
-        "evidence_refs": list(result.evidence_refs[:6]),
-    }
-
-
-def _small_jsonable_mapping(value: object) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        return {}
-    allowed = {}
-    for key in (
-        "title",
-        "description",
-        "guidance",
-        "acceptance_constraints",
-        "verify_command",
-        "max_wall_seconds",
-    ):
-        item = value.get(key)
-        if item not in (None, ""):
-            allowed[key] = item
-    return allowed
-
-
-def _finish_verifier_planner_prompt(request: Mapping[str, object]) -> str:
-    return (
-        "You are an independent verifier-planner agent for a coding task. "
-        "You are not the implementer and must not trust an implementer's finish claim.\n\n"
-        "Given the task and recent tool results, return one JSON object describing the smallest "
-        "non-mutating terminal command that should verify whether the task is complete.\n\n"
-        "Rules:\n"
-        "- Return JSON only.\n"
-        "- Required key: command.\n"
-        "- Optional keys: cwd, reason, confidence.\n"
-        "- The command must test the real task outcome, not print a self-acceptance marker.\n"
-        "- Do not use echo/printf/true/exit 0 as the verifier.\n"
-        "- Prefer task-provided tests, exact verifier commands, build/test commands, or a focused runtime smoke.\n"
-        "- If using python -c, keep it read-only and safety-compatible: no import aliases, no from-imports, "
-        "no getattr/importlib.import_module/eval/exec/exit, no helper lambdas/functions, no command variables, "
-        "and subprocess calls must use literal argv lists.\n"
-        "- If no safe verifier exists, return {\"command\":\"\", \"reason\":\"no safe verifier\"}.\n\n"
-        "Input:\n"
-        f"{json.dumps(dict(request), ensure_ascii=False, sort_keys=True)}"
-    )
+) -> tuple[_finish_planner.FinishVerifierPlan | None, Mapping[str, object] | None]:
+    return _closeout_policy.safe_auto_detected_finish_verifier_fallback(lane_input, request=request)
 
 
 def _native_final_verifier_closeout_budget_seconds(
@@ -3524,27 +1657,11 @@ def _native_final_verifier_closeout_budget_seconds(
     *,
     run_started: float,
 ) -> float:
-    remaining = _native_remaining_wall_budget_seconds(lane_input, run_started=run_started)
-    if remaining is None:
-        remaining = float(lane_input.lane_config.get("final_verifier_closeout_seconds") or 60.0)
-    configured = lane_input.lane_config.get("final_verifier_closeout_seconds")
-    if configured not in (None, ""):
-        try:
-            remaining = min(remaining, max(0.0, float(configured)))
-        except (TypeError, ValueError):
-            return 0.0
-    return max(0.0, min(3600.0, remaining))
+    return _closeout_policy.native_final_verifier_closeout_budget_seconds(lane_input, run_started=run_started)
 
 
 def _native_remaining_wall_budget_seconds(lane_input: ImplementLaneInput, *, run_started: float) -> float | None:
-    max_wall = lane_input.task_contract.get("max_wall_seconds")
-    if max_wall in (None, ""):
-        return None
-    try:
-        remaining = float(max_wall) - max(0.0, time.monotonic() - run_started)
-    except (TypeError, ValueError):
-        return None
-    return max(0.0, min(600.0, remaining))
+    return _closeout_policy.native_remaining_wall_budget_seconds(lane_input, run_started=run_started)
 
 
 def _native_next_model_timeout_seconds(
@@ -3553,21 +1670,11 @@ def _native_next_model_timeout_seconds(
     run_started: float,
     requested_timeout: object,
 ) -> float | None:
-    remaining = _native_remaining_wall_budget_seconds(lane_input, run_started=run_started)
-    if remaining is None:
-        return None
-    try:
-        requested = float(requested_timeout) if requested_timeout not in (None, "") else remaining
-    except (TypeError, ValueError):
-        requested = remaining
-    if requested <= 0:
-        return requested
-    reserve = min(
-        _NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS,
-        max(0.0, remaining - _NATIVE_MODEL_TIMEOUT_MIN_SECONDS),
+    return _closeout_policy.native_next_model_timeout_seconds(
+        lane_input,
+        run_started=run_started,
+        requested_timeout=requested_timeout,
     )
-    available = remaining - reserve
-    return max(0.0, min(requested, available))
 
 
 def _native_final_verifier_closeout_call(
@@ -3577,196 +1684,20 @@ def _native_final_verifier_closeout_call(
     provider: object,
     turn_index: int,
     lane_config: Mapping[str, object],
-    plan: _NativeFinishVerifierPlan,
+    plan: _finish_planner.FinishVerifierPlan,
     timeout_seconds: float,
     pending_mutation: Mapping[str, object],
 ) -> NativeTranscriptItem:
-    call_id = f"call-final-verifier-closeout-{turn_index:03d}"
-    arguments = {
-        "command": plan.command,
-        "cwd": plan.cwd or ".",
-        "use_shell": True,
-        "controller_closeout": True,
-        "timeout": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
-        "foreground_budget_seconds": round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds), 3),
-        "command_intent": "finish_verifier",
-        "finish_verifier_plan": {
-            "source": plan.source,
-            "reason": plan.reason,
-            "confidence": plan.confidence,
-            "separate_agent": plan.source == "finish_verifier_planner",
-            **({"provenance": dict(plan.raw)} if plan.raw else {}),
-        },
-        "execution_contract": {
-            "role": "verify",
-            "stage": "verification",
-            "purpose": "verify the latest source mutation before native closeout",
-            "proof_role": "verifier",
-            "acceptance_kind": "external_verifier",
-            "verifier_required": True,
-            "expected_exit": 0,
-            "latest_source_mutation_provider_call_id": pending_mutation.get("provider_call_id") or "",
-            "latest_source_mutation_path": pending_mutation.get("path") or "",
-        },
-    }
-    tool_name = _native_final_verifier_tool_name(lane_input, lane_config=lane_config) or "run_command"
-    if tool_name == "exec_command":
-        arguments = {
-            **arguments,
-            "cmd": plan.command,
-            "timeout_ms": int(round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds) * 1000)),
-            "yield_time_ms": int(round(max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds) * 1000)),
-        }
-    return NativeTranscriptItem(
-        sequence=0,
-        turn_id=f"turn-{turn_index}-final-verifier-closeout",
+    return _closeout_policy.native_final_verifier_closeout_call(
+        lane_input,
         lane_attempt_id=lane_attempt_id,
-        provider=str(getattr(provider, "provider", "") or "native-controller"),
-        model=str(getattr(provider, "model", "") or lane_input.model or ""),
-        response_id=f"native-final-verifier-closeout-{turn_index}",
-        provider_item_id=f"fc_mew_final_verifier_closeout_{turn_index:03d}",
-        output_index=0,
-        kind="function_call",
-        call_id=call_id,
-        tool_name=tool_name,
-        arguments_json_text=json.dumps(arguments, sort_keys=True),
+        provider=provider,
+        turn_index=turn_index,
+        lane_config=lane_config,
+        plan=plan,
+        timeout_seconds=timeout_seconds,
+        pending_mutation=pending_mutation,
     )
-
-
-def _latest_native_source_mutation_without_later_verifier(
-    tool_calls: tuple[NativeTranscriptItem, ...],
-    tool_results: tuple[ToolResultEnvelope, ...],
-    *,
-    source_mutation_roots: tuple[str, ...],
-) -> dict[str, object]:
-    latest_mutation = _latest_native_source_mutation(
-        tool_calls,
-        tool_results,
-        source_mutation_roots=source_mutation_roots,
-    )
-    latest_verifier_index = 0
-    verifier_command_run_ids: set[str] = set()
-    for index, (call, result) in enumerate(zip(tool_calls, tool_results), start=1):
-        if _native_call_is_verifier(call):
-            command_run_id = _command_run_id_from_result(result)
-            if command_run_id:
-                verifier_command_run_ids.add(command_run_id)
-        if _native_result_is_terminal_verifier(call, result, verifier_command_run_ids=verifier_command_run_ids):
-            latest_verifier_index = index
-    if not latest_mutation:
-        return {}
-    latest_mutation["latest_verifier_index"] = latest_verifier_index
-    if int(latest_mutation.get("result_index") or 0) <= latest_verifier_index:
-        return {}
-    return latest_mutation
-
-
-def _latest_native_source_mutation(
-    tool_calls: tuple[NativeTranscriptItem, ...],
-    tool_results: tuple[ToolResultEnvelope, ...],
-    *,
-    source_mutation_roots: tuple[str, ...],
-) -> dict[str, object]:
-    latest_mutation: dict[str, object] = {}
-    for index, (call, result) in enumerate(zip(tool_calls, tool_results), start=1):
-        if result.status == "completed" and _native_result_has_source_mutation(
-            result,
-            source_mutation_roots=source_mutation_roots,
-        ):
-            latest_mutation = {
-                "result_index": index,
-                "provider_call_id": call.call_id or result.provider_call_id,
-                "tool_name": call.tool_name or result.tool_name,
-                "path": _native_write_result_path(result),
-                "turn_index": _turn_number(call.turn_id),
-            }
-    return latest_mutation
-
-
-def _native_result_is_terminal_verifier(
-    call: NativeTranscriptItem,
-    result: ToolResultEnvelope,
-    *,
-    verifier_command_run_ids: set[str],
-) -> bool:
-    if result.status not in {"completed", "failed", "interrupted", "invalid"}:
-        return False
-    command_run_id = _command_run_id_from_result(result)
-    if command_run_id and command_run_id in verifier_command_run_ids:
-        return True
-    if _native_call_is_verifier(call):
-        return True
-    payload = _native_result_payload(result)
-    contract = payload.get("execution_contract_normalized") or payload.get("execution_contract")
-    if not _native_execution_contract_is_verifier_like(contract):
-        return False
-    verifier = payload.get("verifier_evidence")
-    if not isinstance(verifier, dict):
-        return True
-    return str(verifier.get("verdict") or "").casefold() in {"pass", "fail", "partial"}
-
-
-def _native_result_has_source_mutation(
-    result: ToolResultEnvelope,
-    *,
-    source_mutation_roots: tuple[str, ...],
-) -> bool:
-    for effect in result.side_effects:
-        kind = str(effect.get("kind") or "")
-        if kind == "file_write" and _native_path_in_roots(effect.get("path"), source_mutation_roots):
-            return True
-        if kind in {"source_tree_mutation", "source_tree_delta"}:
-            record = effect.get("record")
-            if isinstance(record, dict) and record.get("changed_count"):
-                return True
-        if kind == "process_source_observation":
-            record = effect.get("record")
-            if isinstance(record, dict) and record.get("changed_count"):
-                return True
-    return False
-
-
-def _native_write_result_path(result: ToolResultEnvelope) -> str:
-    for effect in result.side_effects:
-        if str(effect.get("kind") or "") == "file_write":
-            path = str(effect.get("path") or "").strip()
-            if path:
-                return path
-        if str(effect.get("kind") or "") in {"source_tree_mutation", "source_tree_delta"}:
-            record = effect.get("record")
-            if not isinstance(record, dict):
-                continue
-            changes = record.get("changes")
-            if isinstance(changes, list):
-                for change in changes:
-                    if isinstance(change, dict) and change.get("path"):
-                        return str(change.get("path") or "")
-    return ""
-
-
-def _native_path_in_roots(path: object, roots: tuple[str, ...]) -> bool:
-    text = str(path or "").strip()
-    if not text:
-        return False
-    candidate = Path(text).expanduser()
-    for root in roots:
-        root_path = Path(root).expanduser().resolve(strict=False)
-        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (root_path / candidate).resolve(strict=False)
-        try:
-            resolved.relative_to(root_path)
-            return True
-        except ValueError:
-            continue
-    return False
-
-
-def _native_source_mutation_roots(lane_input: ImplementLaneInput, workspace: Path) -> tuple[str, ...]:
-    raw_roots = lane_input.lane_config.get("source_mutation_roots")
-    if isinstance(raw_roots, list):
-        roots = tuple(str(root) for root in raw_roots if str(root or "").strip())
-    else:
-        roots = ()
-    return roots or (str(workspace),)
 
 
 def _native_result_payload(result: ToolResultEnvelope) -> dict[str, object]:
@@ -3881,16 +1812,16 @@ def _finish_result(
     outcome = _native_finish_outcome(call.arguments)
     task_done = call.arguments.get("task_done")
     blocked = outcome in {"blocked", "blocked_return", "continue"} or task_done is False
-    if not blocked:
-        finish_arguments = dict(call.arguments)
-        finish_arguments["outcome"] = outcome
-        gate = _native_finish_gate_decision(
-            lane_input,
-            finish_arguments,
-            prior_tool_results,
-        )
-        if gate.get("decision") != "allow_complete":
-            return _finish_gate_block_result(call, gate)
+    typed_refs = finish_typed_evidence_refs(
+        prior_tool_results,
+        task_description=_native_task_description(lane_input),
+        task_contract=lane_input.task_contract,
+    )
+    evidence_refs = tuple(
+        text
+        for ref in typed_refs
+        if isinstance(ref, Mapping) and (text := str(ref.get("id") or "").strip())
+    )
     status = "invalid" if blocked else "completed"
     return ToolResultEnvelope(
         lane_attempt_id=call.lane_attempt_id,
@@ -3900,7 +1831,7 @@ def _finish_result(
         status=status,
         is_error=blocked,
         content=({"summary": str(call.arguments.get("summary") or ""), "outcome": outcome or status},),
-        evidence_refs=("native-finish://accepted",) if status == "completed" else (),
+        evidence_refs=evidence_refs if status == "completed" else (),
     )
 
 
@@ -4024,475 +1955,8 @@ def _native_finish_outcome(arguments: Mapping[str, object]) -> str:
     return "completed"
 
 
-def _native_finish_gate_decision(
-    lane_input: ImplementLaneInput,
-    finish_arguments: dict[str, object],
-    prior_tool_results: tuple[ToolResultEnvelope, ...],
-) -> dict[str, object]:
-    action = _finish_acceptance_action(
-        finish_arguments,
-        prior_tool_results,
-        task_description=_native_task_description(lane_input),
-    )
-    return acceptance_done_gate_decision(
-        _native_task_description(lane_input),
-        action,
-        session=_acceptance_session_from_tool_results(prior_tool_results, lane_input=lane_input),
-    )
-
-
 def _native_task_description(lane_input: ImplementLaneInput) -> str:
-    contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
-    chunks = [
-        str(contract.get("title") or "").strip(),
-        str(contract.get("goal") or "").strip(),
-        str(contract.get("objective") or "").strip(),
-        str(contract.get("description") or "").strip(),
-        str(contract.get("guidance") or "").strip(),
-        str(contract.get("verify_command") or "").strip(),
-    ]
-    criteria = contract.get("completion_criteria")
-    if isinstance(criteria, list):
-        chunks.extend(str(item or "").strip() for item in criteria)
-    constraints = contract.get("acceptance_constraints")
-    if isinstance(constraints, list):
-        chunks.extend(str(item or "").strip() for item in constraints)
-    return "\n".join(chunk for chunk in chunks if chunk)
-
-
-def _finish_gate_block_result(call: ToolCallEnvelope, gate: Mapping[str, object]) -> ToolResultEnvelope:
-    continuation = str(gate.get("continuation_prompt") or gate.get("reason") or "finish gate blocked completion")
-    return ToolResultEnvelope(
-        lane_attempt_id=call.lane_attempt_id,
-        provider_call_id=call.provider_call_id,
-        mew_tool_call_id=call.mew_tool_call_id,
-        tool_name="finish",
-        status="invalid",
-        is_error=True,
-        content=(
-            {
-                "summary": continuation,
-                "outcome": "continue",
-                "finish_gate": dict(gate),
-            },
-        ),
-    )
-
-
-def _completion_resolver_input_from_finish(
-    call: NativeTranscriptItem,
-    result: ToolResultEnvelope,
-    *,
-    lane_input: ImplementLaneInput,
-    transcript_items: tuple[NativeTranscriptItem, ...],
-    request_descriptor: Mapping[str, object],
-    prior_tool_results: tuple[ToolResultEnvelope, ...],
-    closeout_context: _NativeCloseoutContext,
-) -> CompletionResolverInput:
-    arguments, _ = _arguments(call)
-    outcome = _native_finish_outcome(arguments)
-    gate: dict[str, object] = {}
-    if outcome == "completed" and arguments.get("task_done") is not False:
-        finish_arguments = dict(arguments)
-        finish_arguments["outcome"] = outcome
-        gate = _native_finish_gate_decision(lane_input, finish_arguments, prior_tool_results)
-    blockers: list[str] = []
-    missing: list[str] = []
-    unsafe_blockers: list[str] = []
-    budget_blockers: list[str] = []
-    if outcome in {"blocked", "continue"} or arguments.get("task_done") is False:
-        blockers.append("finish_claim_not_completed")
-    if outcome == "blocked_return" or arguments.get("return_to_supervisor") is True:
-        budget_blockers.append("finish_requested_supervisor_return")
-    if arguments.get("unsafe_to_continue") is True:
-        unsafe_blockers.append("finish_marked_unsafe_to_continue")
-    finish_evidence_refs = _finish_arg_strings(arguments.get("evidence_refs"))
-    finish_closeout_refs = _finish_arg_strings(arguments.get("closeout_refs"))
-    finish_closeout_context = _native_finish_supplied_closeout_context(
-        tuple(dict.fromkeys((*finish_evidence_refs, *finish_closeout_refs))),
-        prior_tool_results,
-        source_mutation_roots=_native_source_mutation_roots(lane_input, Path(lane_input.workspace or ".")),
-    )
-    effective_closeout_context = _native_closeout_context_resolved_by_finish_evidence(
-        closeout_context,
-        finish_closeout_context,
-    )
-    blockers.extend(_finish_arg_strings(arguments.get("blockers")))
-    missing.extend(_finish_arg_strings(arguments.get("missing_obligations")))
-    unsafe_blockers.extend(_finish_arg_strings(arguments.get("unsafe_blockers")))
-    budget_blockers.extend(_finish_arg_strings(arguments.get("budget_blockers")))
-    blockers.extend(effective_closeout_context.blockers)
-    missing.extend(effective_closeout_context.missing_obligations)
-    unsafe_blockers.extend(effective_closeout_context.unsafe_blockers)
-    budget_blockers.extend(effective_closeout_context.budget_blockers)
-    gate_codes = _finish_gate_blocker_codes(gate) if gate else ()
-    gate_missing = _finish_gate_missing_obligations(gate) if gate else ()
-    if (
-        gate
-        and gate.get("decision") != "allow_complete"
-        and not _finish_gate_block_resolved_by_closeout(
-            gate_codes,
-            gate_missing,
-            gate=gate,
-            closeout_context=effective_closeout_context,
-        )
-    ):
-        blockers.append("finish_gate_blocked")
-        blockers.extend(gate_codes)
-        missing.extend(gate_missing)
-    return CompletionResolverInput(
-        finish_claim=FinishClaim(
-            lane_attempt_id=call.lane_attempt_id,
-            turn_id=call.turn_id,
-            finish_call_id=call.call_id,
-            finish_output_call_id=call.call_id,
-            outcome=outcome,
-            summary=str(arguments.get("summary") or ""),
-            arguments=dict(arguments),
-        ),
-        transcript_hash_before_decision=native_transcript_hash(
-            NativeTranscript(
-                lane_attempt_id=call.lane_attempt_id,
-                provider=call.provider,
-                model=call.model,
-                items=transcript_items,
-            )
-        ),
-        compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
-        typed_evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *finish_evidence_refs))),
-        fresh_verifier_refs=tuple(effective_closeout_context.fresh_verifier_refs),
-        missing_obligations=tuple(dict.fromkeys(missing)),
-        closeout_refs=tuple(dict.fromkeys((*finish_closeout_refs, *effective_closeout_context.closeout_refs))),
-        blockers=tuple(dict.fromkeys(blockers)),
-        unsafe_blockers=tuple(dict.fromkeys(unsafe_blockers)),
-        budget_blockers=tuple(dict.fromkeys(budget_blockers)),
-        verifier_required=bool(gate and gate.get("decision") != "allow_complete"),
-    )
-
-
-def _native_finish_gate_decision_from_closeout_events(
-    call: NativeTranscriptItem,
-    result: ToolResultEnvelope,
-    *,
-    lane_input: ImplementLaneInput,
-    lane_config: Mapping[str, object],
-    transcript_items: tuple[NativeTranscriptItem, ...],
-    request_descriptor: Mapping[str, object],
-    closeout_events: tuple[_NativeCloseoutEvent, ...],
-    closeout_context: _NativeCloseoutContext,
-) -> NativeFinishGateDecision | None:
-    if result.tool_name != "finish":
-        return None
-    arguments, error = _arguments(call)
-    if error:
-        return None
-    if _native_finish_outcome(arguments) != "completed" or arguments.get("task_done") is False:
-        return None
-    final_event = next((event for event in reversed(closeout_events) if event.kind == "final_verifier"), None)
-    if final_event is None:
-        return None
-    closeout = _native_finish_closeout_result_from_event(final_event, closeout_context=closeout_context)
-    if closeout.status != "completed_zero":
-        return None
-    request = NativeFinishGateRequest(
-        lane_attempt_id=call.lane_attempt_id,
-        turn_id=call.turn_id,
-        finish_call_id=call.call_id,
-        finish_arguments=dict(arguments),
-        task_id=str(lane_input.task_id or ""),
-        task_description=_native_task_description(lane_input),
-        task_contract=dict(lane_input.task_contract),
-        lane_config=dict(lane_config),
-        workspace=str(lane_input.workspace or ""),
-        allowed_read_roots=tuple(str(root) for root in lane_config.get("allowed_read_roots") or ()),
-        allowed_write_roots=tuple(str(root) for root in lane_config.get("allowed_write_roots") or ()),
-        transcript_hash_before_decision=native_transcript_hash(
-            NativeTranscript(
-                lane_attempt_id=call.lane_attempt_id,
-                provider=call.provider,
-                model=call.model,
-                items=transcript_items,
-            )
-        ),
-        compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
-    )
-    return decide_native_finish_from_closeout(request, closeout)
-
-
-def _native_finish_gate_decision_from_done_candidate(
-    done_candidate: NativeDoneCandidate,
-    *,
-    lane_input: ImplementLaneInput,
-    lane_config: Mapping[str, object],
-    provider: object,
-    turn_index: int,
-    transcript_items: tuple[NativeTranscriptItem, ...],
-    closeout_events: tuple[_NativeCloseoutEvent, ...],
-    closeout_context: _NativeCloseoutContext,
-) -> NativeFinishGateDecision:
-    final_event = next((event for event in reversed(closeout_events) if event.kind == "final_verifier"), None)
-    if final_event is not None:
-        closeout = _native_finish_closeout_result_from_event(final_event, closeout_context=closeout_context)
-    else:
-        closeout = _native_finish_closeout_result_from_context(closeout_context)
-    request = NativeFinishGateRequest(
-        lane_attempt_id=done_candidate.lane_attempt_id,
-        turn_id=done_candidate.turn_id or f"turn-{turn_index}",
-        done_candidate_id=done_candidate.done_candidate_id,
-        task_id=str(lane_input.task_id or ""),
-        task_description=_native_task_description(lane_input),
-        task_contract=dict(lane_input.task_contract),
-        lane_config=dict(lane_config),
-        workspace=str(lane_input.workspace or ""),
-        allowed_read_roots=tuple(str(root) for root in lane_config.get("allowed_read_roots") or ()),
-        allowed_write_roots=tuple(str(root) for root in lane_config.get("allowed_write_roots") or ()),
-        transcript_hash_before_decision=native_transcript_hash(
-            NativeTranscript(
-                lane_attempt_id=done_candidate.lane_attempt_id,
-                provider=str(getattr(provider, "provider", "")),
-                model=str(getattr(provider, "model", "")),
-                items=transcript_items,
-            )
-        ),
-        compact_sidecar_digest_hash=done_candidate.compact_sidecar_digest_hash,
-    )
-    return decide_native_finish_from_closeout(request, closeout)
-
-
-def _native_finish_gate_decision_from_controller_closeout_event(
-    event: _NativeCloseoutEvent,
-    *,
-    lane_input: ImplementLaneInput,
-    lane_config: Mapping[str, object],
-    transcript_items: tuple[NativeTranscriptItem, ...],
-    closeout_context: _NativeCloseoutContext,
-) -> NativeFinishGateDecision:
-    closeout = _native_finish_closeout_result_from_event(event, closeout_context=closeout_context)
-    request = NativeFinishGateRequest(
-        lane_attempt_id=event.call.lane_attempt_id,
-        turn_id=event.call.turn_id,
-        finish_call_id=event.call.call_id,
-        finish_arguments={
-            "outcome": "completed",
-            "summary": "deterministic final verifier closeout",
-            "controller_closeout": True,
-        },
-        task_id=str(lane_input.task_id or ""),
-        task_description=_native_task_description(lane_input),
-        task_contract=dict(lane_input.task_contract),
-        lane_config=dict(lane_config),
-        workspace=str(lane_input.workspace or ""),
-        allowed_read_roots=tuple(str(root) for root in lane_config.get("allowed_read_roots") or ()),
-        allowed_write_roots=tuple(str(root) for root in lane_config.get("allowed_write_roots") or ()),
-        transcript_hash_before_decision=native_transcript_hash(
-            NativeTranscript(
-                lane_attempt_id=event.call.lane_attempt_id,
-                provider=event.call.provider,
-                model=event.call.model,
-                items=transcript_items,
-            )
-        ),
-    )
-    return decide_native_finish_from_closeout(request, closeout)
-
-
-def _native_finish_closeout_result_from_context(
-    context: _NativeCloseoutContext,
-) -> NativeFinishCloseoutResult:
-    blockers = tuple(dict.fromkeys((*context.blockers, *context.unsafe_blockers, *context.budget_blockers)))
-    status: FinishCloseoutStatus = "not_run"
-    reason = "final verifier closeout did not run"
-    if "closeout_verifier_command_missing" in context.blockers:
-        status = "missing_command"
-        reason = "final verifier closeout command is missing"
-    elif "closeout_verifier_budget_or_timeout" in context.budget_blockers:
-        status = "timed_out"
-        reason = "final verifier closeout timed out"
-    elif context.budget_blockers:
-        status = "budget_insufficient"
-        reason = "insufficient budget for final verifier closeout"
-    elif context.unsafe_blockers:
-        status = "unsafe"
-        reason = "final verifier closeout is not permitted"
-    elif "closeout_verifier_failed" in context.blockers:
-        status = "completed_nonzero"
-        reason = "final verifier closeout exited nonzero"
-    elif "closeout_verifier_not_run" in context.blockers:
-        status = "not_run"
-        reason = "final verifier closeout was not run"
-    return NativeFinishCloseoutResult(
-        command=None,
-        call_item=None,
-        output_item=None,
-        tool_result=None,
-        status=status,
-        evidence_refs=context.fresh_verifier_refs,
-        closeout_refs=context.closeout_refs,
-        blockers=blockers,
-        reason=reason,
-    )
-
-
-def _native_finish_closeout_result_from_event(
-    event: _NativeCloseoutEvent,
-    *,
-    closeout_context: _NativeCloseoutContext,
-) -> NativeFinishCloseoutResult:
-    payload = _native_result_payload(event.result)
-    exit_code = _native_exit_code(payload)
-    timed_out = _native_result_timed_out(event.result, payload)
-    if event.result.status == "completed" and not event.result.is_error and exit_code == 0 and not timed_out:
-        status = "completed_zero"
-    elif timed_out:
-        status = "timed_out"
-    elif event.result.status in {"completed", "failed"} and exit_code not in (None, 0):
-        status = "completed_nonzero"
-    elif event.result.status in {"yielded", "running"}:
-        status = "active_command_running"
-    else:
-        status = "runtime_error"
-    return NativeFinishCloseoutResult(
-        command=_finish_closeout_command_from_call(event.call),
-        call_item=event.call,
-        output_item=None,
-        tool_result=event.result,
-        status=status,
-        exit_code=exit_code,
-        timed_out=timed_out,
-        observed_unexpected_source_mutation=_native_closeout_observed_source_mutation(event.result),
-        typed_evidence_projection_status="warning" if _native_closeout_projection_warnings(event.result) else "passed",
-        evidence_refs=tuple(event.result.evidence_refs),
-        closeout_refs=tuple(closeout_context.closeout_refs),
-        warnings=_native_closeout_projection_warnings(event.result),
-        reason=event.reason,
-    )
-
-
-def _finish_closeout_command_from_call(call: NativeTranscriptItem) -> FinishCloseoutCommand | None:
-    arguments, error = _arguments(call)
-    if error:
-        return None
-    command = str(arguments.get("command") or "").strip()
-    if not command:
-        return None
-    plan = arguments.get("finish_verifier_plan")
-    source = "configured_verifier"
-    source_ref = "native_final_verifier_closeout"
-    reason = ""
-    confidence = ""
-    if isinstance(plan, Mapping):
-        plan_source = str(plan.get("source") or "").strip()
-        if plan_source == "finish_verifier_planner":
-            source = plan_source
-        elif plan_source in {"auto_detected", "auto_detected_verifier"}:
-            source = "auto_detected_verifier"
-        elif plan_source in {"configured", "configured_verifier", "explicit"}:
-            source = "configured_verifier"
-        reason = str(plan.get("reason") or "")
-        confidence = str(plan.get("confidence") or "")
-    return FinishCloseoutCommand(
-        command=command,
-        cwd=str(arguments.get("cwd") or "."),
-        source=source,  # type: ignore[arg-type]
-        source_ref=source_ref,
-        reason=reason,
-        confidence=confidence,
-        raw=dict(arguments),
-    )
-
-
-def _native_exit_code(payload: Mapping[str, object]) -> int | None:
-    value = payload.get("exit_code")
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            return None
-    return None
-
-
-def _native_result_timed_out(result: ToolResultEnvelope, payload: Mapping[str, object]) -> bool:
-    if payload.get("timed_out") is True:
-        return True
-    status = str(payload.get("status") or result.status or "").strip().casefold()
-    return status in {"timeout", "timed_out"}
-
-
-def _native_closeout_projection_warnings(result: ToolResultEnvelope) -> tuple[str, ...]:
-    payload = _native_result_payload(result)
-    warnings: list[str] = []
-    unchecked = payload.get("unchecked_expected_artifacts")
-    if isinstance(unchecked, list) and unchecked:
-        warnings.append("unchecked_expected_artifacts")
-    if payload.get("typed_evidence_projection_status") in {"warning", "failed"}:
-        warnings.append("typed_evidence_projection_warning")
-    return tuple(dict.fromkeys(warnings))
-
-
-def _native_closeout_observed_source_mutation(result: ToolResultEnvelope) -> bool:
-    payload = _native_result_payload(result)
-    if payload.get("observed_source_side_effect") is True:
-        return True
-    observations = payload.get("process_source_observations")
-    if isinstance(observations, list):
-        for observation in observations:
-            if isinstance(observation, Mapping) and _positive_intish(observation.get("changed_count")):
-                return True
-    for effect in result.side_effects:
-        if str(effect.get("kind") or "") in {"source_tree_mutation", "source_tree_delta"}:
-            record = effect.get("record")
-            if isinstance(record, Mapping) and _positive_intish(record.get("changed_count")):
-                return True
-    return False
-
-
-def _positive_intish(value: object) -> bool:
-    if isinstance(value, bool):
-        return False
-    try:
-        return int(value or 0) > 0
-    except (TypeError, ValueError):
-        return False
-
-
-def _finish_result_with_native_finish_gate_decision(
-    result: ToolResultEnvelope,
-    decision: NativeFinishGateDecision,
-) -> ToolResultEnvelope:
-    payload = dict(result.content[0]) if result.content and isinstance(result.content[0], dict) else {}
-    payload["native_finish_gate_decision"] = decision.as_dict()
-    payload["native_finish_gate_decision_id"] = decision.decision_id
-    payload["lane_status"] = decision.lane_status
-    if decision.result == "allow":
-        payload.pop("finish_gate", None)
-        payload.pop("blockers", None)
-        payload.pop("missing_obligations", None)
-        payload["summary"] = payload.get("summary") or decision.reason
-        payload["outcome"] = "completed"
-        return replace(
-            result,
-            status="completed",
-            is_error=False,
-            content=(payload,),
-            evidence_refs=tuple(
-                dict.fromkeys((*result.evidence_refs, *decision.evidence_refs, *decision.closeout_refs))
-            ),
-        )
-    payload["summary"] = decision.reason
-    payload["outcome"] = decision.lane_status
-    payload["blockers"] = list(decision.blockers)
-    payload["missing_obligations"] = list(decision.missing_obligations)
-    return replace(
-        result,
-        status="invalid",
-        is_error=True,
-        content=(payload,),
-        evidence_refs=tuple(dict.fromkeys((*result.evidence_refs, *decision.evidence_refs))),
-    )
+    return _finish_gate.native_task_description(lane_input)
 
 
 def _finish_result_with_resolver_decision(
@@ -4575,12 +2039,8 @@ def _compact_finish_missing_obligation(item: object) -> str:
     text = str(item or "").strip()
     if not text:
         return ""
-    if text.startswith("oracle:task_contract:compiled:"):
-        parts = text.split(":")
-        if len(parts) >= 5:
-            return f"{parts[3]}:{parts[4]}"
-    if text.startswith("oracle:task_contract_compiler:verifier"):
-        return "task_contract_verifier:fresh"
+    if text.startswith("oracle:completion_obligation:verifier"):
+        return "completion_obligation_verifier:fresh"
     if text.startswith("oracle:contract:") and "/app/" in text:
         suffix = text[text.find("/app/") :]
         return _finish_block_clip(suffix, limit=120)
@@ -4664,112 +2124,6 @@ def _request_compact_sidecar_digest_hash(request_descriptor: Mapping[str, object
     return ""
 
 
-def _finish_arg_strings(value: object) -> tuple[str, ...]:
-    if isinstance(value, str):
-        return (value,) if value else ()
-    if not isinstance(value, (list, tuple)):
-        return ()
-    return tuple(text for item in value if (text := str(item or "").strip()))
-
-
-def _finish_gate_blocker_codes(gate: Mapping[str, object]) -> tuple[str, ...]:
-    codes: list[str] = []
-    blockers = gate.get("blockers")
-    if isinstance(blockers, list):
-        for blocker in blockers:
-            if isinstance(blocker, Mapping):
-                code = str(blocker.get("code") or blocker.get("family") or blocker.get("message") or "").strip()
-                if code:
-                    codes.append(code)
-            else:
-                text = str(blocker or "").strip()
-                if text:
-                    codes.append(text)
-    return tuple(dict.fromkeys(codes))
-
-
-def _finish_gate_block_resolved_by_closeout(
-    gate_codes: tuple[str, ...],
-    gate_missing: tuple[str, ...],
-    *,
-    gate: Mapping[str, object],
-    closeout_context: _NativeCloseoutContext,
-) -> bool:
-    if not closeout_context.fresh_verifier_refs:
-        return False
-    top_level_missing = gate.get("missing_obligations")
-    runtime_artifact_codes = {"runtime_final_verifier_artifact_evidence"}
-    if gate_codes and all(code in runtime_artifact_codes for code in gate_codes):
-        return not gate_missing and (not isinstance(top_level_missing, list) or not top_level_missing)
-    closeout_resolvable_codes = {
-        "failed_typed_evidence_ref",
-        "invalid_typed_evidence_ref",
-        "missing_typed_evidence",
-        "missing_typed_obligation",
-    }
-    planner_verified = bool(closeout_context.planner_verified_finish_refs)
-    if planner_verified:
-        planner_only_codes = {"acceptance_constraints_unchecked"}
-        if gate_codes and all(code in planner_only_codes for code in gate_codes):
-            top_level_missing = gate.get("missing_obligations")
-            if not gate_missing and (not isinstance(top_level_missing, list) or not top_level_missing):
-                return True
-    if any(code not in closeout_resolvable_codes for code in gate_codes):
-        return False
-    if isinstance(top_level_missing, list):
-        return bool(top_level_missing) and all(_finish_gate_missing_obligation_is_verifier(item) for item in top_level_missing)
-    if not gate_missing:
-        return False
-    return all(
-        not missing
-        or missing == "strict_verifier_evidence"
-        or missing == "verifier_pass"
-        or missing.endswith(":verifier_pass")
-        for missing in gate_missing
-    )
-
-
-def _finish_gate_missing_obligation_is_verifier(value: object) -> bool:
-    if isinstance(value, Mapping):
-        kind = str(value.get("kind") or "").strip()
-        if kind:
-            return kind == "verifier_pass"
-        text = str(value.get("id") or value.get("missing_obligation") or value.get("obligation") or "").strip()
-    else:
-        text = str(value or "").strip()
-    return text in {"strict_verifier_evidence", "verifier_pass"} or text.endswith(":verifier_pass")
-
-
-def _finish_gate_missing_obligations(gate: Mapping[str, object]) -> tuple[str, ...]:
-    missing: list[str] = []
-    top_level_missing = gate.get("missing_obligations")
-    if isinstance(top_level_missing, list):
-        for item in top_level_missing:
-            text = _finish_gate_missing_obligation_text(item)
-            if text:
-                missing.append(text)
-    blockers = gate.get("blockers")
-    if isinstance(blockers, list):
-        for blocker in blockers:
-            if not isinstance(blocker, Mapping):
-                continue
-            for key in ("required_evidence_ref", "missing_obligation", "obligation"):
-                value = str(blocker.get(key) or "").strip()
-                if value:
-                    missing.append(value)
-    return tuple(dict.fromkeys(missing))
-
-
-def _finish_gate_missing_obligation_text(value: object) -> str:
-    if isinstance(value, Mapping):
-        for key in ("id", "kind", "missing_obligation", "obligation", "required_evidence_ref"):
-            text = str(value.get(key) or "").strip()
-            if text:
-                return text
-        return json.dumps(value, sort_keys=True, default=str)
-    return str(value or "").strip()
-
-
 def _native_finish_gate_blocked(result: ToolResultEnvelope) -> bool:
     if result.tool_name != "finish" or not result.is_error:
         return False
@@ -4777,7 +2131,7 @@ def _native_finish_gate_blocked(result: ToolResultEnvelope) -> bool:
     return isinstance(payload.get("finish_gate"), dict)
 
 
-def _native_finish_gate_decision_payload(result: ToolResultEnvelope) -> dict[str, object]:
+def _legacy_finish_gate_payload(result: ToolResultEnvelope) -> dict[str, object]:
     payload = result.content[0] if result.content and isinstance(result.content[0], dict) else {}
     gate = payload.get("finish_gate")
     return dict(gate) if isinstance(gate, dict) else {}
@@ -4842,103 +2196,21 @@ def _request_descriptor(
     transcript_items: list[NativeTranscriptItem],
     loop_signals: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    loop_signals = loop_signals or _native_loop_control_state(
-        transcript_items,
-        current_turn_index=turn_index,
-        lane_input=lane_input,
-    )
-    provider_visible_transcript_items = [
-        _provider_visible_native_item(item, lane_input=lane_input)
-        for item in transcript_items
-        if _native_item_provider_visible(item)
-    ]
-    compact_sidecar_digest = _compact_sidecar_digest_for_request(
+    return _request_builder.build_request_descriptor(
         lane_input=lane_input,
         lane_attempt_id=lane_attempt_id,
-        transcript_items=provider_visible_transcript_items,
-        loop_signals=loop_signals,
+        turn_index=turn_index,
+        transcript_items=transcript_items,
+        loop_signals=(
+            loop_signals
+            if loop_signals is not None
+            else _native_loop_control_state(
+                transcript_items,
+                current_turn_index=turn_index,
+                lane_input=lane_input,
+            )
+        ),
     )
-    tool_surface = _tool_surface_snapshot_for_request(
-        lane_input,
-        provider_visible_transcript_items,
-    )
-    tool_specs = tool_surface.tool_specs
-    developer_contract = (
-        codex_hot_path_developer_contract(tool_specs=tool_surface.tool_specs)
-        if tool_surface.profile_id == CODEX_HOT_PATH_PROFILE_ID
-        else None
-    )
-    input_items = _responses_input_items(
-        lane_input,
-        provider_visible_transcript_items,
-        compact_sidecar_digest=compact_sidecar_digest,
-        tool_surface=tool_surface,
-    )
-    instructions = _native_instructions(
-        lane_input,
-        tool_specs=tool_specs,
-        tool_surface=tool_surface,
-    )
-    forbidden_fields_report = build_provider_visible_forbidden_fields_report(
-        input_items=input_items,
-        instructions=instructions,
-        compact_sidecar_digest=compact_sidecar_digest,
-        compact_sidecar_digest_wire_visible=False,
-        developer_contract_texts=(developer_contract.rendered_text,) if developer_contract else (),
-        developer_contract_forbidden_terms=developer_contract.forbidden_terms if developer_contract else (),
-    )
-    provider_request_inventory = build_native_prompt_input_inventory(
-        compact_sidecar_digest=compact_sidecar_digest,
-        provider_visible_forbidden_fields=forbidden_fields_report,
-        diagnostic_only_fields=loop_signals.keys(),
-        diagnostic_loop_signals=loop_signals,
-        compact_sidecar_digest_wire_visible=False,
-    )
-    provider_request_inventory["tool_surface"] = tool_surface.request_metadata()
-    developer_transport = _profile_developer_transport(lane_input, tool_surface)
-    if developer_transport["developer_contract_id"]:
-        provider_request_inventory.update(
-            {
-                "developer_contract_id": developer_transport["developer_contract_id"],
-                "developer_contract_version": developer_transport["developer_contract_version"],
-                "developer_contract_hash": developer_transport["developer_contract_hash"],
-                "developer_contract_transport": developer_transport["developer_contract_transport"],
-                "developer_contract_wire_visible": developer_transport["developer_contract_wire_visible"],
-                "developer_contract_fallback_reason": developer_transport["developer_contract_fallback_reason"],
-            }
-        )
-        sections = list(provider_request_inventory.get("model_visible_sections") or ())
-        leading_sections = (
-            ["profile_developer_contract", "raw_task"]
-            if developer_transport["developer_contract_transport"] == "role_developer_input"
-            else ["raw_task"]
-        )
-        provider_request_inventory["model_visible_sections"] = [*leading_sections, *sections]
-    return {
-        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
-        "transport_kind": "provider_native" if _provider_is_live(lane_input) else "fake_native",
-        "native_transport_kind": "provider_native",
-        "lane_attempt_id": lane_attempt_id,
-        "turn_index": turn_index,
-        "input_item_count": len(transcript_items),
-        "input_items": input_items,
-        "transcript_window": [item.as_dict() for item in provider_visible_transcript_items],
-        "compact_sidecar_digest": dict(compact_sidecar_digest),
-        "provider_request_inventory": provider_request_inventory,
-        "tool_surface": tool_surface.request_metadata(),
-        "tool_surface_profile_id": tool_surface.profile_id,
-        "tool_surface_profile_default": tool_surface.profile_default,
-        "tool_surface_profile_selection_source": tool_surface.profile_selection_source,
-        "tool_surface_profile_version": tool_surface.profile_version,
-        "tool_surface_profile_hash": tool_surface.profile_hash,
-        "tool_surface_descriptor_hash": tool_surface.descriptor_hash,
-        "tool_surface_route_table_hash": tool_surface.route_table_hash,
-        "tool_surface_render_policy_hash": tool_surface.render_policy_hash,
-        "tool_surface_prompt_contract_id": tool_surface.prompt_contract_id,
-        "provider_tool_names": [spec.name for spec in tool_specs],
-        "instructions": instructions,
-        "model_json_main_path_detected": False,
-    }
 
 
 def _live_responses_request_descriptor(
@@ -4948,20 +2220,11 @@ def _live_responses_request_descriptor(
     model: str,
     request_descriptor: Mapping[str, object],
 ) -> dict[str, object]:
-    reasoning = _reasoning_config(lane_input)
-    tool_specs = _tool_specs_from_request_descriptor(lane_input, request_descriptor)
-    return build_responses_request_descriptor(
+    return _request_builder.build_live_responses_request_descriptor(
+        lane_input,
+        provider=provider,
         model=model,
-        instructions=str(request_descriptor.get("instructions") or _native_instructions(lane_input, tool_specs=tool_specs)),
-        input_items=_provider_safe_input_items(request_descriptor.get("input_items")),
-        tool_specs=tool_specs,
-        transcript_window=request_descriptor.get("transcript_window") or (),
-        reasoning=reasoning,
-        provider_request_id=f"{request_descriptor.get('lane_attempt_id')}:turn:{request_descriptor.get('turn_index')}",
-        prompt_cache_key=str(request_descriptor.get("lane_attempt_id") or ""),
-        tool_surface_snapshot=_mapping_from_request_descriptor(
-            request_descriptor.get("tool_surface")
-        ),
+        request_descriptor=request_descriptor,
     )
 
 
@@ -4971,67 +2234,28 @@ def _native_instructions(
     tool_specs: tuple[ImplementLaneToolSpec, ...] | None = None,
     tool_surface: ToolSurfaceSnapshot | None = None,
 ) -> str:
-    if tool_specs is None:
-        tool_specs = _native_tool_specs_for_request(lane_input, ())
-    if tool_surface is None:
-        tool_surface = _tool_surface_snapshot_for_request(lane_input, ())
-    sections = [
-        section
-        for section in build_implement_v2_prompt_sections(
-            lane_input,
-            tool_specs=tool_specs,
-        )
-        if section.id
-        not in {
-            "implement_v2_workframe",
-            "implement_v2_task_contract",
-            "implement_v2_lane_state",
-        }
-    ]
-    if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
-        sections = [
-            section
-            for section in sections
-            if section.id
-            not in {
-                "implement_v2_coding_contract",
-                "implement_v2_environment_context",
-            }
-        ]
-    rendered = render_prompt_sections(sections)
-    if (
-        tool_surface.profile_id == CODEX_HOT_PATH_PROFILE_ID
-        and not _profile_developer_role_supported(lane_input)
-    ):
-        contract = codex_hot_path_developer_contract(tool_specs=tool_surface.tool_specs)
-        rendered = f"{rendered.rstrip()}\n\n{contract.rendered_text}" if rendered.strip() else contract.rendered_text
-    if not any(spec.name == "write_file" for spec in tool_specs):
-        return hide_unavailable_write_file_guidance(rendered)
-    return rendered
+    return _request_builder.native_instructions(
+        lane_input,
+        tool_specs=tool_specs,
+        tool_surface=tool_surface,
+    )
 
 
 def _tool_specs_from_request_descriptor(
     lane_input: ImplementLaneInput,
     request_descriptor: Mapping[str, object],
 ) -> tuple[ImplementLaneToolSpec, ...]:
-    names = {
-        str(name or "").strip()
-        for name in (request_descriptor.get("provider_tool_names") or ())
-        if str(name or "").strip()
-    }
-    snapshot = _tool_surface_snapshot_for_request(
+    return _request_builder.tool_specs_from_request_descriptor(
         lane_input,
-        (),
-        available_provider_tool_names=tuple(sorted(names)) if names else None,
+        request_descriptor,
     )
-    return snapshot.tool_specs
 
 
 def _native_tool_specs_for_request(
     lane_input: ImplementLaneInput,
     transcript_items: object,
 ) -> tuple[ImplementLaneToolSpec, ...]:
-    return _tool_surface_snapshot_for_request(lane_input, transcript_items).tool_specs
+    return _request_builder.native_tool_specs_for_request(lane_input, transcript_items)
 
 
 def _tool_surface_snapshot_for_request(
@@ -5040,18 +2264,15 @@ def _tool_surface_snapshot_for_request(
     *,
     available_provider_tool_names: tuple[str, ...] | None = None,
 ) -> ToolSurfaceSnapshot:
-    return build_tool_surface_snapshot(
-        lane_config=lane_input.lane_config,
-        task_contract=lane_input.task_contract,
-        transcript_items=transcript_items,
+    return _request_builder.tool_surface_snapshot_for_request(
+        lane_input,
+        transcript_items,
         available_provider_tool_names=available_provider_tool_names,
     )
 
 
 def _mapping_from_request_descriptor(value: object) -> Mapping[str, object]:
-    if isinstance(value, Mapping):
-        return value
-    return {}
+    return _request_builder.mapping_from_request_descriptor(value)
 
 
 def _native_has_open_command(transcript_items: object) -> bool:
@@ -5133,116 +2354,34 @@ def _responses_input_items(
     compact_sidecar_digest: Mapping[str, object],
     tool_surface: ToolSurfaceSnapshot,
 ) -> list[dict[str, object]]:
-    task_facts = _provider_visible_task_facts(lane_input)
-    if tool_surface_profile_id(lane_input.lane_config) == CODEX_HOT_PATH_PROFILE_ID:
-        items = [
-            *_profile_developer_input_items(lane_input, tool_surface),
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": _raw_task_provider_visible_text(lane_input),
-                    }
-                ],
-            }
-        ]
-    else:
-        task_payload = {
-            "task_contract": dict(lane_input.task_contract),
-            "task_facts": task_facts,
-            "workspace": lane_input.workspace,
-            "lane": lane_input.lane,
-        }
-        items = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": _task_first_provider_visible_text(lane_input, task_facts=task_facts),
-                    }
-                ],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": json.dumps(task_payload, ensure_ascii=False),
-                    }
-                ],
-            }
-        ]
-    for item in transcript_items:
-        converted = _responses_input_item_from_transcript_item(
-            _provider_visible_native_item(item, lane_input=lane_input),
-        )
-        if converted:
-            items.append(converted)
-    return items
+    return _request_builder.responses_input_items(
+        lane_input,
+        transcript_items,
+        compact_sidecar_digest=compact_sidecar_digest,
+        tool_surface=tool_surface,
+    )
 
 
 def _profile_developer_input_items(
     lane_input: ImplementLaneInput,
     tool_surface: ToolSurfaceSnapshot,
 ) -> list[dict[str, object]]:
-    if tool_surface.profile_id != CODEX_HOT_PATH_PROFILE_ID:
-        return []
-    if not _profile_developer_role_supported(lane_input):
-        return []
-    contract = codex_hot_path_developer_contract(tool_specs=tool_surface.tool_specs)
-    return [
-        {
-            "role": "developer",
-            "content": [
-                {
-                    "type": "input_text",
-                    "text": contract.rendered_text,
-                }
-            ],
-        }
-    ]
+    return _request_builder.profile_developer_input_items(lane_input, tool_surface)
 
 
 def _profile_developer_transport(
     lane_input: ImplementLaneInput,
     tool_surface: ToolSurfaceSnapshot,
 ) -> dict[str, object]:
-    if tool_surface.profile_id != CODEX_HOT_PATH_PROFILE_ID:
-        return {
-            "developer_contract_id": "",
-            "developer_contract_version": "",
-            "developer_contract_hash": "",
-            "developer_contract_transport": "",
-            "developer_contract_wire_visible": False,
-            "developer_contract_fallback_reason": "",
-        }
-    role_supported = _profile_developer_role_supported(lane_input)
-    return {
-        "developer_contract_id": tool_surface.developer_contract_id,
-        "developer_contract_version": tool_surface.developer_contract_version,
-        "developer_contract_hash": tool_surface.developer_contract_hash,
-        "developer_contract_transport": "role_developer_input" if role_supported else "instructions_folded",
-        "developer_contract_wire_visible": True,
-        "developer_contract_fallback_reason": "" if role_supported else "provider_lacks_developer_role",
-    }
+    return _request_builder.profile_developer_transport(lane_input, tool_surface)
 
 
 def _profile_developer_role_supported(lane_input: ImplementLaneInput) -> bool:
-    value = lane_input.lane_config.get("supports_developer_role_input", True)
-    if isinstance(value, str):
-        return value.strip().casefold() not in {"0", "false", "no", "off"}
-    return bool(value)
+    return _request_builder.profile_developer_role_supported(lane_input)
 
 
 def _raw_task_provider_visible_text(lane_input: ImplementLaneInput) -> str:
-    contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
-    for key in ("description", "prompt", "task", "objective", "goal", "title"):
-        value = contract.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return "Complete the requested coding task in the current workspace."
+    return _request_builder.raw_task_provider_visible_text(lane_input)
 
 
 def _task_first_provider_visible_text(
@@ -5250,177 +2389,35 @@ def _task_first_provider_visible_text(
     *,
     task_facts: Mapping[str, object],
 ) -> str:
-    contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
-    lines = ["Task"]
-    title = str(contract.get("title") or "").strip()
-    if title:
-        lines.append(f"Title: {title}")
-    objective = _task_contract_objective_text(contract)
-    if objective:
-        lines.append(f"Objective: {objective}")
-    guidance = str(contract.get("guidance") or "").strip()
-    if guidance:
-        lines.append(f"Guidance: {guidance}")
-    verify_command = str(contract.get("verify_command") or "").strip()
-    if verify_command:
-        lines.append(f"Verifier: {verify_command}")
-    criteria = contract.get("completion_criteria")
-    if isinstance(criteria, list):
-        rendered_criteria = [str(item or "").strip() for item in criteria if str(item or "").strip()]
-        if rendered_criteria:
-            lines.append("Completion criteria:")
-            lines.extend(f"- {item}" for item in rendered_criteria[:8])
-    expected_artifacts = contract.get("expected_artifacts")
-    if isinstance(expected_artifacts, list):
-        rendered_artifacts = []
-        for item in expected_artifacts[:8]:
-            if not isinstance(item, Mapping):
-                continue
-            path = str(item.get("path") or "").strip()
-            kind = str(item.get("kind") or "file").strip()
-            artifact_id = str(item.get("id") or path or kind).strip()
-            rendered_artifacts.append(f"- {artifact_id}: {kind}" + (f" at {path}" if path else ""))
-        if rendered_artifacts:
-            lines.append("Expected artifacts:")
-            lines.extend(rendered_artifacts)
-    constraints = contract.get("acceptance_constraints")
-    if isinstance(constraints, list):
-        rendered_constraints = [str(item or "").strip() for item in constraints if str(item or "").strip()]
-        if rendered_constraints:
-            lines.append("Acceptance constraints:")
-            lines.extend(f"- {item}" for item in rendered_constraints)
-    for key, label in (
-        ("missing_workspace_paths", "Missing task paths"),
-        ("existing_workspace_paths", "Existing task paths"),
-        ("verify_command_paths", "Verifier paths"),
-    ):
-        raw_paths = task_facts.get(key)
-        paths = [str(item).strip() for item in raw_paths if str(item).strip()] if isinstance(raw_paths, list) else []
-        if paths:
-            lines.append(f"{label}: {', '.join(paths)}")
-    lines.append("Supporting JSON facts follow in the next input item.")
-    return "\n".join(lines)
+    return _request_builder.task_first_provider_visible_text(lane_input, task_facts=task_facts)
 
 
 def _task_contract_objective_text(contract: Mapping[str, object]) -> str:
-    for key in ("objective", "description", "goal", "task", "prompt"):
-        value = contract.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
+    return _request_builder.task_contract_objective_text(contract)
 
 
 def _provider_visible_task_facts(lane_input: ImplementLaneInput) -> dict[str, object]:
-    """Return factual task/path context without prescribing the next action."""
-
-    contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
-    verify_command = str(contract.get("verify_command") or "").strip()
-    text_sources = [
-        verify_command,
-        str(contract.get("description") or ""),
-        str(contract.get("title") or ""),
-        str(contract.get("guidance") or ""),
-    ]
-    constraints = contract.get("acceptance_constraints")
-    if isinstance(constraints, list):
-        text_sources.extend(str(item or "") for item in constraints)
-
-    verify_paths = _task_paths_from_text(verify_command, workspace=lane_input.workspace)
-    mentioned_paths = _dedupe_task_paths(
-        path for source in text_sources for path in _task_paths_from_text(source, workspace=lane_input.workspace)
-    )
-    existing_paths = [
-        path
-        for path in mentioned_paths
-        if _task_path_has_safe_segments(path) and (Path(lane_input.workspace) / path).exists()
-    ]
-    missing_paths = [
-        path
-        for path in mentioned_paths
-        if _task_path_is_safe_relative(path) and not (Path(lane_input.workspace) / path).exists()
-    ]
-    facts = {
-        "verify_command_paths": verify_paths,
-        "mentioned_workspace_paths": mentioned_paths,
-        "existing_workspace_paths": existing_paths,
-        "missing_workspace_paths": missing_paths,
-    }
-    return {key: value for key, value in facts.items() if value}
+    return _request_builder.provider_visible_task_facts(lane_input)
 
 
 def _task_paths_from_text(text: object, *, workspace: str | Path | None = None) -> list[str]:
-    raw = str(text or "")
-    if not raw.strip():
-        return []
-    paths: list[str] = []
-    try:
-        tokens = shlex.split(raw, posix=False)
-    except ValueError:
-        tokens = []
-    for token in tokens:
-        candidate = _normalize_task_path_token(token, workspace=workspace)
-        if candidate:
-            paths.append(candidate)
-    paths.extend(
-        _normalize_task_path_token(match.group("path"), workspace=workspace) for match in _TASK_PATH_TOKEN_RE.finditer(raw)
-    )
-    return _dedupe_task_paths(path for path in paths if path)
+    return _request_builder.task_paths_from_text(text, workspace=workspace)
 
 
 def _normalize_task_path_token(token: object, *, workspace: str | Path | None = None) -> str:
-    text = str(token or "").strip().strip("`'\"()[]{}<>").rstrip(".,:;").rstrip("/")
-    if not text:
-        return ""
-    if "\\" in text or re.match(r"^[A-Za-z]:", text):
-        return ""
-    if text.startswith("-"):
-        return ""
-    if "://" in text:
-        return ""
-    if text.startswith("/") and workspace:
-        workspace_path = Path(workspace).resolve()
-        try:
-            relative = Path(text).resolve().relative_to(workspace_path)
-        except (OSError, ValueError):
-            return ""
-        text = relative.as_posix()
-    if text.startswith(("/", "../", "/tmp/", "/var/tmp/")):
-        return ""
-    while text.startswith("./"):
-        text = text[2:]
-    if not _task_path_is_safe_relative(text):
-        if workspace and _task_path_has_safe_segments(text) and (Path(workspace) / text).exists():
-            return text
-        return ""
-    return text
+    return _request_builder.normalize_task_path_token(token, workspace=workspace)
 
 
 def _task_path_has_safe_segments(path: object) -> bool:
-    text = str(path or "").strip()
-    if not text or "\\" in text or re.match(r"^[A-Za-z]:", text):
-        return False
-    if text.startswith(("/", "../")) or "/../" in text:
-        return False
-    parts = text.split("/")
-    return not any(part in {"", ".", ".."} or part.startswith("..") for part in parts)
+    return _request_builder.task_path_has_safe_segments(path)
 
 
 def _task_path_is_safe_relative(path: object) -> bool:
-    text = str(path or "").strip()
-    if not _task_path_has_safe_segments(text):
-        return False
-    return bool(_TASK_PATH_TOKEN_RE.fullmatch(text))
+    return _request_builder.task_path_is_safe_relative(path)
 
 
 def _dedupe_task_paths(paths: Iterable[object]) -> list[str]:
-    result: list[str] = []
-    for path in paths:
-        text = str(path or "").strip()
-        if text and text not in result:
-            result.append(text)
-        if len(result) >= 12:
-            break
-    return result
+    return _request_builder.dedupe_task_paths(paths)
 
 
 def _compact_sidecar_digest_for_request(
@@ -5430,14 +2427,11 @@ def _compact_sidecar_digest_for_request(
     transcript_items: list[NativeTranscriptItem],
     loop_signals: Mapping[str, object],
 ) -> dict[str, object]:
-    transcript = NativeTranscript(
+    return _request_builder.compact_sidecar_digest_for_request(
+        lane_input=lane_input,
         lane_attempt_id=lane_attempt_id or _lane_attempt_id(lane_input),
-        provider="codex" if _provider_is_live(lane_input) else "fake_native",
-        model=str(lane_input.model or "gpt-5.5"),
-        items=tuple(_provider_visible_native_item(item, lane_input=lane_input) for item in transcript_items),
-    )
-    return build_compact_native_sidecar_digest(
-        transcript,
+        transcript_items=transcript_items,
+        loop_signals=loop_signals,
     )
 
 
@@ -5756,40 +2750,7 @@ def _native_call_is_verifier(item: NativeTranscriptItem) -> bool:
 
 
 def _responses_input_item_from_transcript_item(item: NativeTranscriptItem) -> dict[str, object]:
-    if item.kind == "input_message":
-        return {"role": "user", "content": [{"type": "input_text", "text": item.output_text_or_ref}]}
-    if item.kind == "assistant_message":
-        return {"role": "assistant", "content": [{"type": "output_text", "text": item.output_text_or_ref}]}
-    if item.kind == "reasoning":
-        # Do not synthesize invalid stateless Responses reasoning input from a
-        # local ref. A later reasoning-sidecar slice can carry encrypted
-        # provider content forward when the bytes are persisted.
-        return {}
-    if item.kind in {"function_call", "finish_call"}:
-        return {
-            "type": "function_call",
-            "id": item.provider_item_id,
-            "call_id": item.call_id,
-            "name": item.tool_name,
-            "arguments": item.arguments_json_text or "{}",
-        }
-    if item.kind == "custom_tool_call":
-        return {
-            "type": "custom_tool_call",
-            "id": item.provider_item_id,
-            "call_id": item.call_id,
-            "name": item.tool_name,
-            "input": item.custom_input_text,
-        }
-    if item.kind == "custom_tool_call_output":
-        return build_custom_tool_call_output_input_item(
-            call_id=item.call_id,
-            name=item.tool_name,
-            output=item.output_text_or_ref,
-        )
-    if item.kind in {"function_call_output", "finish_output"}:
-        return build_function_call_output_input_item(call_id=item.call_id, output=item.output_text_or_ref)
-    return {}
+    return _request_builder.responses_input_item_from_transcript_item(item)
 
 
 def _response_output_input_items(
@@ -5810,57 +2771,23 @@ def _provider_visible_native_item(
     *,
     lane_input: ImplementLaneInput,
 ) -> NativeTranscriptItem:
-    if _native_tool_available("write_file", lane_input=lane_input, lane_config=lane_input.lane_config):
-        return item
-    output_text = hide_unavailable_write_file_guidance(item.output_text_or_ref)
-    if item.tool_name != "write_file":
-        if output_text == item.output_text_or_ref:
-            return item
-        return replace(item, output_text_or_ref=output_text)
-    if item.kind in {"function_call", "custom_tool_call"}:
-        return replace(
-            item,
-            tool_name="unavailable_write_tool",
-            arguments_json_text='{"unavailable_tool":true,"redacted_arguments":true}',
-            custom_input_text="",
-            output_text_or_ref=output_text,
-        )
-    return replace(
-        item,
-        tool_name="unavailable_write_tool",
-        output_text_or_ref=output_text,
-    )
+    return _request_builder.provider_visible_native_item(item, lane_input=lane_input)
 
 
 def _native_item_provider_visible(item: NativeTranscriptItem) -> bool:
-    """Return whether a transcript item belongs in the next provider input."""
-
-    if str(item.call_id or "").startswith("call-final-verifier-closeout"):
-        return False
-    return True
+    return _request_builder.native_item_provider_visible(item)
 
 
 def _mapping_list(value: object) -> list[dict[str, object]]:
-    if not isinstance(value, list):
-        return []
-    return [dict(item) for item in value if isinstance(item, Mapping)]
+    return _request_builder.mapping_list(value)
 
 
 def _provider_safe_input_items(value: object) -> list[dict[str, object]]:
-    items = []
-    for item in _mapping_list(value):
-        if item.get("type") == "reasoning" and not item.get("encrypted_content"):
-            continue
-        items.append(item)
-    return items
+    return _request_builder.provider_safe_input_items(value)
 
 
 def _reasoning_config(lane_input: ImplementLaneInput) -> dict[str, object] | bool:
-    effort = str(lane_input.effort or os.environ.get("MEW_CODEX_REASONING_EFFORT", DEFAULT_CODEX_REASONING_EFFORT))
-    effort = effort.strip()
-    if not effort or effort.lower() in {"none", "off", "false"}:
-        return False
-    return {"effort": effort}
+    return _request_builder.reasoning_config(lane_input)
 
 
 def _native_surface_for_provider(provider: object) -> dict[str, object]:
@@ -5907,8 +2834,8 @@ def _live_failure_lane_result(
         provider=provider.provider,
         model=provider.model,
     )
-    finish_verifier_planner_decisions = _provider_finish_verifier_planner_decisions(provider)
-    finish_verifier_planner_requests = _provider_finish_verifier_planner_requests(provider)
+    finish_verifier_planner_decisions = _finish_planner.provider_finish_verifier_planner_decisions(provider)
+    finish_verifier_planner_requests = _finish_planner.provider_finish_verifier_planner_requests(provider)
     proof_artifacts = _write_live_failure_artifacts(
         lane_input,
         transcript=transcript,
@@ -5970,8 +2897,8 @@ def _partial_failure_harness_result(
     validation = validate_native_transcript_pairing(transcript)
     if not validation.valid:
         raise InvalidNativeTranscriptError(f"invalid native transcript: {', '.join(validation.errors)}")
-    finish_verifier_planner_decisions = _provider_finish_verifier_planner_decisions(provider)
-    finish_verifier_planner_requests = _provider_finish_verifier_planner_requests(provider)
+    finish_verifier_planner_decisions = _finish_planner.provider_finish_verifier_planner_decisions(provider)
+    finish_verifier_planner_requests = _finish_planner.provider_finish_verifier_planner_requests(provider)
     metrics = {
         **_native_surface_for_provider(provider),
         "status": "failed",
@@ -6055,146 +2982,30 @@ def _write_live_failure_artifacts(
         return ()
     root = Path(root_path)
     root.mkdir(parents=True, exist_ok=True)
-    paths = write_native_transcript_artifacts(root, transcript)
-    paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
-    paths.update(_write_native_render_output_sidecar(root, transcript))
-    route_records = _route_records_with_tool_surface(
-        route_records_from_results(tool_results),
-        provider=provider,
-    )
-    tool_routes_path = root / "tool_routes.jsonl"
-    tool_routes_path.write_text(
-        "".join(json.dumps(record, sort_keys=True) + "\n" for record in route_records),
-        encoding="utf-8",
-    )
-    paths["tool_routes"] = tool_routes_path
-    if done_candidates:
-        paths.update(
-            write_native_done_candidate_artifacts(
-                root,
-                done_candidates,
-                proof_manifest_path=paths.get("proof_manifest"),
-            )
-        )
-    if native_finish_gate_decisions:
-        paths.update(
-            write_native_finish_gate_artifacts(
-                root,
-                native_finish_gate_decisions,
-                proof_manifest_path=paths.get("proof_manifest"),
-            )
-        )
-    if ng_resume_signals:
-        paths.update(
-            write_native_ng_resume_signal_artifacts(
-                root,
-                ng_resume_signals,
-                proof_manifest_path=paths.get("proof_manifest"),
-            )
-        )
-    paths.update(
-        _write_finish_verifier_planner_artifacts(
-            root,
-            proof_manifest_path=paths.get("proof_manifest"),
-            finish_verifier_planner_decisions=finish_verifier_planner_decisions,
-            finish_verifier_planner_requests=finish_verifier_planner_requests,
-        )
-    )
-    request_path = root / "native-provider-requests.json"
-    inventory_path = root / "provider-request-inventory.json"
-    response_count = len(provider.responses)
-    rejected_response_count = len(provider.rejected_responses)
-    failure_status = (
-        "failed_before_completed_native_response"
-        if rejected_response_count
-        else "failed_before_native_response"
-    )
-    request_payload = {
-        "schema_version": 1,
-        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
-        "transport_kind": "provider_native",
-        "status": failure_status,
-        "error": str(error),
-        "request_count": len(provider.requests),
-        "response_count": response_count,
-        "rejected_response_count": rejected_response_count,
-        "requests": list(provider.requests),
-        "responses": list(provider.responses),
-        "rejected_responses": list(provider.rejected_responses),
-    }
-    inventory_payload = {
-        "schema_version": 1,
-        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
-        "transport_kind": "provider_native",
-        "status": failure_status,
-        "error": str(error),
-        "request_count": len(provider.requests),
-        "response_count": response_count,
-        "rejected_response_count": rejected_response_count,
-        "provider_request_inventory": [
-            request.get("provider_request_inventory")
-            for request in provider.requests
-            if isinstance(request.get("provider_request_inventory"), dict)
-        ],
-        "provider_response_statuses": [
-            response.get("status")
-            for response in provider.responses
-            if isinstance(response, dict)
-        ],
-        "rejected_provider_response_statuses": [
-            response.get("status")
-            for response in provider.rejected_responses
-            if isinstance(response, dict)
-        ],
-    }
-    request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    inventory_path.write_text(json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    _patch_native_default_observability(
-        paths,
-        provider=provider,
+    return _artifact_writer.write_live_failure_artifacts(
+        root,
         lane_input=lane_input,
+        transcript=transcript,
+        provider=provider,
+        tool_results=tool_results,
+        done_candidates=done_candidates,
+        native_finish_gate_decisions=native_finish_gate_decisions,
+        ng_resume_signals=ng_resume_signals,
         finish_verifier_planner_decisions=finish_verifier_planner_decisions,
         finish_verifier_planner_requests=finish_verifier_planner_requests,
+        error=error,
     )
-    return tuple(str(path) for path in (*paths.values(), request_path, inventory_path))
-
 
 def _route_records_with_tool_surface(
     route_records: tuple[dict[str, object], ...],
     *,
     provider: object,
 ) -> tuple[dict[str, object], ...]:
-    metadata_by_turn = _provider_tool_surface_metadata_by_turn(provider)
-    if not metadata_by_turn:
-        return route_records
-    augmented: list[dict[str, object]] = []
-    for record in route_records:
-        turn_index = _safe_int(record.get("turn_index"), default=0)
-        metadata = metadata_by_turn.get(turn_index) or metadata_by_turn.get(-1) or {}
-        item = dict(record)
-        item["tool_surface_profile_id"] = metadata.get("profile_id", "")
-        item["tool_surface_profile_hash"] = metadata.get("profile_hash", "")
-        item["tool_surface_route_table_hash"] = metadata.get("route_table_hash", "")
-        item["tool_surface_descriptor_hash"] = metadata.get("descriptor_hash", "")
-        augmented.append(item)
-    return tuple(augmented)
+    return _artifact_writer.route_records_with_tool_surface(route_records, provider=provider)
 
 
 def _provider_tool_surface_metadata_by_turn(provider: object) -> dict[int, Mapping[str, object]]:
-    requests = getattr(provider, "requests", None)
-    if not isinstance(requests, list):
-        return {}
-    by_turn: dict[int, Mapping[str, object]] = {}
-    for request in reversed(requests):
-        if not isinstance(request, Mapping):
-            continue
-        tool_surface = request.get("tool_surface")
-        if isinstance(tool_surface, Mapping):
-            turn_index = _safe_int(request.get("turn_index"), default=0)
-            if turn_index:
-                by_turn.setdefault(turn_index, tool_surface)
-            by_turn.setdefault(-1, tool_surface)
-    return by_turn
+    return _artifact_writer.provider_tool_surface_metadata_by_turn(provider)
 
 
 def _safe_int(value: object, *, default: int) -> int:
@@ -6240,51 +3051,16 @@ def _native_apply_ng_resume_policy(
     current_plateau_signature: str,
     last_plateau_signature: str,
 ) -> tuple[NativeFinishGateDecision, int]:
-    if no_tool_reason == "no_tool_repeat":
-        return (
-            _native_ng_return_decision(
-                decision,
-                blocker="ng_repeat_plateau",
-                reason=(
-                    "native model returned repeated assistant text without tool progress "
-                    "after an NG resume signal"
-                ),
-            ),
-            1,
-        )
-    if (
-        last_progress_fingerprint
-        and last_progress_fingerprint == current_progress_fingerprint
-        and last_plateau_signature
-        and last_plateau_signature == current_plateau_signature
-    ):
-        return (
-            _native_ng_return_decision(
-                decision,
-                blocker="ng_repeat_plateau",
-                reason="internal finish gate repeated the same blocker plateau without model tool progress",
-            ),
-            1,
-        )
-    if ng_continue_consecutive_count >= _NG_CONTINUE_CONSECUTIVE_LIMIT:
-        return (
-            _native_ng_return_decision(
-                decision,
-                blocker="ng_continue_consecutive_cap",
-                reason="internal finish gate NG continue hard cap reached",
-            ),
-            0,
-        )
-    if ng_continue_total_count >= _NG_DECISION_TOTAL_LIMIT - 1:
-        return (
-            _native_ng_return_decision(
-                decision,
-                blocker="ng_decision_total_cap",
-                reason="internal finish gate total NG decision cap reached",
-            ),
-            0,
-        )
-    return decision, 0
+    return _closeout_policy.apply_ng_resume_policy(
+        decision,
+        no_tool_reason=no_tool_reason,
+        ng_continue_total_count=ng_continue_total_count,
+        ng_continue_consecutive_count=ng_continue_consecutive_count,
+        current_progress_fingerprint=current_progress_fingerprint,
+        last_progress_fingerprint=last_progress_fingerprint,
+        current_plateau_signature=current_plateau_signature,
+        last_plateau_signature=last_plateau_signature,
+    )
 
 
 def _native_ng_return_decision(
@@ -6293,14 +3069,7 @@ def _native_ng_return_decision(
     blocker: str,
     reason: str,
 ) -> NativeFinishGateDecision:
-    return replace(
-        decision,
-        lane_status="blocked_return",
-        result="block",
-        blockers=tuple(dict.fromkeys((*decision.blockers, blocker))),
-        reason=reason,
-    )
-
+    return _closeout_policy.ng_return_decision(decision, blocker=blocker, reason=reason)
 
 def _native_model_tool_progress_fingerprint(tool_results: tuple[ToolResultEnvelope, ...]) -> str:
     records = [
@@ -6506,47 +3275,6 @@ def _call_order_key(call: NativeTranscriptItem) -> tuple[int, int]:
     return (call.output_index, call.sequence)
 
 
-def _write_finish_verifier_planner_artifacts(
-    root: Path,
-    *,
-    proof_manifest_path: Path | None,
-    finish_verifier_planner_decisions: tuple[Mapping[str, object], ...],
-    finish_verifier_planner_requests: tuple[Mapping[str, object], ...] = (),
-) -> dict[str, Path]:
-    if not finish_verifier_planner_decisions:
-        return {}
-    paths: dict[str, Path] = {}
-    planner_requests_path: Path | None = None
-    if finish_verifier_planner_requests:
-        planner_requests_path = root / _FINISH_VERIFIER_PLANNER_REQUESTS_FILE
-        planner_requests_path.write_text(
-            "".join(
-                json.dumps(_json_safe_native(dict(record)), ensure_ascii=False, sort_keys=True) + "\n"
-                for record in finish_verifier_planner_requests
-            ),
-            encoding="utf-8",
-        )
-        paths["finish_verifier_planner_requests"] = planner_requests_path
-    planner_decisions_path = root / _FINISH_VERIFIER_PLANNER_DECISIONS_FILE
-    planner_decisions_path.write_text(
-        "".join(
-            json.dumps(_json_safe_native(dict(record)), ensure_ascii=False, sort_keys=True) + "\n"
-            for record in finish_verifier_planner_decisions
-        ),
-        encoding="utf-8",
-    )
-    paths["finish_verifier_planner_decisions"] = planner_decisions_path
-    if proof_manifest_path is not None:
-        _patch_proof_manifest_with_finish_verifier_planner_decisions(
-            proof_manifest_path,
-            decision_path=planner_decisions_path,
-            records=finish_verifier_planner_decisions,
-            request_path=planner_requests_path,
-            request_records=finish_verifier_planner_requests,
-        )
-    return paths
-
-
 def _write_native_artifacts(
     root: Path,
     transcript: NativeTranscript,
@@ -6563,86 +3291,21 @@ def _write_native_artifacts(
     finish_verifier_planner_decisions: tuple[Mapping[str, object], ...] = (),
     finish_verifier_planner_requests: tuple[Mapping[str, object], ...] = (),
 ) -> dict[str, Path]:
-    paths = write_native_transcript_artifacts(root, transcript)
-    paths.update(_write_native_tool_result_sidecars(root, tool_results=tool_results))
-    paths.update(_write_native_render_output_sidecar(root, transcript))
-    route_records = _route_records_with_tool_surface(
-        route_records_from_results(tool_results),
-        provider=provider,
-    )
-    tool_routes_path = root / "tool_routes.jsonl"
-    tool_routes_path.write_text(
-        "".join(json.dumps(record, sort_keys=True) + "\n" for record in route_records),
-        encoding="utf-8",
-    )
-    paths["tool_routes"] = tool_routes_path
-    if resolver_decisions:
-        paths.update(
-            write_completion_resolver_artifacts(
-                root,
-                resolver_decisions,
-                proof_manifest_path=paths.get("proof_manifest"),
-            )
-        )
-    if native_finish_gate_decisions:
-        paths.update(
-            write_native_finish_gate_artifacts(
-                root,
-                native_finish_gate_decisions,
-                proof_manifest_path=paths.get("proof_manifest"),
-            )
-        )
-    if done_candidates:
-        paths.update(
-            write_native_done_candidate_artifacts(
-                root,
-                done_candidates,
-                proof_manifest_path=paths.get("proof_manifest"),
-            )
-        )
-    if ng_resume_signals:
-        paths.update(
-            write_native_ng_resume_signal_artifacts(
-                root,
-                ng_resume_signals,
-                proof_manifest_path=paths.get("proof_manifest"),
-            )
-        )
-    paths.update(
-        _write_finish_verifier_planner_artifacts(
-            root,
-            proof_manifest_path=paths.get("proof_manifest"),
-            finish_verifier_planner_decisions=finish_verifier_planner_decisions,
-            finish_verifier_planner_requests=finish_verifier_planner_requests,
-        )
-    )
-    paths.update(
-        write_native_evidence_observation(
-            root,
-            transcript,
-            resolver_decisions=resolver_decisions,
-            proof_manifest_path=paths.get("proof_manifest"),
-        )
-    )
-    paths.update(_write_provider_request_artifacts(root, provider=provider, status=status, error=error))
-    if isinstance(provider, NativeFakeProvider):
-        for key in ("transcript_metrics", "proof_manifest"):
-            path = paths[key]
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            payload["transport_kind"] = "fake_native"
-            payload["native_transport_kind"] = "provider_native"
-            if isinstance(payload.get("metrics"), dict):
-                payload["metrics"]["transport_kind"] = "fake_native"
-                payload["metrics"]["native_transport_kind"] = "provider_native"
-            path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    _patch_native_default_observability(
-        paths,
-        provider=provider,
+    return _artifact_writer.write_native_artifacts(
+        root,
+        transcript,
         lane_input=lane_input,
+        tool_results=tool_results,
+        provider=provider,
+        status=status,
+        error=error,
+        resolver_decisions=resolver_decisions,
+        native_finish_gate_decisions=native_finish_gate_decisions,
+        done_candidates=done_candidates,
+        ng_resume_signals=ng_resume_signals,
         finish_verifier_planner_decisions=finish_verifier_planner_decisions,
         finish_verifier_planner_requests=finish_verifier_planner_requests,
     )
-    return paths
 
 
 def _patch_native_default_observability(
@@ -6653,35 +3316,13 @@ def _patch_native_default_observability(
     finish_verifier_planner_decisions: tuple[Mapping[str, object], ...],
     finish_verifier_planner_requests: tuple[Mapping[str, object], ...],
 ) -> None:
-    facts = _native_default_observability_facts(
-        provider,
+    _artifact_writer.patch_native_default_observability(
+        paths,
+        provider=provider,
         lane_input=lane_input,
         finish_verifier_planner_decisions=finish_verifier_planner_decisions,
         finish_verifier_planner_requests=finish_verifier_planner_requests,
     )
-    for key in ("proof_manifest", "transcript_metrics"):
-        path = paths.get(key)
-        if path is None or not path.exists():
-            continue
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        payload.update(
-            {
-                field: facts[field]
-                for field in (
-                    "native_transport_kind",
-                    "tool_surface_profile_id",
-                    "tool_surface_profile_selection_source",
-                    "tool_surface_profile_default",
-                    "tool_surface_profile_hash",
-                    "developer_contract_transport",
-                )
-                if field in facts
-            }
-        )
-        metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
-        metrics.update(facts)
-        payload["metrics"] = metrics
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _native_default_observability_facts(
@@ -6691,73 +3332,20 @@ def _native_default_observability_facts(
     finish_verifier_planner_decisions: tuple[Mapping[str, object], ...],
     finish_verifier_planner_requests: tuple[Mapping[str, object], ...],
 ) -> dict[str, object]:
-    requests = _provider_request_records(provider)
-    latest_request = requests[-1] if requests else {}
-    latest_inventory = _mapping_or_empty(latest_request.get("provider_request_inventory"))
-    tool_surface = _latest_tool_surface_metadata(provider)
-    if not tool_surface and lane_input is not None:
-        tool_surface = build_tool_surface_snapshot(
-            lane_config=lane_input.lane_config,
-            task_contract=lane_input.task_contract,
-            transcript_items=(),
-        ).request_metadata()
-    planner_policy = finish_verifier_planner_policy(lane_input.lane_config if lane_input is not None else {})
-    latest_planner_request = (
-        _mapping_or_empty(finish_verifier_planner_requests[-1].get("request"))
-        if finish_verifier_planner_requests
-        else {}
+    return _artifact_writer.native_default_observability_facts(
+        provider,
+        lane_input=lane_input,
+        finish_verifier_planner_decisions=finish_verifier_planner_decisions,
+        finish_verifier_planner_requests=finish_verifier_planner_requests,
     )
-    latest_read_policy = _mapping_or_empty(latest_planner_request.get("read_policy"))
-    facts: dict[str, object] = {
-        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
-        "native_transport_kind": "provider_native",
-        "provider_native_tool_loop": True,
-        "model_json_main_path_detected": False,
-        "provider_request_inventory_available": bool(requests),
-        "provider_request_count": len(requests),
-        "finish_verifier_planner_enabled": bool(latest_read_policy.get("enabled", planner_policy.enabled)),
-        "finish_verifier_planner_selection_source": str(
-            latest_read_policy.get("selection_source") or planner_policy.selection_source
-        ),
-        "finish_verifier_planner_request_count": len(finish_verifier_planner_requests),
-        "finish_verifier_planner_decision_count": len(finish_verifier_planner_decisions),
-        "previous_response_delta_mode": str(latest_request.get("previous_response_delta_mode") or "none"),
-        "previous_response_prefix_item_count": _safe_int(latest_request.get("input_item_count"), default=0),
-    }
-    if tool_surface:
-        facts.update(
-            {
-                "tool_surface_profile_id": str(tool_surface.get("profile_id") or ""),
-                "tool_surface_profile_selection_source": str(tool_surface.get("profile_selection_source") or ""),
-                "tool_surface_profile_default": bool(tool_surface.get("profile_default")),
-                "tool_surface_profile_hash": str(tool_surface.get("profile_hash") or ""),
-                "tool_surface_descriptor_hash": str(tool_surface.get("descriptor_hash") or ""),
-                "tool_surface_route_table_hash": str(tool_surface.get("route_table_hash") or ""),
-                "tool_surface_render_policy_hash": str(tool_surface.get("render_policy_hash") or ""),
-                "developer_contract_transport": str(
-                    latest_inventory.get("developer_contract_transport")
-                    or tool_surface.get("developer_contract_transport")
-                    or tool_surface.get("developer_contract_transport_policy")
-                    or ""
-                ),
-            }
-        )
-    return facts
 
 
 def _mapping_or_empty(value: object) -> dict[str, object]:
-    return dict(value) if isinstance(value, Mapping) else {}
+    return _artifact_writer.mapping_or_empty(value)
 
 
 def _latest_tool_surface_metadata(provider: object) -> dict[str, object]:
-    for request in reversed(_provider_request_records(provider)):
-        tool_surface = request.get("tool_surface")
-        if isinstance(tool_surface, Mapping):
-            return dict(tool_surface)
-        inventory = request.get("provider_request_inventory")
-        if isinstance(inventory, Mapping) and isinstance(inventory.get("tool_surface"), Mapping):
-            return dict(inventory["tool_surface"])  # type: ignore[index]
-    return {}
+    return _artifact_writer.latest_tool_surface_metadata(provider)
 
 
 def _write_native_tool_result_sidecars(
@@ -6765,66 +3353,15 @@ def _write_native_tool_result_sidecars(
     *,
     tool_results: tuple[ToolResultEnvelope, ...],
 ) -> dict[str, Path]:
-    """Write derived tool-result sidecars for native transcript artifacts."""
-
-    tool_results_path = root / "tool_results.jsonl"
-    tool_result_index_path = root / "tool_result_index.json"
-    evidence_sidecar_path = root / "evidence_sidecar.json"
-    evidence_ref_index_path = root / "evidence_ref_index.json"
-    write_jsonl(tool_results_path, tool_results_jsonl_lines(tool_results))
-    tool_result_index = build_tool_result_index_artifact(tool_results)
-    evidence_sidecar = build_evidence_sidecar_artifact(tool_results)
-    evidence_ref_index = build_evidence_ref_index_artifact(evidence_sidecar)
-    tool_result_index_path.write_text(
-        json.dumps(tool_result_index, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    evidence_sidecar_path.write_text(
-        json.dumps(evidence_sidecar, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    evidence_ref_index_path.write_text(
-        json.dumps(evidence_ref_index, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return {
-        "tool_results": tool_results_path,
-        "tool_result_index": tool_result_index_path,
-        "evidence_sidecar": evidence_sidecar_path,
-        "evidence_ref_index": evidence_ref_index_path,
-    }
+    return _artifact_writer.write_native_tool_result_sidecars(root, tool_results=tool_results)
 
 
 def _write_native_render_output_sidecar(root: Path, transcript: NativeTranscript) -> dict[str, Path]:
-    """Write renderer observability for provider-visible paired outputs."""
-
-    records: list[dict[str, object]] = []
-    for item in transcript.items:
-        if item.kind not in OUTPUT_ITEM_KINDS or not item.metrics_ref:
-            continue
-        records.append(
-            render_observability_record(
-                metrics_ref=item.metrics_ref,
-                tool_name=item.tool_name,
-                call_id=item.call_id,
-                output_text=item.output_text_or_ref,
-            )
-        )
-    if not records:
-        return {}
-    path = root / "tool_render_outputs.jsonl"
-    path.write_text(
-        "".join(json.dumps(record, sort_keys=True) + "\n" for record in records),
-        encoding="utf-8",
-    )
-    return {"tool_render_outputs": path}
+    return _artifact_writer.write_native_render_output_sidecar(root, transcript)
 
 
 def _provider_request_records(provider: object) -> tuple[dict[str, object], ...]:
-    requests = getattr(provider, "requests", None)
-    if not isinstance(requests, list):
-        return ()
-    return tuple(dict(request) for request in requests if isinstance(request, Mapping))
+    return _artifact_writer.provider_request_records(provider)
 
 
 def _write_provider_request_artifacts(
@@ -6834,43 +3371,7 @@ def _write_provider_request_artifacts(
     status: str = "",
     error: str = "",
 ) -> dict[str, Path]:
-    requests = _provider_request_records(provider)
-    if not requests:
-        return {}
-    request_path = root / "native-provider-requests.json"
-    inventory_path = root / "provider-request-inventory.json"
-    request_payload: dict[str, object] = {
-        "schema_version": 1,
-        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
-        "transport_kind": "provider_native",
-        "native_transport_kind": "provider_native",
-        "status": status or "unknown",
-        "request_count": len(requests),
-        "requests": list(requests),
-    }
-    if error:
-        request_payload["error"] = str(error)
-    inventory_payload: dict[str, object] = {
-        "schema_version": 1,
-        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
-        "transport_kind": "provider_native",
-        "native_transport_kind": "provider_native",
-        "status": status or "unknown",
-        "request_count": len(requests),
-        "provider_request_inventory": [
-            request.get("provider_request_inventory")
-            for request in requests
-            if isinstance(request.get("provider_request_inventory"), dict)
-        ],
-    }
-    if error:
-        inventory_payload["error"] = str(error)
-    request_path.write_text(json.dumps(request_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    inventory_path.write_text(json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return {
-        "native_provider_requests": request_path,
-        "provider_request_inventory": inventory_path,
-    }
+    return _artifact_writer.write_provider_request_artifacts(root, provider=provider, status=status, error=error)
 
 
 def _finish_summary(call: NativeTranscriptItem) -> str:

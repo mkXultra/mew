@@ -91,7 +91,6 @@ def test_native_workframe_debug_bundle_replays_from_transcript_with_stable_hashe
         objective="Patch src/app.py and verify it.",
         success_contract_ref="pytest",
         evidence_sidecar=evidence_sidecar,
-        variant="current",
     )
     regenerated = build_native_workframe_debug_bundle(
         transcript,
@@ -99,7 +98,6 @@ def test_native_workframe_debug_bundle_replays_from_transcript_with_stable_hashe
         objective="Patch src/app.py and verify it.",
         success_contract_ref="pytest",
         evidence_sidecar=evidence_sidecar,
-        variant="current",
     )
 
     assert first["bundle_hash"] == regenerated["bundle_hash"]
@@ -148,14 +146,12 @@ def test_native_workframe_projection_ignores_model_authored_state_fields() -> No
         task_id="task-1",
         objective="Patch src/app.py and verify it.",
         success_contract_ref="pytest",
-        variant="current",
     )
     second = build_native_workframe_debug_bundle(
         mutated,
         task_id="task-1",
         objective="Patch src/app.py and verify it.",
         success_contract_ref="pytest",
-        variant="current",
     )
 
     assert first["bundle_hash"] == second["bundle_hash"]
@@ -169,10 +165,11 @@ def test_native_workframe_inputs_preserve_projection_only_policy() -> None:
         objective="Patch src/app.py and verify it.",
         success_contract_ref="pytest",
     )
-    policy = native_workframe_projection_policy("current")
+    policy = native_workframe_projection_policy()
 
     assert "native_transcript_projection" in inputs.constraints
     assert inputs.turn_id == "turn-2"
+    assert policy["projection_kind"] == "canonical_workframe"
     assert policy["role"] == "projection_policy_analyzer"
     assert policy["provider_request_authority"] is False
     assert policy["model_authored_state_authority"] is False

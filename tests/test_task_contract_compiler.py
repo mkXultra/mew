@@ -1,3 +1,5 @@
+import json
+
 from mew.task_contract_compiler import (
     apply_compiled_task_contract,
     build_task_contract_compiler_prompt,
@@ -8,7 +10,6 @@ from mew.task_contract_compiler import (
 )
 from mew.implement_lane.execution_evidence import build_oracle_bundle
 from mew.commands import (
-    _work_guidance_task_contract_compiler_enabled,
     _work_guidance_task_contract_guidance,
 )
 
@@ -96,6 +97,7 @@ def test_compiled_task_contract_adds_oracle_obligations():
             "verifier": {"command": "pytest -q", "must_pass": False},
         },
     )
+    task_contract["completion_obligation_contract"] = dict(task_contract["compiled_task_contract"])
 
     bundle = build_oracle_bundle(task_contract=task_contract)
 
@@ -106,6 +108,7 @@ def test_compiled_task_contract_adds_oracle_obligations():
     verifier_obligations = [obligation for obligation in bundle.obligations if obligation.kind == "verifier_pass"]
     assert any(obligation.subject.get("any_verifier") for obligation in verifier_obligations)
     assert any(obligation.subject.get("verify_command") == "node vm.js" for obligation in verifier_obligations)
+    assert all(obligation.source != "task_contract_compiler" for obligation in verifier_obligations)
 
 
 def test_task_contract_compiler_prompt_requests_json_only():
@@ -116,16 +119,19 @@ def test_task_contract_compiler_prompt_requests_json_only():
     assert "Raw task contract" in prompt
 
 
-def test_task_contract_compiler_is_default_enabled_with_legacy_opt_in():
-    assert _work_guidance_task_contract_compiler_enabled("selected_lane=implement_v2") is True
-    assert _work_guidance_task_contract_compiler_enabled("task_contract_compiler=legacy") is False
-    assert _work_guidance_task_contract_compiler_enabled('{"task_contract_compiler":false}') is False
-
+def test_retired_task_contract_compiler_knobs_are_stripped_from_live_guidance():
     sanitized = _work_guidance_task_contract_guidance(
         "selected_lane=implement_v2 task_contract_compiler=legacy task_contract_compiler_model=gpt-test"
     )
     assert "task_contract_compiler" not in sanitized
     assert "selected_lane" in sanitized
+
+    nested = _work_guidance_task_contract_guidance(
+        '{"selected_lane":"implement_v2","task_contract_compiler":true,'
+        '"lane_config":{"task_contract_compiler_model":"gpt-test","legacy_task_contract":true}}'
+    )
+    payload = json.loads(nested)
+    assert payload == {"selected_lane": "implement_v2"}
 
 
 def test_task_contract_compiler_failure_uses_typed_fallback_not_legacy_gate():

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from .provider import FakeProviderAdapter
+from ..implement_lane.provider import FakeProviderAdapter
 
 
 class JsonModelProviderAdapter(FakeProviderAdapter):
     """Provider adapter for the quarantined legacy model-JSON transport."""
 
-    provider = "model_json"
+    provider = "legacy_model_json"
 
 
 __all__ = ["JsonModelProviderAdapter"]

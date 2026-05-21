@@ -10,9 +10,9 @@ from mew.implement_lane import (
     NativeFinishGatePolicy,
     NativeFinishGateRequest,
 )
-from mew.implement_lane.native_tool_harness import (
-    _NativeFinishVerifierPlan,
-    _native_final_verifier_closeout_call,
+from mew.implement_lane.finish_verifier_planner import FinishVerifierPlan
+from mew.implement_lane.native_finish_closeout_policy import (
+    native_final_verifier_closeout_call,
 )
 from mew.implement_lane.native_finish_gate import (
     NATIVE_FINISH_GATE_POLICY_VERSION,
@@ -606,7 +606,7 @@ def test_native_finish_closeout_exit_zero_allows_despite_projection_warnings() -
         typed_evidence_projection_status="warning",
         evidence_refs=("ev:typed:diagnostic",),
         closeout_refs=("implement-v2-exec://attempt/final-verifier/terminal",),
-        warnings=("invalid_typed_evidence_ref", "oracle:task_contract:compiled:verifier_pass"),
+        warnings=("invalid_typed_evidence_ref", "oracle:completion_obligation:verifier:pytest"),
     )
 
     decision = decide_native_finish_from_closeout(request, closeout)
@@ -795,13 +795,13 @@ def test_native_final_verifier_closeout_call_uses_minimal_finish_verifier_intent
         },
         lane_config={"mode": "full", "allow_verify": True, "allow_shell": True},
     )
-    call = _native_final_verifier_closeout_call(
+    call = native_final_verifier_closeout_call(
         lane_input,
         lane_attempt_id="attempt-1",
         provider=SimpleNamespace(provider="fake-native", model="fake-model"),
         turn_index=3,
         lane_config=lane_input.lane_config,
-        plan=_NativeFinishVerifierPlan(command="node vm.js", source="configured"),
+        plan=FinishVerifierPlan(command="node vm.js", source="configured"),
         timeout_seconds=30.0,
         pending_mutation={"provider_call_id": "call-write-1", "path": "vm.js"},
     )

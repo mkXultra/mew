@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass, field
+import fnmatch
 import json
 from pathlib import Path
 from typing import Mapping
@@ -38,6 +39,28 @@ class NativeLoopGateResult:
             "errors": list(self.errors),
             "warnings": list(self.warnings),
             "details": dict(self.details),
+        }
+
+
+@dataclass(frozen=True)
+class StaticGateAllowlistEntry:
+    """Explicit temporary allowance for known M6.25 cleanup debt."""
+
+    path_pattern: str
+    symbols: tuple[str, ...]
+    owner: str
+    action: str
+    removal_gate: str
+    reason: str = ""
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "path_pattern": self.path_pattern,
+            "symbols": list(self.symbols),
+            "owner": self.owner,
+            "action": self.action,
+            "removal_gate": self.removal_gate,
+            "reason": self.reason,
         }
 
 
@@ -94,9 +117,13 @@ def validate_native_loop_gate(
         checks[f"package_surface_no_{symbol}"] = present is False
     production_scan = _scan_native_production_paths(source_path)
     details["native_production_paths"] = production_scan
+    details["native_production_static_allowlist"] = [
+        entry.as_dict() for entry in _native_production_legacy_allowlist()
+    ]
     checks["native_production_paths_exist"] = all(
         bool(item.get("exists")) for item in production_scan
     )
+    checks["native_production_static_allowlist_explicit"] = bool(_native_production_legacy_allowlist())
     checks["native_production_paths_no_legacy_symbols"] = not any(
         item.get("legacy_hits") for item in production_scan
     )
@@ -104,6 +131,11 @@ def validate_native_loop_gate(
     details["planner_policy_boundary_paths"] = planner_policy_scan
     checks["native_production_paths_no_direct_planner_config_reads"] = not any(
         item.get("planner_config_hits") for item in planner_policy_scan
+    )
+    research_lane_boundary_scan = _scan_research_lane_import_boundary(source_path)
+    details["research_lane_import_boundary"] = research_lane_boundary_scan
+    checks["research_lane_no_implement_runtime_imports"] = not any(
+        item.get("forbidden_import_hits") for item in research_lane_boundary_scan
     )
 
     fixture_manifest = native_proof_manifest_from_transcript(_validation_fixture_transcript())
@@ -203,56 +235,169 @@ def _package_surface_banned_symbols(package_scan: Mapping[str, object]) -> dict[
     return {symbol: package_scan.get(symbol) for symbol in _legacy_public_surface_symbols()}
 
 
-def _native_production_relative_paths() -> tuple[str, ...]:
-    return (
-        "src/mew/commands.py",
-        "src/mew/implement_lane/__init__.py",
-        "src/mew/implement_lane/registry.py",
-        "src/mew/implement_lane/provider.py",
-        "src/mew/implement_lane/native_provider_adapter.py",
-        "src/mew/implement_lane/native_tool_harness.py",
-    )
+def _native_production_relative_paths(source_root: Path) -> tuple[str, ...]:
+    return _production_scan_relative_paths(source_root)
+
+
+def _production_scan_relative_paths(source_root: Path) -> tuple[str, ...]:
+    candidates = [source_root / "src" / "mew" / "commands.py"]
+    for package in ("implement_lane", "lane_substrate", "research_lane"):
+        package_root = source_root / "src" / "mew" / package
+        if package_root.exists():
+            candidates.extend(sorted(package_root.rglob("*.py")))
+    relative_paths = []
+    for path in candidates:
+        try:
+            relative_paths.append(path.relative_to(source_root).as_posix())
+        except ValueError:
+            relative_paths.append(path.as_posix())
+    return tuple(dict.fromkeys(relative_paths))
 
 
 def _native_production_banned_symbols() -> tuple[str, ...]:
-    # This gate protects the main implement_v2 hot path. Internal helper model
-    # calls, such as the finish verifier planner, are checked by their own
-    # input-filtering tests and are not the retired model-JSON implement loop.
+    # This gate freezes the M6.25 production boundary. Known pre-cleanup debt is
+    # allowed only through _native_production_legacy_allowlist().
     return (
-        "JsonModelProviderAdapter",
-        'provider = "model_json"',
         "run_live_json_implement_v2",
+        "JsonModelProviderAdapter",
+        "model_json_tool_loop",
+        "implement_v2_model_json_tool_loop",
         "from .v2_runtime import",
         "from mew.implement_lane.v2_runtime import",
+        "legacy_model_json_runtime",
+        "legacy_model_json_provider",
+        "list_v2_base_tool_specs",
+        "list_v2_tool_specs_for_mode",
+        "list_v2_tool_specs_for_task",
+        "workframe_variants",
+        "from .workframe_variants import",
+        "from mew.implement_lane.workframe_variants import",
+        "project_workframe_with_variant",
+        "reduce_workframe_with_variant",
+        "DEFAULT_WORKFRAME_VARIANT",
+        "CommonWorkFrameInputs",
+        "list_workframe_variants",
+        "workframe_variant_transition_contract",
+        "workframe_variant_transcript_first",
+        "workframe_variant_transcript_tool_nav",
+        "task_contract_compiler",
+        "task_contract_compiler_mode",
+        "task_contract_compiler_model",
+        "task_contract_compiler_timeout_seconds",
+        "task_contract_compiler_required",
+        "legacy_task_contract",
+        "task_contract_legacy",
+        "compiled_task_contract",
+        "finish_acceptance_gate_decision",
+        "_finish_acceptance_action",
+        "_acceptance_session_from_tool_results",
+        "_typed_acceptance_session_from_tool_results",
+        'provider = "model_json"',
         "_live_json_prompt",
         "_normalize_live_json_payload",
         "call_model_json_with_retries",
-        "implement_v2_model_json_tool_loop",
         "LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID",
         "history_json:",
         "frontier_state_update",
     )
 
 
+def _native_production_legacy_allowlist() -> tuple[StaticGateAllowlistEntry, ...]:
+    all_symbols = _native_production_banned_symbols()
+    legacy_projection_field_symbols = (
+        "history_json:",
+        "frontier_state_update",
+    )
+    return (
+        StaticGateAllowlistEntry(
+            "src/mew/implement_lane/affordance_visibility.py",
+            ("frontier_state_update",),
+            owner="Phase 4 provider-visible field cleanup",
+            action="rename-or-semantic-exempt",
+            removal_gate="field guard avoids legacy projection token or gate uses semantic leak detection",
+            reason="current guard names the forbidden legacy field explicitly",
+        ),
+        StaticGateAllowlistEntry(
+            "src/mew/implement_lane/hot_path_fastcheck.py",
+            legacy_projection_field_symbols,
+            owner="Phase 4 diagnostic split",
+            action="split",
+            removal_gate="native fastcheck no longer scans legacy projection fields by raw token",
+        ),
+        StaticGateAllowlistEntry(
+            "src/mew/implement_lane/native_validation.py",
+            all_symbols,
+            owner="Phase 0 static gate",
+            action="keep-gate-definitions",
+            removal_gate="banned symbol list no longer needs to mention retired legacy names",
+        ),
+        StaticGateAllowlistEntry(
+            "src/mew/implement_lane/native_transcript.py",
+            ("LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID", "model_json_tool_loop", "implement_v2_model_json_tool_loop"),
+            owner="Phase 2 forbidden-evidence compatibility marker",
+            action="keep-rejected-evidence-marker",
+            removal_gate="native artifact contract no longer needs legacy forbidden runtime-id compatibility field",
+            reason="metadata-only marker used to reject legacy model-json artifacts; not a route or package export",
+        ),
+        StaticGateAllowlistEntry(
+            "src/mew/implement_lane/tool_profiles/mew_legacy.py",
+            (
+                "list_v2_base_tool_specs",
+                "list_v2_tool_specs_for_mode",
+                "list_v2_tool_specs_for_task",
+            ),
+            owner="Phase 2 tool profile quarantine",
+            action="isolate-or-delete",
+            removal_gate="legacy tool surface cannot be selected by production runtime",
+        ),
+        StaticGateAllowlistEntry(
+            "src/mew/implement_lane/tool_surface_ab_report.py",
+            ("frontier_state_update",),
+            owner="Phase 4 provider-visible field cleanup",
+            action="rename-or-semantic-exempt",
+            removal_gate="A/B report avoids legacy projection token or gate uses semantic leak detection",
+            reason="current report names the forbidden legacy field explicitly",
+        ),
+    )
+
+
+def _allowed_banned_symbols_for_path(relative_path: str) -> tuple[str, ...]:
+    symbols: list[str] = []
+    for entry in _native_production_legacy_allowlist():
+        if fnmatch.fnmatch(relative_path, entry.path_pattern):
+            symbols.extend(entry.symbols)
+    return tuple(dict.fromkeys(symbols))
+
+
 def _scan_native_production_paths(source_root: Path) -> tuple[dict[str, object], ...]:
     scanned: list[dict[str, object]] = []
-    for relative_path in _native_production_relative_paths():
+    for relative_path in _native_production_relative_paths(source_root):
         path = source_root / relative_path
         if not path.exists():
-            scanned.append({"path": relative_path, "exists": False, "legacy_hits": {}})
+            scanned.append({"path": relative_path, "exists": False, "legacy_hits": {}, "allowed_legacy_hits": {}})
             continue
         text = path.read_text(encoding="utf-8")
-        hits = {
+        all_hits = {
             symbol: text.count(symbol)
             for symbol in _native_production_banned_symbols()
             if symbol in text
         }
-        scanned.append({"path": relative_path, "exists": True, "legacy_hits": hits})
+        allowed_symbols = set(_allowed_banned_symbols_for_path(relative_path))
+        allowed_hits = {symbol: count for symbol, count in all_hits.items() if symbol in allowed_symbols}
+        unallowed_hits = {symbol: count for symbol, count in all_hits.items() if symbol not in allowed_symbols}
+        scanned.append(
+            {
+                "path": relative_path,
+                "exists": True,
+                "legacy_hits": unallowed_hits,
+                "allowed_legacy_hits": allowed_hits,
+            }
+        )
     return tuple(scanned)
 
 
-def _planner_policy_boundary_relative_paths() -> tuple[str, ...]:
-    return _native_production_relative_paths()
+def _planner_policy_boundary_relative_paths(source_root: Path) -> tuple[str, ...]:
+    return _production_scan_relative_paths(source_root)
 
 
 def _planner_config_direct_read_keys() -> tuple[str, ...]:
@@ -324,7 +469,7 @@ def _planner_config_direct_read_hits(text: str) -> dict[str, int]:
 
 def _scan_planner_policy_boundary_paths(source_root: Path) -> tuple[dict[str, object], ...]:
     scanned: list[dict[str, object]] = []
-    for relative_path in _planner_policy_boundary_relative_paths():
+    for relative_path in _planner_policy_boundary_relative_paths(source_root):
         path = source_root / relative_path
         if not path.exists():
             scanned.append({"path": relative_path, "exists": False, "planner_config_hits": {}})
@@ -332,6 +477,64 @@ def _scan_planner_policy_boundary_paths(source_root: Path) -> tuple[dict[str, ob
         text = path.read_text(encoding="utf-8")
         hits = _planner_config_direct_read_hits(text)
         scanned.append({"path": relative_path, "exists": True, "planner_config_hits": hits})
+    return tuple(scanned)
+
+
+def _research_lane_forbidden_import_roots() -> tuple[str, ...]:
+    return (
+        "mew.implement_lane",
+    )
+
+
+def _imported_module_names(text: str) -> tuple[str, ...]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return ()
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module:
+                names.append(module)
+            module_already_matches = any(
+                module == root or module.startswith(f"{root}.")
+                for root in _research_lane_forbidden_import_roots()
+            )
+            if not module_already_matches:
+                names.extend(f"{module}.{alias.name}" if module else alias.name for alias in node.names)
+    return tuple(names)
+
+
+def _forbidden_research_lane_import_hits(text: str) -> dict[str, int]:
+    hits: dict[str, int] = {}
+    for name in _imported_module_names(text):
+        for root in _research_lane_forbidden_import_roots():
+            if name == root or name.startswith(f"{root}."):
+                hits[root] = hits.get(root, 0) + 1
+    return hits
+
+
+def _scan_research_lane_import_boundary(source_root: Path) -> tuple[dict[str, object], ...]:
+    package_root = source_root / "src" / "mew" / "research_lane"
+    if not package_root.exists():
+        return ()
+    scanned: list[dict[str, object]] = []
+    for path in sorted(package_root.rglob("*.py")):
+        try:
+            relative_path = path.relative_to(source_root).as_posix()
+        except ValueError:
+            relative_path = path.as_posix()
+        text = path.read_text(encoding="utf-8")
+        scanned.append(
+            {
+                "path": relative_path,
+                "exists": True,
+                "forbidden_import_hits": _forbidden_research_lane_import_hits(text),
+            }
+        )
     return tuple(scanned)
 
 

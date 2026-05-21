@@ -1,4 +1,4 @@
-"""Transition-contract WorkFrame reducer variant for implement_v2.
+"""Legacy transition-contract WorkFrame reducer variant for diagnostics.
 
 This variant is deliberately a schema-compatible wrapper around the current
 WorkFrame reducer. It adds a compact reducer-owned transition contract only
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from dataclasses import replace
 from typing import Iterable
 
-from .workframe import (
+from ..implement_lane.workframe import (
     WorkFrame,
     WorkFrameForbiddenNext,
     WorkFrameInputs,

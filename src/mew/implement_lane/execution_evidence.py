@@ -1255,9 +1255,12 @@ def build_oracle_bundle(
         item if isinstance(item, ExecutionContract) else normalize_execution_contract(item, task_contract=task_contract)
         for item in execution_contracts
     )
-    compiled_task_contract = _compiled_task_contract_mapping(task_contract)
-    if compiled_task_contract:
-        synthetic_contract = _compiled_task_contract_execution_contract(task_contract, compiled_task_contract)
+    completion_obligation_contract = _completion_obligation_contract_mapping(task_contract)
+    if completion_obligation_contract:
+        synthetic_contract = _completion_obligation_contract_execution_contract(
+            task_contract,
+            completion_obligation_contract,
+        )
         if synthetic_contract is not None:
             normalized_contracts = (*normalized_contracts, synthetic_contract)
     non_completion_contract_ids: set[str] = set()
@@ -1298,19 +1301,19 @@ def build_oracle_bundle(
                     provenance_refs=({"kind": "verifier_evidence", "id": verifier.verifier_id},),
                 )
             )
-    if compiled_task_contract:
-        verifier = _mapping(compiled_task_contract.get("verifier"))
+    if completion_obligation_contract:
+        verifier = _mapping(completion_obligation_contract.get("verifier"))
         command = str(task_contract.get("verify_command") or verifier.get("command") or "").strip()
         must_pass = True if str(task_contract.get("verify_command") or "").strip() else bool(verifier.get("must_pass", True))
         if command and must_pass:
             obligations.append(
                 OracleObligation(
-                    id=f"oracle:task_contract_compiler:verifier:{_stable_token(command)}",
+                    id=f"oracle:completion_obligation:verifier:{_stable_token(command)}",
                     kind="verifier_pass",
                     subject={"any_verifier": True, "verify_command": command},
                     expected={"verdict": "pass"},
-                    source="task_contract_compiler",
-                    provenance_refs=({"kind": "task_contract_compiler", "id": "compiled_task_contract"},),
+                    source="completion_obligation_index",
+                    provenance_refs=({"kind": "completion_obligation_index", "id": "completion_obligation_contract"},),
                 )
             )
     for ref in source_grounding_refs:
@@ -1338,27 +1341,29 @@ def build_oracle_bundle(
     )
 
 
-def _compiled_task_contract_mapping(task_contract: Mapping[str, Any]) -> dict[str, Any]:
+def _completion_obligation_contract_mapping(task_contract: Mapping[str, Any]) -> dict[str, Any]:
     raw = _mapping(task_contract)
-    compiler = _mapping(raw.get("task_contract_compiler"))
-    if str(compiler.get("status") or "").strip().casefold() not in {"compiled", "typed_fallback"}:
+    contract = _mapping(raw.get("completion_obligation_contract"))
+    if contract:
+        return contract
+    index = _mapping(raw.get("completion_obligation_index"))
+    if not index:
         return {}
-    compiled = _mapping(raw.get("compiled_task_contract"))
-    return compiled if compiled else raw
+    return _mapping(index.get("contract") or index.get("completion_obligation_contract"))
 
 
-def _compiled_task_contract_execution_contract(
+def _completion_obligation_contract_execution_contract(
     task_contract: Mapping[str, Any],
-    compiled_task_contract: Mapping[str, Any],
+    completion_obligation_contract: Mapping[str, Any],
 ) -> ExecutionContract | None:
-    artifacts = compiled_task_contract.get("expected_artifacts")
+    artifacts = completion_obligation_contract.get("expected_artifacts")
     if not isinstance(artifacts, (list, tuple)) or not artifacts:
         artifacts = task_contract.get("expected_artifacts")
     if not isinstance(artifacts, (list, tuple)) or not artifacts:
         return None
     return normalize_execution_contract(
         {
-            "id": "task_contract:compiled",
+            "id": "completion_obligation:contract",
             "role": "verify",
             "stage": "verification",
             "purpose": "verification",

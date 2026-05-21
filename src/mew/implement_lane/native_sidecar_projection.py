@@ -739,11 +739,12 @@ def _workframe_digest(workframe_bundle: Mapping[str, object] | None) -> dict[str
     if not isinstance(workframe_bundle, Mapping):
         return {}
     output = workframe_bundle.get("reducer_output") if isinstance(workframe_bundle.get("reducer_output"), Mapping) else {}
+    cursor = workframe_bundle.get("workframe_cursor") if isinstance(workframe_bundle.get("workframe_cursor"), Mapping) else {}
     trace = output.get("trace") if isinstance(output.get("trace"), Mapping) else {}
     required_next = output.get("required_next") if isinstance(output.get("required_next"), Mapping) else {}
     finish_readiness = output.get("finish_readiness") if isinstance(output.get("finish_readiness"), Mapping) else {}
     return {
-        "variant": _text(workframe_bundle.get("workframe_variant")),
+        "projection_kind": _text(workframe_bundle.get("projection_kind") or cursor.get("projection_kind")),
         "current_phase": _text(output.get("current_phase")),
         "input_hash": _text(trace.get("input_hash")),
         "output_hash": _text(trace.get("output_hash")),

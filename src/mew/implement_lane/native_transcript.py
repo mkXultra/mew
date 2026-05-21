@@ -202,6 +202,7 @@ def native_artifact_contract() -> dict[str, object]:
         "derived_files": list(DERIVED_NATIVE_TRANSCRIPT_FILES),
         "source_of_truth": "response_transcript.json",
         "forbidden_main_path_runtime_id": LEGACY_IMPLEMENT_V2_MODEL_JSON_RUNTIME_ID,
+        "forbidden_main_path_label": "legacy_model_json",
         "sidecars_are_derived": True,
         "model_json_main_path_allowed": False,
     }

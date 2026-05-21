@@ -1,5 +1,5 @@
 from mew.implement_lane.workframe import WorkFrameInputs, reduce_workframe, workframe_output_hash
-from mew.implement_lane.workframe_variant_minimal import VARIANT_NAME, reduce_minimal_workframe
+from mew.legacy_experiments.workframe_variant_minimal import VARIANT_NAME, reduce_minimal_workframe
 
 
 def test_minimal_runtime_failure_keeps_actionable_without_repair_required_next() -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from mew.implement_lane.workframe import WorkFrameInputs, reduce_workframe
-from mew.implement_lane.workframe_variant_transcript_first import (
+from mew.legacy_experiments.workframe_variant_transcript_first import (
     VARIANT_NAME,
     reduce_transcript_first_workframe,
 )

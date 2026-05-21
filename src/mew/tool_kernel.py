@@ -159,6 +159,8 @@ class ToolKernel:
         requested = str(tool_name or "")
         if self.config.available_tool_names:
             return requested in set(self.config.available_tool_names)
+        if not self.config.tool_surface_profile_id and self.config.surface_label != "implement_v2":
+            return requested in _shared_kernel_tool_names_for_mode(self.config.mode)
         lane_config = {"mode": self.config.mode}
         if self.config.tool_surface_profile_id:
             lane_config["tool_surface_profile_id"] = self.config.tool_surface_profile_id
@@ -239,6 +241,24 @@ def _write_tool_names() -> frozenset[str]:
     from .implement_lane.write_runtime import WRITE_TOOL_NAMES
 
     return WRITE_TOOL_NAMES
+
+
+def _shared_kernel_tool_names_for_mode(mode: object) -> frozenset[str]:
+    from .implement_lane.read_runtime import READ_ONLY_TOOL_NAMES
+
+    mode_name = str(mode or "read_only").strip() or "read_only"
+    read_names = set(READ_ONLY_TOOL_NAMES)
+    write_names = set(_write_tool_names())
+    exec_names = set(_exec_tool_names())
+    if mode_name in {"read_only", "plan"}:
+        return frozenset(read_names)
+    if mode_name == "exec":
+        return frozenset(read_names | exec_names)
+    if mode_name == "write":
+        return frozenset(read_names | write_names)
+    if mode_name in {"full", "implement", "implementation"}:
+        return frozenset(read_names | write_names | exec_names)
+    return frozenset(read_names)
 
 
 __all__ = [

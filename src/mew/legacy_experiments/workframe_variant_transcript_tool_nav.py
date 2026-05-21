@@ -1,11 +1,11 @@
-"""Transcript-tool navigation WorkFrame reducer variant for implement_v2."""
+"""Legacy transcript-tool navigation WorkFrame reducer variant for diagnostics."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 
-from .tool_registry import build_tool_surface_snapshot
-from .workframe import (
+from ..implement_lane.tool_registry import build_tool_surface_snapshot
+from ..implement_lane.workframe import (
     WorkFrame,
     WorkFrameForbiddenNext,
     WorkFrameInputs,

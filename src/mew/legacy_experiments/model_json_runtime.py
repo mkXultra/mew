@@ -15,39 +15,45 @@ from ..acceptance import (
 )
 from ..errors import ModelBackendError
 from ..work_lanes import IMPLEMENT_V2_LANE
-from .affordance_visibility import CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS
-from .execution_evidence import (
+from ..implement_lane.affordance_visibility import CANONICAL_FORBIDDEN_PROVIDER_VISIBLE_FIELDS
+from ..implement_lane.execution_evidence import (
     evidence_events_from_tool_payload,
     normalize_execution_contract,
 )
-from .artifact_checks import _resolve_artifact_path, _stat_path
-from .exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
-from .finish_acceptance_helpers import (
+from ..implement_lane.artifact_checks import _resolve_artifact_path, _stat_path
+from ..implement_lane.exec_runtime import EXEC_TOOL_NAMES, ImplementV2ManagedExecRuntime
+from ..implement_lane.finish_acceptance_helpers import (
     _COMPLETED_FINISH_OUTCOMES,
-    _acceptance_session_from_tool_results,
     _artifact_id_is_visual_runtime_output,
-    _finish_acceptance_action,
     _finish_outcome,
     _first_result_payload,
     _is_verifier_scratch_artifact_id,
     _live_task_description,
     _structured_finish_acceptance_check,
-    _typed_acceptance_session_from_tool_results,
     _tool_result_content_text,
 )
-from .legacy_model_json_provider import JsonModelProviderAdapter
-from .provider import FakeProviderAdapter, FakeProviderToolCall
+from .acceptance_bridge import (
+    _acceptance_session_from_tool_results,
+    _finish_acceptance_action,
+    _typed_acceptance_session_from_tool_results,
+)
+from .model_json_provider import JsonModelProviderAdapter
+from ..implement_lane.provider import FakeProviderAdapter, FakeProviderToolCall
 from ..prompt_sections import render_prompt_sections
-from .prompt import (
+from ..implement_lane.prompt import (
     build_implement_v2_workframe_debug_bundle,
     build_implement_v2_prompt_sections,
     implement_v2_prompt_section_metrics,
     is_deep_probe_hard_runtime_task,
 )
-from .read_runtime import execute_read_only_tool_call, extract_inspected_paths
-from .registry import get_implement_lane_runtime_view
-from .replay import build_invalid_tool_result, validate_proof_manifest_pairing, validate_proof_manifest_write_safety
-from .tool_harness_contract import (
+from ..implement_lane.read_runtime import execute_read_only_tool_call, extract_inspected_paths
+from ..implement_lane.registry import get_implement_lane_runtime_view
+from ..implement_lane.replay import build_invalid_tool_result, validate_proof_manifest_pairing, validate_proof_manifest_write_safety
+from ..implement_lane.replay_proof_helpers import (
+    _frontier_evidence_registry,
+    _source_output_contract_from_tool_results,
+)
+from ..implement_lane.tool_harness_contract import (
     build_evidence_ref_index_artifact,
     build_evidence_sidecar_artifact,
     build_model_turn_index_artifact,
@@ -60,19 +66,19 @@ from .tool_harness_contract import (
     transcript_jsonl_lines,
     write_jsonl,
 )
-from .tool_guidance import (
+from ..implement_lane.tool_guidance import (
     hide_unavailable_write_file_guidance,
     is_hard_runtime_artifact_task,
 )
-from .tool_profiles.mew_legacy import list_v2_base_tool_specs, list_v2_tool_specs_for_mode, list_v2_tool_specs_for_task
-from .tool_registry import MEW_LEGACY_PROFILE_ID
-from .tool_specs import ImplementLaneToolSpec
-from .transcript import lane_artifact_namespace
-from .types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
-from .types import ToolCallEnvelope
-from .types import ToolResultEnvelope
+from ..implement_lane.tool_profiles.mew_legacy import list_v2_base_tool_specs, list_v2_tool_specs_for_mode, list_v2_tool_specs_for_task
+from ..implement_lane.tool_registry import MEW_LEGACY_PROFILE_ID
+from ..implement_lane.tool_specs import ImplementLaneToolSpec
+from ..implement_lane.transcript import lane_artifact_namespace
+from ..implement_lane.types import ImplementLaneInput, ImplementLaneProofManifest, ImplementLaneResult, ImplementLaneTranscriptEvent
+from ..implement_lane.types import ToolCallEnvelope
+from ..implement_lane.types import ToolResultEnvelope
 from .workframe_variants import DEFAULT_WORKFRAME_VARIANT
-from .write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
+from ..implement_lane.write_runtime import WRITE_TOOL_NAMES, ImplementV2WriteRuntime
 from ..tool_kernel import ToolKernel, ToolKernelConfig
 
 _FINAL_VERIFIER_COMMAND_TOOL_NAMES = frozenset({"run_command", "run_tests", "poll_command"})
@@ -369,9 +375,9 @@ def run_live_json_implement_v2(
     This is the first production v2 runtime. It is intentionally separate from
     the legacy v1 THINK/ACT action loop: the model returns provider-shaped tool
     calls, mew pairs every call with a ToolResultEnvelope, and the final result
-    carries a v2 proof manifest. Provider-specific function-calling transport is
-    still a later optimization; the transport is recorded as ``model_json`` so
-    metrics do not confuse it with native provider tool calls.
+    carries a v2 proof manifest. The transport is explicitly labeled
+    ``legacy_model_json`` so diagnostics cannot be confused with native
+    production evidence.
     """
 
     if model_json_callable is None:
@@ -1670,7 +1676,9 @@ def run_live_json_implement_v2(
         tool_results=tuple(tool_results),
         metrics={
             "mode": mode,
+            "diagnostic_kind": "legacy_model_json",
             "transport": adapter.provider,
+            "transport_kind": "legacy_model_json",
             "tool_calls": len(tool_calls),
             "tool_results": len(tool_results),
             "tool_registry_ref": tool_registry_artifact["tool_registry_ref"],
@@ -1760,7 +1768,9 @@ def run_live_json_implement_v2(
         metrics={
             "completion_credit": status == "completed",
             "mode": mode,
+            "diagnostic_kind": "legacy_model_json",
             "provider": adapter.provider,
+            "transport_kind": "legacy_model_json",
             "provider_native_tool_loop": False,
             "runtime_id": "implement_v2_model_json_tool_loop",
             "replay_valid": validation.valid,
@@ -2478,7 +2488,7 @@ def _final_verifier_closeout_call(
     timeout_seconds = max(_FINAL_VERIFIER_CLOSEOUT_MIN_SECONDS, timeout_seconds)
     return ToolCallEnvelope(
         lane_attempt_id=lane_attempt_id,
-        provider="model_json",
+        provider="legacy_model_json",
         provider_call_id=f"call-final-verifier-closeout-{turn_index:03d}",
         mew_tool_call_id=f"{lane_attempt_id}:tool:{turn_index}:final-verifier-closeout",
         tool_name="run_command",
@@ -4689,7 +4699,7 @@ def _tool_result_transcript_events(
     turn_id: str,
     tool_results,
 ) -> tuple[ImplementLaneTranscriptEvent, ...]:
-    from .transcript import build_transcript_event
+    from ..implement_lane.transcript import build_transcript_event
 
     return tuple(
         build_transcript_event(
@@ -7023,32 +7033,6 @@ def _active_work_todo_target_paths(active_work_todo: dict[str, object]) -> list[
     ]
 
 
-def _frontier_evidence_registry(
-    tool_results: tuple[ToolResultEnvelope, ...],
-    *,
-    artifact_namespace: str,
-) -> dict[str, object]:
-    output_refs: set[str] = set()
-    command_run_ids: set[str] = set()
-    for result in tool_results:
-        for item in result.content:
-            if not isinstance(item, dict):
-                continue
-            if item.get("command_run_id"):
-                command_run_ids.add(str(item.get("command_run_id")))
-            if item.get("output_ref"):
-                output_refs.add(str(item.get("output_ref")))
-    return {
-        "tool_call_ids": set(range(1, len(tool_results) + 1)),
-        "provider_call_ids": {result.provider_call_id for result in tool_results if result.provider_call_id},
-        "command_run_ids": command_run_ids,
-        "output_refs": output_refs,
-        "content_refs": {ref for result in tool_results for ref in result.content_refs},
-        "evidence_refs": {ref for result in tool_results for ref in result.evidence_refs},
-        "artifact_namespace": artifact_namespace,
-    }
-
-
 def _resolve_frontier_entry_list(value: object, registry: dict[str, object]) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
@@ -7386,36 +7370,6 @@ def _frontier_build_target_from_contract(
             "artifact_path": _frontier_clip_text(artifact_path, limit=400),
         }
     )
-
-
-def _source_output_contract_from_tool_results(
-    tool_results: tuple[ToolResultEnvelope, ...],
-    registry: dict[str, object],
-) -> dict[str, object]:
-    best: dict[str, object] = {}
-    best_score = -1
-    for result in tool_results:
-        if result.tool_name not in {"read_file", "search_text", "run_command", "run_tests"}:
-            continue
-        payload = next((item for item in result.content if isinstance(item, dict)), {})
-        if not payload:
-            continue
-        raw_contract = payload.get("execution_contract")
-        contract = _payload_execution_contract(payload)
-        if isinstance(raw_contract, dict) and contract and _execution_contract_is_verifier_like(contract):
-            continue
-        for text, source_label in _source_output_contract_texts(result.tool_name, payload):
-            for candidate in _source_output_contract_candidates(text, source_label=source_label):
-                score = int(candidate.get("_score") or 0)
-                if score <= best_score:
-                    continue
-                refs = _frontier_result_refs(result, registry)
-                candidate.pop("_score", None)
-                if refs:
-                    candidate["evidence_refs"] = refs
-                best = candidate
-                best_score = score
-    return best
 
 
 def _tool_result_has_source_output_contract(result: ToolResultEnvelope) -> bool:
@@ -10514,7 +10468,9 @@ def _integration_observation_summary(
     return {
         "schema_version": 1,
         "runtime_id": "implement_v2_model_json_tool_loop",
+        "diagnostic_kind": "legacy_model_json",
         "transport": transport,
+        "transport_kind": "legacy_model_json",
         "lane_attempt_id": lane_attempt_id,
         "artifact_namespace": artifact_namespace,
         "detail_policy": "sidecar" if artifact_ref else "summary",

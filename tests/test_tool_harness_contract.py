@@ -18,7 +18,7 @@ from mew.implement_lane.tool_harness_contract import (
 from mew.implement_lane.tool_routes import route_records_from_native_transcript_items
 from mew.implement_lane.tool_profiles.mew_legacy import list_v2_tool_specs_for_mode
 from mew.implement_lane.types import ImplementLaneInput, ImplementLaneProofManifest, ToolResultEnvelope
-from mew.implement_lane.v2_runtime import _tool_result_transcript_events, _write_live_json_artifacts
+from mew.legacy_experiments.model_json_runtime import _tool_result_transcript_events, _write_live_json_artifacts
 from mew.tool_kernel import ToolKernel, ToolKernelConfig, make_tool_call_envelope
 from mew.work_lanes import IMPLEMENT_V2_LANE
 

@@ -8,12 +8,11 @@ import time
 
 import mew.implement_lane.read_runtime as read_runtime
 import mew.implement_lane.exec_runtime as exec_runtime
-import mew.implement_lane.v2_runtime as v2_runtime
+import mew.legacy_experiments.model_json_runtime as v2_runtime
 import pytest
 from mew.errors import ModelBackendError
 from mew.implement_lane.exec_runtime import _source_like_mutation_paths
 from mew.implement_lane import (
-    DEFAULT_WORKFRAME_VARIANT,
     IMPLEMENT_V2_NATIVE_RUNTIME_ID,
     ImplementLaneInput,
     ImplementLaneProofManifest,
@@ -22,24 +21,16 @@ from mew.implement_lane import (
     ImplementLaneTranscriptEvent,
     ToolCallEnvelope,
     ToolResultEnvelope,
-    WorkFrameInputs,
     build_invalid_tool_result,
     build_implement_v2_prompt_sections,
-    common_workframe_inputs_from_workframe_inputs,
     describe_implement_v1_adapter,
-    describe_implement_v2_runtime,
     evaluate_m6_24_reentry_ab_gate,
     get_implement_lane_runtime_view,
     implement_v2_prompt_section_metrics,
-    describe_workframe_variant,
     list_implement_lane_runtime_views,
-    list_workframe_variants,
-    project_workframe_with_variant,
     select_implement_lane_runtime,
-    normalize_workframe_variant,
     validate_proof_manifest_pairing,
     validate_tool_result_pairing,
-    validate_workframe_variant_name,
 )
 from mew.implement_lane.tool_profiles.mew_legacy import (
     list_v2_base_tool_specs,
@@ -50,18 +41,19 @@ from mew.implement_lane.tool_registry import MEW_LEGACY_PROFILE_ID
 from mew.implement_lane.provider import FakeProviderAdapter, FakeProviderToolCall
 from mew.implement_lane.legacy_shell_edit_bridge import bridge_registry_manifest
 from mew.implement_lane.finish_acceptance_helpers import (
-    _finish_acceptance_action,
     _finish_evidence_refs,
     _typed_finish_evidence_refs,
     _typed_retired_legacy_blockers_for_bundle,
 )
-from mew.implement_lane.legacy_model_json_runtime import (
+from mew.legacy_experiments.acceptance_bridge import _finish_acceptance_action
+from mew.legacy_experiments.model_json_runtime import (
     _frontier_evidence_registry,
     _render_prompt_history_json,
     _source_output_contract_from_tool_results,
+    describe_implement_v2_runtime,
     run_live_json_implement_v2,
 )
-from mew.implement_lane.v2_runtime import (
+from mew.legacy_experiments.model_json_runtime import (
     ModelTurnInput,
     _auto_finish_from_structured_final_verifier,
     _call_model_turn,
@@ -262,26 +254,24 @@ def test_implement_v2_descriptor_exposes_live_runtime_and_tools() -> None:
     assert "fallback_lane" not in result.updated_lane_state
 
 
-def test_workframe_variant_registry_exposes_current_alias_and_transition_contract_default() -> None:
-    variants = list_workframe_variants()
+def test_implement_lane_package_no_longer_exports_workframe_variant_registry() -> None:
+    import mew.implement_lane as implement_lane
 
-    assert [variant.name for variant in variants] == [
-        "current",
-        "minimal",
-        "transcript_first",
-        "transcript_tool_nav",
-        "transition_contract",
-    ]
-    assert DEFAULT_WORKFRAME_VARIANT == "transition_contract"
-    assert normalize_workframe_variant(None) == "transition_contract"
-    assert normalize_workframe_variant("") == "transition_contract"
-    assert normalize_workframe_variant("   ") == "transition_contract"
-    assert describe_workframe_variant().name == "transition_contract"
-    assert validate_workframe_variant_name("current") == "current"
-    assert "Current M6.24" in variants[0].description
+    retired_exports = (
+        "DEFAULT_WORKFRAME_VARIANT",
+        "CommonWorkFrameInputs",
+        "list_workframe_variants",
+        "project_workframe_with_variant",
+        "reduce_workframe_with_variant",
+    )
+
+    for name in retired_exports:
+        assert name not in dir(implement_lane)
+        with pytest.raises(AttributeError):
+            getattr(implement_lane, name)
 
 
-def test_workframe_debug_bundle_defaults_to_transition_contract_when_variant_omitted_or_blank() -> None:
+def test_workframe_debug_bundle_uses_canonical_projection_when_selector_omitted_or_present() -> None:
     omitted = ImplementLaneInput(
         work_session_id="ws-variant",
         task_id="task-variant",
@@ -301,15 +291,15 @@ def test_workframe_debug_bundle_defaults_to_transition_contract_when_variant_omi
     omitted_bundle = build_implement_v2_workframe_debug_bundle(omitted, turn_id="turn-variant")
     blank_bundle = build_implement_v2_workframe_debug_bundle(blank, turn_id="turn-variant")
 
-    assert omitted_bundle["workframe_variant"] == "transition_contract"
-    assert omitted_bundle["reducer_inputs"]["workframe_variant"] == "transition_contract"
-    assert omitted_bundle["workframe_cursor"]["workframe_variant"] == "transition_contract"
-    assert blank_bundle["workframe_variant"] == "transition_contract"
-    assert blank_bundle["reducer_inputs"]["workframe_variant"] == "transition_contract"
-    assert blank_bundle["workframe_cursor"]["workframe_variant"] == "transition_contract"
+    assert omitted_bundle["projection_kind"] == "canonical_workframe"
+    assert blank_bundle["projection_kind"] == "canonical_workframe"
+    assert "workframe_variant" not in omitted_bundle
+    assert "workframe_variant" not in omitted_bundle["reducer_inputs"]
+    assert "workframe_variant" not in omitted_bundle["workframe_cursor"]
+    assert omitted_bundle["reducer_output"] == blank_bundle["reducer_output"]
 
 
-def test_workframe_debug_bundle_records_variant() -> None:
+def test_workframe_debug_bundle_ignores_explicit_retired_selector() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-variant",
         task_id="task-variant",
@@ -321,37 +311,9 @@ def test_workframe_debug_bundle_records_variant() -> None:
 
     bundle = build_implement_v2_workframe_debug_bundle(lane_input, turn_id="turn-variant")
 
-    assert bundle["workframe_variant"] == "current"
-    assert bundle["reducer_inputs"]["workframe_variant"] == "current"
-    assert bundle["workframe_cursor"]["workframe_variant"] == "current"
-
-
-def test_workframe_projection_keeps_shared_substrate_hash_stable_across_variants() -> None:
-    inputs = WorkFrameInputs(
-        attempt_id="attempt-variant",
-        turn_id="turn-variant",
-        task_id="task-variant",
-        objective="Repair the workspace.",
-        sidecar_events=(
-            {
-                "kind": "verifier",
-                "event_id": "tool-result:verify",
-                "event_sequence": 1,
-                "status": "failed",
-                "family": "runtime_failure",
-                "summary": "TypeError: undefined",
-                "evidence_refs": ["ev:verify"],
-            },
-        ),
-    )
-    common = common_workframe_inputs_from_workframe_inputs(inputs)
-
-    current = project_workframe_with_variant(common, variant="current")
-    minimal = project_workframe_with_variant(common, variant="minimal")
-
-    assert current.shared_substrate_hash == minimal.shared_substrate_hash
-    assert current.projection_hash != minimal.projection_hash
-    assert current.common_inputs.as_dict()["indexes"]["model_turn_index_usage"] == "debug_plateau_recovery_only"
+    assert bundle["projection_kind"] == "canonical_workframe"
+    assert bundle["workframe_cursor"]["projection_kind"] == "canonical_workframe"
+    assert "variant" not in bundle["reducer_output"]
 
 
 def test_workframe_debug_bundle_records_common_substrate_and_static_shape() -> None:
@@ -369,16 +331,17 @@ def test_workframe_debug_bundle_records_common_substrate_and_static_shape() -> N
     cursor = bundle["workframe_cursor"]
     render_inventory = bundle["prompt_render_inventory"]
 
-    assert reducer_inputs["schema_version"] == 2
-    assert reducer_inputs["common_workframe_inputs_schema_version"] == 1
+    assert reducer_inputs["schema_version"] == 3
+    assert reducer_inputs["projection_kind"] == "canonical_workframe"
     assert reducer_inputs["shared_substrate_hash"] == cursor["shared_substrate_hash"]
-    assert reducer_inputs["canonical"]["payload"]["indexes"]["model_turn_index_usage"] == "debug_plateau_recovery_only"
+    assert reducer_inputs["shared_substrate_hash"] == bundle["reducer_output"]["trace"]["input_hash"]
     assert render_inventory["static_shape"] == [
         "static_instructions",
         "task_contract_digest",
         "natural_transcript_tail",
         "one_workframe_projection",
     ]
+    assert render_inventory["projection_kind"] == "canonical_workframe"
     assert render_inventory["projection_hash"] == cursor["projection_hash"]
 
 
@@ -408,11 +371,12 @@ def test_workframe_debug_bundle_keeps_prompt_inventory_out_of_shared_substrate_h
         without_inventory["reducer_inputs"]["shared_substrate_hash"]
         == with_inventory["reducer_inputs"]["shared_substrate_hash"]
     )
-    assert with_inventory["reducer_inputs"]["common_workframe_inputs"]["current_workframe_inputs"]["prompt_inventory"] == []
+    assert with_inventory["reducer_inputs"]["workframe_inputs"]["prompt_inventory"] == []
+    assert with_inventory["reducer_inputs"]["canonical"]["payload"]["prompt_inventory"] == []
     assert with_inventory["prompt_render_inventory"]["source_prompt_inventory"][0]["id"] == "implement_v2_workframe"
 
 
-def test_transcript_tool_nav_projects_advisory_tool_context_without_default_flip() -> None:
+def test_retired_workframe_selector_does_not_enable_tool_navigation_projection() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-nav",
         task_id="task-nav",
@@ -436,64 +400,16 @@ def test_transcript_tool_nav_projects_advisory_tool_context_without_default_flip
 
     bundle = build_implement_v2_workframe_debug_bundle(lane_input, sidecar_events=runtime_events)
     workframe = bundle["reducer_output"]
-    visible_workframe = bundle["prompt_visible_workframe"]["workframe"]
-    tool_context = workframe["tool_context"]
 
-    assert DEFAULT_WORKFRAME_VARIANT == "transition_contract"
-    assert workframe["schema_version"] == 3
-    assert workframe["variant"]["name"] == "transcript_tool_nav"
-    assert visible_workframe["variant"]["name"] == "transcript_tool_nav"
-    assert visible_workframe["tool_context"]["recommended_tool_refs"]
-    assert workframe["required_next"] is None
+    assert bundle["projection_kind"] == "canonical_workframe"
+    assert workframe["schema_version"] == 1
+    assert "variant" not in workframe
+    assert "tool_context" not in workframe
+    assert workframe["required_next"]["kind"] == "patch_or_edit"
     assert workframe["latest_actionable"]["summary"] == "TypeError: cannot read property 'pc' of undefined"
-    assert "tool:finish" in {item["tool_ref"] for item in tool_context["disabled_tool_refs"]}
-    assert {"tool:apply_patch", "tool:edit_file"} & {
-        item["tool_ref"] for item in tool_context["recommended_tool_refs"]
-    }
-    assert tool_context["model_turn_search"]["usage"] == "debug_plateau_recovery_only"
-    rendered_tool_context = json.dumps(tool_context).lower()
-    assert "parameters" not in rendered_tool_context
-    assert "implementation" not in rendered_tool_context
 
 
-def test_transcript_tool_nav_uses_active_mode_tool_surface_for_recommendations() -> None:
-    lane_input = ImplementLaneInput(
-        work_session_id="ws-nav",
-        task_id="task-nav",
-        workspace="/tmp/work",
-        lane=IMPLEMENT_V2_LANE,
-        lane_config={
-            "workframe_variant": "transcript_tool_nav",
-            "tool_surface_profile_id": MEW_LEGACY_PROFILE_ID,
-        },
-        task_contract={"objective": "Repair the runtime failure."},
-    )
-    runtime_events = (
-        {
-            "kind": "verifier",
-            "event_id": "tool-result:runtime",
-            "event_sequence": 1,
-            "status": "failed",
-            "family": "runtime_failure",
-            "summary": "TypeError: cannot read property 'pc' of undefined",
-            "target_paths": ["vm.js"],
-            "evidence_refs": ["ev:runtime"],
-        },
-    )
-
-    bundle = build_implement_v2_workframe_debug_bundle(lane_input, sidecar_events=runtime_events)
-    tool_context = bundle["reducer_output"]["tool_context"]
-    active_refs = set(tool_context["active_tool_refs"])
-    recommended_refs = {item["tool_ref"] for item in tool_context["recommended_tool_refs"]}
-
-    assert "tool:apply_patch" not in active_refs
-    assert "tool:edit_file" not in active_refs
-    assert "tool:write_file" not in active_refs
-    assert not (recommended_refs & {"tool:apply_patch", "tool:edit_file", "tool:write_file"})
-    assert "tool:read_file" in recommended_refs
-
-
-def test_transcript_tool_nav_respects_explicit_prompt_tool_surface_override() -> None:
+def test_retired_workframe_selector_does_not_affect_prompt_tool_surface_override() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-nav",
         task_id="task-nav",
@@ -527,13 +443,11 @@ def test_transcript_tool_nav_respects_explicit_prompt_tool_surface_override() ->
     workframe_prompt = json.dumps(bundle["prompt_visible_workframe"], sort_keys=True)
 
     assert "implement_v2_workframe" not in {section.id for section in sections}
-    assert "tool:read_file" in workframe_prompt
-    assert "tool:apply_patch" not in workframe_prompt
-    assert "tool:edit_file" not in workframe_prompt
-    assert "tool:write_file" not in workframe_prompt
+    assert "transcript_tool_nav" not in workframe_prompt
+    assert "tool_context" not in workframe_prompt
 
 
-def test_transcript_tool_nav_preserves_missing_obligation_controller_required_next() -> None:
+def test_canonical_workframe_preserves_missing_obligation_required_next() -> None:
     lane_input = ImplementLaneInput(
         work_session_id="ws-nav",
         task_id="task-nav",
@@ -565,7 +479,7 @@ def test_transcript_tool_nav_preserves_missing_obligation_controller_required_ne
     assert workframe["finish_readiness"]["state"] == "blocked"
     assert workframe["required_next"]["kind"] == "run_verifier"
     assert workframe["required_next"]["evidence_refs"] == ["oracle:artifact-fresh"]
-    assert workframe["obligations"]["missing_or_stale_refs"] == ["oracle:artifact-fresh"]
+    assert "obligations" not in workframe
 
 
 def test_workframe_variant_is_not_rendered_in_lane_state_prompt() -> None:
@@ -684,7 +598,7 @@ def test_implement_v2_live_json_runtime_can_edit_verify_and_finish(tmp_path) -> 
     )
 
     assert result.status == "completed"
-    assert result.metrics["provider"] == "model_json"
+    assert result.metrics["provider"] == "legacy_model_json"
     assert result.metrics["tool_calls"] == 4
     assert result.metrics["write_evidence_count"] == 1
     assert result.metrics["terminal_evidence_count"] == 1
@@ -5846,7 +5760,7 @@ def test_implement_v2_model_turn_transient_retry_uses_remaining_timeout(monkeypa
     clock_values = iter([0.0, 1.0, 1.0, 1.1])
     observed_timeouts = []
 
-    monkeypatch.setattr("mew.implement_lane.v2_runtime.time.monotonic", lambda: next(clock_values))
+    monkeypatch.setattr("mew.legacy_experiments.model_json_runtime.time.monotonic", lambda: next(clock_values))
 
     def fake_model(*args, **_kwargs):
         observed_timeouts.append(args[5])
@@ -5891,7 +5805,7 @@ def test_implement_v2_model_turn_does_not_retry_transient_after_turn_timeout_exh
     clock_values = iter([0.0, 1.2, 1.2])
     calls = []
 
-    monkeypatch.setattr("mew.implement_lane.v2_runtime.time.monotonic", lambda: next(clock_values))
+    monkeypatch.setattr("mew.legacy_experiments.model_json_runtime.time.monotonic", lambda: next(clock_values))
 
     def fake_model(*_args, **_kwargs):
         calls.append(True)

@@ -1,4 +1,4 @@
-"""Production-safe finish acceptance helpers for implement_v2."""
+"""Production-safe typed finish evidence helpers for implement_v2."""
 
 from __future__ import annotations
 
@@ -51,40 +51,6 @@ def _live_task_description(lane_input: ImplementLaneInput) -> str:
     return "\n".join(chunk for chunk in chunks if chunk)
 
 
-def _finish_acceptance_action(
-    finish_arguments: dict[str, object],
-    tool_results: tuple[ToolResultEnvelope, ...],
-    *,
-    task_description: str = "",
-) -> dict[str, object]:
-    action = dict(finish_arguments or {})
-    action["task_done"] = _finish_outcome(action) in _COMPLETED_FINISH_OUTCOMES
-    checks = action.get("acceptance_checks")
-    acceptance_checks: list[object] = []
-    if isinstance(checks, list):
-        acceptance_checks = [
-            _with_finish_evidence_refs(check, tool_results) if isinstance(check, dict) else check for check in checks
-        ]
-    if not acceptance_checks:
-        acceptance_checks = _synthetic_finish_acceptance_checks(action, tool_results)
-    sidecar_checks = [
-        *_structured_finish_acceptance_checks(tool_results),
-        *_source_grounding_finish_acceptance_checks(task_description, tool_results),
-    ]
-    acceptance_checks = _merge_finish_acceptance_sidecar_checks(acceptance_checks, sidecar_checks)
-    action["acceptance_checks"] = acceptance_checks
-    existing_refs = _finish_action_evidence_ref_items(action.get("evidence_refs") or action.get("evidence_ref"))
-    typed_refs = _typed_finish_evidence_refs(
-        tool_results,
-        task_description=task_description,
-        include_supplemental=not existing_refs,
-    )
-    merged_refs = _merge_finish_action_evidence_refs(existing_refs, typed_refs)
-    if merged_refs:
-        action["evidence_refs"] = merged_refs
-    return action
-
-
 def _merge_finish_action_evidence_refs(
     existing: object,
     typed_refs: list[dict[str, object]],
@@ -128,11 +94,12 @@ def _finish_action_evidence_ref_items(value: object) -> list[dict[str, object]]:
     return refs
 
 
-def _typed_finish_evidence_refs(
+def finish_typed_evidence_refs(
     tool_results: tuple[ToolResultEnvelope, ...],
     *,
     include_supplemental: bool = True,
     task_description: object = "",
+    task_contract: object = None,
 ) -> list[dict[str, object]]:
     source_refs: list[dict[str, object]] = []
     for requirement in implementation_contract_source_requirements(task_description):
@@ -147,10 +114,14 @@ def _typed_finish_evidence_refs(
         if ref not in source_refs:
             source_refs.append(ref)
     ref_limit = 16
-    typed_acceptance = _typed_acceptance_session_from_tool_results(tool_results, lane_input=None)
+    typed_evidence = finish_typed_evidence_snapshot_from_tool_results(
+        tool_results,
+        task_description=task_description,
+        task_contract=task_contract,
+    )
     recommended = recommend_finish_evidence_refs(
-        typed_acceptance.get("oracle_bundle") if isinstance(typed_acceptance.get("oracle_bundle"), dict) else None,
-        tuple(item for item in typed_acceptance.get("evidence_events") or () if isinstance(item, dict)),
+        typed_evidence.get("oracle_bundle") if isinstance(typed_evidence.get("oracle_bundle"), dict) else None,
+        tuple(item for item in typed_evidence.get("evidence_events") or () if isinstance(item, dict)),
         include_supplemental=include_supplemental,
         limit=max(0, ref_limit - len(source_refs)),
     )
@@ -190,6 +161,21 @@ def _typed_finish_evidence_refs(
         if ref not in refs:
             refs.append(ref)
     return refs[:ref_limit]
+
+
+def _typed_finish_evidence_refs(
+    tool_results: tuple[ToolResultEnvelope, ...],
+    *,
+    include_supplemental: bool = True,
+    task_description: object = "",
+    task_contract: object = None,
+) -> list[dict[str, object]]:
+    return finish_typed_evidence_refs(
+        tool_results,
+        include_supplemental=include_supplemental,
+        task_description=task_description,
+        task_contract=task_contract,
+    )
 
 
 def _merge_finish_acceptance_sidecar_checks(
@@ -566,31 +552,12 @@ def _provider_call_id_mentioned(evidence: str, provider_call_id: object) -> bool
     return False
 
 
-def _acceptance_session_from_tool_results(
+def finish_typed_evidence_snapshot_from_tool_results(
     tool_results: tuple[ToolResultEnvelope, ...],
     *,
     lane_input: ImplementLaneInput | None = None,
-) -> dict[str, object]:
-    session: dict[str, object] = {
-        "tool_calls": [
-            _acceptance_tool_call_from_result(index, result)
-            for index, result in enumerate(tool_results, start=1)
-        ]
-    }
-    typed_acceptance = _typed_acceptance_session_from_tool_results(tool_results, lane_input=lane_input)
-    if typed_acceptance:
-        session["typed_acceptance"] = typed_acceptance
-    if lane_input is not None and isinstance(lane_input.task_contract, dict):
-        compiler = lane_input.task_contract.get("task_contract_compiler")
-        if isinstance(compiler, dict):
-            session["task_contract_compiler"] = dict(compiler)
-    return session
-
-
-def _typed_acceptance_session_from_tool_results(
-    tool_results: tuple[ToolResultEnvelope, ...],
-    *,
-    lane_input: ImplementLaneInput | None = None,
+    task_description: object = "",
+    task_contract: object = None,
 ) -> dict[str, object]:
     events = []
     execution_contracts: list[dict[str, object]] = []
@@ -622,25 +589,26 @@ def _typed_acceptance_session_from_tool_results(
             artifact_evidence.extend(dict(item) for item in artifacts if isinstance(item, dict))
     if lane_input is not None:
         task_description = _live_task_description(lane_input)
-        for requirement in implementation_contract_source_requirements(task_description):
-            if isinstance(requirement, dict):
-                source_grounding_refs.append(dict(requirement))
-                source_ref = str(requirement.get("path") or "").strip()
-                match = _source_grounding_tool_result(source_ref, tool_results)
-                if match is not None:
-                    tool_index, result = match
-                    events.append(
-                        {
-                            "schema_version": 1,
-                            "id": f"ev:source:{source_ref}:{result.provider_call_id or tool_index}",
-                            "kind": "source_grounding",
-                            "status": "passed",
-                            "observed": {"path": source_ref, "grounded": True},
-                            "refs": [{"kind": "tool_call", "id": tool_index}],
-                            "provider_call_id": result.provider_call_id,
-                        }
-                    )
-    task_contract = lane_input.task_contract if lane_input is not None and isinstance(lane_input.task_contract, dict) else {}
+        task_contract = lane_input.task_contract if isinstance(lane_input.task_contract, dict) else {}
+    for requirement in implementation_contract_source_requirements(task_description):
+        if isinstance(requirement, dict):
+            source_grounding_refs.append(dict(requirement))
+            source_ref = str(requirement.get("path") or "").strip()
+            match = _source_grounding_tool_result(source_ref, tool_results)
+            if match is not None:
+                tool_index, result = match
+                events.append(
+                    {
+                        "schema_version": 1,
+                        "id": f"ev:source:{source_ref}:{result.provider_call_id or tool_index}",
+                        "kind": "source_grounding",
+                        "status": "passed",
+                        "observed": {"path": source_ref, "grounded": True},
+                        "refs": [{"kind": "tool_call", "id": tool_index}],
+                        "provider_call_id": result.provider_call_id,
+                    }
+                )
+    task_contract = task_contract if isinstance(task_contract, dict) else {}
     oracle_bundle = build_oracle_bundle(
         task_contract=task_contract,
         execution_contracts=execution_contracts,
@@ -650,17 +618,17 @@ def _typed_acceptance_session_from_tool_results(
     )
     if not events and oracle_bundle is None:
         return {}
-    typed: dict[str, object] = {
+    typed_evidence: dict[str, object] = {
         "evidence_events": events,
         "digest": _typed_acceptance_digest(events, oracle_bundle.as_dict() if oracle_bundle is not None else {}),
     }
     if oracle_bundle is not None:
-        typed["oracle_bundle"] = oracle_bundle.as_dict()
-        typed["retired_legacy_blockers"] = _typed_retired_legacy_blockers_for_bundle(
+        typed_evidence["oracle_bundle"] = oracle_bundle.as_dict()
+        typed_evidence["retired_legacy_blockers"] = _typed_retired_legacy_blockers_for_bundle(
             oracle_bundle.as_dict(),
-            task_description=_live_task_description(lane_input) if lane_input is not None else "",
+            task_description=task_description,
         )
-    return typed
+    return typed_evidence
 
 
 def _typed_retired_legacy_blockers_for_bundle(
@@ -814,11 +782,11 @@ def _tool_result_content_text(result: ToolResultEnvelope) -> str:
 
 
 __all__ = [
-    "_acceptance_session_from_tool_results",
-    "_finish_acceptance_action",
     "_finish_outcome",
     "_first_result_payload",
     "_structured_finish_acceptance_check",
     "_typed_finish_evidence_refs",
     "_tool_result_content_text",
+    "finish_typed_evidence_refs",
+    "finish_typed_evidence_snapshot_from_tool_results",
 ]

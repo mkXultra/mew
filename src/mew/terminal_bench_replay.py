@@ -17,7 +17,7 @@ from .implement_lane.native_transcript import (
     validate_native_transcript_pairing,
 )
 from .implement_lane.types import ToolResultEnvelope
-from .implement_lane.legacy_model_json_runtime import (
+from .implement_lane.replay_proof_helpers import (
     _frontier_evidence_registry,
     _source_output_contract_from_tool_results,
 )

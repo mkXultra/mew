@@ -51,20 +51,13 @@ from .native_transcript import native_function_call_argument_metrics, native_tra
 from .tool_lab import resolve_implement_v2_manifest_path
 from .tool_registry import CODEX_HOT_PATH_PROFILE_ID, MEW_LEGACY_PROFILE_ID
 from .types import search_text_output_has_line_anchor
-from .legacy_model_json_runtime import _render_prompt_history_json
 from .workframe import (
     WORKFRAME_RED_MAX_BYTES,
     WorkFrameInputs,
     canonical_json,
     canonicalize_workframe_inputs,
+    reduce_workframe,
     workframe_output_hash,
-)
-from .workframe_variants import reduce_workframe_with_variant
-from .workframe_variants import (
-    CommonWorkFrameInputs,
-    canonicalize_common_workframe_inputs,
-    common_workframe_inputs_from_workframe_inputs,
-    project_workframe_with_variant,
 )
 
 HOT_PATH_FASTCHECK_SCHEMA_VERSION = 1
@@ -84,6 +77,10 @@ NEXT_ACTION_CATEGORIES = (
     "blocked",
     "invalid",
 )
+
+
+def _render_prompt_history_json(history: object) -> str:
+    return json.dumps(history, ensure_ascii=False, indent=2, sort_keys=True, default=str)
 
 
 @dataclass(frozen=True)
@@ -2213,22 +2210,6 @@ def _request_transcript_provider(
     return fallback_transcript.provider
 
 
-def _native_request_allows_transition_contract(
-    task_payload: Mapping[str, object],
-    digest: Mapping[str, object],
-) -> bool:
-    values = [
-        task_payload.get("workframe_variant"),
-        task_payload.get("native_projection_variant"),
-        digest.get("workframe_variant"),
-        _safe_mapping(digest.get("workframe_projection")).get("variant"),
-    ]
-    lane_config = task_payload.get("lane_config")
-    if isinstance(lane_config, Mapping):
-        values.append(lane_config.get("workframe_variant"))
-    return any(str(value or "").strip() == "transition_contract" for value in values)
-
-
 def _native_imperative_hint_leaks(projection: Mapping[str, object]) -> list[str]:
     hints = projection.get("attention_hints")
     if not isinstance(hints, list):
@@ -2476,27 +2457,6 @@ def _workframe_inputs_from_mapping(value: object) -> WorkFrameInputs | None:
         previous_workframe_hash=str(raw.get("previous_workframe_hash") or ""),
         workspace_root=str(raw.get("workspace_root") or ""),
         artifact_root=str(raw.get("artifact_root") or ""),
-        schema_version=_nonnegative_int(raw.get("schema_version")) or 1,
-    )
-
-
-def _common_workframe_inputs_from_mapping(value: object) -> CommonWorkFrameInputs | None:
-    data = _safe_mapping(value)
-    inputs = _workframe_inputs_from_mapping(value)
-    if inputs is None:
-        return None
-    raw = _safe_mapping(data.get("common_workframe_inputs"))
-    if not raw:
-        return common_workframe_inputs_from_workframe_inputs(inputs)
-    return CommonWorkFrameInputs(
-        current_workframe_inputs=inputs,
-        attempt=_safe_mapping(raw.get("attempt")),
-        transcript=_safe_mapping(raw.get("transcript")),
-        tool_registry=_safe_mapping(raw.get("tool_registry")),
-        sidecars=_safe_mapping(raw.get("sidecars")),
-        indexes=_safe_mapping(raw.get("indexes")),
-        replay=_safe_mapping(raw.get("replay")),
-        migration=_safe_mapping(raw.get("migration")),
         schema_version=_nonnegative_int(raw.get("schema_version")) or 1,
     )
 
@@ -2995,25 +2955,11 @@ def _check_workframe_replay(bundle: dict[str, object], manifest: dict[str, objec
         return _check("workframe_replay", False, "invalid reducer_inputs.json", {"bundle_dir": bundle.get("bundle_dir")})
     stored_inputs = _safe_mapping(bundle.get("reducer_inputs"))
     stored_cursor = _safe_mapping(bundle.get("workframe_cursor"))
-    workframe_variant = str(
-        stored_inputs.get("workframe_variant")
-        or _safe_mapping(_safe_mapping((manifest or {}).get("metrics")).get("workframe")).get("variant")
-        or "current"
-    )
     stored_canonical = _safe_mapping(stored_inputs.get("canonical"))
-    common_inputs = _common_workframe_inputs_from_mapping(stored_inputs)
-    if common_inputs is not None and stored_inputs.get("common_workframe_inputs_schema_version"):
-        canonical = canonicalize_common_workframe_inputs(common_inputs)
-        projection = project_workframe_with_variant(common_inputs, variant=workframe_variant)
-        workframe = projection.workframe
-        report = projection.invariant_report
-        shared_substrate_hash = projection.shared_substrate_hash
-        projection_hash = projection.projection_hash
-    else:
-        canonical = canonicalize_workframe_inputs(inputs)
-        workframe, report = reduce_workframe_with_variant(inputs, variant=workframe_variant)
-        shared_substrate_hash = ""
-        projection_hash = ""
+    canonical = canonicalize_workframe_inputs(inputs)
+    workframe, report = reduce_workframe(inputs)
+    shared_substrate_hash = workframe.trace.input_hash
+    projection_hash = workframe.trace.output_hash
     stored_output = _safe_mapping(bundle.get("reducer_output"))
     recomputed_output = workframe.as_dict()
     stored_report = _safe_mapping(bundle.get("invariant_report"))
@@ -3023,11 +2969,14 @@ def _check_workframe_replay(bundle: dict[str, object], manifest: dict[str, objec
     stored_shared_substrate_hash = str(stored_inputs.get("shared_substrate_hash") or "")
     cursor_shared_substrate_hash = str(stored_cursor.get("shared_substrate_hash") or "")
     cursor_projection_hash = str(stored_cursor.get("projection_hash") or "")
-    shared_hash_matches = not shared_substrate_hash or (
+    projection_hashes_expected = _nonnegative_int(stored_inputs.get("schema_version")) >= 3 or bool(
+        stored_shared_substrate_hash or cursor_shared_substrate_hash or cursor_projection_hash
+    )
+    shared_hash_matches = not projection_hashes_expected or (
         stored_shared_substrate_hash == shared_substrate_hash
         and cursor_shared_substrate_hash == shared_substrate_hash
     )
-    projection_hash_matches = not projection_hash or (
+    projection_hash_matches = not projection_hashes_expected or (
         cursor_projection_hash == projection_hash
     )
     ok = (
@@ -3049,7 +2998,7 @@ def _check_workframe_replay(bundle: dict[str, object], manifest: dict[str, objec
         "saved WorkFrame replay matches reducer" if ok else "saved WorkFrame replay does not match reducer",
         {
             "bundle_dir": bundle.get("bundle_dir"),
-            "workframe_variant": workframe_variant,
+            "projection_kind": str(stored_cursor.get("projection_kind") or stored_inputs.get("projection_kind") or ""),
             "stored_input_hash": _safe_mapping(stored_output.get("trace")).get("input_hash"),
             "recomputed_input_hash": workframe.trace.input_hash,
             "stored_output_hash": _safe_mapping(stored_output.get("trace")).get("output_hash"),

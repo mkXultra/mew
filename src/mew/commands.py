@@ -1,4 +1,5 @@
 import json
+import hashlib
 import math
 import os
 import re
@@ -111,7 +112,6 @@ from .mew_first_calibration import (
     summarize_mew_first_calibration,
 )
 from .model_backends import (
-    call_model_json,
     load_model_auth,
     model_backend_default_base_url,
     model_backend_default_model,
@@ -128,10 +128,6 @@ from .proof_summary import (
     format_proof_summary,
     summarize_m6_11_replay_calibration,
     summarize_proof_artifacts,
-)
-from .task_contract_compiler import (
-    compile_task_contract_with_model,
-    task_contract_compiler_failure_contract,
 )
 from .typed_memory import FileMemoryBackend, entry_to_dict
 from .morning_paper import (
@@ -7409,53 +7405,22 @@ def _work_guidance_persisted_lane_state(guidance):
     return persisted
 
 
-def _work_guidance_task_contract_compiler_enabled(guidance):
-    value = _work_guidance_task_contract_compiler_raw_value(guidance)
-    if value is None:
-        return True
-    return _task_contract_compiler_value_enabled(value)
-
-
-def _work_guidance_task_contract_compiler_raw_value(guidance):
-    payload = _work_guidance_json_payload(guidance)
-    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
-    for name in ("task_contract_compiler", "task_contract_compiler_mode"):
-        if name in payload:
-            return payload.get(name)
-        if isinstance(lane_config, dict) and name in lane_config:
-            return lane_config.get(name)
-    for name in ("legacy_task_contract", "task_contract_legacy"):
-        if name in payload:
-            return False if _coerce_guidance_bool(payload.get(name)) else None
-        if isinstance(lane_config, dict) and name in lane_config:
-            return False if _coerce_guidance_bool(lane_config.get(name)) else None
-    text = str(guidance or "")
-    for name in (
-        "task_contract_compiler",
-        "task_contract_compiler_mode",
-        "legacy_task_contract",
-        "task_contract_legacy",
-    ):
-        pattern = rf"(?:^|\s){re.escape(name)}\s*=\s*([A-Za-z0-9_.-]+)"
-        match = re.search(pattern, text)
-        if not match:
-            continue
-        value = match.group(1).strip()
-        if name in {"legacy_task_contract", "task_contract_legacy"}:
-            return False if _coerce_guidance_bool(value) else None
-        return value
-    return None
-
-
-def _task_contract_compiler_value_enabled(value):
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    text = str(value or "").strip().casefold()
-    if not text:
-        return True
-    return text not in {"0", "false", "no", "n", "off", "disabled", "disable", "legacy", "heuristic"}
+_RETIRED_CONTRACT_MODEL_OPTION = "task_contract" + "_compiler"
+_RETIRED_CONTRACT_MODEL_OPTIONS = (
+    _RETIRED_CONTRACT_MODEL_OPTION,
+    f"{_RETIRED_CONTRACT_MODEL_OPTION}_mode",
+    f"{_RETIRED_CONTRACT_MODEL_OPTION}_model",
+    f"{_RETIRED_CONTRACT_MODEL_OPTION}_timeout_seconds",
+    f"{_RETIRED_CONTRACT_MODEL_OPTION}_required",
+)
+_RETIRED_CONTRACT_LEGACY_OPTIONS = (
+    "legacy" + "_task_contract",
+    "task_contract" + "_legacy",
+)
+_RETIRED_CONTRACT_LIVE_KNOBS = (
+    *_RETIRED_CONTRACT_MODEL_OPTIONS,
+    *_RETIRED_CONTRACT_LEGACY_OPTIONS,
+)
 
 
 def _work_guidance_float_option(guidance, *names):
@@ -7507,13 +7472,7 @@ def _work_guidance_task_contract_guidance(guidance):
         "experimental_finish_verifier_planner",
         "finish_verifier_planner",
         "finish_verifier_planner_model",
-        "task_contract_compiler",
-        "task_contract_compiler_mode",
-        "task_contract_compiler_model",
-        "task_contract_compiler_timeout_seconds",
-        "task_contract_compiler_required",
-        "legacy_task_contract",
-        "task_contract_legacy",
+        *_RETIRED_CONTRACT_LIVE_KNOBS,
     ):
         sanitized.pop(key, None)
     lane_config = sanitized.get("lane_config")
@@ -7529,13 +7488,8 @@ def _work_guidance_task_contract_guidance(guidance):
         lane_config.pop("experimental_finish_verifier_planner", None)
         lane_config.pop("finish_verifier_planner", None)
         lane_config.pop("finish_verifier_planner_model", None)
-        lane_config.pop("task_contract_compiler", None)
-        lane_config.pop("task_contract_compiler_mode", None)
-        lane_config.pop("task_contract_compiler_model", None)
-        lane_config.pop("task_contract_compiler_timeout_seconds", None)
-        lane_config.pop("task_contract_compiler_required", None)
-        lane_config.pop("legacy_task_contract", None)
-        lane_config.pop("task_contract_legacy", None)
+        for key in _RETIRED_CONTRACT_LIVE_KNOBS:
+            lane_config.pop(key, None)
         if lane_config:
             sanitized["lane_config"] = lane_config
         else:
@@ -7556,13 +7510,7 @@ def _strip_internal_work_guidance_options(guidance):
         "experimental_finish_verifier_planner",
         "finish_verifier_planner",
         "finish_verifier_planner_model",
-        "task_contract_compiler",
-        "task_contract_compiler_mode",
-        "task_contract_compiler_model",
-        "task_contract_compiler_timeout_seconds",
-        "task_contract_compiler_required",
-        "legacy_task_contract",
-        "task_contract_legacy",
+        *_RETIRED_CONTRACT_LIVE_KNOBS,
     ):
         text = re.sub(rf"(?:^|\s){re.escape(name)}\s*=\s*[A-Za-z0-9_.-]+", " ", text)
     return " ".join(text.split())
@@ -7786,45 +7734,15 @@ def _run_work_ai_implement_v2(
         verify_command=getattr(effective_args, "verify_command", None) or "",
         verify_command_source=getattr(effective_args, "verify_command_source", None) or "",
     )
-    task_contract_compiler_enabled = _work_guidance_task_contract_compiler_enabled(work_guidance)
-    task_contract_compiler_report = {
-        "status": "legacy_opt_in",
+    contract_compiler_report = {
+        "status": "retired",
         "enabled": False,
-        "reason": "task_contract_compiler disabled by work guidance",
+        "reason": "model-assisted task contract compilation is retired from the implement_v2 live path",
+        "raw_compiled_contract_stored": False,
     }
-    if task_contract_compiler_enabled:
-        compiler_model = _work_guidance_string_option(work_guidance, "task_contract_compiler_model") or model
-        compiler_timeout = _work_guidance_float_option(work_guidance, "task_contract_compiler_timeout_seconds")
-        if compiler_timeout is None:
-            compiler_timeout = 45.0 if model_timeout_seconds <= 0 else min(model_timeout_seconds, 45.0)
-        if progress:
-            progress("task_contract_compiler start")
-        try:
-            task_contract, task_contract_compiler_report = compile_task_contract_with_model(
-                task_contract,
-                model_backend=model_backend,
-                model_auth=model_auth,
-                model=compiler_model,
-                base_url=base_url,
-                timeout=compiler_timeout,
-                call_json=call_model_json,
-            )
-        except Exception as exc:
-            task_contract, task_contract_compiler_report = task_contract_compiler_failure_contract(
-                task_contract,
-                error=exc,
-            )
-            task_contract_compiler_report["enabled"] = True
-            if progress:
-                progress(f"task_contract_compiler failed: {exc}")
-        else:
-            task_contract_compiler_report["enabled"] = True
-            task_contract_compiler_report["timeout_seconds"] = compiler_timeout
-            if progress:
-                progress("task_contract_compiler done")
-    report["task_contract_compiler"] = dict(task_contract_compiler_report)
-    implement_v2_runtime_metrics["task_contract_compiler_status"] = task_contract_compiler_report.get("status")
-    implement_v2_runtime_metrics["task_contract_compiler_enabled"] = bool(task_contract_compiler_enabled)
+    report["contract_compiler"] = dict(contract_compiler_report)
+    implement_v2_runtime_metrics["contract_compiler_status"] = contract_compiler_report.get("status")
+    implement_v2_runtime_metrics["contract_compiler_enabled"] = False
     lane_config = {
         "mode": "full",
         "allowed_read_roots": _work_ai_workspace_roots(effective_args.allow_read or [], workspace),
@@ -7846,8 +7764,6 @@ def _run_work_ai_implement_v2(
             "write_integration_observation_detail",
             "integration_observation_detail",
         ),
-        "task_contract_compiler_enabled": bool(task_contract_compiler_enabled),
-        "task_contract_compiler_status": str(task_contract_compiler_report.get("status") or ""),
     }
     if _work_guidance_has_option(work_guidance, "finish_verifier_planner_enabled"):
         lane_config["finish_verifier_planner_enabled"] = _work_guidance_bool_option(
@@ -17780,6 +17696,54 @@ def cmd_memory_core(args):
             artifact = inspect_artifact(store_path=args.store, entry_id=args.entry)
         elif action == "score":
             artifact = score_fixture_artifact(fixture_path=args.fixture, mode=args.mode)
+        elif action == "compress":
+            from .memory_compression import compress_memory_with_model
+            from .memory_core import MemoryCompressionRequest, MemorySystem, ProvenanceRef
+
+            if bool(args.raw_text) == bool(args.raw_file):
+                raise ValueError("memory-core compress requires exactly one of --raw-text or --raw-file")
+            raw_text = args.raw_text or Path(args.raw_file).read_text(encoding="utf-8")
+            raw_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+            source_uri = args.source_uri or (str(Path(args.raw_file).expanduser()) if args.raw_file else "memory-compression://inline")
+            source_ref = ProvenanceRef(
+                ref_id=args.source_ref_id or f"raw:{raw_hash[:16]}",
+                ref_kind=args.source_ref_kind,
+                artifact_path_or_uri=source_uri,
+                content_hash=f"sha256:{raw_hash}",
+                producer="memory_core_compress_cli",
+            )
+            model_auth = load_model_auth(args.model_backend, args.auth)
+            result = compress_memory_with_model(
+                MemorySystem(),
+                MemoryCompressionRequest(
+                    raw_text=raw_text,
+                    memory_kind=args.kind,
+                    scope=args.scope,
+                    source_refs=(source_ref,),
+                    created_at=now_iso(),
+                    title_hint=args.title_hint,
+                    applicability_hint=args.applicability_hint,
+                    max_summary_chars=args.max_summary_chars,
+                ),
+                model_backend=args.model_backend,
+                model_auth=model_auth,
+                model=args.model,
+                base_url=args.base_url,
+                timeout=args.timeout,
+            )
+            artifact = {
+                "operation": "memory_core_compress",
+                "llm_used": True,
+                "model_backend": args.model_backend,
+                "model": args.model,
+                "source_ref": source_ref.to_dict(),
+                "result": result.to_dict(),
+                "summary": (
+                    "memory core compress: "
+                    f"action={result.action} title={result.title!r} "
+                    f"merge_target={result.merge_target_entry_id or '-'}"
+                ),
+            }
         elif action == "memory-arena-score":
             from .memory_arena import format_memory_arena_summary, score_memory_arena_artifact
 
@@ -17806,6 +17770,30 @@ def cmd_memory_core(args):
                 limit_rows=args.limit_rows,
                 limit=args.limit,
                 include_stale=bool(args.include_stale),
+            )
+            artifact["summary"] = format_memory_arena_summary(artifact)
+        elif action == "memory-arena-agent-score":
+            from .memory_arena import format_memory_arena_summary, score_memory_arena_agent_artifact
+
+            model_auth = load_model_auth(args.model_backend, args.auth)
+            artifact = score_memory_arena_agent_artifact(
+                input_path=args.input,
+                hf_config=args.hf_config,
+                hf_split=args.hf_split,
+                hf_revision=args.hf_revision,
+                mode=args.mode,
+                limit_rows=args.limit_rows,
+                limit=args.limit,
+                include_stale=bool(args.include_stale),
+                max_turns=args.max_turns,
+                save_source=args.save_source,
+                answer_score_mode=args.answer_score_mode,
+                answer_threshold=args.answer_threshold,
+                model_backend=args.model_backend,
+                model_auth=model_auth,
+                model=args.model,
+                base_url=args.base_url,
+                timeout=args.timeout,
             )
             artifact["summary"] = format_memory_arena_summary(artifact)
         else:

@@ -17,23 +17,33 @@ from mew.implement_lane.native_fake_provider import (
     model_json_text_non_control_item,
 )
 from mew.implement_lane.hot_path_fastcheck import run_hot_path_fastcheck
+from mew.implement_lane.finish_verifier_planner import (
+    FinishVerifierPlan,
+    finish_verifier_command_safety,
+    finish_verifier_planner_prompt,
+    record_finish_verifier_planner_decision,
+    record_finish_verifier_planner_request,
+)
+from mew.implement_lane.native_completion_policy import (
+    build_completion_resolver_input_from_finish,
+    finish_arg_strings,
+    finish_gate_block_resolved_by_closeout,
+    finish_gate_missing_obligations,
+)
+from mew.implement_lane.native_finish_closeout_policy import (
+    native_final_verifier_closeout_call,
+    native_source_mutation_roots,
+    native_finish_supplied_closeout_context,
+)
 from mew.implement_lane.native_provider_adapter import NativeResponsesStreamParseResult
 from mew.implement_lane.native_tool_harness import (
     NativeCodexResponsesProvider,
     PHASE3_NATIVE_SURFACE,
-    _NativeFinishVerifierPlan,
     _NativeCloseoutContext,
-    _completion_resolver_input_from_finish,
-    _finish_verifier_command_safety,
-    _finish_verifier_planner_prompt,
-    _finish_gate_block_resolved_by_closeout,
-    _finish_gate_missing_obligations,
-    _native_final_verifier_closeout_call,
-    _native_finish_supplied_closeout_context,
+    _native_finish_outcome,
     _native_task_description,
     _partial_failure_harness_result,
-    _record_finish_verifier_planner_decision,
-    _record_finish_verifier_planner_request,
+    _request_compact_sidecar_digest_hash,
     run_live_native_implement_v2,
     run_native_implement_v2,
     run_unavailable_native_implement_v2,
@@ -53,6 +63,40 @@ from mew.implement_lane.tool_registry import (
     build_tool_surface_snapshot,
 )
 from mew.implement_lane.types import ImplementLaneInput, ToolResultEnvelope
+
+
+def _completion_resolver_input_from_finish(
+    call: NativeTranscriptItem,
+    result: ToolResultEnvelope,
+    *,
+    lane_input: ImplementLaneInput,
+    transcript_items: tuple[NativeTranscriptItem, ...],
+    request_descriptor: dict[str, object],
+    prior_tool_results: tuple[ToolResultEnvelope, ...],
+    closeout_context: _NativeCloseoutContext,
+    gate: dict[str, object] | None = None,
+):
+    arguments = json.loads(call.arguments_json_text or "{}")
+    outcome = _native_finish_outcome(arguments)
+    finish_evidence_refs = finish_arg_strings(arguments.get("evidence_refs"))
+    finish_closeout_refs = finish_arg_strings(arguments.get("closeout_refs"))
+    finish_closeout_context = native_finish_supplied_closeout_context(
+        tuple(dict.fromkeys((*finish_evidence_refs, *finish_closeout_refs))),
+        prior_tool_results,
+        source_mutation_roots=native_source_mutation_roots(lane_input, Path(lane_input.workspace or ".")),
+    )
+    return build_completion_resolver_input_from_finish(
+        call,
+        result,
+        lane_input=lane_input,
+        transcript_items=transcript_items,
+        arguments=arguments,
+        outcome=outcome,
+        gate=gate or {},
+        compact_sidecar_digest_hash=_request_compact_sidecar_digest_hash(request_descriptor),
+        closeout_context=closeout_context,
+        finish_closeout_context=finish_closeout_context,
+    )
 
 
 def _lane_input(
@@ -724,7 +768,7 @@ def test_finish_verifier_planner_timeout_config_overrides_default(tmp_path: Path
 
 
 def test_finish_verifier_planner_prompt_requests_safety_compatible_python() -> None:
-    prompt = _finish_verifier_planner_prompt({"task": {"description": "verify completion"}})
+    prompt = finish_verifier_planner_prompt({"task": {"description": "verify completion"}})
 
     assert "If using python -c" in prompt
     assert "no helper lambdas/functions" in prompt
@@ -741,7 +785,7 @@ def test_partial_failure_persists_finish_verifier_planner_observability(tmp_path
         model="gpt-5.5",
     )
     provider.requests.append({"turn_index": 1, "provider_request_inventory": {"turn_index": 1}})
-    _record_finish_verifier_planner_request(
+    record_finish_verifier_planner_request(
         provider,
         {
             "component": "FinishVerifierPlannerLoop",
@@ -750,7 +794,7 @@ def test_partial_failure_persists_finish_verifier_planner_observability(tmp_path
         },
         request_hash="sha256:planner-request",
     )
-    _record_finish_verifier_planner_decision(
+    record_finish_verifier_planner_decision(
         provider,
         {
             "status": "error",
@@ -2466,7 +2510,7 @@ def test_native_harness_blocked_return_preserves_pair_and_stops_provider_request
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
-def test_native_harness_completed_finish_runs_acceptance_gate(tmp_path: Path) -> None:
+def test_native_harness_completed_finish_uses_resolver_for_missing_typed_evidence(tmp_path: Path) -> None:
     lane_input = replace(
         _lane_input(tmp_path),
         task_contract={
@@ -2492,13 +2536,52 @@ def test_native_harness_completed_finish_runs_acceptance_gate(tmp_path: Path) ->
     result = run_native_implement_v2(lane_input, provider=provider, max_turns=1)
 
     assert result.status == "blocked"
-    assert result.metrics["finish_gate_block_count"] == 1
-    blockers = result.metrics["finish_gate_decision"]["blockers"]
-    assert any(blocker["code"] == "acceptance_constraints_unchecked" for blocker in blockers)
+    assert result.metrics["finish_gate_block_count"] == 0
+    resolver_decision = result.metrics["completion_resolver_latest_decision"]
+    assert resolver_decision["lane_status"] == "blocked_continue"
+    assert "typed_acceptance_evidence_missing" in resolver_decision["blockers"]
+    assert "strict_verifier_evidence" in resolver_decision["missing_obligations"]
     finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
     assert finish_output.status == "blocked"
     assert finish_output.is_error is True
-    assert result.metrics["completion_resolver_latest_decision"]["lane_status"] == "blocked_continue"
+    assert validate_native_transcript_pairing(result.transcript).valid is True
+
+
+def test_native_harness_raw_finish_evidence_ref_does_not_satisfy_typed_evidence(tmp_path: Path) -> None:
+    lane_input = replace(
+        _lane_input(tmp_path),
+        task_contract={
+            "description": "The output should include hello.",
+            "acceptance_constraints": ["The output should include hello."],
+        },
+    )
+    provider = NativeFakeProvider.from_item_batches(
+        [
+            [
+                fake_finish(
+                    "finish-bogus-ref",
+                    {
+                        "outcome": "completed",
+                        "summary": "done",
+                        "evidence_refs": ["model-supplied-bogus-ref"],
+                    },
+                    output_index=0,
+                )
+            ]
+        ]
+    )
+
+    result = run_native_implement_v2(lane_input, provider=provider, max_turns=1)
+
+    assert result.status == "blocked"
+    resolver_decision = result.metrics["completion_resolver_latest_decision"]
+    assert resolver_decision["lane_status"] == "blocked_continue"
+    assert "typed_acceptance_evidence_missing" in resolver_decision["blockers"]
+    assert "strict_verifier_evidence" in resolver_decision["missing_obligations"]
+    assert "model-supplied-bogus-ref" not in resolver_decision["evidence_refs"]
+    finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
+    assert finish_output.status == "blocked"
+    assert finish_output.is_error is True
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
@@ -2553,7 +2636,7 @@ def test_native_harness_exec_command_source_grounding_allows_finish_closeout(tmp
     assert validate_native_transcript_pairing(result.transcript).valid is True
 
 
-def test_native_harness_unknown_completion_status_still_runs_acceptance_gate(tmp_path: Path) -> None:
+def test_native_harness_unknown_completion_status_still_requires_typed_evidence(tmp_path: Path) -> None:
     lane_input = replace(
         _lane_input(tmp_path),
         task_contract={
@@ -2568,9 +2651,10 @@ def test_native_harness_unknown_completion_status_still_runs_acceptance_gate(tmp
     result = run_native_implement_v2(lane_input, provider=provider, max_turns=1)
 
     assert result.status == "blocked"
-    assert result.metrics["finish_gate_block_count"] == 1
-    blockers = result.metrics["finish_gate_decision"]["blockers"]
-    assert any(blocker["code"] == "acceptance_constraints_unchecked" for blocker in blockers)
+    assert result.metrics["finish_gate_block_count"] == 0
+    resolver_decision = result.metrics["completion_resolver_latest_decision"]
+    assert resolver_decision["lane_status"] == "blocked_continue"
+    assert "typed_acceptance_evidence_missing" in resolver_decision["blockers"]
 
 
 def test_native_harness_failed_finish_status_does_not_complete(tmp_path: Path) -> None:
@@ -4535,16 +4619,8 @@ def test_native_harness_trusted_closeout_exit_zero_overrides_typed_evidence_bloc
     )
 
     with patch(
-        "mew.implement_lane.native_tool_harness._native_finish_gate_decision",
-        return_value={
-            "decision": "block_continue",
-            "blockers": [{"code": "invalid_typed_evidence_ref"}],
-            "missing_obligations": [
-                {"id": "strict_verifier_evidence", "kind": "verifier_pass"},
-                {"id": "oracle:task_contract:compiled:verifier_pass", "kind": "verifier_pass"},
-            ],
-            "continuation_prompt": "legacy typed evidence resolver would continue",
-        },
+        "mew.legacy_experiments.acceptance_bridge.finish_acceptance_gate_decision",
+        side_effect=AssertionError("legacy acceptance bridge must not run in native completion"),
     ):
         result = run_native_implement_v2(
             _lane_input(
@@ -5367,7 +5443,7 @@ def test_finish_verifier_command_safe_accepts_semantic_task_subjects() -> None:
         "import vectorops; assert vectorops.dotproduct([1,1], [0,1]) == 1\""
     )
 
-    result = _finish_verifier_command_safety(
+    result = finish_verifier_command_safety(
         command,
         request=request,
         require_observable_assertions=False,
@@ -5838,13 +5914,13 @@ def test_codex_hot_path_finish_verifier_planner_uses_exec_command_surface(tmp_pa
     )
     provider = NativeFakeProvider.from_item_batches([])
 
-    closeout_call = _native_final_verifier_closeout_call(
+    closeout_call = native_final_verifier_closeout_call(
         lane_input,
         lane_attempt_id="attempt-1",
         provider=provider,
         turn_index=2,
         lane_config=lane_input.lane_config,
-        plan=_NativeFinishVerifierPlan(
+        plan=FinishVerifierPlan(
             command="test -f vm.js",
             cwd=".",
             source="finish_verifier_planner",
@@ -6440,44 +6516,44 @@ def test_native_closeout_resolves_only_verifier_typed_gate_missing_obligations()
         planner_verified_finish_refs=("implement-v2-evidence://attempt/verifier_evidence/planner-run",),
     )
 
-    assert _finish_gate_missing_obligations(
+    assert finish_gate_missing_obligations(
         {
             "missing_obligations": [
                 {"id": "oracle:contract:run:verifier_pass", "kind": "verifier_pass"},
             ],
         }
     ) == ("oracle:contract:run:verifier_pass",)
-    assert _finish_gate_block_resolved_by_closeout(
+    assert finish_gate_block_resolved_by_closeout(
         ("missing_typed_obligation",),
         ("oracle:contract:run:verifier_pass",),
         gate={"missing_obligations": [{"id": "oracle:contract:run:verifier_pass", "kind": "verifier_pass"}]},
         closeout_context=closeout,
     )
-    assert not _finish_gate_block_resolved_by_closeout(
+    assert not finish_gate_block_resolved_by_closeout(
         ("missing_typed_obligation",),
         ("oracle:source:doomgeneric_mips",),
         gate={"missing_obligations": [{"id": "oracle:source:doomgeneric_mips", "kind": "source_grounding"}]},
         closeout_context=closeout,
     )
-    assert not _finish_gate_block_resolved_by_closeout(
+    assert not finish_gate_block_resolved_by_closeout(
         ("missing_typed_obligation",),
         ("oracle:source:verifier-py",),
         gate={"missing_obligations": [{"id": "oracle:source:verifier-py", "kind": "source_grounding"}]},
         closeout_context=closeout,
     )
-    assert not _finish_gate_block_resolved_by_closeout(
+    assert not finish_gate_block_resolved_by_closeout(
         ("failed_typed_evidence_ref",),
         (),
         gate={"failed_evidence_refs": [{"id": "ev:artifact:frame", "kind": "artifact_check"}], "missing_obligations": []},
         closeout_context=closeout,
     )
-    assert not _finish_gate_block_resolved_by_closeout(
+    assert not finish_gate_block_resolved_by_closeout(
         ("failed_typed_evidence_ref",),
         (),
         gate={"failed_evidence_refs": [{"id": "ev:artifact:frame", "kind": "artifact_check"}], "missing_obligations": []},
         closeout_context=planner_closeout,
     )
-    assert _finish_gate_block_resolved_by_closeout(
+    assert finish_gate_block_resolved_by_closeout(
         ("runtime_final_verifier_artifact_evidence",),
         (),
         gate={
@@ -6486,7 +6562,7 @@ def test_native_closeout_resolves_only_verifier_typed_gate_missing_obligations()
         },
         closeout_context=closeout,
     )
-    assert not _finish_gate_block_resolved_by_closeout(
+    assert not finish_gate_block_resolved_by_closeout(
         ("runtime_final_verifier_artifact_evidence",),
         ("oracle:source:vm-js",),
         gate={
@@ -6495,13 +6571,13 @@ def test_native_closeout_resolves_only_verifier_typed_gate_missing_obligations()
         },
         closeout_context=closeout,
     )
-    assert _finish_gate_block_resolved_by_closeout(
+    assert finish_gate_block_resolved_by_closeout(
         ("acceptance_constraints_unchecked",),
         (),
         gate={"blockers": [{"code": "acceptance_constraints_unchecked"}], "missing_obligations": []},
         closeout_context=planner_closeout,
     )
-    assert not _finish_gate_block_resolved_by_closeout(
+    assert not finish_gate_block_resolved_by_closeout(
         ("acceptance_constraints_unchecked",),
         (),
         gate={"blockers": [{"code": "acceptance_constraints_unchecked"}], "missing_obligations": []},
@@ -6535,23 +6611,20 @@ def test_native_completion_resolver_accepts_final_verifier_runtime_artifact_clos
         fresh_verifier_refs=("implement-v2-exec://attempt/command-final-verifier/terminal",),
     )
 
-    with patch(
-        "mew.implement_lane.native_tool_harness._native_finish_gate_decision",
-        return_value={
+    resolver_input = _completion_resolver_input_from_finish(
+        finish_call,
+        finish_result,
+        lane_input=_lane_input(tmp_path),
+        transcript_items=(finish_call,),
+        request_descriptor={},
+        prior_tool_results=(),
+        closeout_context=closeout,
+        gate={
             "decision": "block_continue",
             "blockers": [{"code": "runtime_final_verifier_artifact_evidence"}],
             "missing_obligations": [],
         },
-    ):
-        resolver_input = _completion_resolver_input_from_finish(
-            finish_call,
-            finish_result,
-            lane_input=_lane_input(tmp_path),
-            transcript_items=(finish_call,),
-            request_descriptor={},
-            prior_tool_results=(),
-            closeout_context=closeout,
-        )
+    )
 
     assert "finish_gate_blocked" not in resolver_input.blockers
     assert "runtime_final_verifier_artifact_evidence" not in resolver_input.blockers
@@ -6584,7 +6657,7 @@ def test_native_finish_tool_result_alias_resolves_verifier_closeout_context() ->
         ),
     )
 
-    context = _native_finish_supplied_closeout_context(
+    context = native_finish_supplied_closeout_context(
         ("ev:tool_result:verify-call",),
         (verifier,),
     )
@@ -6617,7 +6690,7 @@ def test_native_finish_tool_result_alias_resolves_unknown_verdict_verify_command
         ),
     )
 
-    context = _native_finish_supplied_closeout_context(
+    context = native_finish_supplied_closeout_context(
         ("ev:tool_result:exec-verify",),
         (verifier,),
     )
@@ -6658,7 +6731,7 @@ def test_native_finish_tool_route_alias_resolves_polled_acceptance_pass() -> Non
         route_decision={"ref": "tool-route:poll-verify"},
     )
 
-    context = _native_finish_supplied_closeout_context(
+    context = native_finish_supplied_closeout_context(
         ("tool-route:poll-verify",),
         (verifier,),
     )
@@ -6700,7 +6773,7 @@ def test_native_finish_tool_result_alias_resolves_polled_acceptance_ok_marker() 
         route_decision={"ref": "tool-route:poll-verify", "tool_route": "process_lifecycle"},
     )
 
-    context = _native_finish_supplied_closeout_context(
+    context = native_finish_supplied_closeout_context(
         ("ev:tool_result:poll-verify",),
         (verifier,),
     )
@@ -6736,7 +6809,7 @@ def test_native_finish_tool_result_alias_rejects_polled_output_without_acceptanc
         ),
     )
 
-    context = _native_finish_supplied_closeout_context(
+    context = native_finish_supplied_closeout_context(
         ("ev:tool_result:poll-verify",),
         (verifier,),
     )
@@ -6779,7 +6852,7 @@ def test_native_finish_tool_result_alias_rejects_negated_or_extended_acceptance_
         route_decision={"ref": "tool-route:poll-verify", "tool_route": "process_lifecycle"},
     )
 
-    context = _native_finish_supplied_closeout_context(
+    context = native_finish_supplied_closeout_context(
         ("ev:tool_result:poll-verify",),
         (verifier,),
     )
@@ -6813,7 +6886,7 @@ def test_native_finish_tool_result_alias_rejects_non_lifecycle_acceptance_text()
         route_decision={"ref": "tool-route:generic-pass", "tool_route": "process_runner"},
     )
 
-    context = _native_finish_supplied_closeout_context(
+    context = native_finish_supplied_closeout_context(
         ("ev:tool_result:generic-pass",),
         (result,),
     )
@@ -6835,7 +6908,7 @@ def test_native_finish_tool_result_alias_does_not_resolve_non_verifier_result() 
         ),
     )
 
-    context = _native_finish_supplied_closeout_context(
+    context = native_finish_supplied_closeout_context(
         ("ev:tool_result:read-call",),
         (read_result,),
     )

@@ -13,13 +13,9 @@ import shlex
 from dataclasses import replace
 from pathlib import Path
 
-from .types import ImplementLaneInput, ToolCallEnvelope, ToolResultEnvelope
-from .legacy_model_json_tool_lab import (
-    IMPLEMENT_V2_LANE,
-    _first_write_readiness_from_trace,
-    _provider_visible_tool_result_for_history,
-    run_fake_exec_implement_v2,
-)
+from ..work_lanes import IMPLEMENT_V2_LANE
+from .exec_runtime import ImplementV2ManagedExecRuntime
+from .types import ToolCallEnvelope, ToolResultEnvelope
 
 TOOL_LAB_SCHEMA_VERSION = 1
 _ABSOLUTE_PATH_LITERAL_RE = re.compile(r"(?<![:\w./-])/(?:[^\s'\";|&<>`$(){},]+)")
@@ -82,21 +78,6 @@ def run_implement_v2_tool_lab_command(
     )
     if scope_error:
         raise ValueError(scope_error)
-    lane_input = ImplementLaneInput(
-        work_session_id="tool-lab",
-        task_id="tool-lab",
-        workspace=str(workspace_path),
-        lane=IMPLEMENT_V2_LANE,
-        task_contract={"goal": "implement_v2 tool-lab deterministic command diagnostic"},
-        lane_config={
-            "mode": "exec",
-            "allowed_read_roots": list(read_roots),
-            "allowed_write_roots": list(write_roots),
-            "source_mutation_roots": list(source_roots),
-            "allow_shell": True,
-            "first_write_probe_threshold": int(probe_threshold or 3),
-        },
-    )
     arguments: dict[str, object] = {
         "command": str(command),
         "cwd": str(cwd or "."),
@@ -104,18 +85,29 @@ def run_implement_v2_tool_lab_command(
     }
     if timeout is not None:
         arguments["timeout"] = float(timeout)
-    result = run_fake_exec_implement_v2(
-        lane_input,
-        provider_calls=(
-            {
-                "id": "tool-lab-command",
-                "name": "run_command",
-                "arguments": arguments,
-            },
-        ),
-        finish_arguments={"outcome": "analysis_ready", "summary": "tool-lab command executed"},
+    call = ToolCallEnvelope(
+        lane_attempt_id="implement_v2:tool-lab",
+        provider="native_tool_lab",
+        provider_message_id="tool-lab-message",
+        provider_call_id="tool-lab-command",
+        mew_tool_call_id="mew-tool-lab-command",
+        turn_index=1,
+        sequence_index=1,
+        tool_name="run_command",
+        arguments=arguments,
     )
-    manifest = dict((result.updated_lane_state or {}).get("proof_manifest") or {})
+    runtime = ImplementV2ManagedExecRuntime(
+        workspace=workspace_path,
+        allowed_roots=read_roots,
+        allow_shell=True,
+        run_command_available=True,
+        task_contract={"goal": "implement_v2 native tool-lab deterministic command diagnostic"},
+        source_mutation_roots=source_roots,
+        allowed_write_roots=write_roots,
+        auto_approve_writes=True,
+    )
+    tool_result = runtime.execute(call)
+    manifest = _native_tool_lab_manifest(call, tool_result)
     analysis = analyze_implement_v2_tool_lab_manifest(
         manifest,
         manifest_path="",
@@ -132,8 +124,8 @@ def run_implement_v2_tool_lab_command(
         "intent": str(command_intent or "probe"),
         "timeout": timeout,
     }
-    analysis["result_status"] = result.status
-    analysis["result_metrics"] = dict(result.metrics or {})
+    analysis["result_status"] = tool_result.status
+    analysis["result_metrics"] = dict(manifest.get("metrics") or {})
     return analysis
 
 
@@ -579,6 +571,123 @@ def _provider_visible_tool_result_bytes(results: tuple[ToolResultEnvelope, ...])
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
         total += len(encoded)
     return total
+
+
+def _native_tool_lab_manifest(call: ToolCallEnvelope, result: ToolResultEnvelope) -> dict[str, object]:
+    readiness = _first_write_readiness_from_trace(
+        {"id": "tool-lab", "status": "drafting", "source": {"target_paths": []}},
+        tool_calls=(call,),
+        tool_results=(result,),
+        probe_threshold=1,
+        source_mutation_roots=(),
+    )
+    return {
+        "schema_version": 1,
+        "lane": IMPLEMENT_V2_LANE,
+        "lane_attempt_id": call.lane_attempt_id,
+        "diagnostic_kind": "native_tool_lab",
+        "tool_calls": [call.as_dict()],
+        "tool_results": [result.as_dict()],
+        "metrics": {
+            "transport_kind": "provider_native",
+            "provider_native_tool_loop": True,
+            "model_json_main_path_detected": False,
+            "first_write_readiness": readiness,
+        },
+    }
+
+
+def _first_write_readiness_from_trace(
+    active_work_todo: dict[str, object],
+    *,
+    tool_calls: tuple[object, ...],
+    tool_results: tuple[ToolResultEnvelope, ...],
+    probe_threshold: int,
+    requires_deep_runtime_coverage: bool = False,
+    source_mutation_roots: tuple[str, ...] = (),
+) -> dict[str, object]:
+    if not active_work_todo:
+        return {}
+    probes = 0
+    probe_call_ids: list[str] = []
+    first_attempt_turn = 0
+    first_attempt_call_id = ""
+    first_attempt_tool = ""
+    first_mutation_turn = 0
+    first_mutation_call_id = ""
+    first_mutation_tool = ""
+    write_count = 0
+    mutation_provider_ids = {str(item.get("provider_call_id") or "") for item in _collect_source_tree_mutations(tool_results)}
+    for call, result in zip(tool_calls, tool_results):
+        tool_name = str(getattr(call, "tool_name", "") or result.tool_name or "")
+        call_id = str(getattr(call, "provider_call_id", "") or result.provider_call_id or "")
+        turn = int(getattr(call, "turn_index", 0) or 0)
+        is_source_write_tool = tool_name in {"apply_patch", "edit_file", "write_file"}
+        is_write_attempt = is_source_write_tool or call_id in mutation_provider_ids
+        if is_write_attempt:
+            write_count += 1
+            if first_attempt_turn <= 0:
+                first_attempt_turn = turn
+                first_attempt_call_id = call_id
+                first_attempt_tool = tool_name
+            if result.status == "completed" and (is_source_write_tool or call_id in mutation_provider_ids):
+                first_mutation_turn = turn
+                first_mutation_call_id = call_id
+                first_mutation_tool = tool_name
+                break
+            continue
+        if result.status in {"completed", "failed", "invalid"} and tool_name in {
+            "glob",
+            "inspect_dir",
+            "read_file",
+            "search_text",
+            "run_command",
+        }:
+            probes += 1
+            if len(probe_call_ids) < 8:
+                probe_call_ids.append(call_id)
+    threshold = max(1, int(probe_threshold))
+    first_write_due = first_mutation_turn <= 0 and probes >= threshold
+    target_paths = _active_work_todo_target_paths(active_work_todo)
+    readiness = {
+        "schema_version": 1,
+        "status": "written" if first_mutation_turn > 0 else ("due" if first_write_due else "not_due"),
+        "first_write_due": first_write_due,
+        "probe_threshold": threshold,
+        "probes_seen_without_write": probes if first_mutation_turn <= 0 else 0,
+        "probe_count_before_first_write": probes,
+        "probe_count_total": probes,
+        "write_attempt_count": write_count,
+        "first_write_attempt_turn": first_attempt_turn or None,
+        "first_write_attempt_latency_turns": max(0, first_attempt_turn - 1) if first_attempt_turn > 0 else None,
+        "first_write_attempt_tool": first_attempt_tool,
+        "first_write_attempt_provider_call_id": first_attempt_call_id,
+        "first_source_mutation_turn": first_mutation_turn or None,
+        "first_write_latency_turns": max(0, first_mutation_turn - 1) if first_mutation_turn > 0 else None,
+        "first_write_tool": first_mutation_tool,
+        "first_write_provider_call_id": first_mutation_call_id,
+        "target_paths": target_paths,
+        "probe_provider_call_ids": probe_call_ids,
+        "source": "native_tool_lab_trace",
+    }
+    if requires_deep_runtime_coverage:
+        readiness["prewrite_probe_missing_categories"] = ()
+    return {key: value for key, value in readiness.items() if value not in ("", [], {}, None)}
+
+
+def _active_work_todo_target_paths(active_work_todo: dict[str, object]) -> list[str]:
+    source = active_work_todo.get("source") if isinstance(active_work_todo.get("source"), dict) else {}
+    return [str(path)[:240] for path in source.get("target_paths") or [] if str(path or "").strip()][:8]
+
+
+def _provider_visible_tool_result_for_history(result: ToolResultEnvelope) -> dict[str, object]:
+    return {
+        "provider_call_id": result.provider_call_id,
+        "tool_name": result.tool_name,
+        "status": result.status,
+        "is_error": result.is_error,
+        "content": result.provider_visible_content(),
+    }
 
 
 def _tool_lab_command_scope_error(command: str, *, workspace_path: Path, write_roots: tuple[str, ...]) -> str:

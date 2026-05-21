@@ -6,25 +6,20 @@ from pathlib import Path
 from mew.implement_lane.substrate_inventory import build_substrate_inventory, render_inventory_markdown
 
 
-def test_substrate_inventory_lists_current_tools_and_variants(tmp_path: Path) -> None:
+def test_substrate_inventory_lists_current_tools_and_canonical_projection(tmp_path: Path) -> None:
     inventory = build_substrate_inventory(tmp_path)
 
     tools = inventory["tool_registry"]["tools"]
-    variants = inventory["workframe_variants"]["variants"]
+    projection = inventory["workframe_projection"]
 
     assert inventory["schema_version"] == 1
     tool_names = {tool["name"] for tool in tools}
-    assert tool_names >= {"read_file", "run_command", "apply_patch"}
+    assert tool_names >= {"exec_command", "write_stdin", "apply_patch"}
     assert "finish" not in tool_names
     assert inventory["tool_registry"]["hash"].startswith("sha256:")
-    assert inventory["workframe_variants"]["default"] == "transition_contract"
-    assert [variant["name"] for variant in variants] == [
-        "current",
-        "minimal",
-        "transcript_first",
-        "transcript_tool_nav",
-        "transition_contract",
-    ]
+    assert projection["kind"] == "canonical_workframe"
+    assert projection["selector_live"] is False
+    assert projection["hash"].startswith("sha256:")
 
 
 def test_substrate_inventory_reports_phase0_migration_gap(tmp_path: Path) -> None:
@@ -38,10 +33,8 @@ def test_substrate_inventory_reports_phase0_migration_gap(tmp_path: Path) -> Non
         "tool registry artifact",
         "natural transcript log",
     }
-    assert inventory["schemas"]["common_workframe_inputs"] == 1
-    assert inventory["schemas"]["target_workframe_projection"] == 3
-    assert inventory["workframe_inputs"]["compatibility_wrapper_target"] == "CommonWorkFrameInputs"
-    assert inventory["workframe_inputs"]["compatibility_wrapper_type"] == "CommonWorkFrameInputs"
+    assert inventory["schemas"]["workframe_projection"] == 1
+    assert inventory["workframe_projection"]["historical_experiments_namespace"] == "mew.legacy_experiments"
     assert any(field["name"] == "sidecar_events" for field in inventory["workframe_inputs"]["fields"])
 
 
@@ -64,6 +57,6 @@ def test_substrate_inventory_markdown_is_serializable(tmp_path: Path) -> None:
 
     assert "# M6.24 Phase 0 Substrate Inventory" in rendered
     assert "## Tool Surface" in rendered
-    assert "transcript_tool_nav" in rendered
+    assert "canonical_workframe" in rendered
     assert "status | current source" in rendered
     json.dumps(inventory, sort_keys=True)

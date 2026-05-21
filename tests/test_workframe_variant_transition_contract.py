@@ -2,13 +2,13 @@ import json
 from pathlib import Path
 
 from mew.implement_lane.workframe import WORKFRAME_RED_MAX_BYTES, WorkFrameInputs, reduce_workframe, workframe_output_hash
-from mew.implement_lane.workframe_variants import (
+from mew.legacy_experiments.workframe_variants import (
     DEFAULT_WORKFRAME_VARIANT,
     common_workframe_inputs_from_workframe_inputs,
     project_workframe_with_variant,
     reduce_workframe_with_variant,
 )
-from mew.implement_lane.workframe_variant_transition_contract import (
+from mew.legacy_experiments.workframe_variant_transition_contract import (
     VARIANT_NAME,
     reduce_transition_contract_workframe,
 )

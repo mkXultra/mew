@@ -29,7 +29,6 @@ from .workframe import (
     WORKFRAME_TARGET_MAX_BYTES,
     WorkFrameInputs,
 )
-from .workframe_variants import DEFAULT_WORKFRAME_VARIANT, CommonWorkFrameInputs, list_workframe_variants
 
 INVENTORY_SCHEMA_VERSION = 1
 
@@ -55,7 +54,7 @@ REQUIRED_SHARED_ARTIFACTS = (
     {"filename": "replay_manifest.json", "phase": 6, "surface": "replay manifest"},
     {"filename": "provider_request_inventory.json", "phase": 6, "surface": "provider request inventory"},
     {"filename": "provider_response_inventory.json", "phase": 6, "surface": "provider response inventory"},
-    {"filename": "workframe_variant.json", "phase": 3, "surface": "WorkFrame variant artifact"},
+    {"filename": "workframe_projection.json", "phase": 3, "surface": "WorkFrame projection artifact"},
     {"filename": "reducer_inputs.json", "phase": 3, "surface": "reducer inputs artifact"},
     {"filename": "prompt_visible_workframe.json", "phase": 3, "surface": "prompt visible WorkFrame artifact"},
     {"filename": "reducer_output.workframe.json", "phase": 3, "surface": "reducer output artifact"},
@@ -108,18 +107,11 @@ SHARED_SUBSTRATE_SURFACES = (
         "notes": "Prompt projection recovery exists; redesign should demote this to sidecar-derived state.",
     },
     {
-        "name": "workframe_variant_projection",
-        "current_source": "src/mew/implement_lane/workframe_variants.py",
+        "name": "canonical_workframe_projection",
+        "current_source": "src/mew/implement_lane/workframe.py",
         "phase": 3,
-        "status": "implemented",
-        "notes": "Variant registry, CommonWorkFrameInputs wrapper, shared substrate hash, and projection hash exist.",
-    },
-    {
-        "name": "transcript_tool_nav",
-        "current_source": "src/mew/implement_lane/workframe_variant_transcript_tool_nav.py",
-        "phase": 4,
-        "status": "implemented",
-        "notes": "Transcript-authoritative tool navigation variant is registered behind explicit selector.",
+        "status": "canonical",
+        "notes": "Production uses one deterministic reducer projection; historical reducer experiments are isolated outside production scans.",
     },
 )
 
@@ -137,7 +129,12 @@ def build_substrate_inventory(repo_root: Path | str = ".") -> dict[str, Any]:
         spec.as_dict()
         for spec in build_tool_surface_snapshot(lane_config={}).tool_specs
     ]
-    variants = [variant.__dict__.copy() for variant in list_workframe_variants()]
+    workframe_projection = {
+        "kind": "canonical_workframe",
+        "source": "src/mew/implement_lane/workframe.py",
+        "selector_live": False,
+        "historical_experiments_namespace": "mew.legacy_experiments",
+    }
     proof_root = root / "proof-artifacts" / "terminal-bench"
     required_artifact_coverage = _required_artifact_coverage(proof_root)
 
@@ -154,11 +151,9 @@ def build_substrate_inventory(repo_root: Path | str = ".") -> dict[str, Any]:
                 for mode in ("read_only", "exec", "write", "implement")
             },
         },
-        "workframe_variants": {
-            "default": DEFAULT_WORKFRAME_VARIANT,
-            "count": len(variants),
-            "hash": _stable_hash(variants),
-            "variants": variants,
+        "workframe_projection": {
+            **workframe_projection,
+            "hash": _stable_hash(workframe_projection),
         },
         "schemas": {
             "tool_call": TOOL_CALL_SCHEMA_VERSION,
@@ -175,20 +170,16 @@ def build_substrate_inventory(repo_root: Path | str = ".") -> dict[str, Any]:
             "workframe_reducer": WORKFRAME_REDUCER_SCHEMA_VERSION,
             "workframe_canonicalizer": WORKFRAME_CANONICALIZER_VERSION,
             "workframe_phase0_inputs": WORKFRAME_PHASE0_SCHEMA_VERSION,
-            "common_workframe_inputs": 1,
-            "target_workframe_projection": 3,
+            "workframe_projection": 1,
         },
         "workframe_inputs": {
             "current_type": "WorkFrameInputs",
-            "compatibility_wrapper_target": "CommonWorkFrameInputs",
-            "compatibility_wrapper_type": CommonWorkFrameInputs.__name__,
             "fields": _dataclass_field_inventory(WorkFrameInputs),
             "migration_notes": [
-                "Current WorkFrameInputs remains the source compatibility surface for existing reducers.",
-                "CommonWorkFrameInputs v1 wraps current WorkFrameInputs plus tool registry, sidecars, indexes, and migration metadata.",
-                "WorkFrame projection schema v3 is the target projection schema; it is distinct from CommonWorkFrameInputs schema v1.",
-                "Variant projections must canonicalize CommonWorkFrameInputs before hashing or rendering.",
-                "v1/v2 fixtures must be compared within their original schema or explicitly converted before v3 hash comparison.",
+                "Current WorkFrameInputs remains the source compatibility surface for the canonical reducer.",
+                "Production projection hashes are derived from canonical WorkFrameInputs and reducer output hashes.",
+                "Historical reducer experiments are diagnostic-only and live outside the production scan root.",
+                "v1/v2 fixtures must be compared within their original schema or explicitly converted before current hash comparison.",
             ],
         },
         "byte_caps": {
@@ -217,7 +208,7 @@ def render_inventory_markdown(inventory: dict[str, Any]) -> str:
     """Render the inventory as a compact phase-0 Markdown artifact."""
 
     tool_registry = inventory["tool_registry"]
-    variants = inventory["workframe_variants"]
+    projection = inventory["workframe_projection"]
     artifact_coverage = inventory["artifact_coverage"]
     missing = inventory["missing_for_offline_diagnosis"]
     surfaces = inventory["shared_substrate_surfaces"]
@@ -233,9 +224,8 @@ def render_inventory_markdown(inventory: dict[str, Any]) -> str:
         "",
         f"- tool registry count: `{tool_registry['count']}`",
         f"- tool registry hash: `{tool_registry['hash']}`",
-        f"- WorkFrame default variant: `{variants['default']}`",
-        f"- WorkFrame variant count: `{variants['count']}`",
-        f"- WorkFrame variant hash: `{variants['hash']}`",
+        f"- WorkFrame projection: `{projection['kind']}`",
+        f"- WorkFrame projection hash: `{projection['hash']}`",
         f"- proof root exists: `{artifact_coverage['proof_root_exists']}`",
         f"- terminal-bench JSON artifact count: `{len(artifact_coverage['terminal_bench_json_files'])}`",
         f"- missing offline-diagnosis surfaces: `{len(missing)}`",
@@ -259,14 +249,14 @@ def render_inventory_markdown(inventory: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## WorkFrame Variants",
+            "## WorkFrame Projection",
             "",
-            "| variant | description |",
+            "| field | value |",
             "|---|---|",
         ]
     )
-    for variant in variants["variants"]:
-        lines.append(f"| `{variant['name']}` | {variant['description']} |")
+    for key in ("kind", "source", "selector_live", "historical_experiments_namespace"):
+        lines.append(f"| `{key}` | `{projection[key]}` |")
 
     lines.extend(
         [

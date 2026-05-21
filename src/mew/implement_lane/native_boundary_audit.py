@@ -80,11 +80,11 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
     ),
     SourceControlSpec(
         name="native_final_verifier_closeout_call",
-        relative_path="src/mew/implement_lane/native_tool_harness.py",
-        anchor="def _run_native_finish_time_closeouts",
+        relative_path="src/mew/implement_lane/native_finish_closeout_policy.py",
+        anchor="def run_finish_time_closeouts",
         markers=(
             "scoped_calls = list(tool_calls)",
-            "closeout = _native_final_verifier_closeout(",
+            "closeout = native_final_verifier_closeout(",
             "provider=provider",
             "tool_calls=tuple(scoped_calls)",
         ),
@@ -100,8 +100,8 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
     ),
     SourceControlSpec(
         name="native_loop_control_instruction_removed",
-        relative_path="src/mew/implement_lane/native_tool_harness.py",
-        anchor="def _responses_input_items",
+        relative_path="src/mew/implement_lane/native_request_builder.py",
+        anchor="def responses_input_items",
         markers=('"task_contract": dict(lane_input.task_contract)', '"task_facts": task_facts'),
         forbidden_markers=(
             "_native_loop_control_input_item",
@@ -113,7 +113,7 @@ SOURCE_CONTROL_SPECS: tuple[SourceControlSpec, ...] = (
     ),
     SourceControlSpec(
         name="persisted_lane_state_provider_payload",
-        relative_path="src/mew/implement_lane/native_tool_harness.py",
+        relative_path="src/mew/implement_lane/native_request_builder.py",
         anchor="task_payload = {",
         markers=('"task_contract": dict(lane_input.task_contract)', '"workspace": lane_input.workspace'),
         forbidden_markers=("persisted_lane_state", '"compact_sidecar_digest": dict(compact_sidecar_digest)'),

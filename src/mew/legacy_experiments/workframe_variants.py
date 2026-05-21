@@ -1,4 +1,4 @@
-"""WorkFrame reducer variant registry for implement_v2 experiments."""
+"""Legacy WorkFrame reducer variant registry for diagnostic experiments."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 
-from .workframe import (
+from ..implement_lane.workframe import (
     WORKFRAME_CANONICALIZER_VERSION,
     WORKFRAME_REDUCER_SCHEMA_VERSION,
     WORKFRAME_SCHEMA_VERSION,

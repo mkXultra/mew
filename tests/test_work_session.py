@@ -11172,7 +11172,17 @@ class WorkSessionTests(unittest.TestCase):
                                             "--approval-mode",
                                             "accept-edits",
                                             "--work-guidance",
-                                            json.dumps({"selected_lane": "implement_v2", "active_work_todo": {}}),
+                                            json.dumps(
+                                                {
+                                                    "selected_lane": "implement_v2",
+                                                    "active_work_todo": {},
+                                                    "task_contract_compiler": True,
+                                                    "lane_config": {
+                                                        "task_contract_compiler_model": "gpt-test",
+                                                        "legacy_task_contract": True,
+                                                    },
+                                                }
+                                            ),
                                             "--max-steps",
                                             "2",
                                             "--json",
@@ -11197,12 +11207,12 @@ class WorkSessionTests(unittest.TestCase):
                     lane_input.lane_config["finish_verifier_planner_selection_source"],
                     "default_enabled",
                 )
-                self.assertEqual(lane_input.task_contract["acceptance_constraints"], [])
-                self.assertEqual(
-                    lane_input.task_contract["legacy_acceptance_constraints"],
-                    ["The output should change."],
-                )
-                self.assertEqual(lane_input.task_contract["task_contract_compiler"]["status"], "typed_fallback")
+                self.assertEqual(lane_input.task_contract["acceptance_constraints"], ["The output should change."])
+                self.assertNotIn("legacy_acceptance_constraints", lane_input.task_contract)
+                self.assertNotIn("task_contract_compiler", lane_input.task_contract)
+                self.assertNotIn("compiled_task_contract", lane_input.task_contract)
+                self.assertNotIn("task_contract_compiler_enabled", lane_input.lane_config)
+                self.assertNotIn("task_contract_compiler_status", lane_input.lane_config)
                 self.assertTrue(lane_input.lane_config["auto_approve_writes"])
                 self.assertEqual(lane_input.lane_config["allowed_write_roots"], [str(workspace.resolve())])
                 self.assertEqual(
@@ -11214,6 +11224,8 @@ class WorkSessionTests(unittest.TestCase):
                 self.assertEqual(payload["work_exit_code"], 0)
                 work_report = payload["work_report"]
                 self.assertEqual(work_report["selected_lane"], "implement_v2")
+                self.assertEqual(work_report["contract_compiler"]["status"], "retired")
+                self.assertFalse(work_report["contract_compiler"]["raw_compiled_contract_stored"])
                 self.assertEqual(work_report["stop_reason"], "finish")
                 self.assertEqual(work_report["steps"][0]["action"]["type"], "implement_lane")
                 self.assertEqual(work_report["implement_lane_result"]["lane"], "implement_v2")

@@ -27,11 +27,6 @@ from mew.implement_lane.native_transcript import (
 )
 from mew.implement_lane.tool_registry import build_tool_surface_snapshot
 from mew.implement_lane.workframe import WorkFrameInputs, canonicalize_workframe_inputs, reduce_workframe
-from mew.implement_lane.workframe_variants import (
-    canonicalize_common_workframe_inputs,
-    common_workframe_inputs_from_workframe_inputs,
-    project_workframe_with_variant,
-)
 
 
 def _write_artifact(tmp_path: Path) -> Path:
@@ -2902,24 +2897,19 @@ def _write_workframe_bundle(root: Path, inputs: WorkFrameInputs | None = None):
 def _write_common_workframe_bundle(
     root: Path,
     inputs: WorkFrameInputs | None = None,
-    *,
-    variant: str = "transcript_tool_nav",
 ):
     root.mkdir(parents=True, exist_ok=True)
     inputs = inputs or _workframe_inputs()
-    common = common_workframe_inputs_from_workframe_inputs(inputs)
-    projection = project_workframe_with_variant(common, variant=variant)
-    workframe = projection.workframe
-    report = projection.invariant_report
+    workframe, report = reduce_workframe(inputs)
+    shared_substrate_hash = workframe.trace.input_hash
+    projection_hash = workframe.trace.output_hash
     files = {
         "reducer_inputs.json": {
-            "schema_version": 2,
-            "workframe_variant": variant,
-            "common_workframe_inputs_schema_version": common.schema_version,
+            "schema_version": 3,
+            "projection_kind": "canonical_workframe",
             "workframe_inputs": inputs.as_dict(),
-            "common_workframe_inputs": common.as_dict(),
-            "canonical": canonicalize_common_workframe_inputs(common),
-            "shared_substrate_hash": projection.shared_substrate_hash,
+            "canonical": canonicalize_workframe_inputs(inputs),
+            "shared_substrate_hash": shared_substrate_hash,
         },
         "reducer_output.workframe.json": workframe.as_dict(),
         "invariant_report.json": report.as_dict(),
@@ -2928,26 +2918,26 @@ def _write_common_workframe_bundle(
             "rule": "This is the only ordinary dynamic state object.",
         },
         "prompt_render_inventory.json": {
-            "schema_version": 2,
+            "schema_version": 3,
+            "projection_kind": "canonical_workframe",
             "static_shape": [
                 "static_instructions",
                 "task_contract_digest",
                 "natural_transcript_tail",
                 "one_workframe_projection",
             ],
-            "workframe_variant": variant,
-            "shared_substrate_hash": projection.shared_substrate_hash,
-            "projection_hash": projection.projection_hash,
+            "shared_substrate_hash": shared_substrate_hash,
+            "projection_hash": projection_hash,
             "sections": list(inputs.prompt_inventory),
         },
         "workframe_cursor.json": {
-            "schema_version": 2,
+            "schema_version": 3,
+            "projection_kind": "canonical_workframe",
             "attempt_id": inputs.attempt_id,
             "turn_id": inputs.turn_id,
             "workframe_id": workframe.trace.workframe_id,
-            "workframe_variant": variant,
-            "shared_substrate_hash": projection.shared_substrate_hash,
-            "projection_hash": projection.projection_hash,
+            "shared_substrate_hash": shared_substrate_hash,
+            "projection_hash": projection_hash,
             "input_hash": workframe.trace.input_hash,
             "output_hash": workframe.trace.output_hash,
         },

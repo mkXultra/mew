@@ -1,10 +1,10 @@
-"""Minimal WorkFrame reducer variant for implement_v2 experiments."""
+"""Legacy minimal WorkFrame reducer variant for diagnostics."""
 
 from __future__ import annotations
 
 from dataclasses import replace
 
-from .workframe import (
+from ..implement_lane.workframe import (
     WorkFrame,
     WorkFrameInputs,
     WorkFrameInvariantReport,

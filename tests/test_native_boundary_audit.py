@@ -35,9 +35,9 @@ def test_native_boundary_audit_reports_missing_required_design_marker(tmp_path: 
 
 def test_native_boundary_audit_reports_missing_source_marker_in_anchor_window(tmp_path: Path) -> None:
     _write_complete_fixture(tmp_path)
-    harness = tmp_path / "src/mew/implement_lane/native_tool_harness.py"
-    harness.write_text(
-        harness.read_text(encoding="utf-8").replace('    "workspace": lane_input.workspace,\n', ""),
+    closeout = tmp_path / "src/mew/implement_lane/native_finish_closeout_policy.py"
+    closeout.write_text(
+        closeout.read_text(encoding="utf-8").replace("    tool_calls=tuple(scoped_calls),\n", ""),
         encoding="utf-8",
     )
 
@@ -45,7 +45,7 @@ def test_native_boundary_audit_reports_missing_source_marker_in_anchor_window(tm
 
     assert not report.ok
     failed = {check.name for check in report.checks if not check.passed}
-    assert "source_inventory_persisted_lane_state_provider_payload" in failed
+    assert "source_inventory_native_final_verifier_closeout_call" in failed
 
 
 def test_native_boundary_audit_reports_missing_source_file(tmp_path: Path) -> None:
@@ -103,25 +103,31 @@ def _write_complete_fixture(root: Path) -> None:
         encoding="utf-8",
     )
     (impl / "native_tool_harness.py").write_text(
-        "def _run_native_finish_time_closeouts():\n"
-        "    scoped_calls = list(tool_calls)\n"
-        "closeout = _native_final_verifier_closeout(\n"
-        "    provider=provider,\n"
-        "    tool_calls=tuple(scoped_calls),\n"
-        ")\n"
-        "def _responses_input_items():\n"
-        "    task_facts = {}\n"
-        "task_payload = {\n"
-        '    "task_contract": dict(lane_input.task_contract),\n'
-        '    "task_facts": task_facts,\n'
-        '    "workspace": lane_input.workspace,\n'
-        "}\n"
         "def _native_loop_control_state():\n"
         "    first_write_due = True\n"
         "    verifier_repair_due = True\n"
         "    return {\n"
         '        "surface": "native_loop_signals",\n'
         "    }\n",
+        encoding="utf-8",
+    )
+    (impl / "native_request_builder.py").write_text(
+        "def responses_input_items():\n"
+        "    task_facts = {}\n"
+        "    task_payload = {\n"
+        '        "task_contract": dict(lane_input.task_contract),\n'
+        '        "task_facts": task_facts,\n'
+        '        "workspace": lane_input.workspace,\n'
+        "    }\n",
+        encoding="utf-8",
+    )
+    (impl / "native_finish_closeout_policy.py").write_text(
+        "def run_finish_time_closeouts():\n"
+        "    scoped_calls = list(tool_calls)\n"
+        "    closeout = native_final_verifier_closeout(\n"
+        "        provider=provider,\n"
+        "        tool_calls=tuple(scoped_calls),\n"
+        "    )\n",
         encoding="utf-8",
     )
     profiles = impl / "tool_profiles"

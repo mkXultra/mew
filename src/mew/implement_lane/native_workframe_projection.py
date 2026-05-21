@@ -13,7 +13,6 @@ from typing import Iterable, Mapping
 
 from .affordance_visibility import fields_from_forbidden_violations, scan_forbidden_provider_visible
 from .native_sidecar_projection import (
-    NATIVE_RESPONSE_ITEMS_SOURCE_OF_TRUTH,
     NATIVE_SIDECAR_TRANSPORT_CHANGE,
     NATIVE_TRANSCRIPT_SOURCE_OF_TRUTH,
     PROVIDER_VISIBLE_STEERING_KEYS,
@@ -26,14 +25,7 @@ from .native_sidecar_projection import (
     stable_json_hash,
 )
 from .native_transcript import IMPLEMENT_V2_NATIVE_RUNTIME_ID, NativeTranscript, NativeTranscriptItem, OUTPUT_ITEM_KINDS
-from .workframe import WorkFrameInputs, canonicalize_workframe_inputs
-from .workframe_variants import (
-    DEFAULT_WORKFRAME_VARIANT,
-    common_workframe_inputs_from_workframe_inputs,
-    canonicalize_common_workframe_inputs,
-    project_workframe_with_variant,
-    validate_workframe_variant_name,
-)
+from .workframe import WorkFrameInputs, canonicalize_workframe_inputs, reduce_workframe
 
 NATIVE_WORKFRAME_PROJECTION_SCHEMA_VERSION = 1
 NATIVE_PROMPT_INPUT_INVENTORY_SCHEMA_VERSION = 1
@@ -121,14 +113,12 @@ def build_native_workframe_debug_bundle(
     compact_sidecar_digest: Mapping[str, object] | None = None,
     sidecar_events: Iterable[Mapping[str, object]] = (),
     prompt_inventory: Iterable[Mapping[str, object]] = (),
-    variant: object = DEFAULT_WORKFRAME_VARIANT,
     workspace_root: str = "",
     artifact_root: str = "",
     turn_id: str = "",
 ) -> dict[str, object]:
     """Build the derived WorkFrame debug bundle from native transcript data."""
 
-    workframe_variant = validate_workframe_variant_name(variant)
     tool_index = dict(tool_result_index or build_native_tool_result_index(transcript))
     evidence = dict(evidence_sidecar or build_native_evidence_sidecar(transcript, tool_result_index=tool_index))
     evidence_index = dict(evidence_ref_index or build_native_evidence_ref_index(evidence))
@@ -163,59 +153,27 @@ def build_native_workframe_debug_bundle(
         turn_id=turn_id,
     )
     context = _transcript_context(transcript)
-    common_inputs = common_workframe_inputs_from_workframe_inputs(
-        inputs,
-        transcript={
-            "source_of_truth": NATIVE_TRANSCRIPT_SOURCE_OF_TRUTH,
-            "response_items_source_of_truth": NATIVE_RESPONSE_ITEMS_SOURCE_OF_TRUTH,
-            "transcript_hash": context["transcript_hash"],
-            "latest_tool_call_ref": _latest_provider_call_ref(tool_index),
-            "latest_tool_result_ref": _latest_tool_result_ref(tool_index),
-            "paired_call_result_index_ref": tool_index.get("index_hash") or "",
-        },
-        sidecars={
-            "typed_evidence_delta_ref": evidence.get("sidecar_ref") or "",
-            "evidence_ref_index_ref": evidence_index.get("index_hash") or "",
-            "verifier_freshness_ref": stable_json_hash(evidence.get("verifier_freshness") or {}),
-            "compact_sidecar_digest_hash": digest.get("digest_hash") or "",
-        },
-        indexes={
-            "tool_result_index_ref": tool_index.get("index_hash") or "",
-            "evidence_search_index_ref": evidence_index.get("index_hash") or "",
-            "model_turn_index_ref": turn_index.get("index_hash") or "",
-            "model_turn_index_usage": "debug_plateau_recovery_only",
-        },
-        replay={
-            "workframe_cursor_ref": "",
-            "replay_manifest_ref": context["transcript_hash"],
-        },
-        migration={
-            "native_phase": "phase4_derived_projection",
-            "transport_change": NATIVE_SIDECAR_TRANSPORT_CHANGE,
-        },
-    )
-    projection = project_workframe_with_variant(common_inputs, variant=workframe_variant)
-    workframe = projection.workframe
-    report = projection.invariant_report
+    workframe, report = reduce_workframe(inputs)
+    canonical_inputs = canonicalize_workframe_inputs(inputs)
+    shared_substrate_hash = workframe.trace.input_hash
+    projection_hash = workframe.trace.output_hash
     bundle: dict[str, object] = {
         "schema_version": NATIVE_WORKFRAME_PROJECTION_SCHEMA_VERSION,
         "bundle_kind": "native_transcript_workframe_debug_projection",
+        "projection_kind": "canonical_workframe",
         "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
         "transport_kind": "provider_native",
         "transport_change": NATIVE_SIDECAR_TRANSPORT_CHANGE,
         "source_of_truth": NATIVE_TRANSCRIPT_SOURCE_OF_TRUTH,
         "turn_id": inputs.turn_id,
-        "workframe_variant": workframe_variant,
-        "projection_policy": native_workframe_projection_policy(workframe_variant),
+        "projection_policy": native_workframe_projection_policy(),
         "transcript_hash": context["transcript_hash"],
         "sidecar_digest_hash": digest.get("digest_hash") or "",
         "reducer_inputs": {
-            "schema_version": 1,
+            "schema_version": 3,
             "workframe_inputs": inputs.as_dict(),
-            "canonical": canonicalize_workframe_inputs(inputs),
-            "common_workframe_inputs": common_inputs.as_dict(),
-            "common_canonical": canonicalize_common_workframe_inputs(common_inputs),
-            "shared_substrate_hash": projection.shared_substrate_hash,
+            "canonical": canonical_inputs,
+            "shared_substrate_hash": shared_substrate_hash,
         },
         "reducer_output": workframe.as_dict(),
         "invariant_report": report.as_dict(),
@@ -225,13 +183,13 @@ def build_native_workframe_debug_bundle(
             source_prompt_inventory=prompt_inventory,
         ),
         "workframe_cursor": {
-            "schema_version": 1,
+            "schema_version": 3,
+            "projection_kind": "canonical_workframe",
             "attempt_id": inputs.attempt_id,
             "turn_id": inputs.turn_id,
             "workframe_id": workframe.trace.workframe_id,
-            "workframe_variant": workframe_variant,
-            "shared_substrate_hash": projection.shared_substrate_hash,
-            "projection_hash": projection.projection_hash,
+            "shared_substrate_hash": shared_substrate_hash,
+            "projection_hash": projection_hash,
             "input_hash": workframe.trace.input_hash,
             "output_hash": workframe.trace.output_hash,
             "previous_workframe_hash": inputs.previous_workframe_hash,
@@ -370,11 +328,11 @@ def _forbidden_term_in_text(term: str, text: str) -> bool:
     return term in text
 
 
-def native_workframe_projection_policy(variant: object = DEFAULT_WORKFRAME_VARIANT) -> dict[str, object]:
-    """Return the Phase 4 WorkFrame role for a variant."""
+def native_workframe_projection_policy() -> dict[str, object]:
+    """Return the Phase 4 WorkFrame projection role."""
 
     return {
-        "variant": validate_workframe_variant_name(variant),
+        "projection_kind": "canonical_workframe",
         "role": "projection_policy_analyzer",
         "runtime_wired": False,
         "tool_execution_authority": False,
