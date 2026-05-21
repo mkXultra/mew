@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-20
+Last updated: 2026-05-21
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -100,6 +100,15 @@ into `implement_v2` itself. Keep the Harbor fixture as a future benchmark, but
 defer Harbor memory-on/off campaign execution until the implement lane has a
 real, bounded, inspectable memory surface.
 
+2026-05-21 decision update: MemoryArena remains auxiliary, not the primary
+M6.25 memory close gate. Current memory recall is mostly token-overlap over
+structured entries, so the next valuable work is `MemoryContextBuilder`
+contract and V0 fixtures: compression, progressive expansion, relevance,
+decay/contradiction, scope isolation, retrieval timing, and retrieval audit.
+Use `docs/REVIEW_2026-05-20_MEMORY_CONTEXT_BUILDER_LITERATURE.md` as the
+literature basis and `docs/DESIGN_2026-05-21_M6_25_MEMORY_CONTEXT_BUILDER.md`
+as the implementation authority.
+
 ## M6.24 Close Summary
 
 M6.24 is staged-closed via `docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`.
@@ -140,8 +149,10 @@ Phase order:
 8. Resident advantage report.
 
 Current next action: after the cleanup controller settles, continue M6.25 by
-designing the implement-lane memory surface. Do not implement the Harbor
-resident campaign runner yet. Do not treat
+implementing `MemoryContextBuilder` Phase A/B from
+`docs/DESIGN_2026-05-21_M6_25_MEMORY_CONTEXT_BUILDER.md`. Do not implement a
+MemoryArena model-in-loop agent or Harbor resident campaign runner yet. Do not
+treat
 `docs/DESIGN_2026-05-20_M6_25_IMPLEMENT_V2_DURABLE_CODING_INTELLIGENCE.md` or
 the reverted `016e102` implementation as active implementation authority. Do
 not inject memory into ordinary `implement_v2` requests until the bounded
