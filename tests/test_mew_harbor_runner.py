@@ -14,6 +14,7 @@ from mew.mew_harbor_runner import (
     collect_mew_trial_summary,
     command_cwd_for_task,
     debug_cleanup_specs_for_task,
+    environment_build_timeout_multiplier_for_task,
     extract_harbor_reward,
     make_jobs_dir,
     observer_detail_missing,
@@ -40,6 +41,7 @@ def _config(tmp_path, **overrides):
         "timeout_reserve_seconds": 60,
         "agent_timeout_multiplier": 2,
         "agent_setup_timeout_multiplier": 4,
+        "environment_build_timeout_multiplier": None,
         "work_guidance": DEFAULT_WORK_GUIDANCE,
         "install_command": "python3 -m pip install -e /mew",
         "run_mode": "step-check-10min",
@@ -258,6 +260,7 @@ def test_build_harbor_command_uses_mew_wrapper_mounts_and_timeout_shape(tmp_path
     assert command[command.index("--agent-import-path") + 1] == "mew_terminal_bench_agent:MewTerminalBenchAgent"
     assert "--agent" not in command
     assert command[command.index("--agent-setup-timeout-multiplier") + 1] == "4"
+    assert "--environment-build-timeout-multiplier" not in command
     assert "timeout_seconds=660" in command
     assert "timeout_reserve_seconds=60" in command
     assert "command_cwd=/app" in command
@@ -275,6 +278,12 @@ def test_build_harbor_command_accepts_task_specific_command_cwd(tmp_path):
     assert any(part.startswith("command_template=") and "--cwd {command_cwd_shell}" in part for part in command)
 
 
+def test_build_harbor_command_accepts_environment_build_timeout_multiplier(tmp_path):
+    command = build_harbor_command(_config(tmp_path, environment_build_timeout_multiplier=3))
+
+    assert command[command.index("--environment-build-timeout-multiplier") + 1] == "3"
+
+
 def test_parser_accepts_command_cwd_override():
     args = build_parser().parse_args(["prove-plus-comm", "--command-cwd", "/workspace"])
 
@@ -287,11 +296,24 @@ def test_parser_accepts_agent_setup_timeout_multiplier():
     assert args.agent_setup_timeout_multiplier == 6
 
 
+def test_parser_accepts_environment_build_timeout_multiplier():
+    args = build_parser().parse_args(["make-mips-interpreter", "--environment-build-timeout-multiplier", "5"])
+
+    assert args.environment_build_timeout_multiplier == 5
+
+
 def test_command_cwd_for_task_uses_known_task_map():
     assert command_cwd_for_task("prove-plus-comm") == "/workspace"
     assert command_cwd_for_task("terminal-bench/prove-plus-comm") == "/workspace"
     assert command_cwd_for_task("make-mips-interpreter") == "/app"
     assert command_cwd_for_task("prove-plus-comm", "/custom") == "/custom"
+
+
+def test_environment_build_timeout_multiplier_for_task_uses_known_heavy_task_default():
+    assert environment_build_timeout_multiplier_for_task("make-mips-interpreter") == 3
+    assert environment_build_timeout_multiplier_for_task("terminal-bench/make-mips-interpreter") == 3
+    assert environment_build_timeout_multiplier_for_task("prove-plus-comm") is None
+    assert environment_build_timeout_multiplier_for_task("make-mips-interpreter", 5) == 5
 
 
 def test_make_jobs_dir_is_stable_and_human_readable(tmp_path):

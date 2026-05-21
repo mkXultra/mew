@@ -33,6 +33,12 @@ TASK_COMMAND_CWD_BY_SLUG = {
 TASK_DEBUG_CLEANUP_SPECS_BY_SLUG = {
     "make-mips-interpreter": ("/tmp/frame*.bmp",),
 }
+TASK_ENVIRONMENT_BUILD_TIMEOUT_MULTIPLIERS_BY_SLUG = {
+    # make-mips-interpreter uses a comparatively heavy Docker environment. In
+    # cold-cache or busy Docker states Harbor's default 600s environment start
+    # window can expire before mew ever enters the task.
+    "make-mips-interpreter": 3,
+}
 RUN_MODES = ("step-check-10min", "speed-proof", "proof-5")
 _GUIDANCE_PAIR_PATTERN = re.compile(r"(?:^|\s)([A-Za-z0-9_.-]+)\s*=\s*([A-Za-z0-9_.-]+)")
 
@@ -95,6 +101,7 @@ class MewHarborRun:
     timeout_reserve_seconds: int
     agent_timeout_multiplier: int
     agent_setup_timeout_multiplier: int
+    environment_build_timeout_multiplier: int | None
     work_guidance: str
     install_command: str
     command_cwd: str = DEFAULT_COMMAND_CWD
@@ -289,6 +296,13 @@ def debug_cleanup_specs_for_task(task_name: str) -> tuple[str, ...]:
     return TASK_DEBUG_CLEANUP_SPECS_BY_SLUG.get(slug, ())
 
 
+def environment_build_timeout_multiplier_for_task(task_name: str, override: int | None = None) -> int | None:
+    if override is not None:
+        return int(override)
+    slug = str(task_name or "").removeprefix("terminal-bench/")
+    return TASK_ENVIRONMENT_BUILD_TIMEOUT_MULTIPLIERS_BY_SLUG.get(slug)
+
+
 def build_mounts_json(config: MewHarborRun) -> str:
     mounts = [
         {
@@ -306,7 +320,7 @@ def build_mounts_json(config: MewHarborRun) -> str:
 
 
 def build_harbor_command(config: MewHarborRun) -> list[str]:
-    return [
+    command = [
         "harbor",
         "run",
         "-d",
@@ -322,25 +336,37 @@ def build_harbor_command(config: MewHarborRun) -> list[str]:
         str(config.agent_timeout_multiplier),
         "--agent-setup-timeout-multiplier",
         str(config.agent_setup_timeout_multiplier),
-        "--jobs-dir",
-        str(config.jobs_dir),
-        "--agent-import-path",
-        "mew_terminal_bench_agent:MewTerminalBenchAgent",
-        "--ak",
-        f"install_command={config.install_command}",
-        "--ak",
-        f"command_cwd={config.command_cwd}",
-        "--ak",
-        "container_repo_root=/mew",
-        "--ak",
-        f"timeout_seconds={int(config.timeout_seconds)}",
-        "--ak",
-        f"timeout_reserve_seconds={int(config.timeout_reserve_seconds)}",
-        "--ak",
-        f"command_template={build_mew_work_command_template(config)}",
-        "--mounts-json",
-        build_mounts_json(config),
     ]
+    if config.environment_build_timeout_multiplier is not None:
+        command.extend(
+            [
+                "--environment-build-timeout-multiplier",
+                str(config.environment_build_timeout_multiplier),
+            ]
+        )
+    command.extend(
+        [
+            "--jobs-dir",
+            str(config.jobs_dir),
+            "--agent-import-path",
+            "mew_terminal_bench_agent:MewTerminalBenchAgent",
+            "--ak",
+            f"install_command={config.install_command}",
+            "--ak",
+            f"command_cwd={config.command_cwd}",
+            "--ak",
+            "container_repo_root=/mew",
+            "--ak",
+            f"timeout_seconds={int(config.timeout_seconds)}",
+            "--ak",
+            f"timeout_reserve_seconds={int(config.timeout_reserve_seconds)}",
+            "--ak",
+            f"command_template={build_mew_work_command_template(config)}",
+            "--mounts-json",
+            build_mounts_json(config),
+        ]
+    )
+    return command
 
 
 def harbor_environment() -> dict[str, str]:
@@ -829,6 +855,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--agent-timeout-multiplier", type=int, default=2)
     parser.add_argument("--agent-setup-timeout-multiplier", type=int, default=4)
     parser.add_argument(
+        "--environment-build-timeout-multiplier",
+        type=int,
+        help=(
+            "Override Harbor's environment build/start timeout multiplier. "
+            "Omit to use task-specific defaults for known heavy environments."
+        ),
+    )
+    parser.add_argument(
         "--work-guidance",
         action="append",
         help=(
@@ -906,6 +940,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         agent_timeout_multiplier=args.agent_timeout_multiplier,
         agent_setup_timeout_multiplier=args.agent_setup_timeout_multiplier,
+        environment_build_timeout_multiplier=environment_build_timeout_multiplier_for_task(
+            args.task_name,
+            args.environment_build_timeout_multiplier,
+        ),
         work_guidance=combine_work_guidance(work_guidance_fragments, mode_defaults.work_guidance),
         install_command=args.install_command,
         command_cwd=command_cwd_for_task(args.task_name, args.command_cwd),
