@@ -312,7 +312,7 @@ def test_memory_card_golden_serialization_hash_and_retired_schema_names():
         '"expires_at":null,"lifespan":"project_durable","retention_policy_id":null},'
         '"metadata":{"schema_fixture":"phase_a"},"privacy":{"allowed_scope_ids":["scope:v1:repo:6e65353668c4eff4"],'
         '"redaction_policy":"none","sharing":"project","user_visible_editing":"disabled"},'
-        '"projection_mode":"debug_only","revision":{"contradicted_by":[],"superseded_by":[],'
+        '"projection_mode":"debug_only","retrieval_terms":[],"revision":{"contradicted_by":[],"superseded_by":[],'
         '"supersedes":["legacy_entry_001"],"version":1},"schema_version":"memory_card.v1",'
         '"scope":{"branch_ref":null,"lane_id":null,"level":"repo","namespace":"repo:mew",'
         '"project_id":null,"repo_ref":"mew","task_family":null,"task_ref":null,"user_id":null},'
@@ -321,7 +321,7 @@ def test_memory_card_golden_serialization_hash_and_retired_schema_names():
         '"superseded_at":null,"tombstoned_at":null,"updated_at":"2026-05-22T00:01:00Z"},'
         '"valence":{"effect":"use","polarity":"neutral"}}'
     )
-    assert card.stable_hash() == "sha256:9e0dd80338dfc4de66fa52e6227d15394b90aa8f3349fc8f003852194e090110"
+    assert card.stable_hash() == "sha256:81efbbaee31c356ecd9a8c4ae17bc4e78d00288d3dbe09c3d2e518ed0a492ffb"
 
     retired = card.to_dict()
     retired["projection"] = retired.pop("projection_mode")
@@ -510,10 +510,11 @@ def test_memory_candidate_golden_serialization_hash():
         '"proposed_scope":{"branch_ref":null,"lane_id":null,"level":"repo","namespace":"repo:mew",'
         '"project_id":null,"repo_ref":"mew","task_family":null,"task_ref":null,"user_id":null},'
         '"proposed_valence":{"effect":"verify","polarity":"positive"},'
+        '"retrieval_terms":[],'
         '"summary":"Use typed-card schema tests before adding recall behavior.",'
         '"write_reason":"schema-only proposal fixture"}'
     )
-    assert candidate.stable_hash() == "sha256:202442fb64b8e5eaafe173af43a6f44a2a6342778f7bdac7fd1d40f9ec7d8a4f"
+    assert candidate.stable_hash() == "sha256:36874c5860ea8c5f25de744d2a55e01515bd65c49f1a4139f6d21d8fc2d364a4"
 
 
 def test_graph_edge_schema_uses_canonical_actor_edges_and_evidence_links():

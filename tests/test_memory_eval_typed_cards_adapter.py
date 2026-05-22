@@ -249,8 +249,10 @@ def test_live_model_mode_uses_structured_extractor_when_injected() -> None:
         "reject",
         "clarification_needed",
     ]
+    assert "retrieval_terms" in calls[0]["json_schema"]["properties"]["candidate"]["required"]
     assert calls[0]["strict"] is True
     assert "default_scope_key" in calls[0]["prompt"]
+    assert "retrieval_terms" in calls[0]["prompt"]
 
 
 @pytest.mark.parametrize(
@@ -349,6 +351,8 @@ def test_lifecycle_seed_eval_round_trips_current_support_from_typed_provenance()
     assert seed["lifecycle_type"] == "seed_eval"
     assert seed["card_ids"]
     assert [event.operation for event in adapter.core.memory_audit_log][-1] == "seed_eval"
+    committed = adapter.core.memory_cards[seed["card_ids"][0]]
+    assert {"Mira", "green", "tea", "planning", "breaks"}.issubset(set(committed.retrieval_terms))
 
     result = adapter.retrieve(
         {
@@ -366,6 +370,40 @@ def test_lifecycle_seed_eval_round_trips_current_support_from_typed_provenance()
     assert ranked["source_experience_ids"] == ["ex_public"]
     assert ranked["provenance_refs"] == ranked["metadata"]["provenance_refs_by_role"]["current_support"]
     assert ranked["scope_id"] == "tenant_a/user_a"
+
+
+def test_deterministic_replay_retrieval_terms_skip_speaker_roles_and_overlong_tokens() -> None:
+    adapter = TypedCardsMemoryEvalAdapter()
+    adapter.reset({"fixture_id": "fx_replay_terms", "evaluation_time": "2026-05-21T00:00:00Z"})
+    long_url = "https://example.test/" + ("x" * 110)
+    adapter.ingest(
+        [
+            _experience(
+                "ex_replay_terms",
+                text=f"User: Mira stores launch notes near {long_url}",
+            )
+        ]
+    )
+    seed = adapter.mutate(
+        [
+            {
+                "op_id": "seed_replay_terms",
+                "lifecycle_type": "seed_eval",
+                "target_experience_id": "ex_replay_terms",
+            }
+        ]
+    )[0]
+
+    assert seed["status"] == "success"
+    committed = adapter.core.memory_cards[seed["card_ids"][0]]
+    assert "User" not in committed.retrieval_terms
+    assert "Mira" in committed.retrieval_terms
+    assert "launch" in committed.retrieval_terms
+    assert all(len(term) <= 96 for term in committed.retrieval_terms)
+    assert all("x" * 40 not in term for term in committed.retrieval_terms)
+    assert all("https" not in term.casefold() for term in committed.retrieval_terms)
+    assert all("example" not in term.casefold() for term in committed.retrieval_terms)
+    assert all("test/" not in term.casefold() for term in committed.retrieval_terms)
 
 
 def test_update_forget_fixture_uses_current_support_and_does_not_leak_forgotten_ids() -> None:

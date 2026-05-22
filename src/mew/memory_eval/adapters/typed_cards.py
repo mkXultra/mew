@@ -326,6 +326,7 @@ class TypedCardsMemoryEvalAdapter:
                 patch = {
                     **patch,
                     "summary": replacement_card.summary,
+                    "retrieval_terms": list(replacement_card.retrieval_terms),
                     "applicability": replacement_card.applicability.to_dict(),
                     "valence": replacement_card.valence.to_dict(),
                     "confidence": replacement_card.confidence,
@@ -508,6 +509,7 @@ def _deterministic_replay_extractor(
             "kind": "semantic_fact",
             "summary": _clean_summary(request.raw_text),
             "details": None,
+            "retrieval_terms": _replay_retrieval_terms(request.raw_text),
             "confidence": 0.9,
             "authority": {
                 "source": "self",
@@ -521,8 +523,18 @@ def _deterministic_replay_extractor(
                 "prerequisites": [],
                 "counterexamples": [],
             },
+            "evidence_links": [
+                {
+                    "ref_id": provenance_event.event_id,
+                    "role": "current_support",
+                    "active": True,
+                    "added_by_mutation_id": None,
+                    "note": "deterministic replay support",
+                }
+            ],
             "proposed_by": CandidateProducer.MODEL.value,
             "write_reason": "deterministic memory-eval replay",
+            "ambiguous": False,
         },
     }
 
@@ -610,6 +622,29 @@ def _add_second(value: str) -> str:
 def _clean_summary(text: str) -> str:
     cleaned = " ".join(str(text or "").split())
     return cleaned[:512] or "Memory extracted from public experience."
+
+
+def _replay_retrieval_terms(text: str) -> list[str]:
+    terms = []
+    seen = set()
+    for raw in str(text or "").split():
+        term = raw.strip(",:;!?()[]{}\"'")
+        if len(term) < 2:
+            continue
+        key = term.casefold()
+        if key in {"a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "of", "on", "or", "that", "the", "to", "use", "uses", "with"}:
+            continue
+        if key in {"user", "assistant", "system", "tool", "developer"}:
+            continue
+        if len(term) > 96:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(term)
+        if len(terms) >= 32:
+            break
+    return terms
 
 
 def _mutation_patch(op: Mapping[str, Any]) -> dict[str, Any]:

@@ -148,8 +148,55 @@ _MUTATION_ACTORS = {
     TraceActor.REVIEWER.value,
     TraceActor.MAINTAINER.value,
 }
-_SEMANTIC_PATCH_FIELDS = {"summary", "details", "applicability", "valence", "invalidators", "confidence"}
+_SEMANTIC_PATCH_FIELDS = {
+    "summary",
+    "details",
+    "retrieval_terms",
+    "applicability",
+    "valence",
+    "invalidators",
+    "confidence",
+}
 _LATENCY_SOURCE_PRECEDENCE = ("wall_clock", "replayed_artifact", "deterministic_mock")
+_MAX_RETRIEVAL_TERM_CHARS = 96
+_ANCHOR_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "in",
+    "is",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "to",
+    "uses",
+    "use",
+    "with",
+}
+_QUERY_RELEVANCE_STOPWORDS = _ANCHOR_STOPWORDS | {
+    "does",
+    "do",
+    "did",
+    "what",
+    "which",
+    "who",
+    "whom",
+    "whose",
+    "when",
+    "where",
+    "why",
+    "how",
+}
+_RAW_SPEAKER_ROLE_TOKENS = {"user", "assistant", "system", "tool", "developer"}
 
 
 def utc_now_iso() -> str:
@@ -224,6 +271,7 @@ def raw_memory_extraction_schema() -> dict[str, Any]:
             "kind",
             "summary",
             "details",
+            "retrieval_terms",
             "confidence",
             "scope",
             "authority",
@@ -241,6 +289,16 @@ def raw_memory_extraction_schema() -> dict[str, Any]:
                 "description": "Synthesized memory claim, not raw transcript text.",
             },
             "details": nullable_string,
+            "retrieval_terms": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 32,
+                "description": (
+                    "Concise retrieval anchors copied or minimally normalized from raw text. "
+                    "Preserve identifying subject, target context, condition, object, and value terms; "
+                    "do not include full sentences or transcript excerpts."
+                ),
+            },
             "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "scope": scope_schema,
             "authority": {
@@ -344,6 +402,7 @@ def raw_memory_extraction_prompt(request: RawMemoryIngestRequest, provenance_eve
                 "kind": "reentry_snapshot | task_episode | semantic_fact | procedure | policy_or_preference",
                 "summary": "synthesized memory claim, not raw transcript",
                 "details": "optional synthesized details or null",
+                "retrieval_terms": ["raw subject", "target context", "condition", "object", "value"],
                 "confidence": 0.0,
                 "authority": {"source": "self", "strength": "hint", "source_refs": []},
                 "valence": {"polarity": "neutral", "effect": "use"},
@@ -360,6 +419,9 @@ def raw_memory_extraction_prompt(request: RawMemoryIngestRequest, provenance_eve
             "Return exactly one JSON object matching the schema.",
             "Do not mark anything committed or approved.",
             "Do not copy raw transcript into summary or details.",
+            "Populate retrieval_terms with short raw-text anchors that make the claim findable even if summary/details are paraphrased.",
+            "For retrieval_terms, preserve the original identifying terms for the subject, target context, condition, object, and value; for example, keep names, colors, folders, review types, product names, and other discriminators.",
+            "Keep retrieval_terms as concise terms or short phrases, not full sentences.",
             "When ambiguous, return clarification_needed, reject, or a low-confidence proposal.",
             "Every candidate must cite the provided provenance event through current_support evidence.",
             "Applicability fields must contain canonical typed refs only, never natural-language descriptions.",
@@ -997,6 +1059,7 @@ class TypedMemoryCore:
             kind=candidate.proposed_kind,
             summary=candidate.summary,
             details=candidate.details,
+            retrieval_terms=candidate.retrieval_terms,
             confidence=candidate.confidence,
             scope=candidate.proposed_scope,
             lifecycle=Lifecycle(lifespan="project_durable"),
@@ -1317,7 +1380,11 @@ class TypedMemoryCore:
                 _add_drop(reason, card, dropped, internal_dropped, dropped_counts)
                 continue
             components, final_score, exact_scope = self._score_card(card, query_tokens, request)
-            if query_tokens and Decimal(components["lexical_score"]) == Decimal("0.0000") and not request.applicability_refs:
+            if (
+                query_tokens
+                and _query_overlap_count(card, query_tokens) < _minimum_query_overlap(query_tokens)
+                and not request.applicability_refs
+            ):
                 _add_drop("no_relevant_memory", card, dropped, internal_dropped, dropped_counts)
                 continue
             scored.append((components, card, final_score, exact_scope))
@@ -1565,6 +1632,7 @@ class TypedMemoryCore:
         details = _clean_text(raw_candidate.get("details") or "") or None
         if details and _looks_like_raw_copy(details, request.raw_text):
             return None, "rejected", (DroppedReason(reason="raw_transcript_not_memory", ref_id=provenance_event.event_id),)
+        retrieval_terms = _retrieval_anchor_terms(raw_candidate.get("retrieval_terms") or (), request.raw_text)
         scope = default_scope
         if isinstance(raw_candidate.get("scope"), Mapping):
             scope = Scope.from_dict(raw_candidate["scope"])
@@ -1606,6 +1674,7 @@ class TypedMemoryCore:
             proposed_kind=raw_candidate.get("kind", MemoryCardKind.SEMANTIC_FACT.value),
             summary=summary,
             details=details,
+            retrieval_terms=retrieval_terms,
             evidence_links=evidence_links,
             proposed_scope=scope,
             proposed_authority=authority,
@@ -1647,6 +1716,7 @@ class TypedMemoryCore:
             target,
             summary=patch.get("summary", target.summary),
             details=details,
+            retrieval_terms=tuple(patch.get("retrieval_terms", target.retrieval_terms)),
             confidence=patch.get("confidence", target.confidence),
             applicability=Applicability.from_dict(patch["applicability"]) if "applicability" in patch else target.applicability,
             valence=Valence.from_dict(patch["valence"]) if "valence" in patch else target.valence,
@@ -1745,6 +1815,7 @@ class TypedMemoryCore:
                 card_id=new_id,
                 summary=patch["summary"],
                 details=patch.get("details", target.details),
+                retrieval_terms=tuple(patch.get("retrieval_terms", target.retrieval_terms)),
                 evidence_links=evidence_links,
                 approval_state=ApprovalState.COMMITTED.value,
                 staleness_state=StalenessState.FRESH.value,
@@ -2156,11 +2227,80 @@ def _tokens(text: str) -> set[str]:
     return {match.group(0).casefold() for match in _TOKEN_RE.finditer(text or "")}
 
 
+def _meaningful_query_tokens(query_tokens: set[str]) -> set[str]:
+    return {token for token in query_tokens if token not in _QUERY_RELEVANCE_STOPWORDS}
+
+
+def _query_overlap_count(card: MemoryCard, query_tokens: set[str]) -> int:
+    meaningful = _meaningful_query_tokens(query_tokens)
+    if not meaningful:
+        meaningful = query_tokens
+    return len(meaningful & _tokens(_card_search_text(card)))
+
+
+def _minimum_query_overlap(query_tokens: set[str]) -> int:
+    meaningful = _meaningful_query_tokens(query_tokens)
+    return 2 if len(meaningful) >= 4 else 1
+
+
+def _retrieval_anchor_terms(values: Any, raw_text: str) -> tuple[str, ...]:
+    terms: list[str] = []
+    raw_values: Sequence[Any]
+    if isinstance(values, str):
+        raw_values = (values,)
+    elif isinstance(values, Sequence):
+        raw_values = values
+    else:
+        raw_values = ()
+    for match in _TOKEN_RE.finditer(raw_text or ""):
+        token = _raw_retrieval_anchor_token(match.group(0))
+        if token is None:
+            continue
+        terms.append(token)
+    for value in raw_values:
+        text = _clean_text(value)
+        if len(text) > 96:
+            text = text[:96].rstrip()
+        if text:
+            terms.append(text)
+    return tuple(_normalize_patch_retrieval_terms(terms)[:32])
+
+
+def _raw_retrieval_anchor_token(value: str) -> str | None:
+    token = _clean_text(value).strip(".,;:!?()[]{}\"'<>")
+    if len(token) < 2:
+        return None
+    token_key = token.casefold().rstrip(":")
+    if token_key in _ANCHOR_STOPWORDS or token_key in _RAW_SPEAKER_ROLE_TOKENS:
+        return None
+    if len(token) > _MAX_RETRIEVAL_TERM_CHARS:
+        return None
+    return token
+
+
+def _normalize_patch_retrieval_terms(values: Any) -> list[str]:
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        raise ValueError("retrieval_terms must be a sequence")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _clean_text(value)
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(text)
+    return normalized
+
+
 def _card_search_text(card: MemoryCard) -> str:
     applicability = card.applicability.to_dict()
     parts = [
         card.summary,
         card.details or "",
+        " ".join(card.retrieval_terms),
         " ".join(applicability.get("applies_to") or ()),
         " ".join(applicability.get("prerequisites") or ()),
         " ".join(applicability.get("counterexamples") or ()),
@@ -2217,6 +2357,10 @@ def _normalize_patch(patch: Mapping[str, Any]) -> dict[str, Any]:
         if patch["details"] is None and "details" not in clear_fields:
             raise ValueError("details=null requires clear_fields")
         result["details"] = None if patch["details"] is None else _clean_text(patch["details"])
+    if "retrieval_terms" in patch:
+        if patch["retrieval_terms"] is None:
+            raise ValueError("retrieval_terms cannot be null")
+        result["retrieval_terms"] = _normalize_patch_retrieval_terms(patch["retrieval_terms"])
     if "applicability" in patch:
         if patch["applicability"] is None:
             raise ValueError("applicability cannot be null")

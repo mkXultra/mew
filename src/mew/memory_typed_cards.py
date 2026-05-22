@@ -21,6 +21,8 @@ from typing import Any
 
 MAX_SUMMARY_CHARS = 512
 MAX_DETAILS_CHARS = 4096
+MAX_RETRIEVAL_TERMS = 32
+MAX_RETRIEVAL_TERM_CHARS = 96
 MAX_PROVENANCE_EXCERPT_CHARS = 240
 CONFIDENCE_HASH_DIGITS = 4
 
@@ -420,6 +422,28 @@ def _tuple_text(values: Any, field_name: str) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise ValueError(f"{field_name} must be a sequence")
     return tuple(_text(item, allow_empty=False, field_name=field_name) for item in values)
+
+
+def _retrieval_terms(values: Any, field_name: str = "retrieval_terms") -> tuple[str, ...]:
+    terms = _tuple_text(values, field_name)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        cleaned = " ".join(term.split())
+        if not cleaned:
+            continue
+        if len(cleaned) > MAX_RETRIEVAL_TERM_CHARS:
+            raise ValueError(f"{field_name} items must be <= {MAX_RETRIEVAL_TERM_CHARS} chars")
+        if _has_long_direct_quote(cleaned) or re.search(r"\b(User|Assistant|System|Tool):", cleaned):
+            raise ValueError(f"{field_name} must contain concise anchor terms, not transcript excerpts")
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(cleaned)
+    if len(normalized) > MAX_RETRIEVAL_TERMS:
+        raise ValueError(f"{field_name} must contain <= {MAX_RETRIEVAL_TERMS} items")
+    return tuple(normalized)
 
 
 def _tuple_of(cls: type[Any], values: Any, field_name: str) -> tuple[Any, ...]:
@@ -1291,6 +1315,7 @@ class MemoryCard:
     contradiction_state: str = ContradictionState.NONE.value
     approval_state: str = ApprovalState.PROPOSAL.value
     projection_mode: str = ProjectionMode.DEBUG_ONLY.value
+    retrieval_terms: tuple[str, ...] = ()
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -1340,6 +1365,7 @@ class MemoryCard:
         )
         object.__setattr__(self, "approval_state", _enum_value(ApprovalState, self.approval_state, "approval_state"))
         object.__setattr__(self, "projection_mode", _enum_value(ProjectionMode, self.projection_mode, "projection_mode"))
+        object.__setattr__(self, "retrieval_terms", _retrieval_terms(self.retrieval_terms))
         object.__setattr__(self, "metadata", _plain(self.metadata))
         _validate_card_text(self.summary, self.details, self.approval_state)
         if self.approval_state == ApprovalState.COMMITTED.value:
@@ -1366,6 +1392,7 @@ class MemoryCard:
             "contradiction_state": self.contradiction_state,
             "approval_state": self.approval_state,
             "projection_mode": self.projection_mode,
+            "retrieval_terms": list(self.retrieval_terms),
             "graph_refs": self.graph_refs.to_dict(),
             "privacy": self.privacy.to_dict(),
             "timestamps": self.timestamps.to_dict(),
@@ -1395,6 +1422,7 @@ class MemoryCard:
             contradiction_state=payload.get("contradiction_state", ContradictionState.NONE.value),
             approval_state=payload.get("approval_state", ApprovalState.PROPOSAL.value),
             projection_mode=payload.get("projection_mode", ProjectionMode.DEBUG_ONLY.value),
+            retrieval_terms=tuple(payload.get("retrieval_terms") or ()),
             graph_refs=GraphRefs.from_dict(payload.get("graph_refs") or {}),
             privacy=PrivacyRules.from_dict(payload.get("privacy") or {}),
             timestamps=MemoryTimestamps.from_dict(payload.get("timestamps") or {}),
@@ -1884,6 +1912,7 @@ class MemoryCandidate:
     confidence: float
     write_reason: str
     proposed_by: str
+    retrieval_terms: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "candidate_id", _text(self.candidate_id, allow_empty=False, field_name="candidate_id"))
@@ -1927,6 +1956,7 @@ class MemoryCandidate:
         object.__setattr__(self, "confidence", _validate_confidence(self.confidence))
         object.__setattr__(self, "write_reason", _text(self.write_reason, allow_empty=False, field_name="write_reason"))
         object.__setattr__(self, "proposed_by", _enum_value(CandidateProducer, self.proposed_by, "proposed_by"))
+        object.__setattr__(self, "retrieval_terms", _retrieval_terms(self.retrieval_terms))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1943,6 +1973,7 @@ class MemoryCandidate:
             "confidence": self.confidence,
             "write_reason": self.write_reason,
             "proposed_by": self.proposed_by,
+            "retrieval_terms": list(self.retrieval_terms),
         }
 
     def stable_hash(self) -> str:

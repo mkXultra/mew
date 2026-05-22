@@ -258,8 +258,10 @@ def test_model_extractor_prefers_structured_json_and_passes_schema() -> None:
     assert calls[0]["model"] == "gpt-5.5"
     assert calls[0]["schema_name"] == "raw_memory_extraction"
     assert calls[0]["json_schema"] == raw_memory_extraction_schema()
+    assert "retrieval_terms" in calls[0]["json_schema"]["properties"]["candidate"]["required"]
     assert calls[0]["strict"] is True
     assert "default_scope_key" in calls[0]["prompt"]
+    assert "retrieval_terms" in calls[0]["prompt"]
 
 
 def test_approval_commit_separation_and_model_cannot_commit() -> None:
@@ -394,6 +396,107 @@ def test_retrieve_filters_lifecycle_state_scope_and_is_card_side_effect_free() -
     stale = core.retrieve(MemoryRecallRequest(query="direct scan committed", scope=_scope()))
     assert stale.abstained is True
     assert stale.dropped_count_by_reason["stale"] == 1
+
+
+def test_retrieval_terms_preserve_discriminators_for_ranking_when_summary_is_generic() -> None:
+    def extractor(request, provenance_event, scope):
+        is_launch = "cobalt" in request.raw_text
+        return {
+            "decision": "candidate",
+            "candidate": {
+                "kind": "semantic_fact",
+                "summary": "Mira has a badge color preference for reviews.",
+                "details": None,
+                "retrieval_terms": [
+                    "Mira",
+                    "badge color",
+                    "cobalt" if is_launch else "silver",
+                    "launch reviews" if is_launch else "archive reviews",
+                ],
+                "confidence": 0.9,
+                "authority": {"source": "self", "strength": "hint"},
+                "valence": {"polarity": "neutral", "effect": "use"},
+                "applicability": {"applies_to": [_scope().scope_key()]},
+                "proposed_by": "model",
+            },
+        }
+
+    core = TypedMemoryCore(extractor=extractor, clock=_Clock())
+    primary = _ingest(
+        core,
+        raw_text="Mira uses badge color cobalt for launch reviews.",
+        source_experience_id="exp_primary_badge",
+    )
+    secondary = _ingest(
+        core,
+        raw_text="Mira uses badge color silver for archive reviews.",
+        source_experience_id="exp_secondary_badge",
+    )
+    assert primary.proposal_card is not None
+    assert secondary.proposal_card is not None
+    assert "launch reviews" in primary.proposal_card.retrieval_terms
+
+    core.approve_and_commit_memory(primary.proposal_card.card_id, actor="debug")
+    core.approve_and_commit_memory(secondary.proposal_card.card_id, actor="debug")
+
+    result = core.retrieve(
+        MemoryRecallRequest(
+            query="Which badge color does Mira use for launch reviews?",
+            scope=_scope(),
+            limit=1,
+        )
+    )
+
+    assert result.ranked_evidence[0].support_experience_ids == ("exp_primary_badge",)
+
+
+def test_raw_retrieval_anchor_fallback_sanitizes_unbounded_tokens() -> None:
+    payload = _candidate_payload("Store the short durable claim without crashing on raw anchor tokens.")
+    core = _core_with_payload(payload)
+    long_url = "https://example.test/" + ("very-long-path-segment/" * 12)
+
+    result = _ingest(
+        core,
+        raw_text=f"Remember this link for later: {long_url}",
+        source_experience_id="exp_long_url",
+    )
+
+    assert result.proposal_card is not None
+    assert all(len(term) <= 96 for term in result.proposal_card.retrieval_terms)
+    assert all("very-long-path-segment" not in term for term in result.proposal_card.retrieval_terms)
+
+
+def test_raw_retrieval_anchor_fallback_skips_single_line_speaker_role_tokens() -> None:
+    payload = _candidate_payload("Mira uses badge color cobalt for launch reviews.")
+    core = _core_with_payload(payload)
+
+    result = _ingest(
+        core,
+        raw_text="User: Mira uses badge color cobalt for launch reviews.",
+        source_experience_id="exp_speaker_prefix",
+    )
+
+    assert result.proposal_card is not None
+    assert "User:" not in result.proposal_card.retrieval_terms
+    assert "Mira" in result.proposal_card.retrieval_terms
+
+
+def test_multi_token_query_abstains_on_single_weak_overlap() -> None:
+    core, _committed = _committed_core(
+        "Mira stores receipts in drawer seven.",
+        source_experience_id="exp_unrelated",
+    )
+
+    result = core.retrieve(
+        MemoryRecallRequest(
+            query="Which tea does Mira prefer for breaks?",
+            scope=_scope(),
+            limit=3,
+        )
+    )
+
+    assert result.abstained is True
+    assert result.dropped_count_by_reason["no_relevant_memory"] == 1
 
 
 def test_applicability_applies_to_is_required_even_without_explicit_request_refs() -> None:
