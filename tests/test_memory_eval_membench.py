@@ -7,6 +7,7 @@ from mew.memory_eval.hashing import canonical_json
 from mew.memory_eval.membench import (
     audit_mteb_source_manifest,
     build_ephemeral_fixtures_from_dry_run,
+    build_typed_cards_ephemeral_fixtures_from_dry_run,
     convert_mteb_qrels_dry_run,
     main as membench_main,
     validate_mteb_qrels_dry_run,
@@ -223,6 +224,64 @@ def test_mteb_dry_run_validation_uses_ephemeral_fixtures_without_pack_writes(
     assert fixture_tree_before == _fixture_tree_snapshot()
 
 
+def test_mteb_dry_run_validation_can_include_typed_cards_deterministic_replay(
+    tmp_path,
+):
+    fixture_tree_before = _fixture_tree_snapshot()
+    report = _validation_ready_dry_run_report(tmp_path)
+
+    typed_fixtures = build_typed_cards_ephemeral_fixtures_from_dry_run(report)
+    assert len(typed_fixtures) == 1
+    typed_fixture = typed_fixtures[0]
+    assert [item["mutation_type"] for item in typed_fixture["mutations"]] == [
+        "seed_eval",
+        "seed_eval",
+    ]
+    assert [
+        item["type"] for item in typed_fixture["operation_sequence"][:4]
+    ] == ["ingest", "mutate", "ingest", "mutate"]
+    typed_views = split_fixture(typed_fixture)
+    typed_adapter_json = canonical_json(typed_views.adapter_view)
+    assert "source_benchmark" not in typed_adapter_json
+    assert "source_qrels" not in typed_adapter_json
+    assert "source_locator" not in typed_adapter_json
+    assert "doc-green" not in typed_adapter_json
+    assert "qrels.tsv" not in typed_adapter_json
+    assert "target_step_id" not in typed_adapter_json
+
+    validation = validate_mteb_qrels_dry_run(report, include_typed_cards=True)
+
+    assert validation["validation_status"] == "passed"
+    assert validation["typed_cards_adapter"]["run"] is True
+    assert validation["typed_cards_adapter"]["extractor_mode"] == "deterministic_replay"
+    assert validation["typed_cards_adapter"]["live_model_extraction"] is False
+    assert validation["typed_cards_adapter"]["result_summary"]["passed"] is True
+    typed = validation["typed_cards_adapter"]["results"][0]
+    assert typed["result_status"] == "passed"
+    assert typed["request_statuses"] == ["passed"]
+    assert typed["failed_gate_ids"] == []
+    assert typed["failure_types"] == []
+    assert typed["source_hash_match"] == {
+        "fixture_public_hash_matches_preview": True,
+        "fixture_gold_hash_matches_preview": True,
+        "fixture_full_hash_matches_preview": True,
+    }
+    assert typed["typed_cards_setup_mutation_count"] == 2
+    assert typed["typed_cards_adapter_view_leakage_failure_count"] == 0
+    assert typed["artifact_hashes"]["deterministic_result_hash"].startswith("sha256:")
+    assert typed["artifact_hashes"]["retrieval_result_hash"].startswith("sha256:")
+    assert typed["typed_cards_fixture_hashes"]["fixture_public_hash"].startswith(
+        "sha256:"
+    )
+    assert (
+        typed["typed_cards_fixture_hashes"]["fixture_public_hash"]
+        != report["fixture_previews"][0]["fixture_public_hash"]
+    )
+    assert typed["usage_summary"]["run_usage_reported"] is True
+    assert typed["usage_summary"]["count_totals"]["cards_returned"] >= 1
+    assert fixture_tree_before == _fixture_tree_snapshot()
+
+
 def test_mteb_validate_dry_run_report_cli_emits_stdout_json(tmp_path, capsys):
     report = _validation_ready_dry_run_report(tmp_path)
     report_path = tmp_path / "dry_run.json"
@@ -236,6 +295,32 @@ def test_mteb_validate_dry_run_report_cli_emits_stdout_json(tmp_path, capsys):
     assert (
         output["ephemeral_fixture_policy"]["generated_fixture_pack_committed"] is False
     )
+    assert output["typed_cards_adapter"]["run"] is False
+
+
+def test_mteb_validate_dry_run_report_cli_can_include_typed_cards(
+    tmp_path, capsys
+):
+    report = _validation_ready_dry_run_report(tmp_path)
+    report_path = tmp_path / "dry_run_typed.json"
+    report_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+
+    assert (
+        membench_main(
+            [
+                "validate-dry-run-report",
+                str(report_path),
+                "--include-typed-cards",
+            ]
+        )
+        == 0
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["validation_status"] == "passed"
+    assert output["typed_cards_adapter"]["run"] is True
+    assert output["typed_cards_adapter"]["result_summary"]["passed"] is True
+    assert output["typed_cards_adapter"]["results"][0]["result_status"] == "passed"
 
 
 def test_mteb_validate_dry_run_report_infers_non_default_seed(tmp_path, capsys):

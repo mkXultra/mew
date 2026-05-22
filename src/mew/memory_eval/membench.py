@@ -431,11 +431,29 @@ def build_ephemeral_fixtures_from_dry_run(
     ]
 
 
+def build_typed_cards_ephemeral_fixtures_from_dry_run(
+    dry_run_report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Rebuild in-memory dry-run fixtures with typed-card lifecycle setup.
+
+    TypedCardsMemoryEvalAdapter intentionally keeps plain ingested experiences
+    as proposals until a public lifecycle mutation commits them. The added
+    `seed_eval` mutations go through the neutral adapter boundary and are never
+    written as a committed fixture pack.
+    """
+
+    return [
+        _with_typed_cards_lifecycle_setup(fixture)
+        for fixture in build_ephemeral_fixtures_from_dry_run(dry_run_report)
+    ]
+
+
 def validate_mteb_qrels_dry_run(
     dry_run_report: Mapping[str, Any],
     *,
     seed: int | None = None,
     run_broken_controls: bool = True,
+    include_typed_cards: bool = False,
 ) -> dict[str, Any]:
     """Validate dry-run selected previews with in-memory memory_eval fixtures."""
 
@@ -444,6 +462,7 @@ def validate_mteb_qrels_dry_run(
     fixtures = build_ephemeral_fixtures_from_dry_run(dry_run_report)
     reference_results = []
     negative_control_results = []
+    typed_cards_results = []
 
     for index, (preview, fixture) in enumerate(zip(previews, fixtures), start=1):
         fixture_ordinal = _preview_fixture_ordinal(preview, default=index)
@@ -503,6 +522,13 @@ def validate_mteb_qrels_dry_run(
                     )
                 )
 
+    if include_typed_cards:
+        typed_cards_results = _typed_cards_validation_results(
+            previews=previews,
+            fixtures=fixtures,
+            validation_seed=validation_seed,
+        )
+
     report = {
         "schema_version": DRY_RUN_VALIDATION_SCHEMA_VERSION,
         "validation_target": "membench_mteb_qrels_dry_run_previews",
@@ -517,12 +543,33 @@ def validate_mteb_qrels_dry_run(
             "fixtures_memory_eval_write_allowed": False,
             "raw_source_committed": False,
             "generated_fixture_pack_committed": False,
+            "typed_cards_lifecycle_setup_storage": "in_memory_only",
         },
         "selected_fixture_count": len(fixtures),
         "reference_adapter": {
             "adapter_id": "memory_eval_reference_p1",
             "result_summary": _validation_result_summary(reference_results),
             "results": reference_results,
+        },
+        "typed_cards_adapter": {
+            "run": bool(include_typed_cards),
+            "adapter_id": "mew_typed_cards_memory_eval",
+            "extractor_mode": "deterministic_replay",
+            "live_model_extraction": False,
+            "setup_policy": "public_seed_eval_lifecycle_after_each_ingest",
+            "result_summary": _validation_result_summary(typed_cards_results)
+            if include_typed_cards
+            else {
+                "example_count": 0,
+                "status_counts": {},
+                "passed": None,
+                "hash_mismatch_count": 0,
+                "adapter_view_leakage_failure_count": 0,
+            },
+            "results": typed_cards_results,
+            "not_run_reason": None
+            if include_typed_cards
+            else "not requested; pass --include-typed-cards",
         },
         "negative_controls": {
             "run": bool(run_broken_controls),
@@ -606,6 +653,7 @@ def main(argv: list[str] | None = None) -> int:
     validate_report_parser = subcommands.add_parser("validate-dry-run-report")
     validate_report_parser.add_argument("dry_run_report")
     validate_report_parser.add_argument("--seed", type=int)
+    validate_report_parser.add_argument("--include-typed-cards", action="store_true")
     validate_report_parser.add_argument("--output")
 
     validate_parser = subcommands.add_parser("validate-dry-run-mteb-qrels")
@@ -615,6 +663,7 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--source-subset", action="append")
     validate_parser.add_argument("--max-queries", type=int)
     validate_parser.add_argument("--seed", type=int, default=12345)
+    validate_parser.add_argument("--include-typed-cards", action="store_true")
     validate_parser.add_argument("--output")
 
     args = parser.parse_args(argv)
@@ -636,6 +685,7 @@ def main(argv: list[str] | None = None) -> int:
         report = validate_mteb_qrels_dry_run(
             _load_json_object(args.dry_run_report),
             seed=args.seed,
+            include_typed_cards=args.include_typed_cards,
         )
         _write_or_print_json(report, args.output)
         return 0 if report["validation_status"] == "passed" else 1
@@ -652,7 +702,9 @@ def main(argv: list[str] | None = None) -> int:
         write_json_artifact(args.output, report)
         return 0
 
-    report = validate_mteb_qrels_dry_run(report, seed=args.seed)
+    report = validate_mteb_qrels_dry_run(
+        report, seed=args.seed, include_typed_cards=args.include_typed_cards
+    )
     _write_or_print_json(report, args.output)
     return 0 if report["validation_status"] == "passed" else 1
 
@@ -710,9 +762,186 @@ def _fixture_from_dry_run_preview(preview: Mapping[str, Any]) -> dict[str, Any]:
     return fixture
 
 
+def _with_typed_cards_lifecycle_setup(fixture: Mapping[str, Any]) -> dict[str, Any]:
+    typed_fixture = deepcopy(fixture)
+    setup_mutations = []
+    rewritten_sequence = []
+    for operation in typed_fixture.get("operation_sequence") or []:
+        operation_copy = dict(operation)
+        rewritten_sequence.append(operation_copy)
+        if operation_copy.get("type") != "ingest":
+            continue
+        experience_id = str(operation_copy.get("experience_id") or "")
+        if not experience_id:
+            continue
+        op_id = f"typed_cards_seed_{len(setup_mutations) + 1:06d}"
+        setup_mutations.append(
+            {
+                "op_id": op_id,
+                "mutation_type": "seed_eval",
+                "target_experience_id": experience_id,
+                "effective_time": typed_fixture.get("evaluation_time")
+                or DEFAULT_EVALUATION_TIME,
+                "reason": "typed-card public lifecycle seed",
+            }
+        )
+        rewritten_sequence.append(
+            {
+                "type": "mutate",
+                "op_id": op_id,
+                "ingest_order": operation_copy.get("ingest_order"),
+            }
+        )
+    typed_fixture["mutations"] = [
+        *setup_mutations,
+        *(typed_fixture.get("mutations") or []),
+    ]
+    typed_fixture["operation_sequence"] = rewritten_sequence
+    return typed_fixture
+
+
 def _preview_fixture_ordinal(preview: Mapping[str, Any], *, default: int) -> int:
     match = re.fullmatch(r"fx_(\d+)", str(preview.get("adapter_fixture_id") or ""))
     return int(match.group(1)) if match else default
+
+
+def _typed_cards_validation_results(
+    *,
+    previews: list[Mapping[str, Any]],
+    fixtures: list[Mapping[str, Any]],
+    validation_seed: int,
+) -> list[dict[str, Any]]:
+    try:
+        from .adapters.typed_cards import TypedCardsMemoryEvalAdapter
+    except Exception as exc:  # pragma: no cover - exercised only in broken installs.
+        return [
+            _typed_cards_unavailable_summary(
+                preview=preview,
+                fixture_ordinal=_preview_fixture_ordinal(preview, default=index),
+                error=exc,
+            )
+            for index, preview in enumerate(previews, start=1)
+        ]
+
+    results = []
+    for index, (preview, fixture) in enumerate(zip(previews, fixtures), start=1):
+        fixture_ordinal = _preview_fixture_ordinal(preview, default=index)
+        typed_fixture = _with_typed_cards_lifecycle_setup(fixture)
+        try:
+            source_views = split_fixture(
+                fixture, fixture_ordinal=fixture_ordinal, seed=validation_seed
+            )
+            source_leakage = find_membench_adapter_leakage(source_views.adapter_view)
+            source_leakage.extend(find_label_leakage(source_views.adapter_view))
+            typed_views = split_fixture(
+                typed_fixture, fixture_ordinal=fixture_ordinal, seed=validation_seed
+            )
+            typed_leakage = find_membench_adapter_leakage(typed_views.adapter_view)
+            typed_leakage.extend(find_label_leakage(typed_views.adapter_view))
+            artifact = run_fixture(
+                typed_fixture,
+                TypedCardsMemoryEvalAdapter(extractor_mode="deterministic_replay"),
+                seed=validation_seed,
+                fixture_ordinal=fixture_ordinal,
+                run_id=f"run_membench_typed_cards_{fixture_ordinal:06d}",
+                created_at=DEFAULT_VALIDATION_CREATED_AT,
+            )
+        except Exception as exc:
+            results.append(
+                _typed_cards_error_summary(
+                    preview=preview,
+                    fixture_ordinal=fixture_ordinal,
+                    error=exc,
+                )
+            )
+            continue
+
+        summary = _run_validation_summary(
+            artifact=artifact,
+            preview=preview,
+            fixture_ordinal=fixture_ordinal,
+        )
+        summary["source_hash_match"] = {
+            "fixture_public_hash_matches_preview": source_views.fixture_public_hash
+            == preview.get("fixture_public_hash"),
+            "fixture_gold_hash_matches_preview": source_views.fixture_gold_hash
+            == preview.get("fixture_gold_hash"),
+            "fixture_full_hash_matches_preview": source_views.fixture_full_hash
+            == preview.get("fixture_full_hash"),
+        }
+        summary["hash_match"] = dict(summary["source_hash_match"])
+        summary["source_adapter_view_leakage_failure_count"] = len(source_leakage)
+        summary["source_adapter_view_leakage_failures"] = source_leakage
+        summary["typed_cards_adapter_view_leakage_failure_count"] = len(typed_leakage)
+        summary["typed_cards_adapter_view_leakage_failures"] = typed_leakage
+        summary["adapter_view_leakage_failure_count"] = len(typed_leakage)
+        summary["adapter_view_leakage_failures"] = typed_leakage
+        summary["typed_cards_setup_mutation_count"] = len(
+            [
+                mutation
+                for mutation in typed_fixture.get("mutations") or []
+                if mutation.get("mutation_type") == "seed_eval"
+            ]
+        )
+        summary["typed_cards_fixture_hashes"] = {
+            "fixture_public_hash": typed_views.fixture_public_hash,
+            "fixture_gold_hash": typed_views.fixture_gold_hash,
+            "fixture_full_hash": typed_views.fixture_full_hash,
+        }
+        if typed_leakage:
+            summary["result_status"] = "failed"
+            summary["failure_types"] = sorted(
+                {*summary["failure_types"], "typed_cards_adapter_view_leakage"}
+            )
+            summary["failed_gate_ids"] = sorted(
+                {*summary["failed_gate_ids"], "no_label_leakage"}
+            )
+        results.append(summary)
+    return results
+
+
+def _typed_cards_unavailable_summary(
+    *,
+    preview: Mapping[str, Any],
+    fixture_ordinal: int,
+    error: Exception,
+) -> dict[str, Any]:
+    return {
+        "fixture_ordinal": fixture_ordinal,
+        "fixture_id": preview.get("fixture_id"),
+        "adapter_fixture_id": preview.get("adapter_fixture_id"),
+        "query_id_hash": preview.get("query_id_hash"),
+        "result_status": "failed",
+        "request_statuses": [],
+        "failed_gate_ids": ["typed_cards_adapter_available"],
+        "failure_types": ["typed_cards_adapter_unavailable"],
+        "status_reason": str(error),
+        "artifact_hashes": {},
+        "fixture_hashes": {},
+        "usage_summary": {},
+    }
+
+
+def _typed_cards_error_summary(
+    *,
+    preview: Mapping[str, Any],
+    fixture_ordinal: int,
+    error: Exception,
+) -> dict[str, Any]:
+    return {
+        "fixture_ordinal": fixture_ordinal,
+        "fixture_id": preview.get("fixture_id"),
+        "adapter_fixture_id": preview.get("adapter_fixture_id"),
+        "query_id_hash": preview.get("query_id_hash"),
+        "result_status": "failed",
+        "request_statuses": [],
+        "failed_gate_ids": ["typed_cards_validation_run_completed"],
+        "failure_types": ["typed_cards_validation_error"],
+        "status_reason": str(error),
+        "artifact_hashes": {},
+        "fixture_hashes": {},
+        "usage_summary": {},
+    }
 
 
 def _validation_seed(
@@ -782,6 +1011,7 @@ def _run_validation_summary(
         "fixture_hashes": dict(artifact.get("fixture") or {}),
         "hard_gate_summary": list(artifact.get("hard_gates") or []),
         "aggregate_metrics": dict(artifact.get("aggregate_metrics") or {}),
+        "usage_summary": _usage_summary(artifact),
     }
 
 
@@ -824,6 +1054,38 @@ def _negative_control_summary(
         "fixture_hashes": summary["fixture_hashes"],
         "hard_gate_summary": summary["hard_gate_summary"],
         "applicability": control.get("applicability"),
+    }
+
+
+def _usage_summary(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    request_usage = [
+        request.get("usage")
+        for request in artifact.get("requests") or []
+        if isinstance(request.get("usage"), Mapping)
+    ]
+    run_usage = (
+        artifact.get("usage") if isinstance(artifact.get("usage"), Mapping) else {}
+    )
+    latency_sources = sorted(
+        {
+            str(((usage.get("latency_ms") or {}).get("source") or "unknown"))
+            for usage in [*request_usage, run_usage]
+            if isinstance(usage, Mapping) and usage.get("latency_ms") is not None
+        }
+    )
+    count_totals: dict[str, int | float] = {}
+    for usage in [*request_usage, run_usage]:
+        counts = usage.get("counts") if isinstance(usage, Mapping) else None
+        if not isinstance(counts, Mapping):
+            continue
+        for key, value in counts.items():
+            if isinstance(value, (int, float)):
+                count_totals[key] = count_totals.get(key, 0) + value
+    return {
+        "request_usage_count": len(request_usage),
+        "run_usage_reported": bool(run_usage),
+        "latency_sources": latency_sources,
+        "count_totals": count_totals,
     }
 
 
@@ -955,10 +1217,15 @@ def _negative_control_result_summary(
 
 def _validation_status(report: Mapping[str, Any]) -> str:
     reference = (report.get("reference_adapter") or {}).get("result_summary") or {}
+    typed_cards = (report.get("typed_cards_adapter") or {}).get("result_summary") or {}
     controls = (report.get("negative_controls") or {}).get("result_summary") or {}
     if not report.get("selected_fixture_count"):
         return "failed"
     if not reference.get("passed"):
+        return "failed"
+    if (report.get("typed_cards_adapter") or {}).get("run") and not typed_cards.get(
+        "passed"
+    ):
         return "failed"
     if (report.get("negative_controls") or {}).get("run") and not controls.get(
         "passed"
