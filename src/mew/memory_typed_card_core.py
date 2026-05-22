@@ -1671,6 +1671,114 @@ class TypedMemoryCore:
             },
         )
 
+    def derived_graph_index_snapshot(self) -> dict[str, Any]:
+        edges_by_node = self._graph_edges_by_node()
+        active_card_graph_refs = []
+        for card in sorted(self.memory_cards.values(), key=lambda item: item.card_id):
+            if not _card_in_derived_graph_index(card):
+                continue
+            node_ids = tuple(sorted(card.graph_refs.node_ids))
+            edge_ids = tuple(sorted(card.graph_refs.edge_ids))
+            if not node_ids and not edge_ids:
+                continue
+            active_card_graph_refs.append(
+                {
+                    "card_id": card.card_id,
+                    "kind": card.kind,
+                    "scope_key": card.scope.scope_key(),
+                    "node_ids": list(node_ids),
+                    "edge_ids": list(edge_ids),
+                }
+            )
+        snapshot = {
+            "schema_version": "derived_graph_index_snapshot.v1",
+            "active_card_graph_refs": active_card_graph_refs,
+            "edges": [
+                {
+                    "edge_id": edge.edge_id,
+                    "edge_type": edge.edge_type,
+                    "scope_key": edge.scope.scope_key(),
+                    "from_node_id": edge.from_node_id,
+                    "from_node_type": edge.from_node_type,
+                    "from_node_present": edge.from_node_id in self.graph_nodes,
+                    "to_node_id": edge.to_node_id,
+                    "to_node_type": edge.to_node_type,
+                    "to_node_present": edge.to_node_id in self.graph_nodes,
+                    "staleness_state": edge.staleness_state,
+                }
+                for edge in sorted(self.graph_edges.values(), key=lambda item: item.edge_id)
+            ],
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "node_type": node.node_type,
+                    "scope_key": node.scope_key,
+                    "canonical_ref": node.canonical_ref,
+                    "content_hash": node.content_hash,
+                    "staleness_state": node.staleness_state,
+                    "edge_ids": [edge.edge_id for edge in edges_by_node.get(node.node_id, ())],
+                }
+                for node in sorted(self.graph_nodes.values(), key=lambda item: item.node_id)
+            ],
+        }
+        snapshot["snapshot_hash"] = stable_hash(snapshot)
+        return snapshot
+
+    def verify_derived_graph_index(self, *, expected_snapshot_hash: str | None = None) -> dict[str, Any]:
+        snapshot = self.derived_graph_index_snapshot()
+        issues = self._derived_graph_index_issues()
+        if expected_snapshot_hash and expected_snapshot_hash != snapshot["snapshot_hash"]:
+            issues.append(
+                {
+                    "issue_type": "snapshot_hash_mismatch",
+                    "expected": expected_snapshot_hash,
+                    "actual": snapshot["snapshot_hash"],
+                }
+            )
+        return {
+            "ok": not issues,
+            "snapshot_hash": snapshot["snapshot_hash"],
+            "snapshot": snapshot,
+            "issues": issues,
+        }
+
+    def _derived_graph_index_issues(self) -> list[dict[str, Any]]:
+        issues: list[dict[str, Any]] = []
+        for card in sorted(self.memory_cards.values(), key=lambda item: item.card_id):
+            if not _card_in_derived_graph_index(card):
+                continue
+            for node_id in sorted(card.graph_refs.node_ids):
+                node = self.graph_nodes.get(node_id)
+                if node is None:
+                    issues.append(_derived_graph_issue("graph_ref_node_missing", card_id=card.card_id, node_id=node_id))
+                elif node.staleness_state != StalenessState.FRESH.value:
+                    issues.append(
+                        _derived_graph_issue(
+                            "stale_graph_node_in_active_card_ref",
+                            card_id=card.card_id,
+                            node_id=node_id,
+                            staleness_state=node.staleness_state,
+                        )
+                    )
+            for edge_id in sorted(card.graph_refs.edge_ids):
+                edge = self.graph_edges.get(edge_id)
+                if edge is None:
+                    issues.append(_derived_graph_issue("graph_ref_edge_missing", card_id=card.card_id, edge_id=edge_id))
+                    continue
+                if edge.staleness_state != StalenessState.FRESH.value:
+                    issues.append(
+                        _derived_graph_issue(
+                            "stale_graph_edge_in_active_card_ref",
+                            card_id=card.card_id,
+                            edge_id=edge_id,
+                            staleness_state=edge.staleness_state,
+                        )
+                    )
+                issues.extend(_derived_graph_edge_endpoint_issues(edge, card_id=card.card_id, nodes=self.graph_nodes))
+        for edge in sorted(self.graph_edges.values(), key=lambda item: item.edge_id):
+            issues.extend(_derived_graph_edge_endpoint_issues(edge, card_id=None, nodes=self.graph_nodes))
+        return _dedupe_graph_issues(issues)
+
     def store_transient_reentry(
         self,
         *,
@@ -1870,6 +1978,7 @@ class TypedMemoryCore:
             display_name: str = "",
             content_hash: str | None = None,
             metadata: Mapping[str, Any] | None = None,
+            include_ref: bool = True,
         ) -> GraphNode:
             now = self.clock()
             node = GraphNode.build(
@@ -1884,7 +1993,8 @@ class TypedMemoryCore:
             )
             self.add_graph_node(node)
             nodes_by_key[(node.node_type, node.canonical_ref)] = node
-            node_ids.append(node.node_id)
+            if include_ref:
+                node_ids.append(node.node_id)
             return node
 
         for raw_node in raw_nodes:
@@ -1916,11 +2026,13 @@ class TypedMemoryCore:
                     node_type=from_type,
                     canonical_ref=from_ref,
                     display_name=str(raw_edge.get("from_display_name") or from_ref),
+                    include_ref=False,
                 )
                 to_node = nodes_by_key.get((to_type, to_ref)) or add_node(
                     node_type=to_type,
                     canonical_ref=to_ref,
                     display_name=str(raw_edge.get("to_display_name") or to_ref),
+                    include_ref=False,
                 )
                 now = self.clock()
                 edge = GraphEdge.build(
@@ -2198,7 +2310,12 @@ class TypedMemoryCore:
             return _GraphExpansionResult(card_modifiers={}, nodes_expanded=0, edges_expanded=0)
         dropped_counts: dict[str, int] = {}
         dropped: list[DroppedReason] = []
-        frontier = self._seed_graph_node_ids(seed_cards, dropped_counts=dropped_counts, dropped=dropped)
+        frontier = self._seed_graph_node_ids(
+            seed_cards,
+            current_evidence=request.current_evidence,
+            dropped_counts=dropped_counts,
+            dropped=dropped,
+        )
         if not frontier:
             return _GraphExpansionResult(
                 card_modifiers={},
@@ -2217,13 +2334,9 @@ class TypedMemoryCore:
             if len(expanded_nodes) + len(expanded_edges) >= total_budget:
                 break
             node = self.graph_nodes.get(node_id)
-            if node is None or node.staleness_state != StalenessState.FRESH.value:
-                _add_graph_drop(
-                    "uncanonicalized_graph_endpoint" if node is None else "stale_graph_node",
-                    node_id,
-                    dropped_counts,
-                    dropped,
-                )
+            node_drop_reason = _graph_node_drop_reason(node, request.current_evidence)
+            if node_drop_reason is not None:
+                _add_graph_drop(node_drop_reason, node_id, dropped_counts, dropped)
                 continue
             expanded_nodes.add(node_id)
             for edge in edges_by_node.get(node_id, ()):
@@ -2237,17 +2350,16 @@ class TypedMemoryCore:
                 if edge.from_node_id not in self.graph_nodes or edge.to_node_id not in self.graph_nodes:
                     _add_graph_drop("uncanonicalized_graph_endpoint", edge.edge_id, dropped_counts, dropped)
                     continue
-                expanded_edges.add(edge.edge_id)
-                if len(expanded_nodes) + len(expanded_edges) >= total_budget:
-                    continue
                 other_node_id = edge.to_node_id if edge.from_node_id == node_id else edge.from_node_id
                 other_node = self.graph_nodes.get(other_node_id)
-                if other_node is not None and other_node.staleness_state == StalenessState.FRESH.value:
+                other_node_drop_reason = _graph_node_drop_reason(other_node, request.current_evidence)
+                if other_node_drop_reason is None:
+                    expanded_edges.add(edge.edge_id)
+                    if len(expanded_nodes) + len(expanded_edges) >= total_budget:
+                        continue
                     expanded_nodes.add(other_node_id)
-                elif other_node is None:
-                    _add_graph_drop("uncanonicalized_graph_endpoint", other_node_id, dropped_counts, dropped)
                 else:
-                    _add_graph_drop("stale_graph_node", other_node_id, dropped_counts, dropped)
+                    _add_graph_drop(other_node_drop_reason, other_node_id, dropped_counts, dropped)
 
         card_modifiers: dict[str, Decimal] = {}
         for card_id, card in sorted(candidate_cards.items()):
@@ -2267,29 +2379,46 @@ class TypedMemoryCore:
         self,
         seed_cards: Sequence[MemoryCard],
         *,
+        current_evidence: CurrentEvidenceSnapshot | None,
         dropped_counts: dict[str, int],
         dropped: list[DroppedReason],
     ) -> set[str]:
         node_ids: set[str] = set()
         for card in seed_cards:
             for node_id in card.graph_refs.node_ids:
-                if node_id in self.graph_nodes:
+                node = self.graph_nodes.get(node_id)
+                node_drop_reason = _graph_node_drop_reason(node, current_evidence)
+                if node_drop_reason is None:
                     node_ids.add(node_id)
                 else:
-                    _add_graph_drop("uncanonicalized_graph_endpoint", node_id, dropped_counts, dropped)
+                    _add_graph_drop(node_drop_reason, node_id, dropped_counts, dropped)
             for edge_id in card.graph_refs.edge_ids:
                 edge = self.graph_edges.get(edge_id)
                 if edge is None:
                     _add_graph_drop("uncanonicalized_graph_edge", edge_id, dropped_counts, dropped)
                     continue
-                if edge.from_node_id in self.graph_nodes:
+                from_node = self.graph_nodes.get(edge.from_node_id)
+                from_drop_reason = _graph_node_drop_reason(from_node, current_evidence)
+                if from_drop_reason is None:
                     node_ids.add(edge.from_node_id)
                 else:
-                    _add_graph_drop("uncanonicalized_graph_endpoint", edge.edge_id, dropped_counts, dropped)
-                if edge.to_node_id in self.graph_nodes:
+                    _add_graph_drop(
+                        from_drop_reason,
+                        from_node.node_id if from_node is not None else edge.edge_id,
+                        dropped_counts,
+                        dropped,
+                    )
+                to_node = self.graph_nodes.get(edge.to_node_id)
+                to_drop_reason = _graph_node_drop_reason(to_node, current_evidence)
+                if to_drop_reason is None:
                     node_ids.add(edge.to_node_id)
                 else:
-                    _add_graph_drop("uncanonicalized_graph_endpoint", edge.edge_id, dropped_counts, dropped)
+                    _add_graph_drop(
+                        to_drop_reason,
+                        to_node.node_id if to_node is not None else edge.edge_id,
+                        dropped_counts,
+                        dropped,
+                    )
         return node_ids
 
     def _graph_edges_by_node(self) -> dict[str, tuple[GraphEdge, ...]]:
@@ -2820,8 +2949,131 @@ def _add_graph_drop(
     counts: dict[str, int],
     internal_dropped: list[DroppedReason],
 ) -> None:
+    if any(item.reason == reason and item.ref_id == ref_id for item in internal_dropped):
+        return
     counts[reason] = counts.get(reason, 0) + 1
     internal_dropped.append(DroppedReason(reason=reason, ref_id=ref_id))
+
+
+def _card_in_derived_graph_index(card: MemoryCard) -> bool:
+    return (
+        card.approval_state == ApprovalState.COMMITTED.value
+        and card.staleness_state == StalenessState.FRESH.value
+        and card.metadata.get("phase_b_forgotten") is not True
+        and card.metadata.get("phase_b_deleted") is not True
+    )
+
+
+def _derived_graph_edge_endpoint_issues(
+    edge: GraphEdge,
+    *,
+    card_id: str | None,
+    nodes: Mapping[str, GraphNode],
+) -> list[dict[str, Any]]:
+    issues = []
+    endpoint_specs = (
+        ("from", edge.from_node_id, edge.from_node_type),
+        ("to", edge.to_node_id, edge.to_node_type),
+    )
+    for side, node_id, expected_type in endpoint_specs:
+        node = nodes.get(node_id)
+        if node is None:
+            issues.append(
+                _derived_graph_issue(
+                    f"graph_edge_{side}_node_missing",
+                    card_id=card_id,
+                    edge_id=edge.edge_id,
+                    node_id=node_id,
+                )
+            )
+            continue
+        if node.node_type != expected_type:
+            issues.append(
+                _derived_graph_issue(
+                    f"graph_edge_{side}_node_type_mismatch",
+                    card_id=card_id,
+                    edge_id=edge.edge_id,
+                    node_id=node_id,
+                    expected_node_type=expected_type,
+                    actual_node_type=node.node_type,
+                )
+            )
+        if node.staleness_state != StalenessState.FRESH.value:
+            issues.append(
+                _derived_graph_issue(
+                    f"graph_edge_{side}_node_stale",
+                    card_id=card_id,
+                    edge_id=edge.edge_id,
+                    node_id=node_id,
+                    staleness_state=node.staleness_state,
+                )
+            )
+    return issues
+
+
+def _derived_graph_issue(issue_type: str, **fields: Any) -> dict[str, Any]:
+    return {"issue_type": issue_type, **{key: value for key, value in sorted(fields.items()) if value is not None}}
+
+
+def _dedupe_graph_issues(issues: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    by_hash = {stable_hash(issue): dict(issue) for issue in issues}
+    return [by_hash[key] for key in sorted(by_hash)]
+
+
+def _graph_node_drop_reason(node: GraphNode | None, evidence: CurrentEvidenceSnapshot | None) -> str | None:
+    if node is None:
+        return "uncanonicalized_graph_endpoint"
+    if node.staleness_state != StalenessState.FRESH.value:
+        return "stale_graph_node"
+    if evidence is None:
+        return None
+    if node.node_type == NodeType.FILE.value:
+        for state in evidence.file_states:
+            if not _graph_file_evidence_matches(node, state):
+                continue
+            if state.state == "missing":
+                return "uncanonicalized_graph_endpoint"
+            if state.state == "unknown" or _graph_hash_changed(node.content_hash, state.content_hash):
+                return "stale_graph_node"
+    elif node.node_type == NodeType.SYMBOL.value:
+        for state in evidence.symbol_states:
+            if not _graph_ref_evidence_matches(node, state.node_id, state.canonical_ref):
+                continue
+            if state.state == "missing":
+                return "uncanonicalized_graph_endpoint"
+            if (
+                state.state in {"moved", "unknown"}
+                or (state.node_id == node.node_id and state.canonical_ref != node.canonical_ref)
+                or _graph_hash_changed(node.content_hash, state.content_hash)
+            ):
+                return "stale_graph_node"
+    elif node.node_type == NodeType.COMMAND.value:
+        for state in evidence.command_states:
+            if not _graph_ref_evidence_matches(node, state.node_id, state.normalized_command_ref):
+                continue
+            if (
+                state.state in {"changed", "unknown"}
+                or (state.node_id == node.node_id and state.normalized_command_ref != node.canonical_ref)
+                or _graph_hash_changed(node.content_hash, state.command_hash)
+            ):
+                return "stale_graph_node"
+    return None
+
+
+def _graph_file_evidence_matches(node: GraphNode, state: Any) -> bool:
+    return _graph_ref_evidence_matches(node, state.node_id, state.path)
+
+
+def _graph_ref_evidence_matches(node: GraphNode, node_id: str, evidence_ref: str) -> bool:
+    return node.node_id == node_id or _graph_canonical_ref_matches(node.canonical_ref, evidence_ref)
+
+
+def _graph_canonical_ref_matches(canonical_ref: str, evidence_ref: str) -> bool:
+    return canonical_ref == evidence_ref or canonical_ref.endswith(":" + evidence_ref)
+
+
+def _graph_hash_changed(baseline_hash: str | None, current_hash: str | None) -> bool:
+    return bool(baseline_hash and current_hash and baseline_hash != current_hash)
 
 
 def _privacy_allows(card: MemoryCard, authorization_scope: Scope, *, shared_policy_ids: Sequence[str]) -> bool:

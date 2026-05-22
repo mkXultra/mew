@@ -1,0 +1,115 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "graph_cross_scope_no_leak_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "graph_negative",
+  "phase": "P1",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_graph_scope_anchor",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_neg_101",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-11T10:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Cygnus anchor is attached to graph_edge(file:mew:main:src/mew/memory_typed_card_core.py,related,test:mew:tests/test_memory_typed_cards_phase_b.py)."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_graph_scope_foreign",
+      "scope_id": "tenant_b/user_b",
+      "session_id": "session_graph_neg_102",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-11T10:05:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_b",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Foreign Cygnus detail is attached to graph_edge(file:mew:main:src/mew/memory_typed_card_core.py,related,test:mew:tests/test_memory_typed_cards_phase_b.py)."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_b/user_b"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "op_id": "mut_seed_scope_anchor",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_scope_anchor",
+      "effective_time": "2026-05-21T00:00:00Z",
+      "reason": "graph negative fixture setup"
+    },
+    {
+      "op_id": "mut_seed_scope_foreign",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_scope_foreign",
+      "effective_time": "2026-05-21T00:00:00Z",
+      "reason": "graph negative fixture setup"
+    }
+  ],
+  "requests": [
+    {
+      "request_id": "req_graph_scope_no_leak",
+      "mode": "graph_negative",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "What is connected to the Cygnus anchor?",
+        "intent": "graph_related_lookup"
+      },
+      "k": 2,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"],
+        "expand_graph": true,
+        "graph_max_depth": 1,
+        "graph_max_items": 4
+      },
+      "budget": {
+        "max_evidence_items": 2,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "graph_expansion", "scope_enforcement"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_graph_scope_anchor"],
+        "authorized_scope_ids": ["tenant_a/user_a"],
+        "must_not_return_evidence_ids": ["exp_graph_scope_foreign"],
+        "stale_evidence_ids": [],
+        "expected_abstention": false,
+        "expected_usage": {
+          "index_mode": "graph_index",
+          "min_graph_nodes_expanded": 2,
+          "min_graph_edges_expanded": 1
+        },
+        "expected_dropped_count_by_reason": {
+          "privacy_block": 1
+        }
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_graph_scope_anchor", "ingest_order": 1},
+    {"type": "mutate", "op_id": "mut_seed_scope_anchor", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_graph_scope_foreign", "ingest_order": 2},
+    {"type": "mutate", "op_id": "mut_seed_scope_foreign", "ingest_order": 2},
+    {"type": "request", "request_id": "req_graph_scope_no_leak", "after_ingest_order": 2}
+  ]
+}

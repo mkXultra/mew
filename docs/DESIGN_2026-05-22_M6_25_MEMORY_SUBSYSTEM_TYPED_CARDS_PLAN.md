@@ -2413,8 +2413,11 @@ Current Phase D.1 implementation status, 2026-05-22:
 - graph-generation live fixture passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_graph_generation_20260522_v3`): `raw_text -> LLM extractor graph_nodes -> proposal/commit -> graph-on recall` returned the graph-related support with `index_mode=graph_index` and `graph_nodes_expanded=1`。
 - graph-generation fixtures may set scorer-only `gold.expected_usage` gates, so a fixture can require `index_mode=graph_index` and minimum graph expansion counts without exposing those expectations to the adapter。
 - graph-generation live suite passed on 2026-05-23 with `gpt-5.5` (`run_id=manual_graph_edge_generation_20260523_scopefix`, 2/2 passed): both `graph_nodes` and `graph_edges` extraction paths satisfied scorer-only graph usage gates。
+- graph negative fixtures cover raw graph-edge cross-scope non-leak, forgotten-support non-leak, stale endpoints, and uncanonicalized endpoints; scorer-only dropped-count gates validate caller-visible reasons without exposing blocked card/provenance IDs。
+- graph expansion treats `CurrentEvidenceSnapshot` file/symbol/command endpoint states as a freshness overlay: missing endpoints stop expansion as uncanonicalized, and changed/moved/unknown/hash-mismatched endpoints stop expansion as stale。
+- derived graph index verification rebuilds a canonical snapshot/hash from `memory_cards`, `graph_nodes`, and `graph_edges`; it excludes forgotten/deleted cards from active card refs, reports missing/stale graph refs as drift issues, and exposes a safe aggregate verifier summary in memory-eval retrieval artifacts with scorer-only expected verification gates。
 - `seed_graph` remains an explicit fixture/debug setup path for isolating recall expansion from extraction quality; it is not evidence that ingest generates graph material。
-- remaining Phase D work: broader graph-specific memory-eval fixtures, separate fanout/node/card/latency budgets, graph invalidation hooks, and rebuild verification for derived graph-aware indexes。
+- remaining Phase D work: broader graph-specific memory-eval fixtures, separate fanout/node/card/latency budgets, additional graph invalidation coverage, and deeper graph-aware rebuild drift fixtures。
 
 ### Phase E: MemoryContextBuilder / evidence packet
 
@@ -2642,6 +2645,8 @@ MemoryToolProvider does not import prompt projection internals
 | stale/superseded/forgotten IDs are not returned as fresh support。 | stale/update/forget fixtures。 |
 | usage reporting includes fixed latency/count/index fields with non-negative counts, stable per-field aggregate semantics, and unavailable-field handling。 | artifact usage schema/regression test。 |
 | graph-generation fixtures can hard-gate scorer-only expected usage such as `index_mode=graph_index` and minimum graph expansion counts。 | `gold.expected_usage` scoring gate regression test。 |
+| graph negative fixtures can hard-gate caller-visible dropped reason counts without exposing blocked card/provenance IDs。 | `gold.expected_dropped_count_by_reason` scoring gate and graph negative fixture tests。 |
+| graph drift fixtures can hard-gate derived graph verifier status and aggregate issue counts without exposing node/card/provenance IDs。 | `gold.expected_derived_graph_index_verification` scoring gate and graph drift fixture tests。 |
 | raw extraction cannot move memory to an LLM-chosen scope when caller runtime scope is authoritative。 | scope override ignored/audited regression test。 |
 | live raw-memory extraction preserves retrieval anchors for subject/context/value discriminators, so paraphrased summaries do not lose the correct top-1 support in budget-limited retrieval。 | live `budget_limited_basic` smoke with `gpt-5.5` plus deterministic retrieval-anchor regression tests。 |
 | adapter-visible payload does not leak gold/mode/trap labels。 | harness P0 leakage test。 |
@@ -2656,7 +2661,7 @@ MemoryToolProvider does not import prompt projection internals
 | graph edges link durable graph nodes and reject committed non-canonical endpoints while holding only candidate/migration debug refs。 | edge schema tests。 |
 | actor edges `approved_by`/`reviewed_by`/`vetoed_by`/`seed_eval_by`/`migrated_by` target actor nodes with matching `metadata.actor_kind` and do not become scored support IDs。 | actor edge schema/governance test。 |
 | graph edges use role-bearing evidence links and tombstone/drop expansion when edge evidence is forgotten/redacted。 | graph evidence redaction test。 |
-| retrieval index is derived, rebuildable, not authoritative, and Phase B simple index behavior is distinct from Phase D graph-aware index behavior。 | index rebuild/equality/phasing tests。 |
+| retrieval index is derived, rebuildable, not authoritative, and Phase B simple index behavior is distinct from Phase D graph-aware index behavior。 | derived graph snapshot/hash verifier and index rebuild/equality/phasing tests。 |
 | expansion is bounded by depth/fanout/node/card/latency/char budgets。 | budget tests。 |
 | expansion happens after seed retrieval and after Phase C adapter gate。 | trace/gate test。 |
 | expansion does not bypass governance。 | stale/scope/contradiction graph tests。 |

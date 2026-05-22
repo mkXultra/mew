@@ -39,7 +39,7 @@ from ...memory_typed_cards import (
 SETUP_POLICY = "explicit_mutate_lifecycle"
 LIFECYCLE_TYPES = {"seed_eval", "approve", "commit"}
 TERMINAL_MUTATIONS = {"delete", "forget", "tombstone"}
-GRAPH_SETUP_MUTATIONS = {"seed_graph"}
+GRAPH_SETUP_MUTATIONS = {"seed_graph", "mark_graph_stale", "mark_graph_inactive", "remove_graph_node"}
 ExtractorMode = Literal["deterministic_replay", "live_model"]
 EXTRACTOR_MODE_DETERMINISTIC_REPLAY = "deterministic_replay"
 EXTRACTOR_MODE_LIVE_MODEL = "live_model"
@@ -122,6 +122,8 @@ class TypedCardsMemoryEvalAdapter:
         manifest["capabilities"]["seed_eval"] = True
         manifest["capabilities"]["graph_expansion"] = True
         manifest["capabilities"]["seed_graph"] = True
+        manifest["capabilities"]["graph_fault_setup"] = True
+        manifest["capabilities"]["derived_graph_index_verification"] = True
         return manifest
 
     def reset(self, run: Mapping[str, Any]) -> dict[str, Any]:
@@ -170,6 +172,7 @@ class TypedCardsMemoryEvalAdapter:
                 request_id=_optional_str(query.get("request_id")),
             )
         )
+        graph_verification = self.core.verify_derived_graph_index()
         return {
             "request_id": query.get("request_id"),
             "ranked_evidence": [
@@ -178,6 +181,8 @@ class TypedCardsMemoryEvalAdapter:
             "abstained": result.abstained,
             "abstained_reason": result.abstained_reason,
             "dropped": [item.to_dict() for item in result.dropped],
+            "dropped_count_by_reason": dict(result.dropped_count_by_reason),
+            "derived_graph_index_verification": _graph_verification_to_harness(graph_verification),
             "usage": _usage_to_harness(result.usage.to_dict()),
             "failures": [],
         }
@@ -314,8 +319,10 @@ class TypedCardsMemoryEvalAdapter:
         mutation_type = str(op.get("mutation_type") or op.get("lifecycle_type") or op.get("type") or "").strip()
         if mutation_type in LIFECYCLE_TYPES:
             return self._mutate_lifecycle(op, mutation_type)
-        if mutation_type in GRAPH_SETUP_MUTATIONS:
+        if mutation_type == "seed_graph":
             return self._mutate_seed_graph(op)
+        if mutation_type in GRAPH_SETUP_MUTATIONS:
+            return self._mutate_graph_fault_setup(op, mutation_type)
         if mutation_type not in {"update", "delete", "forget", "supersede", "tombstone"}:
             return _receipt(status="failed", status_reason="unsupported_mutation")
         effective_time = _normalize_effective_time(op.get("effective_time"))
@@ -470,6 +477,73 @@ class TypedCardsMemoryEvalAdapter:
             graph_nodes_created=len(node_ids),
             graph_edges_created=len(edge_ids),
         )
+
+    def _mutate_graph_fault_setup(self, op: Mapping[str, Any], mutation_type: str) -> dict[str, Any]:
+        snapshot = self.core._snapshot_state()
+        op_id = str(op.get("op_id") or mutation_type)
+        try:
+            nodes = self._graph_nodes_for_fault_setup(op)
+            if mutation_type in {"mark_graph_stale", "mark_graph_inactive"}:
+                for node in nodes:
+                    self.core.graph_nodes[node.node_id] = replace(
+                        node,
+                        staleness_state="stale",
+                        updated_at=self.core.clock(),
+                    )
+            elif mutation_type == "remove_graph_node":
+                for node in nodes:
+                    self.core.graph_nodes.pop(node.node_id, None)
+            else:
+                raise ValueError("unsupported graph fault setup mutation")
+            audit = self.core._append_audit(
+                operation="mutate",
+                actor=TraceActor.ADAPTER.value,
+                request_hash=stable_hash(op),
+                result_payload={
+                    "mutation_type": mutation_type,
+                    "graph_nodes": len(nodes),
+                    "node_ids": sorted(node.node_id for node in nodes),
+                },
+                mutation_ids=(op_id,),
+                metadata={"mutation_type": mutation_type, "graph_nodes": len(nodes)},
+            )
+        except Exception as exc:
+            self.core._restore_state(snapshot)
+            return _receipt(status="failed", status_reason=_status_reason(exc), mutation_type=mutation_type, failures=[{"message": str(exc)}])
+        return _receipt(
+            status="success",
+            status_reason="applied",
+            mutation_type=mutation_type,
+            audit_ids=[audit.audit_id],
+            graph_nodes_updated=len(nodes),
+        )
+
+    def _graph_nodes_for_fault_setup(self, op: Mapping[str, Any]) -> list[GraphNode]:
+        graph = op.get("graph") if isinstance(op.get("graph"), Mapping) else {}
+        specs = graph.get("nodes") or ()
+        if not specs:
+            raise LookupError("graph_node_not_found")
+        nodes = []
+        for spec in specs:
+            if not isinstance(spec, Mapping):
+                raise ValueError("graph fault nodes must be objects")
+            scope_id = str(spec.get("scope_id") or op.get("scope_id") or "")
+            if not scope_id and spec.get("target_experience_id"):
+                scope_id = str(self.experiences.get(str(spec.get("target_experience_id")) or "", {}).get("scope_id") or "")
+            scope = self._scope_from_public(scope_id)
+            node_type = str(spec.get("node_type") or spec.get("type") or "")
+            canonical_ref = str(spec.get("canonical_ref") or spec.get("ref") or "")
+            matched = [
+                node
+                for node in self.core.graph_nodes.values()
+                if node.scope.scope_key() == scope.scope_key()
+                and node.node_type == node_type
+                and node.canonical_ref == canonical_ref
+            ]
+            if not matched:
+                raise LookupError("graph_node_not_found")
+            nodes.extend(sorted(matched, key=lambda node: node.node_id))
+        return nodes
 
     def _mutation_authority_refs(self, op: Mapping[str, Any], mutation_type: str) -> list[str]:
         op_id = str(op.get("op_id") or f"mut_{mutation_type}")
@@ -915,6 +989,8 @@ def _status_reason(exc: Exception) -> str:
         return text
     if text in {"graph_target_not_found", "graph_target_ambiguous"}:
         return text
+    if text == "graph_node_not_found":
+        return text
     if "ambiguous" in text:
         return "ambiguous_target"
     if "replacement" in text and "terminal" in text:
@@ -936,3 +1012,18 @@ def _usage_to_harness(usage: Mapping[str, Any]) -> dict[str, Any]:
         "index_mode": usage.get("index_mode", "direct_scan"),
     }
     return base
+
+
+def _graph_verification_to_harness(verification: Mapping[str, Any]) -> dict[str, Any]:
+    issue_count_by_type: dict[str, int] = {}
+    for issue in verification.get("issues") or ():
+        if not isinstance(issue, Mapping):
+            continue
+        issue_type = str(issue.get("issue_type") or "unknown")
+        issue_count_by_type[issue_type] = issue_count_by_type.get(issue_type, 0) + 1
+    return {
+        "ok": bool(verification.get("ok")),
+        "snapshot_hash": verification.get("snapshot_hash"),
+        "issue_count": sum(issue_count_by_type.values()),
+        "issue_count_by_type": issue_count_by_type,
+    }

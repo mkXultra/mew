@@ -383,6 +383,47 @@ def test_expected_usage_gold_gate_fails_when_graph_usage_is_not_reported():
     assert "expected_usage_satisfied" in failed_gates
 
 
+def test_expected_dropped_count_gold_gate_fails_when_count_is_not_reported():
+    fixture = load_fixture(P0_FIXTURES / "dummy_happy_path.json")
+    fixture["requests"][0]["gold"]["expected_dropped_count_by_reason"] = {"privacy_block": 1}
+
+    artifact = run_fixture(
+        fixture,
+        DummyPassAdapter(),
+        run_id="run_fixed",
+        created_at="2026-05-21T00:00:00Z",
+    )
+    request = artifact["requests"][0]
+    failed_gates = {gate["gate_id"] for gate in request["hard_gates"] if gate["passed"] is False}
+
+    assert request["result_status"] == "failed"
+    assert request["metrics"]["expected_dropped_counts_satisfied"] == 0.0
+    assert "dropped_count_expectation_mismatch" in {failure["type"] for failure in request["failures"]}
+    assert "expected_dropped_counts_satisfied" in failed_gates
+
+
+def test_expected_derived_graph_verification_gold_gate_fails_when_status_is_not_reported():
+    fixture = load_fixture(P0_FIXTURES / "dummy_happy_path.json")
+    fixture["requests"][0]["gold"]["expected_derived_graph_index_verification"] = {
+        "ok": True,
+        "min_issue_count": 0,
+    }
+
+    artifact = run_fixture(
+        fixture,
+        DummyPassAdapter(),
+        run_id="run_fixed",
+        created_at="2026-05-21T00:00:00Z",
+    )
+    request = artifact["requests"][0]
+    failed_gates = {gate["gate_id"] for gate in request["hard_gates"] if gate["passed"] is False}
+
+    assert request["result_status"] == "failed"
+    assert request["metrics"]["expected_derived_graph_index_verification_satisfied"] == 0.0
+    assert "derived_graph_index_expectation_mismatch" in {failure["type"] for failure in request["failures"]}
+    assert "expected_derived_graph_index_verification_satisfied" in failed_gates
+
+
 def test_adapter_returning_scorer_ids_directly_fails_opaque_ref_validation():
     class DirectScorerRefAdapter(DummyPassAdapter):
         def retrieve(self, query):

@@ -394,6 +394,28 @@ def score_retrieval(
         retrieval=retrieval,
     )
     failures.extend(expected_usage_failures)
+    expected_dropped_counts = (
+        gold.get("expected_dropped_count_by_reason")
+        if isinstance(gold.get("expected_dropped_count_by_reason"), Mapping)
+        else {}
+    )
+    expected_dropped_count_failures = _expected_dropped_count_failures(
+        request_id=request_id,
+        expected=expected_dropped_counts,
+        retrieval=retrieval,
+    )
+    failures.extend(expected_dropped_count_failures)
+    expected_graph_verification = (
+        gold.get("expected_derived_graph_index_verification")
+        if isinstance(gold.get("expected_derived_graph_index_verification"), Mapping)
+        else {}
+    )
+    expected_graph_verification_failures = _expected_graph_verification_failures(
+        request_id=request_id,
+        expected=expected_graph_verification,
+        retrieval=retrieval,
+    )
+    failures.extend(expected_graph_verification_failures)
 
     metrics = _metrics(
         returned_count=len(ranked),
@@ -414,11 +436,21 @@ def score_retrieval(
     )
     if expected_usage:
         metrics["expected_usage_satisfied"] = 0.0 if expected_usage_failures else 1.0
+    if expected_dropped_counts:
+        metrics["expected_dropped_counts_satisfied"] = 0.0 if expected_dropped_count_failures else 1.0
+    if expected_graph_verification:
+        metrics["expected_derived_graph_index_verification_satisfied"] = (
+            0.0 if expected_graph_verification_failures else 1.0
+        )
     failures.extend(_threshold_failures(request=request, metrics=metrics, profile=profile))
 
     gate_ids = list(profile.get("hard_gates") or [])
     if expected_usage and "expected_usage_satisfied" not in gate_ids:
         gate_ids.append("expected_usage_satisfied")
+    if expected_dropped_counts and "expected_dropped_counts_satisfied" not in gate_ids:
+        gate_ids.append("expected_dropped_counts_satisfied")
+    if expected_graph_verification and "expected_derived_graph_index_verification_satisfied" not in gate_ids:
+        gate_ids.append("expected_derived_graph_index_verification_satisfied")
     profile_gate_ids = set(gate_ids)
     gate_ids.extend(
         sorted(
@@ -441,6 +473,8 @@ def score_retrieval(
         "abstained": actual_abstention,
         "abstained_reason": retrieval.get("abstained_reason"),
         "visible_dropped": list(retrieval.get("dropped") or []),
+        "dropped_count_by_reason": dict(retrieval.get("dropped_count_by_reason") or {}),
+        "derived_graph_index_verification": dict(retrieval.get("derived_graph_index_verification") or {}),
         "visible_provenance_derived_evidence_ids": list(
             retrieval.get("visible_provenance_derived_evidence_ids") or []
         ),
@@ -511,6 +545,8 @@ def unsupported_request_result(
             "abstained": False,
             "abstained_reason": None,
             "visible_dropped": [],
+            "dropped_count_by_reason": {},
+            "derived_graph_index_verification": {},
             "visible_provenance_derived_evidence_ids": [],
             "hash_usage_fields": {},
         },
@@ -539,6 +575,8 @@ def leakage_request_result(*, request: Mapping[str, Any], failures: list[dict[st
             "abstained": False,
             "abstained_reason": None,
             "visible_dropped": [],
+            "dropped_count_by_reason": {},
+            "derived_graph_index_verification": {},
             "visible_provenance_derived_evidence_ids": [],
             "hash_usage_fields": {},
         },
@@ -557,6 +595,7 @@ def retrieval_result_hash_input_hash(retrieval_artifact: Mapping[str, Any]) -> s
             "abstained": retrieval_artifact.get("abstained"),
             "abstained_reason": retrieval_artifact.get("abstained_reason"),
             "visible_dropped": retrieval_artifact.get("visible_dropped") or [],
+            "dropped_count_by_reason": retrieval_artifact.get("dropped_count_by_reason") or {},
             "visible_provenance_derived_evidence_ids": retrieval_artifact.get(
                 "visible_provenance_derived_evidence_ids"
             )
@@ -791,6 +830,110 @@ def _expected_usage_failures(
                     metric_id="expected_usage_satisfied",
                     expected={f"counts.{count_key}": {"min": minimum}},
                     actual={f"counts.{count_key}": actual},
+                )
+            )
+    return failures
+
+
+def _expected_dropped_count_failures(
+    *,
+    request_id: str,
+    expected: Mapping[str, Any],
+    retrieval: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if not expected:
+        return []
+    actual_counts = (
+        retrieval.get("dropped_count_by_reason")
+        if isinstance(retrieval.get("dropped_count_by_reason"), Mapping)
+        else {}
+    )
+    failures = []
+    for reason, minimum in sorted(expected.items(), key=lambda item: str(item[0])):
+        reason_key = str(reason)
+        actual = actual_counts.get(reason_key, 0)
+        if not _meets_minimum(actual, minimum):
+            failures.append(
+                make_failure(
+                    stage="scoring",
+                    type="dropped_count_expectation_mismatch",
+                    message=f"Expected dropped_count_by_reason.{reason_key}>={minimum!r}, got {actual!r}.",
+                    request_id=request_id,
+                    gate_id="expected_dropped_counts_satisfied",
+                    metric_id="expected_dropped_counts_satisfied",
+                    expected={f"dropped_count_by_reason.{reason_key}": {"min": minimum}},
+                    actual={f"dropped_count_by_reason.{reason_key}": actual},
+                )
+            )
+    return failures
+
+
+def _expected_graph_verification_failures(
+    *,
+    request_id: str,
+    expected: Mapping[str, Any],
+    retrieval: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if not expected:
+        return []
+    verification = (
+        retrieval.get("derived_graph_index_verification")
+        if isinstance(retrieval.get("derived_graph_index_verification"), Mapping)
+        else {}
+    )
+    failures = []
+    actual_ok = verification.get("ok")
+    expected_ok = bool(expected.get("ok"))
+    if "ok" in expected and (not isinstance(actual_ok, bool) or actual_ok != expected_ok):
+        failures.append(
+            make_failure(
+                stage="scoring",
+                type="derived_graph_index_expectation_mismatch",
+                message=f"Expected derived_graph_index_verification.ok={expected_ok!r}, got {actual_ok!r}.",
+                request_id=request_id,
+                gate_id="expected_derived_graph_index_verification_satisfied",
+                metric_id="expected_derived_graph_index_verification_satisfied",
+                expected={"derived_graph_index_verification.ok": expected_ok},
+                actual={"derived_graph_index_verification.ok": actual_ok},
+            )
+        )
+    if "min_issue_count" in expected and not _meets_minimum(verification.get("issue_count"), expected.get("min_issue_count")):
+        failures.append(
+            make_failure(
+                stage="scoring",
+                type="derived_graph_index_expectation_mismatch",
+                message=f"Expected derived_graph_index_verification.issue_count>={expected.get('min_issue_count')!r}, got {verification.get('issue_count')!r}.",
+                request_id=request_id,
+                gate_id="expected_derived_graph_index_verification_satisfied",
+                metric_id="expected_derived_graph_index_verification_satisfied",
+                expected={"derived_graph_index_verification.issue_count": {"min": expected.get("min_issue_count")}},
+                actual={"derived_graph_index_verification.issue_count": verification.get("issue_count")},
+            )
+        )
+    expected_issue_counts = (
+        expected.get("issue_count_by_type")
+        if isinstance(expected.get("issue_count_by_type"), Mapping)
+        else {}
+    )
+    actual_issue_counts = (
+        verification.get("issue_count_by_type")
+        if isinstance(verification.get("issue_count_by_type"), Mapping)
+        else {}
+    )
+    for issue_type, minimum in sorted(expected_issue_counts.items(), key=lambda item: str(item[0])):
+        issue_key = str(issue_type)
+        actual = actual_issue_counts.get(issue_key, 0)
+        if not _meets_minimum(actual, minimum):
+            failures.append(
+                make_failure(
+                    stage="scoring",
+                    type="derived_graph_index_expectation_mismatch",
+                    message=f"Expected derived_graph_index_verification.issue_count_by_type.{issue_key}>={minimum!r}, got {actual!r}.",
+                    request_id=request_id,
+                    gate_id="expected_derived_graph_index_verification_satisfied",
+                    metric_id="expected_derived_graph_index_verification_satisfied",
+                    expected={f"derived_graph_index_verification.issue_count_by_type.{issue_key}": {"min": minimum}},
+                    actual={f"derived_graph_index_verification.issue_count_by_type.{issue_key}": actual},
                 )
             )
     return failures

@@ -516,6 +516,195 @@ def test_graph_expansion_counts_uncanonicalized_endpoints_without_caller_visible
     assert any(item.reason == "uncanonicalized_graph_endpoint" and item.ref_id == edge.edge_id for item in expanded.audit_event.dropped)
 
 
+def test_graph_expansion_does_not_expand_through_stale_endpoint() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    related_node = replace(_node("test", "test:mew:stale/test_memory.py"), staleness_state="stale")
+    core.add_graph_node(seed_node)
+    core.add_graph_node(related_node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph expansion seed uses delta anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_stale_seed",
+    )
+    related = _commit_with_graph_refs(
+        core,
+        summary="Stale endpoint related coverage must not expand.",
+        graph_refs=GraphRefs(node_ids=(related_node.node_id,)),
+        source_experience_id="exp_graph_stale_related",
+    )
+    edge = GraphEdge.build(
+        from_node_id=seed_node.node_id,
+        from_node_type="file",
+        to_node_id=related_node.node_id,
+        to_node_type="test",
+        edge_type="related",
+        scope=_scope(),
+        evidence_links=(EvidenceLink(ref_id=seed.evidence_links[0].ref_id, role="current_support"),),
+        created_at=CREATED,
+        updated_at=CREATED,
+    )
+    core.add_graph_edge(edge)
+
+    expanded = core.retrieve(MemoryRecallRequest(query="delta anchor", scope=_scope(), expand_graph=True, graph_max_items=4))
+
+    assert [item.evidence_ref for item in expanded.ranked_evidence] == [seed.card_id]
+    assert all(item.evidence_ref != related.card_id for item in expanded.ranked_evidence)
+    assert expanded.usage.graph_edges_expanded == 0
+    assert expanded.dropped_count_by_reason["stale_graph_node"] == 1
+
+
+def test_graph_expansion_respects_current_evidence_file_hash_for_endpoint() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = replace(_node("file", "file:mew:main:src/mew/memory_typed_card_core.py"), content_hash="seed_hash")
+    related_node = replace(_node("file", "file:mew:main:src/mew/graph_related.py"), content_hash="old_hash")
+    core.add_graph_node(seed_node)
+    core.add_graph_node(related_node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph expansion seed uses epsilon anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_current_seed",
+    )
+    related = _commit_with_graph_refs(
+        core,
+        summary="Current evidence related coverage must not expand.",
+        graph_refs=GraphRefs(node_ids=(related_node.node_id,)),
+        source_experience_id="exp_graph_current_related",
+    )
+    edge = GraphEdge.build(
+        from_node_id=seed_node.node_id,
+        from_node_type="file",
+        to_node_id=related_node.node_id,
+        to_node_type="file",
+        edge_type="related",
+        scope=_scope(),
+        evidence_links=(EvidenceLink(ref_id=seed.evidence_links[0].ref_id, role="current_support"),),
+        created_at=CREATED,
+        updated_at=CREATED,
+    )
+    core.add_graph_edge(edge)
+
+    expanded = core.retrieve(
+        MemoryRecallRequest(
+            query="epsilon anchor",
+            scope=_scope(),
+            expand_graph=True,
+            graph_max_items=4,
+            current_evidence=CurrentEvidenceSnapshot(
+                file_states=(
+                    FileEvidenceState(
+                        node_id=related_node.node_id,
+                        path="src/mew/graph_related.py",
+                        state="present",
+                        content_hash="new_hash",
+                        observed_at="2026-05-23T00:00:00Z",
+                    ),
+                )
+            ),
+        )
+    )
+
+    assert [item.evidence_ref for item in expanded.ranked_evidence] == [seed.card_id]
+    assert all(item.evidence_ref != related.card_id for item in expanded.ranked_evidence)
+    assert expanded.usage.graph_nodes_expanded == 1
+    assert expanded.usage.graph_edges_expanded == 0
+    assert expanded.dropped_count_by_reason["stale_graph_node"] == 1
+
+
+def test_derived_graph_index_snapshot_is_rebuildable_and_excludes_forgotten_cards() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    related_node = _node("test", "test:mew:tests/test_memory_typed_cards_phase_b.py")
+    core.add_graph_node(seed_node)
+    core.add_graph_node(related_node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph index seed uses zeta anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_index_seed",
+    )
+    related = _commit_with_graph_refs(
+        core,
+        summary="Graph index related coverage is active until forgotten.",
+        graph_refs=GraphRefs(node_ids=(related_node.node_id,)),
+        source_experience_id="exp_graph_index_related",
+    )
+    core.add_graph_edge(
+        GraphEdge.build(
+            from_node_id=seed_node.node_id,
+            from_node_type="file",
+            to_node_id=related_node.node_id,
+            to_node_type="test",
+            edge_type="related",
+            scope=_scope(),
+            evidence_links=(EvidenceLink(ref_id=seed.evidence_links[0].ref_id, role="current_support"),),
+            created_at=CREATED,
+            updated_at=CREATED,
+        )
+    )
+
+    snapshot = core.derived_graph_index_snapshot()
+    verification = core.verify_derived_graph_index(expected_snapshot_hash=snapshot["snapshot_hash"])
+
+    assert verification["ok"] is True
+    assert verification["snapshot_hash"] == snapshot["snapshot_hash"]
+    assert core.derived_graph_index_snapshot()["snapshot_hash"] == snapshot["snapshot_hash"]
+    assert {item["card_id"] for item in snapshot["active_card_graph_refs"]} == {seed.card_id, related.card_id}
+
+    core.mutate_memory(MemoryMutation(mutation_id="mut_forget_graph_index_related", op="forget", target_card_id=related.card_id, actor="debug"))
+    rebuilt = core.derived_graph_index_snapshot()
+
+    assert rebuilt["snapshot_hash"] != snapshot["snapshot_hash"]
+    assert {item["card_id"] for item in rebuilt["active_card_graph_refs"]} == {seed.card_id}
+    assert core.verify_derived_graph_index(expected_snapshot_hash=rebuilt["snapshot_hash"])["ok"] is True
+
+
+def test_derived_graph_index_verifier_detects_missing_and_stale_graph_refs() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    missing_node = _node("test", "test:mew:missing/test_memory.py")
+    stale_node = _node("test", "test:mew:stale/test_memory.py")
+    core.add_graph_node(seed_node)
+    core.add_graph_node(missing_node)
+    core.add_graph_node(stale_node)
+    edge = GraphEdge.build(
+        from_node_id=seed_node.node_id,
+        from_node_type="file",
+        to_node_id=missing_node.node_id,
+        to_node_type="test",
+        edge_type="related",
+        scope=_scope(),
+        evidence_links=(
+            EvidenceLink(
+                ref_id=_replacement_ref(core, "Graph index orphan edge evidence.", source_experience_id="exp_graph_index_orphan"),
+                role="current_support",
+            ),
+        ),
+        created_at=CREATED,
+        updated_at=CREATED,
+    )
+    core.add_graph_edge(edge)
+    _commit_with_graph_refs(
+        core,
+        summary="Graph index verifier catches broken graph refs.",
+        graph_refs=GraphRefs(node_ids=(stale_node.node_id, missing_node.node_id), edge_ids=(edge.edge_id,)),
+        source_experience_id="exp_graph_index_broken",
+    )
+    core.graph_nodes.pop(missing_node.node_id)
+    core.graph_nodes[stale_node.node_id] = replace(stale_node, staleness_state="stale")
+
+    verification = core.verify_derived_graph_index(expected_snapshot_hash="not_the_current_hash")
+    issue_types = {issue["issue_type"] for issue in verification["issues"]}
+
+    assert verification["ok"] is False
+    assert "snapshot_hash_mismatch" in issue_types
+    assert "graph_ref_node_missing" in issue_types
+    assert "stale_graph_node_in_active_card_ref" in issue_types
+    assert "graph_edge_to_node_missing" in issue_types
+
+
 def test_retrieve_filters_lifecycle_state_scope_and_is_card_side_effect_free() -> None:
     core, committed = _committed_core("Direct scan retrieval returns approved committed cards.")
     before = stable_json({card_id: card.to_dict() for card_id, card in core.memory_cards.items()})

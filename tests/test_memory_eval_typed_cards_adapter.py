@@ -16,6 +16,10 @@ P0_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p0"
 P1_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p1"
 GRAPH_FIXTURE = P1_FIXTURES / "graph_expansion_basic.json"
 GRAPH_EDGE_FIXTURE = P1_FIXTURES / "graph_edge_expansion_basic.json"
+GRAPH_CROSS_SCOPE_FIXTURE = P1_FIXTURES / "graph_cross_scope_no_leak_basic.json"
+GRAPH_FORGET_FIXTURE = P1_FIXTURES / "graph_forget_no_leak_basic.json"
+GRAPH_STALE_ENDPOINT_FIXTURE = P1_FIXTURES / "graph_stale_endpoint_no_leak_basic.json"
+GRAPH_UNCANONICALIZED_ENDPOINT_FIXTURE = P1_FIXTURES / "graph_uncanonicalized_endpoint_no_leak_basic.json"
 
 
 PHASE_C_PASS_FIXTURES = [
@@ -123,6 +127,7 @@ def test_typed_cards_manifest_declares_mutate_lifecycle_setup_policy() -> None:
     assert manifest["capabilities"]["seed_eval"] is True
     assert manifest["capabilities"]["update"] is True
     assert manifest["capabilities"]["forget"] is True
+    assert manifest["capabilities"]["derived_graph_index_verification"] is True
 
 
 def test_live_model_manifest_declares_model_binding_without_token_material() -> None:
@@ -453,6 +458,9 @@ def test_adapter_retrieve_accepts_graph_on_query_controls() -> None:
     assert graph_on["usage"]["counts"]["index_mode"] == "graph_index"
     assert graph_on["usage"]["counts"]["graph_nodes_expanded"] == 2
     assert graph_on["usage"]["counts"]["graph_edges_expanded"] == 1
+    assert graph_on["derived_graph_index_verification"]["ok"] is True
+    assert graph_on["derived_graph_index_verification"]["issue_count"] == 0
+    assert graph_on["derived_graph_index_verification"]["snapshot_hash"]
 
 
 def test_seed_graph_mutation_is_explicit_fixture_setup_for_recall_only() -> None:
@@ -616,6 +624,47 @@ def test_graph_edge_expansion_fixture_passes_with_graph_usage_counts() -> None:
     assert request["usage"]["counts"]["graph_nodes_expanded"] == 2
     assert request["usage"]["counts"]["graph_edges_expanded"] == 1
     assert request["metrics"]["expected_usage_satisfied"] == 1.0
+    assert request["retrieval"]["derived_graph_index_verification"]["ok"] is True
+    assert request["retrieval"]["derived_graph_index_verification"]["issue_count"] == 0
+
+
+@pytest.mark.parametrize(
+    "fixture_path, forbidden_id, dropped_reason",
+    [
+        (GRAPH_CROSS_SCOPE_FIXTURE, "exp_graph_scope_foreign", "privacy_block"),
+        (GRAPH_FORGET_FIXTURE, "exp_graph_forget_related", "forgotten"),
+        (GRAPH_STALE_ENDPOINT_FIXTURE, "exp_graph_stale_related", "stale_graph_node"),
+        (GRAPH_UNCANONICALIZED_ENDPOINT_FIXTURE, "exp_graph_missing_related", "uncanonicalized_graph_endpoint"),
+    ],
+    ids=["cross_scope", "forgotten", "stale_endpoint", "uncanonicalized_endpoint"],
+)
+def test_graph_negative_fixtures_do_not_leak_blocked_support(
+    fixture_path: Path,
+    forbidden_id: str,
+    dropped_reason: str,
+) -> None:
+    artifact = run_fixture(
+        json.loads(fixture_path.read_text(encoding="utf-8")),
+        TypedCardsMemoryEvalAdapter(),
+        run_id="run_graph_negative",
+        created_at="2026-05-21T00:00:00Z",
+    )
+    request = artifact["requests"][0]
+    returned = request["retrieval"]["returned_evidence_order"]
+    support_ids = [support_id for item in returned for support_id in item["support_experience_ids"]]
+
+    assert request["result_status"] == "passed"
+    assert forbidden_id not in support_ids
+    assert forbidden_id not in str(request["retrieval"]["visible_dropped"])
+    assert request["usage"]["counts"]["index_mode"] == "graph_index"
+    assert request["metrics"]["expected_usage_satisfied"] == 1.0
+    assert request["metrics"]["expected_dropped_counts_satisfied"] == 1.0
+    assert request["retrieval"]["dropped_count_by_reason"][dropped_reason] == 1
+    if dropped_reason == "uncanonicalized_graph_endpoint":
+        verification = request["retrieval"]["derived_graph_index_verification"]
+        assert request["metrics"]["expected_derived_graph_index_verification_satisfied"] == 1.0
+        assert verification["ok"] is False
+        assert verification["issue_count_by_type"]["graph_edge_to_node_missing"] >= 1
 
 
 def test_harness_scope_strings_map_to_non_user_typed_scope_for_semantic_facts() -> None:
