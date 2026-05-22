@@ -110,6 +110,9 @@ def score_retrieval(
             "state_reported_by_adapter": item.get("state"),
             "scope_id_hash": stable_hash(item.get("scope_id")),
         }
+        debug_metadata = _artifact_debug_metadata(item.get("metadata"))
+        if debug_metadata:
+            artifact_item["debug_metadata"] = debug_metadata
         returned.append(artifact_item)
         scorable_union.extend(support_ids)
 
@@ -863,3 +866,27 @@ def _threshold_failures(
                 )
             )
     return failures
+
+
+def _artifact_debug_metadata(metadata: Any) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    retrieval_terms = metadata.get("retrieval_terms")
+    if isinstance(retrieval_terms, (str, bytes)) or not isinstance(retrieval_terms, (list, tuple)):
+        return {}
+    terms = []
+    seen: set[str] = set()
+    for value in retrieval_terms:
+        if not isinstance(value, str):
+            continue
+        text = " ".join(value.split())
+        if not text or len(text) > 96:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(text)
+        if len(terms) >= 32:
+            break
+    return {"retrieval_terms": terms} if terms else {}

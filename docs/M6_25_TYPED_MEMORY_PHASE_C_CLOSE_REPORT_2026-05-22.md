@@ -136,6 +136,7 @@ Multi-review controller result:
 | Usage reporting includes fixed counts and index mode. | Adapter artifacts include latency/count/projection/index-mode usage blocks. |
 | Live raw-memory extraction works through `gpt-5.5` without entering CI. | `mew.memory_eval_live_runner` is opt-in and was run manually with explicit auth. |
 | Retrieval anchors preserve discriminators for budget-limited ranking. | `budget_limited_basic` live smoke now passes with `exp_primary_badge` top-1. |
+| Retrieval anchors are inspectable without becoming prompt projection. | `RankedMemoryEvidence.metadata.retrieval_terms` and adapter artifacts expose anchors only after recall governance filtering. |
 
 ## Residual Risks
 
@@ -149,5 +150,5 @@ Multi-review controller result:
 
 Recommended next step before Phase D:
 
-1. Decide whether `retrieval_terms` should be surfaced in debug/inspect output, and under which privacy gate.
-2. Only then start Phase D graph/index expansion, keeping indexes derived and rebuildable.
+1. Start Phase D graph/index expansion, keeping indexes derived and rebuildable.
+2. Use `retrieval_terms` in debug/eval metadata to inspect graph/index ranking differences.

@@ -369,6 +369,7 @@ def test_lifecycle_seed_eval_round_trips_current_support_from_typed_provenance()
     assert ranked["support_experience_ids"] == ["ex_public"]
     assert ranked["source_experience_ids"] == ["ex_public"]
     assert ranked["provenance_refs"] == ranked["metadata"]["provenance_refs_by_role"]["current_support"]
+    assert {"Mira", "green", "tea", "planning", "breaks"}.issubset(set(ranked["metadata"]["retrieval_terms"]))
     assert ranked["scope_id"] == "tenant_a/user_a"
 
 
@@ -418,6 +419,9 @@ def test_update_forget_fixture_uses_current_support_and_does_not_leak_forgotten_
     assert request["result_status"] == "passed"
     returned = request["retrieval"]["returned_evidence_order"]
     assert returned[0]["support_experience_ids"] == ["exp_active_folder"]
+    assert {"Mira", "travel", "notes", "Orion"}.issubset(
+        set(returned[0]["debug_metadata"]["retrieval_terms"])
+    )
     assert "exp_removed_folder" not in str(request["retrieval"])
     assert returned[0]["source_mutation_ids"] == ["mut_update_folder"]
 

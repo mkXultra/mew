@@ -448,6 +448,8 @@ def test_retrieval_terms_preserve_discriminators_for_ranking_when_summary_is_gen
     )
 
     assert result.ranked_evidence[0].support_experience_ids == ("exp_primary_badge",)
+    assert "launch reviews" in result.ranked_evidence[0].metadata["retrieval_terms"]
+    assert "cobalt" in result.ranked_evidence[0].metadata["retrieval_terms"]
 
 
 def test_raw_retrieval_anchor_fallback_sanitizes_unbounded_tokens() -> None:

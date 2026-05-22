@@ -2021,6 +2021,7 @@ class TypedMemoryCore:
                 "card_id": card.card_id,
                 "card_kind": card.kind,
                 "summary": card.summary,
+                "retrieval_terms": list(card.retrieval_terms),
                 "approval_state": card.approval_state,
                 "staleness_state": card.staleness_state,
                 "contradiction_state": card.contradiction_state,
