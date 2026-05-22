@@ -1,6 +1,6 @@
 # Design 2026-05-22 - M6.25 Memory Subsystem Typed Cards Plan
 
-Status: implementation-ready design plan. No implementation authorization.
+Status: target architecture design. Phase A-C implementation slices now exist; this document remains the normative architecture reference and must not treat current code as automatically authoritative.
 
 Scope: define the intended mew memory subsystem architecture after the generic memory eval harness direction, using typed memory cards plus provenance, graph/index, governance, and bounded recall/projection.
 
@@ -256,6 +256,7 @@ memory_card
   kind: MemoryCardKind
   summary: string
   details: string | null
+  retrieval_terms: list[string]
   scope: Scope
   lifecycle: Lifecycle
   authority: Authority
@@ -581,6 +582,7 @@ MemoryCard:
 
   summary: string
   details: string | null
+  retrieval_terms: list[string]
   confidence: float
 
   scope: Scope
@@ -670,6 +672,24 @@ Rules:
 - direct quote/excerpt material longer than 240 chars must live in `provenance_excerpt` on a `provenance_event`, not in `details`。
 - `event_kind=transcript_turn` / `raw_transcript` provenance cannot be copied directly into `details` unless the extractor records an explicit `extractor_marker` in card metadata and cites the source event。
 - extractor output should summarize decisions, facts, prerequisites, or failures; it must not preserve speaker-by-speaker transcript structure in durable card prose。
+
+#### `retrieval_terms`
+
+```text
+retrieval_terms: 0..32 concise anchor strings, each <= 96 chars
+```
+
+Rules:
+
+- `retrieval_terms` are search/ranking anchors, not projected user-facing prose。
+- terms preserve raw identifying discriminators that make a card findable even when `summary` / `details` are synthesized or paraphrased。
+- extractors should keep short raw-text anchors for subject, target context, condition, object, and value. Examples: names, colors, folder names, review types, product names, command names, file/symbol refs, and other discriminators。
+- terms must be concise tokens or short phrases, not full sentences, transcript excerpts, speaker-role prefixes, raw URLs, or long path/blob payloads。
+- duplicate terms are removed case-insensitively while preserving first occurrence order。
+- `retrieval_terms` participate in stable serialization and card hash lineage. Adding or changing them is a semantic retrieval mutation and must be audit-visible。
+- `retrieval_terms` must not include fixture gold labels, fixture modes, trap family names, or any scoring-only labels。
+- `retrieval_terms` do not replace `applicability`: anchors answer "what terms should match this claim"; applicability answers "where this claim may be used"。
+- normal projection and context packets may omit `retrieval_terms`; debug/audit views may expose them after privacy filtering。
 
 #### `confidence`
 
@@ -1489,6 +1509,7 @@ structured filters:
 lexical/BM25:
   summary
   details
+  retrieval_terms
   applicability.applies_to
   applicability.prerequisites
   error_signature refs
@@ -1606,6 +1627,7 @@ Recommended ranking signals:
 | contradiction risk | possible contradiction lowers rank。 |
 | compactness | shorter evidence packet preferred under budget。 |
 | graph proximity | close graph relation after seed retrieval。 |
+| retrieval anchors | concise `retrieval_terms` preserve raw discriminators omitted from synthesized prose。 |
 
 Ranking must be deterministic. Final ordering tie-break:
 
@@ -1621,6 +1643,7 @@ Ranking must be deterministic. Final ordering tie-break:
 Ranking input boundary:
 
 - ranking reads only governance-filtered committed card fields, graph/index features derived from authorized card/node/edge state, and request-local retrieval features。
+- ranking may read `retrieval_terms` because they are committed card fields, but it must not read raw provenance payloads directly to rescue poor extraction。
 - ranking must not read `memory_audit_log.operation=seed_eval`, setup route, fixture mode, gold/trap labels, or any audit-only seeded flag。
 - seeded cards and normally committed cards with equivalent committed fields must rank equivalently。
 
@@ -2589,6 +2612,7 @@ MemoryToolProvider does not import prompt projection internals
 | replacement content converts deterministically to typed patch/replacement card, including `clear_fields` null-clearing semantics, or rejects underspecified payloads。 | replacement content conformance test。 |
 | stale/superseded/forgotten IDs are not returned as fresh support。 | stale/update/forget fixtures。 |
 | usage reporting includes fixed latency/count/index fields with non-negative counts, stable per-field aggregate semantics, and unavailable-field handling。 | artifact usage schema/regression test。 |
+| live raw-memory extraction preserves retrieval anchors for subject/context/value discriminators, so paraphrased summaries do not lose the correct top-1 support in budget-limited retrieval。 | live `budget_limited_basic` smoke with `gpt-5.5` plus deterministic retrieval-anchor regression tests。 |
 | adapter-visible payload does not leak gold/mode/trap labels。 | harness P0 leakage test。 |
 | caller-visible dropped IDs do not leak unauthorized card/provenance existence。 | cross-scope dropped metadata gate。 |
 
