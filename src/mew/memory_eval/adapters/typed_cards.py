@@ -113,6 +113,7 @@ class TypedCardsMemoryEvalAdapter:
         manifest["extractor"] = self._extractor_manifest()
         manifest["external_model_ids"] = list(manifest["extractor"]["external_model_ids"])
         manifest["capabilities"]["seed_eval"] = True
+        manifest["capabilities"]["graph_expansion"] = True
         return manifest
 
     def reset(self, run: Mapping[str, Any]) -> dict[str, Any]:
@@ -143,6 +144,7 @@ class TypedCardsMemoryEvalAdapter:
 
     def retrieve(self, query: Mapping[str, Any]) -> dict[str, Any]:
         scope = self._scope_from_public(str(query.get("scope_id") or ""))
+        filters = query.get("filters") if isinstance(query.get("filters"), Mapping) else {}
         budget = query.get("budget") if isinstance(query.get("budget"), Mapping) else {}
         limit = int(query.get("k") or 5)
         if budget.get("max_evidence_items") is not None:
@@ -152,8 +154,11 @@ class TypedCardsMemoryEvalAdapter:
                 query=_query_text(query),
                 scope=scope,
                 limit=limit,
-                now=_optional_str((query.get("filters") or {}).get("valid_at") if isinstance(query.get("filters"), Mapping) else None),
+                now=_optional_str(filters.get("valid_at")),
                 latency_source="deterministic_mock",
+                expand_graph=_truthy(query.get("expand_graph")) or _truthy(filters.get("expand_graph")),
+                graph_max_depth=int(filters.get("graph_max_depth") or budget.get("graph_max_depth") or 1),
+                graph_max_items=int(filters.get("graph_max_items") or budget.get("graph_max_items") or 16),
                 request_id=_optional_str(query.get("request_id")),
             )
         )
@@ -582,6 +587,12 @@ def _query_text(query: Mapping[str, Any]) -> str:
 def _optional_str(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _lifecycle_type(op: Mapping[str, Any]) -> str:
