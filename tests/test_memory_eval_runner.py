@@ -22,6 +22,7 @@ from mew.memory_eval.runner import run_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 P0_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p0"
+P1_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p1"
 
 
 def test_dummy_happy_path_passes_with_denominator_inclusion():
@@ -322,6 +323,64 @@ def test_metric_threshold_failures_are_reported_as_hard_gates():
     assert "metric_hard_gate" in {failure["type"] for failure in request["failures"]}
     assert "recall_at_k_threshold" in failed_gates
     assert "mrr_at_k_threshold" in failed_gates
+
+
+def test_expected_usage_gold_gate_fails_when_graph_usage_is_not_reported():
+    class GraphBypassAdapter(DummyPassAdapter):
+        def manifest(self):
+            manifest = super().manifest()
+            manifest["adapter_id"] = "memory_eval_graph_bypass"
+            manifest["capabilities"]["graph_expansion"] = True
+            return manifest
+
+        def retrieve(self, query):
+            usage = default_usage(latency_ms=0.0)
+            usage["counts"] = {
+                "cards_scanned": 2,
+                "cards_ranked": 1,
+                "cards_returned": 1,
+                "cards_dropped": 0,
+                "graph_nodes_expanded": 0,
+                "graph_edges_expanded": 0,
+                "projection_chars": 16,
+                "index_mode": "direct_scan",
+            }
+            return {
+                "request_id": query.get("request_id"),
+                "ranked_evidence": [
+                    {
+                        "evidence_ref": "mem_ex_000002",
+                        "evidence_id": "ex_000002",
+                        "rank": 1,
+                        "score": None,
+                        "score_type": "none",
+                        "support_experience_ids": ["ex_000002"],
+                        "source_mutation_ids": [],
+                        "state": "active",
+                        "scope_id": query.get("scope_id"),
+                    }
+                ],
+                "abstained": False,
+                "abstained_reason": None,
+                "dropped": [],
+                "usage": usage,
+                "failures": [],
+            }
+
+    artifact = run_fixture(
+        P1_FIXTURES / "graph_expansion_basic.json",
+        GraphBypassAdapter(),
+        run_id="run_fixed",
+        created_at="2026-05-21T00:00:00Z",
+    )
+    request = artifact["requests"][0]
+    failed_gates = {gate["gate_id"] for gate in request["hard_gates"] if gate["passed"] is False}
+
+    assert request["result_status"] == "failed"
+    assert request["metrics"]["recall_at_k"] == 1.0
+    assert request["metrics"]["expected_usage_satisfied"] == 0.0
+    assert "usage_expectation_mismatch" in {failure["type"] for failure in request["failures"]}
+    assert "expected_usage_satisfied" in failed_gates
 
 
 def test_adapter_returning_scorer_ids_directly_fails_opaque_ref_validation():

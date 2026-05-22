@@ -2401,7 +2401,8 @@ Current Phase D.1 implementation status, 2026-05-22:
 
 - `MemoryRecallRequest.expand_graph` enables one-hop expansion in the typed-card core; default is off。
 - the typed-card eval adapter accepts adapter-visible `filters.expand_graph` / `filters.graph_max_*` controls, and the live runner exposes `--expand-graph` for normal-suite no-regression scoring。
-- raw extraction can emit explicit `graph_nodes` from raw text; proposed graph refs are carried through proposal/commit and can be evaluated without `seed_graph` setup。
+- raw extraction can emit explicit `graph_nodes` and `graph_edges` from raw text; proposed graph refs are carried through proposal/commit and can be evaluated without `seed_graph` setup。
+- raw extraction treats the caller-provided runtime scope as authoritative; LLM-emitted scope overrides that do not match the trusted runtime scope are ignored and audited as dropped scope overrides。
 - expansion seeds only from cards that passed normal recall governance and direct relevance filtering。
 - candidate cards found through graph expansion still pass privacy, authorization scope, memory scope, applicability, lifecycle, staleness, contradiction, invalidator, and visible-support gates before scoring。
 - expansion uses fresh canonical `graph_nodes` and durable `graph_edges`; unresolved or stale endpoints are ignored for expansion。
@@ -2410,6 +2411,8 @@ Current Phase D.1 implementation status, 2026-05-22:
 - graph-expanded cards receive an explicit deterministic `graph_modifier` score component, and usage records `index_mode=graph_index`, `graph_nodes_expanded`, and `graph_edges_expanded`。
 - graph-on live normal suite passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_suite_graph_on_20260522`, 9/9 passed); because current P0/P1 fixtures contain no graph seed material, all graph expansion counts were zero and this run is a no-regression check, not graph retrieval quality proof。
 - graph-generation live fixture passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_graph_generation_20260522_v3`): `raw_text -> LLM extractor graph_nodes -> proposal/commit -> graph-on recall` returned the graph-related support with `index_mode=graph_index` and `graph_nodes_expanded=1`。
+- graph-generation fixtures may set scorer-only `gold.expected_usage` gates, so a fixture can require `index_mode=graph_index` and minimum graph expansion counts without exposing those expectations to the adapter。
+- graph-generation live suite passed on 2026-05-23 with `gpt-5.5` (`run_id=manual_graph_edge_generation_20260523_scopefix`, 2/2 passed): both `graph_nodes` and `graph_edges` extraction paths satisfied scorer-only graph usage gates。
 - `seed_graph` remains an explicit fixture/debug setup path for isolating recall expansion from extraction quality; it is not evidence that ingest generates graph material。
 - remaining Phase D work: broader graph-specific memory-eval fixtures, separate fanout/node/card/latency budgets, graph invalidation hooks, and rebuild verification for derived graph-aware indexes。
 
@@ -2638,6 +2641,8 @@ MemoryToolProvider does not import prompt projection internals
 | replacement content converts deterministically to typed patch/replacement card, including `clear_fields` null-clearing semantics, or rejects underspecified payloads。 | replacement content conformance test。 |
 | stale/superseded/forgotten IDs are not returned as fresh support。 | stale/update/forget fixtures。 |
 | usage reporting includes fixed latency/count/index fields with non-negative counts, stable per-field aggregate semantics, and unavailable-field handling。 | artifact usage schema/regression test。 |
+| graph-generation fixtures can hard-gate scorer-only expected usage such as `index_mode=graph_index` and minimum graph expansion counts。 | `gold.expected_usage` scoring gate regression test。 |
+| raw extraction cannot move memory to an LLM-chosen scope when caller runtime scope is authoritative。 | scope override ignored/audited regression test。 |
 | live raw-memory extraction preserves retrieval anchors for subject/context/value discriminators, so paraphrased summaries do not lose the correct top-1 support in budget-limited retrieval。 | live `budget_limited_basic` smoke with `gpt-5.5` plus deterministic retrieval-anchor regression tests。 |
 | adapter-visible payload does not leak gold/mode/trap labels。 | harness P0 leakage test。 |
 | caller-visible dropped IDs do not leak unauthorized card/provenance existence。 | cross-scope dropped metadata gate。 |

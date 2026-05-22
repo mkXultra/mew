@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 P0_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p0"
 P1_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p1"
 GRAPH_FIXTURE = P1_FIXTURES / "graph_expansion_basic.json"
+GRAPH_EDGE_FIXTURE = P1_FIXTURES / "graph_edge_expansion_basic.json"
 
 
 PHASE_C_PASS_FIXTURES = [
@@ -252,9 +253,11 @@ def test_live_model_mode_uses_structured_extractor_when_injected() -> None:
         "clarification_needed",
     ]
     assert "retrieval_terms" in calls[0]["json_schema"]["properties"]["candidate"]["required"]
+    assert "graph_edges" in calls[0]["json_schema"]["properties"]["candidate"]["required"]
     assert calls[0]["strict"] is True
     assert "default_scope_key" in calls[0]["prompt"]
     assert "retrieval_terms" in calls[0]["prompt"]
+    assert "graph_edges" in calls[0]["prompt"]
 
 
 @pytest.mark.parametrize(
@@ -590,6 +593,29 @@ def test_graph_expansion_fixture_passes_with_graph_usage_counts() -> None:
     assert request["usage"]["counts"]["index_mode"] == "graph_index"
     assert request["usage"]["counts"]["graph_nodes_expanded"] == 1
     assert request["usage"]["counts"]["graph_edges_expanded"] == 0
+    assert request["metrics"]["expected_usage_satisfied"] == 1.0
+    assert "expected_usage_satisfied" in {
+        gate["gate_id"] for gate in request["hard_gates"] if gate["passed"] is True
+    }
+
+
+def test_graph_edge_expansion_fixture_passes_with_graph_usage_counts() -> None:
+    artifact = run_fixture(
+        json.loads(GRAPH_EDGE_FIXTURE.read_text(encoding="utf-8")),
+        TypedCardsMemoryEvalAdapter(),
+        run_id="run_graph_edge",
+        created_at="2026-05-21T00:00:00Z",
+    )
+    request = artifact["requests"][0]
+
+    assert request["result_status"] == "passed"
+    returned = request["retrieval"]["returned_evidence_order"]
+    support_ids = [support_id for item in returned for support_id in item["support_experience_ids"]]
+    assert "exp_edge_related_note" in support_ids
+    assert request["usage"]["counts"]["index_mode"] == "graph_index"
+    assert request["usage"]["counts"]["graph_nodes_expanded"] == 2
+    assert request["usage"]["counts"]["graph_edges_expanded"] == 1
+    assert request["metrics"]["expected_usage_satisfied"] == 1.0
 
 
 def test_harness_scope_strings_map_to_non_user_typed_scope_for_semantic_facts() -> None:

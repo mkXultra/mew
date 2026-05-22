@@ -144,7 +144,10 @@ def test_normal_9_suite_fixture_order_is_stable() -> None:
 def test_graph_generation_suite_fixture_order_is_stable() -> None:
     fixtures = suite_fixture_paths(GRAPH_GENERATION_SUITE)
 
-    assert [path.name for path in fixtures] == ["graph_expansion_basic.json"]
+    assert [path.name for path in fixtures] == [
+        "graph_expansion_basic.json",
+        "graph_edge_expansion_basic.json",
+    ]
 
 
 def test_resolve_output_path_uses_run_id_when_output_is_omitted(tmp_path: Path) -> None:

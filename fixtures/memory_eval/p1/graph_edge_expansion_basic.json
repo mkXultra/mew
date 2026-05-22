@@ -1,22 +1,22 @@
 {
   "schema_version": "memory_eval_fixture.v1",
-  "fixture_id": "graph_expansion_basic",
+  "fixture_id": "graph_edge_expansion_basic",
   "fixture_version": "1.0.0",
   "fixture_family": "graph_expansion",
   "phase": "P1",
   "evaluation_time": "2026-05-21T00:00:00Z",
   "experiences": [
     {
-      "experience_id": "exp_anchor_note",
+      "experience_id": "exp_edge_anchor_note",
       "scope_id": "tenant_a/user_a",
-      "session_id": "session_graph_101",
+      "session_id": "session_graph_102",
       "turn_id": "turn_001",
-      "event_time": "2026-01-10T09:00:00Z",
+      "event_time": "2026-01-10T10:00:00Z",
       "ingest_order": 1,
       "actor_id": "user_a",
       "payload": {
         "mime_type": "text/plain",
-        "text": "Vega anchor is attached to file:mew:main:src/mew/memory_typed_card_core.py."
+        "text": "Deneb anchor is attached to graph_edge(file:mew:main:src/mew/memory_typed_card_core.py,related,test:mew:tests/test_memory_typed_cards_phase_b.py)."
       },
       "visibility": {
         "allowed_scope_ids": ["tenant_a/user_a"],
@@ -27,16 +27,16 @@
       }
     },
     {
-      "experience_id": "exp_related_note",
+      "experience_id": "exp_edge_related_note",
       "scope_id": "tenant_a/user_a",
-      "session_id": "session_graph_101",
+      "session_id": "session_graph_102",
       "turn_id": "turn_002",
-      "event_time": "2026-01-10T09:05:00Z",
+      "event_time": "2026-01-10T10:05:00Z",
       "ingest_order": 2,
       "actor_id": "user_a",
       "payload": {
         "mime_type": "text/plain",
-        "text": "The regression coverage for file:mew:main:src/mew/memory_typed_card_core.py lives in the typed memory adapter tests."
+        "text": "The edge coverage note is attached to graph_edge(file:mew:main:src/mew/memory_typed_card_core.py,related,test:mew:tests/test_memory_typed_cards_phase_b.py)."
       },
       "visibility": {
         "allowed_scope_ids": ["tenant_a/user_a"],
@@ -49,29 +49,29 @@
   ],
   "mutations": [
     {
-      "op_id": "mut_seed_anchor",
+      "op_id": "mut_seed_edge_anchor",
       "mutation_type": "seed_eval",
-      "target_experience_id": "exp_anchor_note",
+      "target_experience_id": "exp_edge_anchor_note",
       "effective_time": "2026-05-21T00:00:00Z",
-      "reason": "graph fixture setup"
+      "reason": "graph edge fixture setup"
     },
     {
-      "op_id": "mut_seed_related",
+      "op_id": "mut_seed_edge_related",
       "mutation_type": "seed_eval",
-      "target_experience_id": "exp_related_note",
+      "target_experience_id": "exp_edge_related_note",
       "effective_time": "2026-05-21T00:00:00Z",
-      "reason": "graph fixture setup"
+      "reason": "graph edge fixture setup"
     }
   ],
   "requests": [
     {
-      "request_id": "req_graph_related",
+      "request_id": "req_graph_edge_related",
       "mode": "graph_expansion",
       "scope_id": "tenant_a/user_a",
       "query_time": "2026-03-01T12:00:00Z",
       "query": {
-        "text": "What is connected to the Vega anchor?",
-        "intent": "graph_related_lookup"
+        "text": "What is connected to the Deneb anchor?",
+        "intent": "graph_edge_related_lookup"
       },
       "k": 2,
       "filters": {
@@ -89,23 +89,23 @@
       "requires_capabilities": ["retrieve", "graph_expansion"],
       "on_unsupported": "hard_failure",
       "gold": {
-        "relevant_evidence_ids": ["exp_related_note"],
+        "relevant_evidence_ids": ["exp_edge_related_note"],
         "must_not_return_evidence_ids": [],
         "stale_evidence_ids": [],
         "expected_abstention": false,
         "expected_usage": {
           "index_mode": "graph_index",
-          "min_graph_nodes_expanded": 1,
-          "min_graph_edges_expanded": 0
+          "min_graph_nodes_expanded": 2,
+          "min_graph_edges_expanded": 1
         }
       }
     }
   ],
   "operation_sequence": [
-    {"type": "ingest", "experience_id": "exp_anchor_note", "ingest_order": 1},
-    {"type": "mutate", "op_id": "mut_seed_anchor", "ingest_order": 1},
-    {"type": "ingest", "experience_id": "exp_related_note", "ingest_order": 2},
-    {"type": "mutate", "op_id": "mut_seed_related", "ingest_order": 2},
-    {"type": "request", "request_id": "req_graph_related", "after_ingest_order": 2}
+    {"type": "ingest", "experience_id": "exp_edge_anchor_note", "ingest_order": 1},
+    {"type": "mutate", "op_id": "mut_seed_edge_anchor", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_edge_related_note", "ingest_order": 2},
+    {"type": "mutate", "op_id": "mut_seed_edge_related", "ingest_order": 2},
+    {"type": "request", "request_id": "req_graph_edge_related", "after_ingest_order": 2}
   ]
 }

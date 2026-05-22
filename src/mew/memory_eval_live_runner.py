@@ -44,6 +44,7 @@ NORMAL_9_FIXTURES = (
 )
 GRAPH_GENERATION_FIXTURES = (
     Path("fixtures/memory_eval/p1/graph_expansion_basic.json"),
+    Path("fixtures/memory_eval/p1/graph_edge_expansion_basic.json"),
 )
 
 

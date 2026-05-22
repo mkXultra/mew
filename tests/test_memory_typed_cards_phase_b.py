@@ -281,10 +281,12 @@ def test_model_extractor_prefers_structured_json_and_passes_schema() -> None:
     assert calls[0]["json_schema"] == raw_memory_extraction_schema()
     assert "retrieval_terms" in calls[0]["json_schema"]["properties"]["candidate"]["required"]
     assert "graph_nodes" in calls[0]["json_schema"]["properties"]["candidate"]["required"]
+    assert "graph_edges" in calls[0]["json_schema"]["properties"]["candidate"]["required"]
     assert calls[0]["strict"] is True
     assert "default_scope_key" in calls[0]["prompt"]
     assert "retrieval_terms" in calls[0]["prompt"]
     assert "graph_nodes" in calls[0]["prompt"]
+    assert "graph_edges" in calls[0]["prompt"]
 
 
 def test_approval_commit_separation_and_model_cannot_commit() -> None:
@@ -638,6 +640,74 @@ def test_raw_extractor_graph_nodes_become_proposal_graph_refs_for_expansion() ->
     assert result.usage.index_mode == "graph_index"
     assert result.usage.graph_nodes_expanded == 1
     assert result.usage.graph_edges_expanded == 0
+
+
+def test_raw_extractor_graph_edges_become_proposal_graph_refs_for_expansion() -> None:
+    file_ref = "file:mew:main:src/mew/memory_typed_card_core.py"
+    test_ref = "test:mew:tests/test_memory_typed_cards_phase_b.py"
+
+    def extractor(request, provenance_event, scope):
+        return {
+            "decision": "candidate",
+            "candidate": {
+                "kind": "semantic_fact",
+                "summary": "Graph extraction keeps explicit edge anchors.",
+                "details": None,
+                "retrieval_terms": ["Deneb" if "Deneb" in request.raw_text else "edge coverage"],
+                "confidence": 0.9,
+                "authority": {"source": "self", "strength": "hint"},
+                "valence": {"polarity": "neutral", "effect": "use"},
+                "applicability": {"applies_to": [_scope().scope_key()]},
+                "graph_edges": [
+                    {
+                        "from_node_type": "file",
+                        "from_canonical_ref": file_ref,
+                        "from_display_name": "memory_typed_card_core.py",
+                        "to_node_type": "test",
+                        "to_canonical_ref": test_ref,
+                        "to_display_name": "test_memory_typed_cards_phase_b.py",
+                        "edge_type": "related",
+                        "confidence": 1.0,
+                    }
+                ],
+                "proposed_by": "model",
+            },
+        }
+
+    core = TypedMemoryCore(extractor=extractor, clock=_Clock())
+    seed = _ingest(core, raw_text="Deneb anchor is attached to an explicit graph edge.")
+    related = _ingest(core, raw_text="Coverage note references the same explicit graph edge.")
+    assert seed.proposal_card is not None
+    assert related.proposal_card is not None
+    assert seed.proposal_card.graph_refs.edge_ids
+    assert seed.proposal_card.graph_refs.edge_ids == related.proposal_card.graph_refs.edge_ids
+    core.approve_and_commit_memory(seed.proposal_card.card_id, actor="debug")
+    core.approve_and_commit_memory(related.proposal_card.card_id, actor="debug")
+
+    result = core.retrieve(
+        MemoryRecallRequest(query="Deneb anchor", scope=_scope(), expand_graph=True, graph_max_items=4, limit=2)
+    )
+
+    assert len(result.ranked_evidence) == 2
+    assert result.usage.index_mode == "graph_index"
+    assert result.usage.graph_nodes_expanded == 2
+    assert result.usage.graph_edges_expanded == 1
+
+
+def test_raw_extractor_scope_override_is_ignored_for_trusted_runtime_scope() -> None:
+    payload = _candidate_payload("Scope overrides from raw extraction must not move the memory.")
+    payload["candidate"]["scope"] = _branch_scope("feature-hallucinated").to_dict()
+    core = _core_with_payload(payload)
+
+    result = _ingest(
+        core,
+        raw_text="Remember that raw text should stay in the caller-provided scope.",
+        source_experience_id="exp_scope_override",
+    )
+
+    assert result.proposal_card is not None
+    assert result.proposal_card.scope.scope_key() == _scope().scope_key()
+    assert any(item.reason == "ignored_scope_override" for item in result.dropped)
 
 
 def test_raw_retrieval_anchor_fallback_sanitizes_unbounded_tokens() -> None:

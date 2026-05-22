@@ -387,6 +387,14 @@ def score_retrieval(
             )
         )
 
+    expected_usage = gold.get("expected_usage") if isinstance(gold.get("expected_usage"), Mapping) else {}
+    expected_usage_failures = _expected_usage_failures(
+        request_id=request_id,
+        expected=expected_usage,
+        retrieval=retrieval,
+    )
+    failures.extend(expected_usage_failures)
+
     metrics = _metrics(
         returned_count=len(ranked),
         k=k,
@@ -404,9 +412,13 @@ def score_retrieval(
         actual_abstention=actual_abstention,
         item_limit=item_limit,
     )
+    if expected_usage:
+        metrics["expected_usage_satisfied"] = 0.0 if expected_usage_failures else 1.0
     failures.extend(_threshold_failures(request=request, metrics=metrics, profile=profile))
 
     gate_ids = list(profile.get("hard_gates") or [])
+    if expected_usage and "expected_usage_satisfied" not in gate_ids:
+        gate_ids.append("expected_usage_satisfied")
     profile_gate_ids = set(gate_ids)
     gate_ids.extend(
         sorted(
@@ -732,6 +744,63 @@ def _has_latency_usage(retrieval: Mapping[str, Any]) -> bool:
     if not isinstance(latency, Mapping):
         return False
     return latency.get("retrieve") is not None and latency.get("total") is not None
+
+
+def _expected_usage_failures(
+    *,
+    request_id: str,
+    expected: Mapping[str, Any],
+    retrieval: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if not expected:
+        return []
+    usage = retrieval.get("usage") if isinstance(retrieval.get("usage"), Mapping) else {}
+    counts = usage.get("counts") if isinstance(usage.get("counts"), Mapping) else {}
+    failures = []
+
+    expected_index_mode = expected.get("index_mode")
+    if expected_index_mode is not None:
+        actual_index_mode = counts.get("index_mode")
+        if actual_index_mode != expected_index_mode:
+            failures.append(
+                make_failure(
+                    stage="scoring",
+                    type="usage_expectation_mismatch",
+                    message=f"Expected usage counts.index_mode={expected_index_mode!r}, got {actual_index_mode!r}.",
+                    request_id=request_id,
+                    gate_id="expected_usage_satisfied",
+                    metric_id="expected_usage_satisfied",
+                    expected={"counts.index_mode": expected_index_mode},
+                    actual={"counts.index_mode": actual_index_mode},
+                )
+            )
+
+    for key, minimum in expected.items():
+        if not str(key).startswith("min_"):
+            continue
+        count_key = str(key)[4:]
+        actual = counts.get(count_key)
+        if not _meets_minimum(actual, minimum):
+            failures.append(
+                make_failure(
+                    stage="scoring",
+                    type="usage_expectation_mismatch",
+                    message=f"Expected usage counts.{count_key}>={minimum!r}, got {actual!r}.",
+                    request_id=request_id,
+                    gate_id="expected_usage_satisfied",
+                    metric_id="expected_usage_satisfied",
+                    expected={f"counts.{count_key}": {"min": minimum}},
+                    actual={f"counts.{count_key}": actual},
+                )
+            )
+    return failures
+
+
+def _meets_minimum(actual: Any, minimum: Any) -> bool:
+    try:
+        return float(actual) >= float(minimum)
+    except (TypeError, ValueError):
+        return False
 
 
 def _metrics(

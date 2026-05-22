@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+import re
 from typing import Any, Literal
 
 from ..adapter_contract import adapter_manifest, default_capabilities, default_usage
@@ -673,6 +674,7 @@ def _deterministic_replay_extractor(
                 }
             ],
             "graph_nodes": _replay_graph_nodes(request.raw_text),
+            "graph_edges": _replay_graph_edges(request.raw_text),
             "proposed_by": CandidateProducer.MODEL.value,
             "write_reason": "deterministic memory-eval replay",
             "ambiguous": False,
@@ -833,6 +835,53 @@ def _replay_graph_nodes(text: str) -> list[dict[str, Any]]:
         if len(nodes) >= 8:
             break
     return nodes
+
+
+def _replay_graph_edges(text: str) -> list[dict[str, Any]]:
+    edges = []
+    seen = set()
+    pattern = re.compile(r"graph_edge\(([^,\s]+),([a-z_]+),([^) \t\n\r]+)\)")
+    for match in pattern.finditer(str(text or "")):
+        from_ref = match.group(1).strip(".,:;!?()[]{}\"'")
+        edge_type = match.group(2).strip()
+        to_ref = match.group(3).strip(".,:;!?()[]{}\"'")
+        key = (from_ref, edge_type, to_ref)
+        if key in seen:
+            continue
+        from_node_type = _node_type_from_ref(from_ref)
+        to_node_type = _node_type_from_ref(to_ref)
+        if not from_node_type or not to_node_type:
+            continue
+        seen.add(key)
+        edges.append(
+            {
+                "from_node_type": from_node_type,
+                "from_canonical_ref": from_ref,
+                "from_display_name": from_ref.rsplit(":", 1)[-1],
+                "to_node_type": to_node_type,
+                "to_canonical_ref": to_ref,
+                "to_display_name": to_ref.rsplit(":", 1)[-1],
+                "edge_type": edge_type,
+                "confidence": 1.0,
+            }
+        )
+        if len(edges) >= 8:
+            break
+    return edges
+
+
+def _node_type_from_ref(ref: str) -> str | None:
+    prefix = ref.split(":", 1)[0].strip()
+    mapping = {
+        "file": "file",
+        "symbol": "symbol",
+        "test": "test",
+        "command": "command",
+        "error": "error_signature",
+        "error_signature": "error_signature",
+        "task": "task",
+    }
+    return mapping.get(prefix)
 
 
 def _mutation_patch(op: Mapping[str, Any]) -> dict[str, Any]:
