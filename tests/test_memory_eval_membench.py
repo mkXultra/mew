@@ -1,9 +1,12 @@
 import json
+import sys
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from mew.memory_eval import membench as membench_module
 from mew.memory_eval.fixtures import split_fixture
 from mew.memory_eval.hashing import canonical_json
 from mew.memory_eval.membench import (
@@ -13,6 +16,7 @@ from mew.memory_eval.membench import (
     build_typed_cards_ephemeral_fixtures_from_dry_run,
     convert_mteb_qrels_dry_run,
     main as membench_main,
+    prepare_hf_mteb_qrels_source,
     validate_mteb_source_manifest,
     validate_mteb_qrels_dry_run,
 )
@@ -453,6 +457,231 @@ def test_mteb_validate_source_manifest_cli_reports_phase_c_status(
     ] is True
 
 
+def test_prepare_hf_mteb_qrels_writes_local_jsonl_and_private_manifest(tmp_path):
+    fixture_tree_before = _fixture_tree_snapshot()
+    calls = []
+
+    prepared = prepare_hf_mteb_qrels_source(
+        tmp_path / "hf_source",
+        revision=PINNED_SOURCE_REVISION,
+        include_top_ranked=True,
+        declared_license="mit",
+        license_source="synthetic test audit",
+        loader=_fake_hf_mteb_loader(calls),
+    )
+
+    assert prepared.manifest_path == tmp_path / "hf_source" / "source_manifest.json"
+    assert prepared.top_ranked_path == tmp_path / "hf_source" / "top_ranked.jsonl"
+    assert [call["config_name"] for call in calls] == [
+        "single_hop-corpus",
+        "single_hop-queries",
+        "single_hop-qrels",
+        "single_hop-top_ranked",
+    ]
+    assert json.loads(prepared.corpus_path.read_text(encoding="utf-8").splitlines()[0])[
+        "_id"
+    ] == "doc-green"
+    assert json.loads(prepared.queries_path.read_text(encoding="utf-8").splitlines()[0])[
+        "_id"
+    ] == "query-green"
+    assert json.loads(prepared.qrels_path.read_text(encoding="utf-8").splitlines()[0])[
+        "corpus-id"
+    ] == "doc-green"
+
+    manifest = json.loads(prepared.manifest_path.read_text(encoding="utf-8"))
+    report = validate_mteb_source_manifest(manifest)
+
+    assert manifest["source_dataset"] == "mteb/MemBench"
+    assert manifest["source_subset"] == "single_hop"
+    assert manifest["source_revision"] == PINNED_SOURCE_REVISION
+    assert manifest["source_revision_status"] == "pinned"
+    assert manifest["local_cache_only"] is True
+    assert manifest["generated_fixture_commit_policy"] == "no_vendor_by_default"
+    assert manifest["redistribution_status"] == "private_only"
+    assert manifest["hf_mteb_export"] == {
+        "dataset": "mteb/MemBench",
+        "subset": "single_hop",
+        "revision": PINNED_SOURCE_REVISION,
+        "split": "auto",
+        "config_names": {
+            "corpus": "single_hop-corpus",
+            "queries": "single_hop-queries",
+            "qrels": "single_hop-qrels",
+            "top_ranked": "single_hop-top_ranked",
+        },
+        "include_top_ranked": True,
+        "raw_source_policy": "local_only_no_vendor",
+        "writes_generated_fixtures": False,
+    }
+    assert {item["path"] for item in manifest["raw_file_hashes"]} == {
+        "corpus.jsonl",
+        "queries.jsonl",
+        "qrels.jsonl",
+        "top_ranked.jsonl",
+    }
+    assert report["phase_c_commit_preconditions"]["status"] == "private_only"
+    assert (
+        report["phase_c_commit_preconditions"]["generated_fixture_commit_allowed"]
+        is False
+    )
+    assert report["phase_c_commit_preconditions"]["raw_source_commit_allowed"] is False
+    assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+def test_prepare_hf_mteb_qrels_output_feeds_dry_run_and_validation(tmp_path):
+    fixture_tree_before = _fixture_tree_snapshot()
+    prepared = prepare_hf_mteb_qrels_source(
+        tmp_path / "hf_source",
+        revision=PINNED_SOURCE_REVISION,
+        loader=_fake_hf_mteb_loader([]),
+    )
+
+    dry_run = convert_mteb_qrels_dry_run(
+        prepared.source_dir,
+        manifest_path=prepared.manifest_path,
+        max_queries=1,
+    )
+    validation = validate_mteb_qrels_dry_run(dry_run)
+
+    assert dry_run["candidate_counts"]["selected_fixture_previews"] == 1
+    assert dry_run["source_manifest"]["redistribution_status"] == "private_only"
+    assert (
+        dry_run["commit_policy"]["phase_c_generated_fixture_commit_allowed"] is False
+    )
+    assert validation["validation_status"] == "passed"
+    assert validation["ephemeral_fixture_policy"]["writes_fixture_pack"] is False
+    assert (
+        validation["ephemeral_fixture_policy"]["generated_fixture_pack_committed"]
+        is False
+    )
+    assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+def test_prepare_hf_mteb_qrels_missing_datasets_cli_message(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setitem(sys.modules, "datasets", None)
+
+    assert (
+        membench_main(
+            [
+                "prepare-hf-mteb-qrels",
+                str(tmp_path / "hf_source"),
+                "--revision",
+                PINNED_SOURCE_REVISION,
+            ]
+        )
+        == 1
+    )
+
+    captured = capsys.readouterr()
+    assert "Optional dependency 'datasets' is required" in captured.err
+    assert not (tmp_path / "hf_source").exists()
+
+
+def test_prepare_hf_mteb_qrels_old_datasets_cli_message(
+    tmp_path, monkeypatch, capsys
+):
+    calls = []
+
+    def fake_load_dataset(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("load_dataset should not be called without DownloadConfig")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "datasets",
+        SimpleNamespace(load_dataset=fake_load_dataset),
+    )
+
+    assert (
+        membench_main(
+            [
+                "prepare-hf-mteb-qrels",
+                str(tmp_path / "hf_source"),
+                "--revision",
+                PINNED_SOURCE_REVISION,
+            ]
+        )
+        == 1
+    )
+
+    captured = capsys.readouterr()
+    assert "must support DownloadConfig(local_files_only=True)" in captured.err
+    assert calls == []
+    assert not (tmp_path / "hf_source").exists()
+
+
+def test_default_hf_dataset_loader_requests_local_files_only(monkeypatch):
+    calls = []
+
+    class FakeDownloadConfig:
+        def __init__(self, *, local_files_only):
+            self.local_files_only = local_files_only
+
+    def fake_load_dataset(dataset, config_name, *, revision, download_config):
+        calls.append(
+            {
+                "dataset": dataset,
+                "config_name": config_name,
+                "revision": revision,
+                "download_config": download_config,
+            }
+        )
+        return [{"_id": "doc-1", "text": "cached record"}]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "datasets",
+        SimpleNamespace(
+            DownloadConfig=FakeDownloadConfig,
+            load_dataset=fake_load_dataset,
+        ),
+    )
+
+    result = membench_module._default_hf_dataset_loader(
+        "mteb/MemBench",
+        "single_hop-corpus",
+        revision=PINNED_SOURCE_REVISION,
+    )
+
+    assert result == [{"_id": "doc-1", "text": "cached record"}]
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["dataset"] == "mteb/MemBench"
+    assert call["config_name"] == "single_hop-corpus"
+    assert call["revision"] == PINNED_SOURCE_REVISION
+    assert isinstance(call["download_config"], FakeDownloadConfig)
+    assert call["download_config"].local_files_only is True
+
+
+def test_prepare_hf_mteb_qrels_requires_pinned_revision_before_loading(tmp_path):
+    calls = []
+
+    with pytest.raises(MembenchConversionError, match="40-character commit SHA"):
+        prepare_hf_mteb_qrels_source(
+            tmp_path / "hf_source",
+            revision="main",
+            loader=_fake_hf_mteb_loader(calls),
+        )
+
+    assert calls == []
+    assert not (tmp_path / "hf_source").exists()
+
+
+def test_prepare_hf_mteb_qrels_rejects_fixture_output_dir(tmp_path):
+    fixture_tree_before = _fixture_tree_snapshot()
+
+    with pytest.raises(MembenchConversionError, match="outside fixtures/memory_eval"):
+        prepare_hf_mteb_qrels_source(
+            MEMORY_EVAL_FIXTURES / "membench_raw_source",
+            revision=PINNED_SOURCE_REVISION,
+            loader=_fake_hf_mteb_loader([]),
+        )
+
+    assert fixture_tree_before == _fixture_tree_snapshot()
+
+
 def test_mteb_qrels_dry_run_maps_docs_through_corpus_manifest_and_hides_gold(tmp_path):
     _write_jsonl(
         tmp_path / "corpus.jsonl",
@@ -877,6 +1106,49 @@ def _write_jsonl(path, rows):
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
     )
+
+
+def _fake_hf_mteb_loader(calls):
+    records = {
+        "single_hop-corpus": [
+            {
+                "_id": "doc-green",
+                "title": "Tea note",
+                "text": "Aki stores the green tea tin beside the kettle.",
+            },
+            {
+                "_id": "doc-bike",
+                "text": "Rin parks the blue bicycle near the station gate.",
+            },
+        ],
+        "single_hop-queries": [
+            {
+                "_id": "query-green",
+                "text": "Where does Aki store the green tea tin?",
+                "choices": ["desk", "kettle"],
+                "answer": "kettle",
+                "ground_truth": "B",
+            }
+        ],
+        "single_hop-qrels": [
+            {"query-id": "query-green", "corpus-id": "doc-green", "score": 1}
+        ],
+        "single_hop-top_ranked": [
+            {"query-id": "query-green", "corpus-id": "doc-bike", "score": 0.2}
+        ],
+    }
+
+    def loader(dataset, config_name, *, revision):
+        calls.append(
+            {
+                "dataset": dataset,
+                "config_name": config_name,
+                "revision": revision,
+            }
+        )
+        return {"test": records[config_name]}
+
+    return loader
 
 
 def _write_minimal_mteb_source(tmp_path):

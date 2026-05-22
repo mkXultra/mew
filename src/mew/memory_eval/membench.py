@@ -11,12 +11,13 @@ import csv
 import hashlib
 import json
 import re
+import sys
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .adapters.broken import (
     DuplicateSupportAdapter,
@@ -40,6 +41,9 @@ MEMBENCH_HF_DATASET = "mteb/MemBench"
 MEMBENCH_HF_SOURCE_HOST = "Hugging Face"
 MEMBENCH_HF_DATASET_URL = "https://huggingface.co/datasets/mteb/MemBench"
 MEMBENCH_THIRD_PARTY_NOTICE_FILE = "docs/THIRD_PARTY_DATA.md"
+MEMORY_EVAL_FIXTURES_DIR = (
+    Path(__file__).resolve().parents[3] / "fixtures" / "memory_eval"
+)
 DEFAULT_EVALUATION_TIME = "2026-05-22T00:00:00Z"
 DEFAULT_SCOPE_ID = "tenant_mb/user_000001"
 DEFAULT_QUERY_TIME = "2026-05-22T00:00:00Z"
@@ -144,6 +148,9 @@ MEMBENCH_PRIVATE_VALUE_TOKENS = {
 
 class MembenchConversionError(ValueError):
     """Raised when a local source cannot be interpreted as MTEB qrels data."""
+
+
+HfDatasetLoader = Callable[..., Any]
 
 
 @dataclass(frozen=True)
@@ -446,6 +453,102 @@ def _raise_if_source_audit_blocks_conversion(
             "MemBench source manifest is not eligible for dry-run conversion: "
             f"{status}"
         )
+
+
+def prepare_hf_mteb_qrels_source(
+    output_dir: str | Path,
+    *,
+    dataset: str = MEMBENCH_HF_DATASET,
+    subset: str = "single_hop",
+    revision: str,
+    include_top_ranked: bool = False,
+    split: str | None = None,
+    loader: HfDatasetLoader | None = None,
+    source_host: str | None = None,
+    source_url: str | None = None,
+    declared_license: str | None = None,
+    license_source: str | None = None,
+    license_source_url: str | None = None,
+    citation_targets: Iterable[str] | None = None,
+    third_party_notice_file: str | None = None,
+    redistribution_status: str | None = None,
+) -> PreparedMtebSource:
+    """Prepare local-only JSONL files from Hugging Face MTEB MemBench configs.
+
+    This helper only writes raw local source files and a conservative source
+    manifest. It never writes generated fixture packs.
+    """
+
+    if not _is_pinned_revision(revision):
+        raise MembenchConversionError(
+            "MemBench Hugging Face preparation requires --revision to be pinned "
+            "to an immutable 40-character commit SHA"
+        )
+
+    target = Path(output_dir)
+    _reject_memory_eval_fixture_output(target)
+    config_names = _hf_mteb_config_names(
+        subset, include_top_ranked=include_top_ranked
+    )
+    loader_fn = loader or _default_hf_dataset_loader
+    records_by_key = {
+        key: _load_hf_config_records(
+            loader=loader_fn,
+            dataset=dataset,
+            config_name=config_name,
+            revision=revision,
+            split=split,
+        )
+        for key, config_name in config_names.items()
+    }
+
+    target.mkdir(parents=True, exist_ok=True)
+    paths = {
+        "corpus": target / "corpus.jsonl",
+        "queries": target / "queries.jsonl",
+        "qrels": target / "qrels.jsonl",
+    }
+    if include_top_ranked:
+        paths["top_ranked"] = target / "top_ranked.jsonl"
+    for key, path in paths.items():
+        _write_jsonl_records(path, records_by_key[key])
+
+    manifest = audit_mteb_source_manifest(
+        target,
+        source_dataset=dataset,
+        source_host=source_host,
+        source_url=source_url or _hf_dataset_url(dataset),
+        source_revision=revision,
+        source_subset=subset,
+        declared_license=declared_license,
+        license_source=license_source,
+        license_source_url=license_source_url,
+        citation_targets=citation_targets,
+        third_party_notice_file=third_party_notice_file,
+        redistribution_status=redistribution_status or "private_only",
+    )
+    manifest["hf_mteb_export"] = {
+        "dataset": dataset,
+        "subset": subset,
+        "revision": revision,
+        "split": split or "auto",
+        "config_names": config_names,
+        "include_top_ranked": include_top_ranked,
+        "raw_source_policy": "local_only_no_vendor",
+        "writes_generated_fixtures": False,
+    }
+    _refresh_source_manifest_hash(manifest)
+    manifest_path = target / "source_manifest.json"
+    write_json_artifact(manifest_path, manifest)
+
+    return PreparedMtebSource(
+        source_dir=target,
+        corpus_path=paths["corpus"],
+        queries_path=paths["queries"],
+        qrels_path=paths["qrels"],
+        top_ranked_path=paths.get("top_ranked"),
+        manifest_path=manifest_path,
+    )
 
 
 def convert_mteb_qrels_dry_run(
@@ -901,6 +1004,26 @@ def main(argv: list[str] | None = None) -> int:
     dry_run_parser.add_argument("--seed", type=int, default=12345)
     dry_run_parser.add_argument("--output", required=True)
 
+    prepare_parser = subcommands.add_parser("prepare-hf-mteb-qrels")
+    prepare_parser.add_argument("output_dir")
+    prepare_parser.add_argument("--dataset", default=MEMBENCH_HF_DATASET)
+    prepare_parser.add_argument("--subset", default="single_hop")
+    prepare_parser.add_argument("--revision", required=True)
+    prepare_parser.add_argument("--split")
+    prepare_parser.add_argument("--include-top-ranked", action="store_true")
+    prepare_parser.add_argument("--source-host")
+    prepare_parser.add_argument("--source-url")
+    prepare_parser.add_argument("--declared-license")
+    prepare_parser.add_argument("--license-source")
+    prepare_parser.add_argument("--license-source-url")
+    prepare_parser.add_argument("--citation-target", action="append")
+    prepare_parser.add_argument("--third-party-notice-file")
+    prepare_parser.add_argument(
+        "--redistribution-status",
+        choices=REDISTRIBUTION_STATUSES,
+        default="private_only",
+    )
+
     validate_report_parser = subcommands.add_parser("validate-dry-run-report")
     validate_report_parser.add_argument("dry_run_report")
     validate_report_parser.add_argument("--seed", type=int)
@@ -949,6 +1072,39 @@ def main(argv: list[str] | None = None) -> int:
         if args.require_commit_allowed:
             return 0 if preconditions["generated_fixture_commit_allowed"] else 1
         return 0 if preconditions["status"] != "invalid" else 1
+
+    if args.command == "prepare-hf-mteb-qrels":
+        try:
+            prepared = prepare_hf_mteb_qrels_source(
+                args.output_dir,
+                dataset=args.dataset,
+                subset=args.subset,
+                revision=args.revision,
+                include_top_ranked=args.include_top_ranked,
+                split=args.split,
+                source_host=args.source_host,
+                source_url=args.source_url,
+                declared_license=args.declared_license,
+                license_source=args.license_source,
+                license_source_url=args.license_source_url,
+                citation_targets=args.citation_target,
+                third_party_notice_file=args.third_party_notice_file,
+                redistribution_status=args.redistribution_status,
+            )
+        except MembenchConversionError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_or_print_json(
+            {
+                "source_dir": str(prepared.source_dir),
+                "source_manifest": str(prepared.manifest_path),
+                "source_files": _source_file_manifest(prepared),
+                "raw_source_committed": False,
+                "generated_fixture_pack_committed": False,
+            },
+            None,
+        )
+        return 0
 
     if args.command == "validate-dry-run-report":
         report = validate_mteb_qrels_dry_run(
@@ -1835,6 +1991,187 @@ def _first_existing(
     if required:
         return None
     return None
+
+
+def _hf_mteb_config_names(
+    subset: str, *, include_top_ranked: bool
+) -> dict[str, str]:
+    names = {
+        "corpus": f"{subset}-corpus",
+        "queries": f"{subset}-queries",
+        "qrels": f"{subset}-qrels",
+    }
+    if include_top_ranked:
+        names["top_ranked"] = f"{subset}-top_ranked"
+    return names
+
+
+def _default_hf_dataset_loader(
+    dataset: str, config_name: str, *, revision: str
+) -> Any:
+    try:
+        from datasets import DownloadConfig, load_dataset
+    except ModuleNotFoundError as exc:
+        raise MembenchConversionError(
+            "Optional dependency 'datasets' is required to prepare Hugging Face "
+            "MemBench sources. Install it separately or pass an injected loader "
+            "in tests."
+        ) from exc
+    except ImportError as exc:
+        raise MembenchConversionError(
+            "Optional dependency 'datasets' must support "
+            "DownloadConfig(local_files_only=True) for local/cache-only MemBench "
+            "preparation. Upgrade datasets or pass an injected local-only loader."
+        ) from exc
+
+    return load_dataset(
+        dataset,
+        config_name,
+        revision=revision,
+        download_config=DownloadConfig(local_files_only=True),
+    )
+
+
+def _load_hf_config_records(
+    *,
+    loader: HfDatasetLoader,
+    dataset: str,
+    config_name: str,
+    revision: str,
+    split: str | None,
+) -> list[dict[str, Any]]:
+    try:
+        loaded = loader(dataset, config_name, revision=revision)
+    except MembenchConversionError:
+        raise
+    except Exception as exc:
+        raise MembenchConversionError(
+            f"Failed to load Hugging Face config {config_name!r} from "
+            f"{dataset!r}: {exc}"
+        ) from exc
+
+    selected = _select_hf_dataset_split(loaded, split=split, config_name=config_name)
+    records = _materialize_hf_records(selected, config_name=config_name)
+    if not records:
+        raise MembenchConversionError(
+            f"Hugging Face config {config_name!r} produced no records"
+        )
+    return records
+
+
+def _select_hf_dataset_split(
+    value: Any, *, split: str | None, config_name: str
+) -> Any:
+    if split is not None:
+        if isinstance(value, Mapping) and split in value:
+            return value[split]
+        try:
+            return value[split]
+        except (KeyError, TypeError):
+            raise MembenchConversionError(
+                f"Hugging Face config {config_name!r} does not contain split "
+                f"{split!r}"
+            ) from None
+
+    if hasattr(value, "to_list") or _is_record_sequence(value):
+        return value
+    if isinstance(value, Mapping):
+        for candidate in ("test", "dev", "validation", "train"):
+            if candidate in value:
+                return value[candidate]
+        if "rows" in value or "data" in value or _looks_like_nested_qrels(value):
+            return value
+        if len(value) == 1:
+            return next(iter(value.values()))
+        raise MembenchConversionError(
+            f"Hugging Face config {config_name!r} has multiple splits; pass --split"
+        )
+    return value
+
+
+def _materialize_hf_records(value: Any, *, config_name: str) -> list[dict[str, Any]]:
+    if hasattr(value, "to_list"):
+        rows = value.to_list()
+    elif isinstance(value, Mapping):
+        rows_value = value.get("rows")
+        if rows_value is None:
+            rows_value = value.get("data")
+        if isinstance(rows_value, list):
+            rows = rows_value
+        elif _looks_like_nested_qrels(value):
+            rows = [value]
+        else:
+            rows = [value]
+    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        rows = list(value)
+    else:
+        raise MembenchConversionError(
+            f"Hugging Face config {config_name!r} is not iterable"
+        )
+
+    records = []
+    for index, row in enumerate(rows, start=1):
+        if not isinstance(row, Mapping):
+            raise MembenchConversionError(
+                f"Hugging Face config {config_name!r} row {index} is not a record"
+            )
+        records.append(dict(row))
+    return records
+
+
+def _is_record_sequence(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and all(isinstance(item, Mapping) for item in value)
+    )
+
+
+def _write_jsonl_records(path: Path, records: Iterable[Mapping[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(_json_ready(record), sort_keys=True) + "\n")
+
+
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_ready(child) for key, child in value.items()}
+    if isinstance(value, tuple):
+        return [_json_ready(child) for child in value]
+    if isinstance(value, list):
+        return [_json_ready(child) for child in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if hasattr(value, "item"):
+        try:
+            return _json_ready(value.item())
+        except (TypeError, ValueError):
+            pass
+    return str(value)
+
+
+def _hf_dataset_url(dataset: str) -> str:
+    return (
+        MEMBENCH_HF_DATASET_URL
+        if dataset == MEMBENCH_HF_DATASET
+        else f"https://huggingface.co/datasets/{dataset}"
+    )
+
+
+def _reject_memory_eval_fixture_output(path: Path) -> None:
+    target = path.resolve()
+    fixtures = MEMORY_EVAL_FIXTURES_DIR.resolve()
+    if target == fixtures or fixtures in target.parents:
+        raise MembenchConversionError(
+            "Hugging Face MemBench preparation writes raw local source data; "
+            "choose an output directory outside fixtures/memory_eval"
+        )
+
+
+def _refresh_source_manifest_hash(manifest: dict[str, Any]) -> None:
+    manifest["source_manifest_hash"] = stable_hash(
+        {key: value for key, value in manifest.items() if key != "source_manifest_hash"}
+    )
 
 
 def _source_file_manifest(source: PreparedMtebSource) -> dict[str, Any]:

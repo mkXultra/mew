@@ -21,6 +21,41 @@ review before committing derived data.
 | Generated fixture commit policy | No generated MemBench-derived fixture pack may be committed unless the source manifest validates as `commit_allowed_ready`. |
 | Redistribution status options | `private_only`, `commit_allowed`, `blocked`. |
 
+### Local Hugging Face Export
+
+MemBench MTEB-style Hugging Face configs may be prepared into the local source
+shape expected by the converter with:
+
+```sh
+python -m mew.memory_eval.membench prepare-hf-mteb-qrels /path/to/local/membench-source \
+  --dataset mteb/MemBench \
+  --subset single_hop \
+  --revision <40-character dataset commit sha>
+```
+
+The command loads configs named `<subset>-corpus`, `<subset>-queries`, and
+`<subset>-qrels`; `--include-top-ranked` also loads
+`<subset>-top_ranked`. It writes only local raw-source files
+`corpus.jsonl`, `queries.jsonl`, `qrels.jsonl`, optional
+`top_ranked.jsonl`, and `source_manifest.json` in the chosen output
+directory. The output directory must not be under `fixtures/memory_eval`.
+
+This export path has an optional dependency on the Python `datasets` package.
+The project does not depend on `datasets` by default; if it is unavailable, the
+command fails with a clear message instead of downloading anything through a
+hidden fallback. When `datasets` is available, the default loader requests
+local-files-only cache access; a cache miss should fail rather than download
+MemBench during preparation. Older `datasets` versions that cannot provide
+`DownloadConfig(local_files_only=True)` should fail clearly instead of
+silently falling back to network access.
+
+`--revision` is required and must be an immutable-looking pinned commit SHA.
+The generated source manifest remains conservative: `local_cache_only: true`,
+`generated_fixture_commit_policy: no_vendor_by_default`, and
+`redistribution_status: private_only` unless explicitly overridden. Preparing
+local raw source files and a source manifest does not imply permission to
+commit raw data or generated fixtures.
+
 ### Redistribution Status
 
 `private_only` is the conservative default. It permits local-only audit,

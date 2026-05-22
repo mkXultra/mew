@@ -760,6 +760,26 @@ The review block must have `approved: true`, non-placeholder `reviewer`,
 only generated fixture commit readiness. It never changes
 `raw_source_commit_allowed: false` and is not legal advice.
 
+Phase 4c implementation note: local Hugging Face MTEB export preparation is a
+separate raw-source preparation step. The command
+`python -m mew.memory_eval.membench prepare-hf-mteb-qrels <output-dir>
+--dataset mteb/MemBench --subset single_hop --revision <40-char commit sha>`
+loads configs named `<subset>-corpus`, `<subset>-queries`, and
+`<subset>-qrels`; `--include-top-ranked` also loads
+`<subset>-top_ranked`. It writes only local raw-source JSONL files and
+`source_manifest.json` under the chosen output directory, never under
+`fixtures/memory_eval`, and never creates a generated fixture pack. The helper
+has no hard project dependency on `datasets`; if the optional dependency is not
+installed, it fails clearly. When `datasets` is installed, the default loader
+uses a local-files-only download configuration so a cache miss fails rather
+than fetching raw MemBench during this preparation step. Older `datasets`
+versions that cannot provide `DownloadConfig(local_files_only=True)` must fail
+clearly instead of falling back to network access. The pinned `--revision`
+remains required before any Hugging Face load is attempted, and the generated
+manifest defaults to `local_cache_only: true`,
+`generated_fixture_commit_policy: no_vendor_by_default`, and
+`redistribution_status: private_only`.
+
 ### Phase A: Source Audit
 
 Generated MemBench-derived fixtures MUST NOT be committed until:
@@ -1002,6 +1022,10 @@ The implementation phase should be reproducible without live network access:
   scorer metadata or sanitized public payload text;
 - record skipped examples so future reruns explain why the fixture count did
   not change.
+- prepare Hugging Face MTEB source dirs with the optional
+  `prepare-hf-mteb-qrels` command only after choosing a pinned dataset
+  revision; the command prepares local raw source files plus a source manifest,
+  not committed fixtures or legal permission to commit fixtures.
 
 ## Risks
 
