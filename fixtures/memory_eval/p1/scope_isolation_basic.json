@@ -1,0 +1,87 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "scope_isolation_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "scope_isolation",
+  "phase": "P1",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_local_color",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_120",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-13T09:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira marks invoices with jade."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_other_color",
+      "scope_id": "tenant_b/user_b",
+      "session_id": "session_121",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-13T09:05:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_b",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira marks invoices with amber."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_b/user_b"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [],
+  "requests": [
+    {
+      "request_id": "req_scope_primary",
+      "mode": "scope_isolation",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "Which color marks Mira invoices?",
+        "intent": "preference_lookup"
+      },
+      "k": 2,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"]
+      },
+      "budget": {
+        "max_evidence_items": 2,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "scope_enforcement"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_local_color"],
+        "authorized_scope_ids": ["tenant_a/user_a"],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": [],
+        "expected_abstention": false
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_local_color", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_other_color", "ingest_order": 2},
+    {"type": "request", "request_id": "req_scope_primary", "after_ingest_order": 2}
+  ]
+}

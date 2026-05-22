@@ -1,0 +1,86 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "broken_support_source_mismatch",
+  "fixture_version": "1.0.0",
+  "fixture_family": "broken_adapter_expected_failures",
+  "phase": "P0",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_a",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_080",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-19T09:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira files grant notes under Rowan."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_b",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_080",
+      "turn_id": "turn_002",
+      "event_time": "2026-01-19T09:05:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira files vendor notes under Cedar."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [],
+  "requests": [
+    {
+      "request_id": "req_mismatch_primary",
+      "mode": "support_mapping_check",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "Where does Mira file grant notes?",
+        "intent": "preference_lookup"
+      },
+      "k": 1,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"]
+      },
+      "budget": {
+        "max_evidence_items": 1,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_a"],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": [],
+        "expected_abstention": false
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_a", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_b", "ingest_order": 2},
+    {"type": "request", "request_id": "req_mismatch_primary", "after_ingest_order": 2}
+  ]
+}

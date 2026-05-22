@@ -1,0 +1,86 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "budget_limited_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "budget_limited",
+  "phase": "P1",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_primary_badge",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_160",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-18T09:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira uses badge color cobalt for launch reviews."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_secondary_badge",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_160",
+      "turn_id": "turn_002",
+      "event_time": "2026-01-18T09:05:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira uses badge color silver for archive reviews."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [],
+  "requests": [
+    {
+      "request_id": "req_badge_color",
+      "mode": "budget_limited",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "Which badge color does Mira use for launch reviews?",
+        "intent": "preference_lookup"
+      },
+      "k": 1,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"]
+      },
+      "budget": {
+        "max_evidence_items": 1,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "report_usage", "latency_reporting"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_primary_badge"],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": [],
+        "expected_abstention": false
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_primary_badge", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_secondary_badge", "ingest_order": 2},
+    {"type": "request", "request_id": "req_badge_color", "after_ingest_order": 2}
+  ]
+}

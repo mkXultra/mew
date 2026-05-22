@@ -1,0 +1,65 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "abstention_no_memory_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "abstention",
+  "phase": "P1",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_unrelated",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_150",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-17T09:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Receipts are stored in drawer seven."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [],
+  "requests": [
+    {
+      "request_id": "req_no_answer",
+      "mode": "abstention",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "Which tea does Mira prefer for breaks?",
+        "intent": "preference_lookup"
+      },
+      "k": 3,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"]
+      },
+      "budget": {
+        "max_evidence_items": 3,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": [],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": [],
+        "expected_abstention": true
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_unrelated", "ingest_order": 1},
+    {"type": "request", "request_id": "req_no_answer", "after_ingest_order": 1}
+  ]
+}

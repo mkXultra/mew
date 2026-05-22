@@ -1,0 +1,43 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "memory_off_no_prior_memory_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "memory_off",
+  "phase": "P1",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [],
+  "mutations": [],
+  "requests": [
+    {
+      "request_id": "req_memory_off_primary",
+      "mode": "memory_off",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "Which tea does Mira prefer for breaks?",
+        "intent": "preference_lookup"
+      },
+      "k": 3,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"]
+      },
+      "budget": {
+        "max_evidence_items": 3,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": [],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": [],
+        "expected_abstention": true
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "request", "request_id": "req_memory_off_primary", "after_ingest_order": 0}
+  ]
+}
