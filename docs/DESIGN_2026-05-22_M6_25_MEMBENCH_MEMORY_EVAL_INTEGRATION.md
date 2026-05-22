@@ -791,6 +791,18 @@ legitimately contain words such as `family` or `stale`. Scorer-only keys,
 source locators, qrels, target IDs, answers, and label-rendered values remain
 forbidden in adapter-visible payloads.
 
+Phase 4e implementation note: dry-run conversion supports deterministic corpus
+sampling so full and smoke runs can share the same converter. Use
+`--corpus-sample-policy full` for stress/full-corpus runs. Use
+`--corpus-sample-policy qrel_plus_prefix --max-corpus-docs N` for smoke runs
+that always include the gold qrel documents plus the first prefix distractors.
+Use `qrel_plus_random` for seed-stable random distractors. Sampling changes the
+fixture's effective corpus and hashes, so reports must include the sampling
+policy, seed, full corpus size, effective corpus size, and whether all qrel
+documents were included. Sampling is for local dry-run and adapter smoke
+validation; it does not create a committed fixture pack or change source-audit
+redistribution status.
+
 ### Phase A: Source Audit
 
 Generated MemBench-derived fixtures MUST NOT be committed until:

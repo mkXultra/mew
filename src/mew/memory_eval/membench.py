@@ -10,6 +10,7 @@ import argparse
 import csv
 import hashlib
 import json
+import random
 import re
 import sys
 from collections import Counter, defaultdict
@@ -50,6 +51,7 @@ DEFAULT_QUERY_TIME = "2026-05-22T00:00:00Z"
 DEFAULT_VALIDATION_CREATED_AT = "2026-05-22T00:00:00Z"
 REDISTRIBUTION_STATUSES = ("private_only", "commit_allowed", "blocked")
 REDISTRIBUTION_REVIEW_SCOPE = "generated_fixtures_only"
+CORPUS_SAMPLE_POLICIES = ("full", "qrel_plus_prefix", "qrel_plus_random")
 UNPINNED_REVISION_VALUES = {"", "latest", "main", "master", "unresolved"}
 PINNED_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
@@ -639,8 +641,18 @@ def convert_mteb_qrels_dry_run(
     source_subset: str | Iterable[str] | None = None,
     max_queries: int | None = None,
     seed: int = 12345,
+    corpus_sample_policy: str = "full",
+    max_corpus_docs: int | None = None,
 ) -> dict[str, Any]:
     """Convert local MTEB/Hugging Face-style MemBench qrels to a dry-run report."""
+
+    sample_policy = _validate_corpus_sample_policy(corpus_sample_policy)
+    if sample_policy == "full":
+        max_corpus_docs = None
+    elif max_corpus_docs is None or max_corpus_docs <= 0:
+        raise MembenchConversionError(
+            "--max-corpus-docs must be positive when corpus sampling is enabled"
+        )
 
     root = Path(source_dir)
     manifest = dict(
@@ -659,27 +671,40 @@ def convert_mteb_qrels_dry_run(
     queries = _load_queries(source.queries_path)
     qrels = _load_qrels(source.qrels_path)
 
-    corpus_manifest, doc_to_experience = _build_corpus_manifest(
-        corpus_records, manifest=manifest
-    )
-    source_fixture_base = _fixture_base(
-        corpus_records=corpus_records,
-        corpus_manifest=corpus_manifest,
-        source=source,
-        manifest=manifest,
-    )
-
     skipped_examples: list[dict[str, Any]] = []
     fixture_previews = []
     leakage_results = []
     selected_count = 0
     grouped_qrels = _group_qrels(qrels)
+    full_doc_ids = [str(record["source_doc_id"]) for record in corpus_records]
+    corpus_by_doc_id = _corpus_by_doc_id(corpus_records)
+    duplicate_doc_ids = set(duplicate_doc_ids)
+    effective_corpus_counts = []
+    sampling_rejections = 0
 
     for query_id in sorted(grouped_qrels):
         if max_queries is not None and selected_count >= max_queries:
             break
         query = queries.get(query_id)
         query_qrels = grouped_qrels[query_id]
+        selected_doc_ids = _selected_corpus_doc_ids(
+            full_doc_ids=full_doc_ids,
+            query_id=query_id,
+            query_qrels=query_qrels,
+            policy=sample_policy,
+            max_corpus_docs=max_corpus_docs,
+            seed=seed,
+        )
+        selected_corpus_records = [
+            corpus_by_doc_id[doc_id]
+            for doc_id in selected_doc_ids
+            if doc_id in corpus_by_doc_id
+        ]
+        if sample_policy != "full" and len(selected_corpus_records) < len(selected_doc_ids):
+            sampling_rejections += 1
+        corpus_manifest, doc_to_experience = _build_corpus_manifest(
+            selected_corpus_records, manifest=manifest
+        )
         rejection = _query_rejection(
             query_id=query_id,
             query=query,
@@ -691,6 +716,12 @@ def convert_mteb_qrels_dry_run(
             skipped_examples.append(rejection)
             continue
 
+        source_fixture_base = _fixture_base(
+            corpus_records=selected_corpus_records,
+            corpus_manifest=corpus_manifest,
+            source=source,
+            manifest=manifest,
+        )
         fixture = deepcopy(source_fixture_base)
         request_index = selected_count + 1
         request, source_qrels = _request_for_query(
@@ -702,6 +733,14 @@ def convert_mteb_qrels_dry_run(
             doc_to_experience=doc_to_experience,
         )
         request["gold"]["source_qrels"] = source_qrels
+        request["gold"]["corpus_sampling"] = _corpus_sampling_report(
+            policy=sample_policy,
+            max_corpus_docs=max_corpus_docs,
+            effective_corpus_docs=len(selected_corpus_records),
+            total_corpus_docs=len(corpus_records),
+            query_qrels=query_qrels,
+            selected_doc_ids=selected_doc_ids,
+        )
         fixture["requests"] = [request]
         fixture["operation_sequence"] = [
             {
@@ -750,6 +789,7 @@ def convert_mteb_qrels_dry_run(
             }
         )
         selected_count += 1
+        effective_corpus_counts.append(len(selected_corpus_records))
 
     report = {
         "schema_version": DRY_RUN_SCHEMA_VERSION,
@@ -771,19 +811,34 @@ def convert_mteb_qrels_dry_run(
         ),
         "candidate_counts": {
             "corpus_documents": len(corpus_records),
+            "effective_corpus_documents_min": min(effective_corpus_counts)
+            if effective_corpus_counts
+            else 0,
+            "effective_corpus_documents_max": max(effective_corpus_counts)
+            if effective_corpus_counts
+            else 0,
             "queries": len(queries),
             "qrel_rows": len(qrels),
             "grouped_qrel_queries": len(grouped_qrels),
             "selected_fixture_previews": len(fixture_previews),
             "skipped_examples": len(skipped_examples),
             "duplicate_doc_ids": len(duplicate_doc_ids),
+            "sampling_rejections": sampling_rejections,
+        },
+        "corpus_sampling": {
+            "policy": sample_policy,
+            "max_corpus_docs": max_corpus_docs,
+            "seed": seed,
+            "full_corpus_documents": len(corpus_records),
+            "effective_corpus_documents": {
+                "min": min(effective_corpus_counts) if effective_corpus_counts else 0,
+                "max": max(effective_corpus_counts) if effective_corpus_counts else 0,
+            },
         },
         "qrel_mapping": {
             "success_count": len(fixture_previews),
             "skipped_count": len(skipped_examples),
             "duplicate_doc_ids": sorted(duplicate_doc_ids),
-            "corpus_manifest_hash": stable_hash(corpus_manifest),
-            "corpus_manifest": corpus_manifest,
         },
         "skipped_examples": skipped_examples,
         "label_like_keys_found": _label_like_keys(
@@ -799,7 +854,10 @@ def convert_mteb_qrels_dry_run(
             str(manifest.get("source_subset") or "unknown"): len(fixture_previews)
         },
         "estimated_budgets": {
-            "experience_items_per_fixture": len(corpus_records),
+            "experience_items_per_fixture": {
+                "min": min(effective_corpus_counts) if effective_corpus_counts else 0,
+                "max": max(effective_corpus_counts) if effective_corpus_counts else 0,
+            },
             "default_k": 5,
             "max_evidence_items": 5,
         },
@@ -1081,6 +1139,12 @@ def main(argv: list[str] | None = None) -> int:
     dry_run_parser.add_argument("--source-revision")
     dry_run_parser.add_argument("--source-subset", action="append")
     dry_run_parser.add_argument("--max-queries", type=int)
+    dry_run_parser.add_argument(
+        "--corpus-sample-policy",
+        choices=CORPUS_SAMPLE_POLICIES,
+        default="full",
+    )
+    dry_run_parser.add_argument("--max-corpus-docs", type=int)
     dry_run_parser.add_argument("--seed", type=int, default=12345)
     dry_run_parser.add_argument("--output", required=True)
 
@@ -1116,6 +1180,12 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--source-revision")
     validate_parser.add_argument("--source-subset", action="append")
     validate_parser.add_argument("--max-queries", type=int)
+    validate_parser.add_argument(
+        "--corpus-sample-policy",
+        choices=CORPUS_SAMPLE_POLICIES,
+        default="full",
+    )
+    validate_parser.add_argument("--max-corpus-docs", type=int)
     validate_parser.add_argument("--seed", type=int, default=12345)
     validate_parser.add_argument("--include-typed-cards", action="store_true")
     validate_parser.add_argument("--output")
@@ -1201,6 +1271,8 @@ def main(argv: list[str] | None = None) -> int:
         source_revision=args.source_revision,
         source_subset=args.source_subset,
         max_queries=args.max_queries,
+        corpus_sample_policy=args.corpus_sample_policy,
+        max_corpus_docs=args.max_corpus_docs,
         seed=args.seed,
     )
     if args.command == "dry-run-mteb-qrels":
@@ -2371,6 +2443,99 @@ def _load_qrels(path: Path) -> list[dict[str, Any]]:
         score = _first_present(record, QREL_SCORE_KEYS)
         _append_qrel(qrels, query_id, doc_id, score)
     return qrels
+
+
+def _validate_corpus_sample_policy(policy: str) -> str:
+    if policy not in CORPUS_SAMPLE_POLICIES:
+        raise MembenchConversionError(
+            "corpus_sample_policy must be one of "
+            + ", ".join(CORPUS_SAMPLE_POLICIES)
+        )
+    return policy
+
+
+def _corpus_by_doc_id(
+    corpus_records: Iterable[Mapping[str, Any]],
+) -> dict[str, Mapping[str, Any]]:
+    result: dict[str, Mapping[str, Any]] = {}
+    for record in corpus_records:
+        doc_id = str(record.get("source_doc_id") or "")
+        if doc_id and doc_id not in result:
+            result[doc_id] = record
+    return result
+
+
+def _selected_corpus_doc_ids(
+    *,
+    full_doc_ids: list[str],
+    query_id: str,
+    query_qrels: list[dict[str, Any]],
+    policy: str,
+    max_corpus_docs: int | None,
+    seed: int,
+) -> list[str]:
+    qrel_doc_ids = [
+        str(row["source_doc_id"])
+        for row in sorted(
+            query_qrels, key=lambda item: (str(item["source_doc_id"]), item["score"])
+        )
+    ]
+    if policy == "full":
+        return list(full_doc_ids)
+
+    assert max_corpus_docs is not None
+    selected = []
+    for doc_id in qrel_doc_ids:
+        if doc_id not in selected:
+            selected.append(doc_id)
+    remaining_slots = max(0, max_corpus_docs - len(selected))
+    candidates = [doc_id for doc_id in full_doc_ids if doc_id not in selected]
+    if policy == "qrel_plus_prefix":
+        selected.extend(candidates[:remaining_slots])
+    elif policy == "qrel_plus_random":
+        selected.extend(
+            _deterministic_sample(
+                candidates,
+                limit=remaining_slots,
+                seed=seed,
+                query_id=query_id,
+            )
+        )
+    return selected
+
+
+def _deterministic_sample(
+    values: list[str], *, limit: int, seed: int, query_id: str
+) -> list[str]:
+    if limit <= 0:
+        return []
+    if limit >= len(values):
+        return list(values)
+    rng_seed = stable_hash({"seed": seed, "query_id": query_id})
+    rng = random.Random(rng_seed)
+    indexes = sorted(rng.sample(range(len(values)), limit))
+    return [values[index] for index in indexes]
+
+
+def _corpus_sampling_report(
+    *,
+    policy: str,
+    max_corpus_docs: int | None,
+    effective_corpus_docs: int,
+    total_corpus_docs: int,
+    query_qrels: list[dict[str, Any]],
+    selected_doc_ids: list[str],
+) -> dict[str, Any]:
+    qrel_doc_ids = sorted({str(row["source_doc_id"]) for row in query_qrels})
+    selected = set(selected_doc_ids)
+    return {
+        "policy": policy,
+        "max_corpus_docs": max_corpus_docs,
+        "effective_corpus_docs": effective_corpus_docs,
+        "total_corpus_docs": total_corpus_docs,
+        "qrel_doc_count": len(qrel_doc_ids),
+        "qrel_docs_included": all(doc_id in selected for doc_id in qrel_doc_ids),
+    }
 
 
 def _load_tsv_qrels(path: Path) -> list[dict[str, Any]]:

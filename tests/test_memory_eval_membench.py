@@ -765,6 +765,113 @@ def test_mteb_qrels_dry_run_maps_docs_through_corpus_manifest_and_hides_gold(tmp
     assert preview["adapter_view"]["experiences"][0]["experience_id"] == "ex_000001"
 
 
+def test_mteb_qrels_dry_run_can_sample_qrel_plus_prefix_corpus(tmp_path):
+    _write_jsonl(
+        tmp_path / "corpus.jsonl",
+        [
+            {"_id": "doc-a", "text": "Aki keeps green tea nearby."},
+            {"_id": "doc-b", "text": "Rin stores a blue bicycle."},
+            {"_id": "doc-c", "text": "Kai prefers window seats."},
+            {"_id": "doc-target", "text": "Mina keeps the bronze key."},
+        ],
+    )
+    _write_jsonl(
+        tmp_path / "queries.jsonl",
+        [{"_id": "query-key", "text": "Which item does Mina keep?"}],
+    )
+    (tmp_path / "qrels.tsv").write_text(
+        "query-id\tcorpus-id\tscore\nquery-key\tdoc-target\t1\n",
+        encoding="utf-8",
+    )
+
+    report = convert_mteb_qrels_dry_run(
+        tmp_path,
+        source_manifest=audit_mteb_source_manifest(
+            tmp_path, source_revision=PINNED_SOURCE_REVISION
+        ),
+        corpus_sample_policy="qrel_plus_prefix",
+        max_corpus_docs=2,
+    )
+
+    preview = report["fixture_previews"][0]
+    scorer_request = preview["scorer_view"]["requests"][0]
+
+    assert report["corpus_sampling"]["policy"] == "qrel_plus_prefix"
+    assert report["candidate_counts"]["corpus_documents"] == 4
+    assert report["candidate_counts"]["effective_corpus_documents_min"] == 2
+    assert len(preview["scorer_view"]["experiences"]) == 2
+    assert scorer_request["gold"]["relevant_evidence_ids"] == ["exp_src_000001"]
+    assert scorer_request["gold"]["corpus_sampling"] == {
+        "effective_corpus_docs": 2,
+        "max_corpus_docs": 2,
+        "policy": "qrel_plus_prefix",
+        "qrel_doc_count": 1,
+        "qrel_docs_included": True,
+        "total_corpus_docs": 4,
+    }
+    assert preview["adapter_view"]["experiences"][0]["payload"]["text"] == (
+        "Mina keeps the bronze key."
+    )
+    assert validate_mteb_qrels_dry_run(report)["validation_status"] == "passed"
+
+
+def test_mteb_qrels_dry_run_random_sampling_is_seed_stable(tmp_path):
+    _write_jsonl(
+        tmp_path / "corpus.jsonl",
+        [
+            {"_id": "doc-a", "text": "Aki keeps green tea nearby."},
+            {"_id": "doc-b", "text": "Rin stores a blue bicycle."},
+            {"_id": "doc-c", "text": "Kai prefers window seats."},
+            {"_id": "doc-d", "text": "Noa labels the red folder."},
+            {"_id": "doc-target", "text": "Mina keeps the bronze key."},
+        ],
+    )
+    _write_jsonl(
+        tmp_path / "queries.jsonl",
+        [{"_id": "query-key", "text": "Which item does Mina keep?"}],
+    )
+    (tmp_path / "qrels.tsv").write_text(
+        "query-id\tcorpus-id\tscore\nquery-key\tdoc-target\t1\n",
+        encoding="utf-8",
+    )
+    manifest = audit_mteb_source_manifest(
+        tmp_path, source_revision=PINNED_SOURCE_REVISION
+    )
+
+    first = convert_mteb_qrels_dry_run(
+        tmp_path,
+        source_manifest=manifest,
+        corpus_sample_policy="qrel_plus_random",
+        max_corpus_docs=3,
+        seed=7,
+    )
+    second = convert_mteb_qrels_dry_run(
+        tmp_path,
+        source_manifest=manifest,
+        corpus_sample_policy="qrel_plus_random",
+        max_corpus_docs=3,
+        seed=7,
+    )
+
+    assert first["fixture_previews"][0]["fixture_full_hash"] == (
+        second["fixture_previews"][0]["fixture_full_hash"]
+    )
+    assert first["candidate_counts"]["effective_corpus_documents_max"] == 3
+
+
+def test_mteb_qrels_dry_run_requires_sample_size_for_sampling(tmp_path):
+    _write_minimal_mteb_source(tmp_path)
+
+    with pytest.raises(MembenchConversionError, match="max-corpus-docs"):
+        convert_mteb_qrels_dry_run(
+            tmp_path,
+            source_manifest=audit_mteb_source_manifest(
+                tmp_path, source_revision=PINNED_SOURCE_REVISION
+            ),
+            corpus_sample_policy="qrel_plus_prefix",
+        )
+
+
 def test_mteb_dry_run_validation_uses_ephemeral_fixtures_without_pack_writes(
     tmp_path,
 ):
