@@ -17,7 +17,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from .adapters.broken import (
     DuplicateSupportAdapter,
@@ -25,8 +25,8 @@ from .adapters.broken import (
     SupportSourceMismatchAdapter,
     UnscorableEvidenceAdapter,
 )
-from .adapters.reference import ReferenceP1Adapter
-from .fixtures import FIXTURE_SCHEMA_VERSION, find_label_leakage, split_fixture
+from .adapter_contract import adapter_manifest, default_capabilities, default_usage
+from .fixtures import FIXTURE_SCHEMA_VERSION, split_fixture
 from .hashing import stable_hash
 from .runner import run_fixture
 
@@ -151,6 +151,85 @@ class MembenchConversionError(ValueError):
 
 
 HfDatasetLoader = Callable[..., Any]
+
+
+class _MembenchQrelsOracleAdapter:
+    """Validation-only adapter that replays scorer qrels through public IDs."""
+
+    def __init__(self, support_by_adapter_request_id: Mapping[str, Sequence[str]]):
+        self._support_by_adapter_request_id = {
+            str(request_id): [str(item) for item in support_ids]
+            for request_id, support_ids in support_by_adapter_request_id.items()
+        }
+        self._items: dict[str, dict[str, Any]] = {}
+
+    def manifest(self) -> dict[str, Any]:
+        return adapter_manifest(
+            adapter_id="membench_qrels_oracle_reference",
+            memory_implementation_id="membench_qrels_oracle_reference",
+            capability_tier="retrieval_only",
+            capabilities=default_capabilities(
+                scope_enforcement=True,
+                latency_reporting=True,
+            ),
+        )
+
+    def reset(self, run: Mapping[str, Any]) -> dict[str, Any]:
+        self._items = {}
+        return {"status": "success", "fixture_id": run.get("fixture_id"), "failures": []}
+
+    def ingest(self, items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        receipts = []
+        for item in items:
+            experience_id = str(item.get("experience_id") or "")
+            self._items[experience_id] = dict(item)
+            receipts.append(
+                {"experience_id": experience_id, "status": "success", "failures": []}
+            )
+        return receipts
+
+    def mutate(self, ops: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {"op_id": str(op.get("op_id") or ""), "status": "success", "failures": []}
+            for op in ops
+        ]
+
+    def retrieve(self, query: Mapping[str, Any]) -> dict[str, Any]:
+        request_id = str(query.get("request_id") or "")
+        k = int(query.get("k") or 5)
+        budget = query.get("budget") or {}
+        if budget.get("max_evidence_items") is not None:
+            k = min(k, int(budget.get("max_evidence_items")))
+        ranked = []
+        for evidence_id in self._support_by_adapter_request_id.get(request_id, [])[:k]:
+            item = self._items.get(evidence_id)
+            if item is None:
+                continue
+            ranked.append(
+                {
+                    "evidence_ref": f"mem_{evidence_id}",
+                    "evidence_id": evidence_id,
+                    "rank": len(ranked) + 1,
+                    "score": None,
+                    "score_type": "none",
+                    "support_experience_ids": [evidence_id],
+                    "source_mutation_ids": [],
+                    "state": "active",
+                    "scope_id": item.get("scope_id"),
+                }
+            )
+        return {
+            "request_id": query.get("request_id"),
+            "ranked_evidence": ranked,
+            "abstained": not ranked,
+            "abstained_reason": "no_memory" if not ranked else None,
+            "dropped": [],
+            "usage": default_usage(latency_ms=0.0),
+            "failures": [],
+        }
+
+    def report_usage(self, scope: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        return default_usage(latency_ms=0.0)
 
 
 @dataclass(frozen=True)
@@ -642,7 +721,6 @@ def convert_mteb_qrels_dry_run(
 
         views = split_fixture(fixture, fixture_ordinal=request_index, seed=seed)
         leakage = find_membench_adapter_leakage(views.adapter_view)
-        leakage.extend(find_label_leakage(views.adapter_view))
         leakage_results.append(
             {
                 "fixture_id": fixture["fixture_id"],
@@ -662,6 +740,9 @@ def convert_mteb_qrels_dry_run(
                 "fixture_public_hash": views.fixture_public_hash,
                 "fixture_gold_hash": views.fixture_gold_hash,
                 "fixture_full_hash": views.fixture_full_hash,
+                "label_leakage_blocked_tokens": deepcopy(
+                    fixture.get("label_leakage_blocked_tokens") or []
+                ),
                 "hash_sensitivity": _hash_sensitivity(
                     fixture, fixture_ordinal=request_index, seed=seed
                 ),
@@ -797,7 +878,6 @@ def validate_mteb_qrels_dry_run(
             fixture, fixture_ordinal=fixture_ordinal, seed=validation_seed
         )
         leakage = find_membench_adapter_leakage(views.adapter_view)
-        leakage.extend(find_label_leakage(views.adapter_view))
         hash_match = {
             "fixture_public_hash_matches_preview": views.fixture_public_hash
             == preview.get("fixture_public_hash"),
@@ -809,7 +889,7 @@ def validate_mteb_qrels_dry_run(
 
         reference_artifact = run_fixture(
             fixture,
-            ReferenceP1Adapter(),
+            _qrels_oracle_adapter_for_views(views),
             seed=validation_seed,
             fixture_ordinal=fixture_ordinal,
             run_id=f"run_membench_reference_{fixture_ordinal:06d}",
@@ -1182,6 +1262,10 @@ def _fixture_from_dry_run_preview(preview: Mapping[str, Any]) -> dict[str, Any]:
         "requests": requests,
         "operation_sequence": deepcopy(scorer_view.get("operation_sequence") or []),
     }
+    if "label_leakage_blocked_tokens" in preview:
+        fixture["label_leakage_blocked_tokens"] = deepcopy(
+            preview.get("label_leakage_blocked_tokens") or []
+        )
     if "source_benchmark" in scorer_view:
         fixture["source_benchmark"] = deepcopy(scorer_view["source_benchmark"])
     return fixture
@@ -1230,6 +1314,20 @@ def _preview_fixture_ordinal(preview: Mapping[str, Any], *, default: int) -> int
     return int(match.group(1)) if match else default
 
 
+def _qrels_oracle_adapter_for_views(views: Any) -> _MembenchQrelsOracleAdapter:
+    experience_id_to_adapter = views.id_maps.get("experience_id_to_adapter") or {}
+    support_by_request = {}
+    for request in views.scorer_view.get("requests") or []:
+        adapter_request_id = str(request.get("adapter_request_id") or "")
+        relevant_ids = (request.get("gold") or {}).get("relevant_evidence_ids") or []
+        support_by_request[adapter_request_id] = [
+            experience_id_to_adapter[item]
+            for item in relevant_ids
+            if item in experience_id_to_adapter
+        ]
+    return _MembenchQrelsOracleAdapter(support_by_request)
+
+
 def _typed_cards_validation_results(
     *,
     previews: list[Mapping[str, Any]],
@@ -1257,12 +1355,10 @@ def _typed_cards_validation_results(
                 fixture, fixture_ordinal=fixture_ordinal, seed=validation_seed
             )
             source_leakage = find_membench_adapter_leakage(source_views.adapter_view)
-            source_leakage.extend(find_label_leakage(source_views.adapter_view))
             typed_views = split_fixture(
                 typed_fixture, fixture_ordinal=fixture_ordinal, seed=validation_seed
             )
             typed_leakage = find_membench_adapter_leakage(typed_views.adapter_view)
-            typed_leakage.extend(find_label_leakage(typed_views.adapter_view))
             artifact = run_fixture(
                 typed_fixture,
                 TypedCardsMemoryEvalAdapter(extractor_mode="deterministic_replay"),
@@ -2442,6 +2538,7 @@ def _fixture_base(
         "fixture_id": "membench_mteb_qrels_dry_run",
         "fixture_version": "0.1.0",
         "fixture_family": "membench_mteb_qrels_dry_run",
+        "label_leakage_blocked_tokens": [],
         "phase": "P1",
         "evaluation_time": DEFAULT_EVALUATION_TIME,
         "source_benchmark": source_benchmark,

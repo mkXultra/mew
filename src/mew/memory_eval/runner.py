@@ -57,7 +57,10 @@ def run_fixture(
     manifest_hash = stable_hash(manifest)
     scoring_profile_hash = stable_hash(profile)
 
-    leakage_failures = find_label_leakage(views.adapter_view)
+    leakage_failures = find_label_leakage(
+        views.adapter_view,
+        blocked_tokens=_fixture_label_leakage_blocked_tokens(fixture_data),
+    )
     if leakage_failures:
         requests = [
             _finalize_request_hashes(
@@ -472,3 +475,16 @@ def _dedupe_failures(failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(key)
         deduped.append(failure)
     return deduped
+
+
+def _fixture_label_leakage_blocked_tokens(
+    fixture_data: Mapping[str, Any],
+) -> set[str] | None:
+    if "label_leakage_blocked_tokens" not in fixture_data:
+        return None
+    value = fixture_data.get("label_leakage_blocked_tokens")
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set)):
+        return None
+    return {str(item) for item in value}

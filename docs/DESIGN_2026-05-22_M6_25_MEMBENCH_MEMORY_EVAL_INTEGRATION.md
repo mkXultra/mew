@@ -780,6 +780,17 @@ manifest defaults to `local_cache_only: true`,
 `generated_fixture_commit_policy: no_vendor_by_default`, and
 `redistribution_status: private_only`.
 
+Phase 4d implementation note: MemBench dry-run validation uses a
+qrels-oracle reference adapter for converter/scorer sanity checks. This
+reference target replays scorer-only qrels through opaque public evidence IDs;
+it is not a memory-quality baseline. Real memory adapter quality is measured by
+separate targets such as `TypedCardsMemoryEvalAdapter`. MemBench external
+fixtures also use converter-specific adapter-view leakage checks instead of the
+generic synthetic P0/P1 blocked-token scan, because natural corpus text may
+legitimately contain words such as `family` or `stale`. Scorer-only keys,
+source locators, qrels, target IDs, answers, and label-rendered values remain
+forbidden in adapter-visible payloads.
+
 ### Phase A: Source Audit
 
 Generated MemBench-derived fixtures MUST NOT be committed until:

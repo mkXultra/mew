@@ -1114,7 +1114,7 @@ def _fake_hf_mteb_loader(calls):
             {
                 "_id": "doc-green",
                 "title": "Tea note",
-                "text": "Aki stores the green tea tin beside the kettle.",
+                "text": "Aki's family stores the green tea tin beside the kettle.",
             },
             {
                 "_id": "doc-bike",

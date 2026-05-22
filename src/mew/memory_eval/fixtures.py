@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .artifacts import make_failure
 from .hashing import stable_hash
@@ -225,9 +225,10 @@ def split_fixture(
 def find_label_leakage(
     adapter_view: Mapping[str, Any],
     *,
-    blocked_tokens: set[str] | None = None,
+    blocked_tokens: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
-    blocked = {_normalize_token(token) for token in (blocked_tokens or BLOCKED_TOKENS)}
+    source_tokens = BLOCKED_TOKENS if blocked_tokens is None else blocked_tokens
+    blocked = {_normalize_token(token) for token in source_tokens}
     failures = []
     for path, value in _walk(adapter_view):
         if isinstance(value, str):
