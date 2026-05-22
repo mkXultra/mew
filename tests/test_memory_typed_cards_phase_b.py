@@ -21,6 +21,7 @@ from mew.memory_typed_cards import (
     CurrentEvidenceSnapshot,
     EvidenceLink,
     FileEvidenceState,
+    GraphEdge,
     GraphNode,
     GraphRefs,
     Invalidator,
@@ -139,6 +140,26 @@ def _node(node_type: str, canonical_ref: str):
         created_at=CREATED,
         updated_at=CREATED,
     )
+
+
+def _commit_with_graph_refs(
+    core: TypedMemoryCore,
+    *,
+    summary: str,
+    graph_refs: GraphRefs,
+    source_experience_id: str,
+) -> MemoryCard:
+    result = core.ingest_raw(
+        RawMemoryIngestRequest(summary),
+        scope=_scope(),
+        extractor=lambda request, provenance_event, scope: _candidate_payload(summary),
+        source_experience_id=source_experience_id,
+    )
+    assert result.proposal_card is not None
+    proposal = replace(result.proposal_card, graph_refs=graph_refs)
+    core.memory_cards[proposal.card_id] = proposal
+    approved = core.approve_memory(proposal.card_id, actor="debug")
+    return core.commit_memory(approved.card.card_id, actor="debug").card
 
 
 def _replace_scope(card: MemoryCard, scope: Scope, *, kind: str | None = None) -> MemoryCard:
@@ -371,6 +392,91 @@ def test_commit_without_graph_refs_is_valid_but_unresolved_graph_refs_fail() -> 
     committed_with_graph = core.commit_memory(approved.card.card_id, actor="debug")
 
     assert committed_with_graph.card.graph_refs.node_ids == (node.node_id,)
+
+
+def test_graph_expansion_is_opt_in_one_hop_and_reports_usage() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    related_node = _node("test", "test:mew:tests/test_memory_typed_cards_phase_b.py")
+    core.add_graph_node(seed_node)
+    core.add_graph_node(related_node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph expansion seed uses alpha anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_seed",
+    )
+    related = _commit_with_graph_refs(
+        core,
+        summary="Phase D regression coverage lives in typed card tests.",
+        graph_refs=GraphRefs(node_ids=(related_node.node_id,)),
+        source_experience_id="exp_graph_related",
+    )
+    edge = GraphEdge.build(
+        from_node_id=seed_node.node_id,
+        from_node_type="file",
+        to_node_id=related_node.node_id,
+        to_node_type="test",
+        edge_type="related",
+        scope=_scope(),
+        evidence_links=(EvidenceLink(ref_id=seed.evidence_links[0].ref_id, role="current_support"),),
+        created_at=CREATED,
+        updated_at=CREATED,
+    )
+    core.add_graph_edge(edge)
+
+    direct = core.retrieve(MemoryRecallRequest(query="alpha anchor", scope=_scope(), expand_graph=False))
+    expanded = core.retrieve(MemoryRecallRequest(query="alpha anchor", scope=_scope(), expand_graph=True, graph_max_items=4))
+
+    assert [item.evidence_ref for item in direct.ranked_evidence] == [seed.card_id]
+    expanded_ids = [item.evidence_ref for item in expanded.ranked_evidence]
+    assert seed.card_id in expanded_ids
+    assert related.card_id in expanded_ids
+    assert expanded.usage.index_mode == "graph_index"
+    assert expanded.usage.graph_nodes_expanded == 2
+    assert expanded.usage.graph_edges_expanded == 1
+    related_item = next(item for item in expanded.ranked_evidence if item.evidence_ref == related.card_id)
+    assert related_item.score_components["graph_modifier"] == "0.2500"
+
+
+def test_graph_expansion_does_not_bypass_privacy_scope_gates() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    private_node = _node("test", "test:mew:private/test_memory.py")
+    core.add_graph_node(seed_node)
+    core.add_graph_node(private_node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph expansion seed uses beta anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_private_seed",
+    )
+    private_related = _commit_with_graph_refs(
+        core,
+        summary="Private related regression coverage lives elsewhere.",
+        graph_refs=GraphRefs(node_ids=(private_node.node_id,)),
+        source_experience_id="exp_graph_private_related",
+    )
+    private_scope = _scope("other")
+    core.memory_cards[private_related.card_id] = _replace_scope(private_related, private_scope)
+    edge = GraphEdge.build(
+        from_node_id=seed_node.node_id,
+        from_node_type="file",
+        to_node_id=private_node.node_id,
+        to_node_type="test",
+        edge_type="related",
+        scope=_scope(),
+        evidence_links=(EvidenceLink(ref_id=seed.evidence_links[0].ref_id, role="current_support"),),
+        created_at=CREATED,
+        updated_at=CREATED,
+    )
+    core.add_graph_edge(edge)
+
+    expanded = core.retrieve(MemoryRecallRequest(query="beta anchor", scope=_scope(), expand_graph=True, graph_max_items=4))
+
+    assert [item.evidence_ref for item in expanded.ranked_evidence] == [seed.card_id]
+    assert expanded.dropped_count_by_reason["privacy_block"] == 1
+    assert all(item.evidence_ref != private_related.card_id for item in expanded.ranked_evidence)
 
 
 def test_retrieve_filters_lifecycle_state_scope_and_is_card_side_effect_free() -> None:

@@ -32,6 +32,7 @@ from .memory_typed_cards import (
     EvidenceLink,
     EvidenceRole,
     GraphEdge,
+    GraphEdgeType,
     GraphRefs,
     GraphNode,
     Invalidator,
@@ -158,6 +159,18 @@ _SEMANTIC_PATCH_FIELDS = {
     "confidence",
 }
 _LATENCY_SOURCE_PRECEDENCE = ("wall_clock", "replayed_artifact", "deterministic_mock")
+_GRAPH_EXPANSION_MODIFIER = Decimal("0.2500")
+_GRAPH_EXPANSION_EDGE_TYPES = {
+    GraphEdgeType.MENTIONS.value,
+    GraphEdgeType.APPLIES_TO.value,
+    GraphEdgeType.PROVED_BY.value,
+    GraphEdgeType.SUPPORTS.value,
+    GraphEdgeType.AVOIDS.value,
+    GraphEdgeType.FIXES.value,
+    GraphEdgeType.FAILS_ON.value,
+    GraphEdgeType.LOCATED_IN.value,
+    GraphEdgeType.RELATED.value,
+}
 _MAX_RETRIEVAL_TERM_CHARS = 96
 _ANCHOR_STOPWORDS = {
     "a",
@@ -621,6 +634,9 @@ class MemoryRecallRequest:
     current_evidence: CurrentEvidenceSnapshot | None = None
     now: str | None = None
     latency_source: str = "deterministic_mock"
+    expand_graph: bool = False
+    graph_max_depth: int = 1
+    graph_max_items: int = 16
     request_id: str | None = None
 
     def __post_init__(self) -> None:
@@ -639,6 +655,15 @@ class MemoryRecallRequest:
         object.__setattr__(self, "now", _clean_text(self.now) or None)
         if self.latency_source not in {"wall_clock", "deterministic_mock", "replayed_artifact"}:
             raise ValueError("latency_source must be wall_clock, deterministic_mock, or replayed_artifact")
+        object.__setattr__(self, "expand_graph", bool(self.expand_graph))
+        graph_max_depth = int(self.graph_max_depth or 0)
+        if graph_max_depth < 0 or graph_max_depth > 1:
+            raise ValueError("graph_max_depth supports only 0 or 1 in Phase D")
+        object.__setattr__(self, "graph_max_depth", graph_max_depth)
+        graph_max_items = int(self.graph_max_items or 0)
+        if graph_max_items < 0:
+            raise ValueError("graph_max_items must be non-negative")
+        object.__setattr__(self, "graph_max_items", graph_max_items)
         request_id = self.request_id or "req_" + stable_short_hash(self.to_request_payload(), length=16)
         object.__setattr__(self, "request_id", request_id)
 
@@ -654,7 +679,17 @@ class MemoryRecallRequest:
             "current_evidence": self.current_evidence.to_dict() if self.current_evidence else None,
             "now": self.now,
             "latency_source": self.latency_source,
+            "expand_graph": self.expand_graph,
+            "graph_max_depth": self.graph_max_depth,
+            "graph_max_items": self.graph_max_items,
         }
+
+
+@dataclass(frozen=True)
+class _GraphExpansionResult:
+    card_modifiers: Mapping[str, Decimal]
+    nodes_expanded: int
+    edges_expanded: int
 
 
 @dataclass(frozen=True)
@@ -1368,7 +1403,9 @@ class TypedMemoryCore:
         dropped: list[CallerVisibleDroppedRecord] = []
         internal_dropped: list[DroppedReason] = []
         dropped_counts: dict[str, int] = {}
-        scored: list[tuple[dict[str, str], MemoryCard, Decimal, bool]] = []
+        scored_by_card: dict[str, tuple[dict[str, str | None], MemoryCard, Decimal, bool]] = {}
+        graph_candidates: dict[str, MemoryCard] = {}
+        pending_no_relevant: list[MemoryCard] = []
         scanned = 0
         now = request.now or self.clock()
         for card in sorted(self.memory_cards.values(), key=lambda item: item.card_id):
@@ -1379,15 +1416,39 @@ class TypedMemoryCore:
             if reason is not None:
                 _add_drop(reason, card, dropped, internal_dropped, dropped_counts)
                 continue
-            components, final_score, exact_scope = self._score_card(card, query_tokens, request)
+            graph_candidates[card.card_id] = card
             if (
                 query_tokens
                 and _query_overlap_count(card, query_tokens) < _minimum_query_overlap(query_tokens)
                 and not request.applicability_refs
             ):
-                _add_drop("no_relevant_memory", card, dropped, internal_dropped, dropped_counts)
+                pending_no_relevant.append(card)
                 continue
-            scored.append((components, card, final_score, exact_scope))
+            components, final_score, exact_scope = self._score_card(card, query_tokens, request)
+            scored_by_card[card.card_id] = (components, card, final_score, exact_scope)
+
+        expansion = self._expand_graph_candidates(
+            seed_cards=tuple(item[1] for item in scored_by_card.values()),
+            candidate_cards=graph_candidates,
+            existing_card_ids=set(scored_by_card),
+            request=request,
+        )
+        for card_id, graph_modifier in expansion.card_modifiers.items():
+            card = graph_candidates.get(card_id)
+            if card is None or card_id in scored_by_card:
+                continue
+            components, final_score, exact_scope = self._score_card(
+                card,
+                query_tokens,
+                request,
+                graph_modifier=graph_modifier,
+            )
+            scored_by_card[card.card_id] = (components, card, final_score, exact_scope)
+        for card in pending_no_relevant:
+            if card.card_id not in scored_by_card:
+                _add_drop("no_relevant_memory", card, dropped, internal_dropped, dropped_counts)
+
+        scored = list(scored_by_card.values())
 
         scored.sort(
             key=lambda item: (
@@ -1413,8 +1474,10 @@ class TypedMemoryCore:
             cards_ranked=len(scored),
             cards_returned=len(ranked),
             cards_dropped=sum(dropped_counts.values()),
+            graph_nodes_expanded=expansion.nodes_expanded,
+            graph_edges_expanded=expansion.edges_expanded,
             projection_chars=sum(len(item.metadata.get("summary", "")) for item in ranked),
-            index_mode="direct_scan",
+            index_mode="graph_index" if expansion.nodes_expanded or expansion.edges_expanded else "direct_scan",
         )
         abstained = not ranked
         if not self.memory_cards:
@@ -1926,11 +1989,89 @@ class TypedMemoryCore:
                 return "invalidator_triggered"
         return None
 
+    def _expand_graph_candidates(
+        self,
+        *,
+        seed_cards: Sequence[MemoryCard],
+        candidate_cards: Mapping[str, MemoryCard],
+        existing_card_ids: set[str],
+        request: MemoryRecallRequest,
+    ) -> _GraphExpansionResult:
+        if not request.expand_graph or request.limit == 0 or request.graph_max_depth == 0 or request.graph_max_items == 0 or not seed_cards:
+            return _GraphExpansionResult(card_modifiers={}, nodes_expanded=0, edges_expanded=0)
+        frontier = self._seed_graph_node_ids(seed_cards)
+        if not frontier:
+            return _GraphExpansionResult(card_modifiers={}, nodes_expanded=0, edges_expanded=0)
+
+        edges_by_node = self._graph_edges_by_node()
+        expanded_nodes: set[str] = set()
+        expanded_edges: set[str] = set()
+        total_budget = request.graph_max_items
+
+        for node_id in sorted(frontier):
+            if len(expanded_nodes) + len(expanded_edges) >= total_budget:
+                break
+            node = self.graph_nodes.get(node_id)
+            if node is None or node.staleness_state != StalenessState.FRESH.value:
+                continue
+            expanded_nodes.add(node_id)
+            for edge in edges_by_node.get(node_id, ()):
+                if len(expanded_nodes) + len(expanded_edges) >= total_budget:
+                    break
+                if edge.edge_id in expanded_edges or edge.edge_type not in _GRAPH_EXPANSION_EDGE_TYPES:
+                    continue
+                if edge.staleness_state != StalenessState.FRESH.value:
+                    continue
+                if edge.from_node_id not in self.graph_nodes or edge.to_node_id not in self.graph_nodes:
+                    continue
+                expanded_edges.add(edge.edge_id)
+                if len(expanded_nodes) + len(expanded_edges) >= total_budget:
+                    continue
+                other_node_id = edge.to_node_id if edge.from_node_id == node_id else edge.from_node_id
+                other_node = self.graph_nodes.get(other_node_id)
+                if other_node is not None and other_node.staleness_state == StalenessState.FRESH.value:
+                    expanded_nodes.add(other_node_id)
+
+        card_modifiers: dict[str, Decimal] = {}
+        for card_id, card in sorted(candidate_cards.items()):
+            if card_id in existing_card_ids:
+                continue
+            if set(card.graph_refs.node_ids) & expanded_nodes or set(card.graph_refs.edge_ids) & expanded_edges:
+                card_modifiers[card_id] = _GRAPH_EXPANSION_MODIFIER
+        return _GraphExpansionResult(
+            card_modifiers=card_modifiers,
+            nodes_expanded=len(expanded_nodes),
+            edges_expanded=len(expanded_edges),
+        )
+
+    def _seed_graph_node_ids(self, seed_cards: Sequence[MemoryCard]) -> set[str]:
+        node_ids: set[str] = set()
+        for card in seed_cards:
+            node_ids.update(node_id for node_id in card.graph_refs.node_ids if node_id in self.graph_nodes)
+            for edge_id in card.graph_refs.edge_ids:
+                edge = self.graph_edges.get(edge_id)
+                if edge is None:
+                    continue
+                if edge.from_node_id in self.graph_nodes:
+                    node_ids.add(edge.from_node_id)
+                if edge.to_node_id in self.graph_nodes:
+                    node_ids.add(edge.to_node_id)
+        return node_ids
+
+    def _graph_edges_by_node(self) -> dict[str, tuple[GraphEdge, ...]]:
+        grouped: dict[str, list[GraphEdge]] = {}
+        for edge in self.graph_edges.values():
+            grouped.setdefault(edge.from_node_id, []).append(edge)
+            grouped.setdefault(edge.to_node_id, []).append(edge)
+        return {node_id: tuple(sorted(edges, key=lambda item: item.edge_id)) for node_id, edges in grouped.items()}
+
     def _score_card(
         self,
         card: MemoryCard,
         query_tokens: set[str],
         request: MemoryRecallRequest,
+        *,
+        graph_modifier: Decimal = Decimal("0"),
     ) -> tuple[dict[str, str | None], Decimal, bool]:
         exact_scope = request.scope.scope_key() == card.scope.scope_key()
         structured = Decimal("1.0000")
@@ -1943,7 +2084,16 @@ class TypedMemoryCore:
         freshness_modifier = Decimal("0.2000") if card.staleness_state == StalenessState.FRESH.value else Decimal("0.0000")
         contradiction_modifier = Decimal("0.0000") if card.contradiction_state == ContradictionState.NONE.value else Decimal("-0.2000")
         confidence_modifier = Decimal(str(card.confidence)) / Decimal("10")
-        final = structured + (lexical * Decimal("2.0000")) + scope_modifier + authority_modifier + freshness_modifier + contradiction_modifier + confidence_modifier
+        final = (
+            structured
+            + (lexical * Decimal("2.0000"))
+            + scope_modifier
+            + authority_modifier
+            + freshness_modifier
+            + contradiction_modifier
+            + confidence_modifier
+            + graph_modifier
+        )
         components = {
             "structured_match": canonical_score(structured),
             "lexical_score": canonical_score(lexical),
@@ -1954,7 +2104,7 @@ class TypedMemoryCore:
             "freshness_modifier": canonical_score(freshness_modifier),
             "contradiction_modifier": canonical_score(contradiction_modifier),
             "confidence_modifier": canonical_score(confidence_modifier),
-            "graph_modifier": canonical_score(Decimal("0")),
+            "graph_modifier": canonical_score(graph_modifier),
             "budget_modifier": canonical_score(Decimal("0")),
             "final_score": canonical_score(final),
         }

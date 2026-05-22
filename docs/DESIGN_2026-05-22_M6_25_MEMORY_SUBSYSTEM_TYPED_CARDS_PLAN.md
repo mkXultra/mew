@@ -1530,6 +1530,16 @@ score = structured_match
 
 Graph expansion happens only after seed retrieval。
 
+Current core request controls:
+
+```text
+expand_graph: false by default
+graph_max_depth: 1 maximum in Phase D
+graph_max_items: total node+edge expansion budget
+```
+
+The default remains direct-scan/lexical retrieval for Phase C compatibility. Graph expansion is opt-in until graph fixtures, public adapter graph seeding, and derived index invalidation are complete.
+
 Default initial limits:
 
 ```text
@@ -2386,6 +2396,16 @@ Rules:
 - no unbounded graph traversal。
 - expansion occurs after seed retrieval。
 - governance filtering still happens before projection。
+
+Current Phase D.1 implementation status, 2026-05-22:
+
+- `MemoryRecallRequest.expand_graph` enables one-hop expansion in the typed-card core; default is off。
+- expansion seeds only from cards that passed normal recall governance and direct relevance filtering。
+- candidate cards found through graph expansion still pass privacy, authorization scope, memory scope, applicability, lifecycle, staleness, contradiction, invalidator, and visible-support gates before scoring。
+- expansion uses fresh canonical `graph_nodes` and durable `graph_edges`; unresolved or stale endpoints are ignored for expansion。
+- actor/lineage and negative governance edge types do not contribute scored retrieval support; only allowlisted retrieval edges such as `related`, `mentions`, `supports`, `proved_by`, `located_in`, and `fixes` expand。
+- graph-expanded cards receive an explicit deterministic `graph_modifier` score component, and usage records `index_mode=graph_index`, `graph_nodes_expanded`, and `graph_edges_expanded`。
+- remaining Phase D work: public adapter graph fixture seeding, separate fanout/node/card/latency budgets, dropped expansion reason accounting without ID leakage, graph invalidation hooks, and rebuild verification for derived graph-aware indexes。
 
 ### Phase E: MemoryContextBuilder / evidence packet
 
