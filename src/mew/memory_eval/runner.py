@@ -233,6 +233,7 @@ def _run_artifact(
         "adapter_config_hash": adapter_config_hash,
         "capability_manifest_hash": manifest_hash,
         "capability_tier": manifest.get("capability_tier"),
+        "external_model_ids": list(manifest.get("external_model_ids") or []),
     }
     failures = _dedupe_failures(list(run_failures or []))
     for request in requests:
@@ -261,7 +262,7 @@ def _run_artifact(
         "environment": {
             "python_version": sys.version.split()[0],
             "platform": platform.platform(),
-            "external_model_ids": [],
+            "external_model_ids": list(manifest.get("external_model_ids") or []),
             "seed": seed,
         },
         "artifact_hashes": {},
