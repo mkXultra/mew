@@ -29,7 +29,8 @@ DEFAULT_TIMEOUT = 120
 LIVE_FIXTURE_SUFFIX = "_typed_live_lifecycle"
 GRAPH_ON_FIXTURE_SUFFIX = "_graph_on"
 NORMAL_9_SUITE = "normal-9"
-SUITES = (NORMAL_9_SUITE,)
+GRAPH_GENERATION_SUITE = "graph-generation"
+SUITES = (NORMAL_9_SUITE, GRAPH_GENERATION_SUITE)
 NORMAL_9_FIXTURES = (
     Path("fixtures/memory_eval/p0/dummy_happy_path.json"),
     Path("fixtures/memory_eval/p1/memory_off_no_prior_memory_basic.json"),
@@ -40,6 +41,9 @@ NORMAL_9_FIXTURES = (
     Path("fixtures/memory_eval/p1/abstention_no_memory_basic.json"),
     Path("fixtures/memory_eval/p1/update_forget_basic.json"),
     Path("fixtures/memory_eval/p1/stale_conflict_supersede_basic.json"),
+)
+GRAPH_GENERATION_FIXTURES = (
+    Path("fixtures/memory_eval/p1/graph_expansion_basic.json"),
 )
 
 
@@ -267,6 +271,8 @@ def suite_fixture_paths(suite: str) -> tuple[Path, ...]:
     suite = _normalize_suite_name(suite)
     if suite == NORMAL_9_SUITE:
         return NORMAL_9_FIXTURES
+    if suite == GRAPH_GENERATION_SUITE:
+        return GRAPH_GENERATION_FIXTURES
     raise ValueError(f"unsupported live memory-eval suite: {suite}")
 
 
@@ -537,6 +543,8 @@ def _normalize_suite_name(value: str) -> str:
     normalized = str(value or "").strip()
     if normalized == "normal_9":
         normalized = NORMAL_9_SUITE
+    if normalized == "graph_generation":
+        normalized = GRAPH_GENERATION_SUITE
     if normalized not in SUITES:
         raise ValueError(f"unsupported live memory-eval suite: {value}")
     return normalized

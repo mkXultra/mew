@@ -20,6 +20,10 @@ from ...memory_typed_card_core import (
 from ...memory_typed_cards import (
     ApprovalState,
     CandidateProducer,
+    EvidenceLink,
+    GraphEdge,
+    GraphNode,
+    GraphRefs,
     ProvenanceEvent,
     ProvenanceProducer,
     RawMemoryExtractorConfig,
@@ -27,12 +31,14 @@ from ...memory_typed_cards import (
     Scope,
     ScopeLevel,
     TraceActor,
+    stable_hash,
 )
 
 
 SETUP_POLICY = "explicit_mutate_lifecycle"
 LIFECYCLE_TYPES = {"seed_eval", "approve", "commit"}
 TERMINAL_MUTATIONS = {"delete", "forget", "tombstone"}
+GRAPH_SETUP_MUTATIONS = {"seed_graph"}
 ExtractorMode = Literal["deterministic_replay", "live_model"]
 EXTRACTOR_MODE_DETERMINISTIC_REPLAY = "deterministic_replay"
 EXTRACTOR_MODE_LIVE_MODEL = "live_model"
@@ -114,6 +120,7 @@ class TypedCardsMemoryEvalAdapter:
         manifest["external_model_ids"] = list(manifest["extractor"]["external_model_ids"])
         manifest["capabilities"]["seed_eval"] = True
         manifest["capabilities"]["graph_expansion"] = True
+        manifest["capabilities"]["seed_graph"] = True
         return manifest
 
     def reset(self, run: Mapping[str, Any]) -> dict[str, Any]:
@@ -306,6 +313,8 @@ class TypedCardsMemoryEvalAdapter:
         mutation_type = str(op.get("mutation_type") or op.get("lifecycle_type") or op.get("type") or "").strip()
         if mutation_type in LIFECYCLE_TYPES:
             return self._mutate_lifecycle(op, mutation_type)
+        if mutation_type in GRAPH_SETUP_MUTATIONS:
+            return self._mutate_seed_graph(op)
         if mutation_type not in {"update", "delete", "forget", "supersede", "tombstone"}:
             return _receipt(status="failed", status_reason="unsupported_mutation")
         effective_time = _normalize_effective_time(op.get("effective_time"))
@@ -364,6 +373,101 @@ class TypedCardsMemoryEvalAdapter:
             audit_ids=[result.audit_event.audit_id],
             provenance_event_ids=list(result.audit_event.provenance_event_ids),
             effective_time=effective_time,
+        )
+
+    def _mutate_seed_graph(self, op: Mapping[str, Any]) -> dict[str, Any]:
+        graph = op.get("graph") if isinstance(op.get("graph"), Mapping) else {}
+        links = graph.get("links") or graph.get("edges") or ()
+        if not links:
+            return _receipt(status="failed", status_reason="missing_graph_links", mutation_type="seed_graph")
+        snapshot = self.core._snapshot_state()
+        touched_card_ids: set[str] = set()
+        node_ids: set[str] = set()
+        edge_ids: set[str] = set()
+        op_id = str(op.get("op_id") or "seed_graph")
+        try:
+            for link in links:
+                if not isinstance(link, Mapping):
+                    raise ValueError("graph links must be objects")
+                from_card = self._graph_card_for_experience(str(link.get("from_experience_id") or ""))
+                to_card = self._graph_card_for_experience(str(link.get("to_experience_id") or ""))
+                if from_card.scope.scope_key() != to_card.scope.scope_key():
+                    raise ValueError("graph link card scopes must match")
+                created_at = self.core.clock()
+                from_node = self._graph_node_from_spec(
+                    link.get("from_node") if isinstance(link.get("from_node"), Mapping) else {},
+                    scope=from_card.scope,
+                    fallback_node_type="memory_card",
+                    fallback_ref=from_card.card_id,
+                    created_at=created_at,
+                )
+                to_node = self._graph_node_from_spec(
+                    link.get("to_node") if isinstance(link.get("to_node"), Mapping) else {},
+                    scope=to_card.scope,
+                    fallback_node_type="memory_card",
+                    fallback_ref=to_card.card_id,
+                    created_at=created_at,
+                )
+                self.core.add_graph_node(from_node)
+                self.core.add_graph_node(to_node)
+                node_ids.update((from_node.node_id, to_node.node_id))
+                edge = GraphEdge.build(
+                    from_node_id=from_node.node_id,
+                    from_node_type=from_node.node_type,
+                    to_node_id=to_node.node_id,
+                    to_node_type=to_node.node_type,
+                    edge_type=str(link.get("edge_type") or "related"),
+                    scope=from_card.scope,
+                    evidence_links=(
+                        EvidenceLink(
+                            ref_id=_first_active_support_ref(from_card),
+                            role="current_support",
+                            active=True,
+                            note="memory-eval graph setup",
+                        ),
+                    ),
+                    created_at=created_at,
+                    updated_at=created_at,
+                )
+                self.core.add_graph_edge(edge)
+                edge_ids.add(edge.edge_id)
+                self.core.memory_cards[from_card.card_id] = _with_graph_refs(
+                    from_card,
+                    node_ids=(from_node.node_id,),
+                    edge_ids=(edge.edge_id,),
+                )
+                self.core.memory_cards[to_card.card_id] = _with_graph_refs(
+                    to_card,
+                    node_ids=(to_node.node_id,),
+                    edge_ids=(edge.edge_id,),
+                )
+                touched_card_ids.update((from_card.card_id, to_card.card_id))
+            result_payload = {
+                "mutation_type": "seed_graph",
+                "graph_nodes": len(node_ids),
+                "graph_edges": len(edge_ids),
+                "card_ids": sorted(touched_card_ids),
+            }
+            audit = self.core._append_audit(
+                operation="mutate",
+                actor=TraceActor.ADAPTER.value,
+                request_hash=stable_hash(op),
+                result_payload=result_payload,
+                card_ids=tuple(sorted(touched_card_ids)),
+                mutation_ids=(op_id,),
+                metadata={"mutation_type": "seed_graph", "graph_nodes": len(node_ids), "graph_edges": len(edge_ids)},
+            )
+        except Exception as exc:
+            self.core._restore_state(snapshot)
+            return _receipt(status="failed", status_reason=_status_reason(exc), mutation_type="seed_graph", failures=[{"message": str(exc)}])
+        return _receipt(
+            status="success",
+            status_reason="applied",
+            mutation_type="seed_graph",
+            card_ids=sorted(touched_card_ids),
+            audit_ids=[audit.audit_id],
+            graph_nodes_created=len(node_ids),
+            graph_edges_created=len(edge_ids),
         )
 
     def _mutation_authority_refs(self, op: Mapping[str, Any], mutation_type: str) -> list[str]:
@@ -435,6 +539,37 @@ class TypedCardsMemoryEvalAdapter:
         if len(matched) > 1:
             return matched
         return matched[0] if matched else None
+
+    def _graph_card_for_experience(self, experience_id: str):
+        card = self._active_card_for_experience(experience_id)
+        if card is None:
+            raise LookupError("graph_target_not_found")
+        if isinstance(card, list):
+            raise LookupError("graph_target_ambiguous")
+        return card
+
+    def _graph_node_from_spec(
+        self,
+        spec: Mapping[str, Any],
+        *,
+        scope: Scope,
+        fallback_node_type: str,
+        fallback_ref: str,
+        created_at: str,
+    ) -> GraphNode:
+        node_type = str(spec.get("node_type") or spec.get("type") or fallback_node_type)
+        canonical_ref = str(spec.get("canonical_ref") or spec.get("ref") or fallback_ref)
+        display_name = str(spec.get("display_name") or canonical_ref)
+        metadata = spec.get("metadata") if isinstance(spec.get("metadata"), Mapping) else {}
+        return GraphNode.build(
+            node_type=node_type,
+            scope=scope,
+            canonical_ref=canonical_ref,
+            display_name=display_name,
+            metadata=metadata,
+            created_at=created_at,
+            updated_at=created_at,
+        )
 
     def _remember_provenance(self, event: ProvenanceEvent) -> None:
         if event.source_experience_id:
@@ -537,6 +672,7 @@ def _deterministic_replay_extractor(
                     "note": "deterministic replay support",
                 }
             ],
+            "graph_nodes": _replay_graph_nodes(request.raw_text),
             "proposed_by": CandidateProducer.MODEL.value,
             "write_reason": "deterministic memory-eval replay",
             "ambiguous": False,
@@ -593,6 +729,23 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _first_active_support_ref(card: Any) -> str:
+    for link in card.evidence_links:
+        if link.active:
+            return link.ref_id
+    raise ValueError("graph setup requires an active evidence link")
+
+
+def _with_graph_refs(card: Any, *, node_ids: Sequence[str], edge_ids: Sequence[str]) -> Any:
+    return replace(
+        card,
+        graph_refs=GraphRefs(
+            node_ids=tuple(sorted({*card.graph_refs.node_ids, *node_ids})),
+            edge_ids=tuple(sorted({*card.graph_refs.edge_ids, *edge_ids})),
+        ),
+    )
 
 
 def _lifecycle_type(op: Mapping[str, Any]) -> str:
@@ -658,6 +811,30 @@ def _replay_retrieval_terms(text: str) -> list[str]:
     return terms
 
 
+def _replay_graph_nodes(text: str) -> list[dict[str, Any]]:
+    nodes = []
+    seen = set()
+    for raw in str(text or "").split():
+        token = raw.strip(".,:;!?()[]{}\"'")
+        if not token.startswith("file:"):
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        nodes.append(
+            {
+                "node_type": "file",
+                "canonical_ref": token,
+                "display_name": token.rsplit(":", 1)[-1],
+                "content_hash": None,
+                "metadata": {},
+            }
+        )
+        if len(nodes) >= 8:
+            break
+    return nodes
+
+
 def _mutation_patch(op: Mapping[str, Any]) -> dict[str, Any]:
     replacement = op.get("replacement") if isinstance(op.get("replacement"), Mapping) else {}
     content = replacement.get("content") if isinstance(replacement.get("content"), Mapping) else {}
@@ -686,6 +863,8 @@ def _public_scope_for_support(experiences: Mapping[str, Mapping[str, Any]], supp
 def _status_reason(exc: Exception) -> str:
     text = str(exc)
     if text in {"proposal_not_found", "approved_not_found", "replacement_not_found"}:
+        return text
+    if text in {"graph_target_not_found", "graph_target_ambiguous"}:
         return text
     if "ambiguous" in text:
         return "ambiguous_target"

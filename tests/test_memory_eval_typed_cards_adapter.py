@@ -14,6 +14,7 @@ from mew.memory_typed_cards import EvidenceLink, GraphEdge, GraphNode, GraphRefs
 ROOT = Path(__file__).resolve().parents[1]
 P0_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p0"
 P1_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p1"
+GRAPH_FIXTURE = P1_FIXTURES / "graph_expansion_basic.json"
 
 
 PHASE_C_PASS_FIXTURES = [
@@ -451,6 +452,61 @@ def test_adapter_retrieve_accepts_graph_on_query_controls() -> None:
     assert graph_on["usage"]["counts"]["graph_edges_expanded"] == 1
 
 
+def test_seed_graph_mutation_is_explicit_fixture_setup_for_recall_only() -> None:
+    adapter = TypedCardsMemoryEvalAdapter()
+    adapter.reset({"fixture_id": "fx_seed_graph", "evaluation_time": "2026-05-21T00:00:00Z"})
+    adapter.ingest(
+        [
+            _experience("ex_seed", text="Rigel anchor belongs to the seed memory."),
+            _experience("ex_related", text="Seeded graph setup can connect this related memory."),
+        ]
+    )
+    adapter.mutate([{"op_id": "seed_graph_a", "lifecycle_type": "seed_eval", "target_experience_id": "ex_seed"}])
+    adapter.mutate([{"op_id": "seed_graph_b", "lifecycle_type": "seed_eval", "target_experience_id": "ex_related"}])
+
+    graph_receipt = adapter.mutate(
+        [
+            {
+                "op_id": "graph_setup",
+                "mutation_type": "seed_graph",
+                "graph": {
+                    "links": [
+                        {
+                            "from_experience_id": "ex_seed",
+                            "to_experience_id": "ex_related",
+                            "from_node": {
+                                "node_type": "file",
+                                "canonical_ref": "file:mew:main:src/mew/memory_typed_card_core.py",
+                            },
+                            "to_node": {
+                                "node_type": "test",
+                                "canonical_ref": "test:mew:tests/test_memory_eval_typed_cards_adapter.py",
+                            },
+                            "edge_type": "related",
+                        }
+                    ]
+                },
+            }
+        ]
+    )[0]
+    graph_on = adapter.retrieve(
+        {
+            "request_id": "rq_seed_graph",
+            "scope_id": "tenant_a/user_a",
+            "query": {"text": "Rigel anchor"},
+            "k": 5,
+            "filters": {"expand_graph": True, "graph_max_items": 4},
+            "budget": {"max_evidence_items": 5},
+        }
+    )
+
+    assert graph_receipt["status"] == "success"
+    assert graph_receipt["graph_nodes_created"] == 2
+    assert graph_receipt["graph_edges_created"] == 1
+    assert graph_on["usage"]["counts"]["index_mode"] == "graph_index"
+    assert [item["support_experience_ids"][0] for item in graph_on["ranked_evidence"]] == ["ex_seed", "ex_related"]
+
+
 def test_deterministic_replay_retrieval_terms_skip_speaker_roles_and_overlong_tokens() -> None:
     adapter = TypedCardsMemoryEvalAdapter()
     adapter.reset({"fixture_id": "fx_replay_terms", "evaluation_time": "2026-05-21T00:00:00Z"})
@@ -516,6 +572,24 @@ def test_scope_isolation_fixture_passes_without_cross_scope_support() -> None:
     assert request["result_status"] == "passed"
     assert request["metrics"]["cross_scope_leak_rate"] == 0
     assert request["metrics"]["cross_scope_exposure_rate"] == 0
+
+
+def test_graph_expansion_fixture_passes_with_graph_usage_counts() -> None:
+    artifact = run_fixture(
+        json.loads(GRAPH_FIXTURE.read_text(encoding="utf-8")),
+        TypedCardsMemoryEvalAdapter(),
+        run_id="run_graph",
+        created_at="2026-05-21T00:00:00Z",
+    )
+    request = artifact["requests"][0]
+
+    assert request["result_status"] == "passed"
+    returned = request["retrieval"]["returned_evidence_order"]
+    support_ids = [support_id for item in returned for support_id in item["support_experience_ids"]]
+    assert "exp_related_note" in support_ids
+    assert request["usage"]["counts"]["index_mode"] == "graph_index"
+    assert request["usage"]["counts"]["graph_nodes_expanded"] == 1
+    assert request["usage"]["counts"]["graph_edges_expanded"] == 0
 
 
 def test_harness_scope_strings_map_to_non_user_typed_scope_for_semantic_facts() -> None:

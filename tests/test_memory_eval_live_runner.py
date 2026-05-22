@@ -6,6 +6,7 @@ from pathlib import Path
 from mew.memory_eval.fixtures import load_fixture
 from mew.memory_eval_live_runner import (
     GRAPH_ON_FIXTURE_SUFFIX,
+    GRAPH_GENERATION_SUITE,
     LIVE_FIXTURE_SUFFIX,
     NORMAL_9_SUITE,
     add_seed_lifecycle,
@@ -110,6 +111,13 @@ def test_live_runner_parser_accepts_normal_suite_without_fixture() -> None:
     assert args.suite == NORMAL_9_SUITE
 
 
+def test_live_runner_parser_accepts_graph_generation_suite_without_fixture() -> None:
+    args = build_parser().parse_args(["--suite", "graph-generation"])
+
+    assert args.fixture is None
+    assert args.suite == GRAPH_GENERATION_SUITE
+
+
 def test_live_runner_parser_accepts_all_normal_alias_without_fixture() -> None:
     args = build_parser().parse_args(["--all-normal"])
 
@@ -131,6 +139,12 @@ def test_normal_9_suite_fixture_order_is_stable() -> None:
         "update_forget_basic.json",
         "stale_conflict_supersede_basic.json",
     ]
+
+
+def test_graph_generation_suite_fixture_order_is_stable() -> None:
+    fixtures = suite_fixture_paths(GRAPH_GENERATION_SUITE)
+
+    assert [path.name for path in fixtures] == ["graph_expansion_basic.json"]
 
 
 def test_resolve_output_path_uses_run_id_when_output_is_omitted(tmp_path: Path) -> None:

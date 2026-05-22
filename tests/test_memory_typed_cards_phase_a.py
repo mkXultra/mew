@@ -502,7 +502,8 @@ def test_memory_candidate_golden_serialization_hash():
         '"proposed_applicability":{"applies_to":["workflow:phase-a","task_family:memory-subsystem"],'
         '"counterexamples":[],"does_not_apply_to":[],"prerequisites":[]},'
         '"proposed_authority":{"source":"scoring","source_refs":["prov_candidate_support"],"strength":"hint"},'
-        '"proposed_by":"adapter","proposed_invalidators":[{"baseline_hash":null,'
+        '"proposed_by":"adapter","proposed_graph_refs":{"edge_ids":[],"node_ids":[]},'
+        '"proposed_invalidators":[{"baseline_hash":null,'
         '"baseline_observed_at":null,"baseline_ref":null,"baseline_value":null,"checked_at":null,'
         '"kind":"manual","manual_reason":"Reviewer asked to retire this if the design changes.",'
         '"metadata":{"source":"phase-a-test"},"ref":null,"target_node_id":null,'
@@ -514,7 +515,7 @@ def test_memory_candidate_golden_serialization_hash():
         '"summary":"Use typed-card schema tests before adding recall behavior.",'
         '"write_reason":"schema-only proposal fixture"}'
     )
-    assert candidate.stable_hash() == "sha256:36874c5860ea8c5f25de744d2a55e01515bd65c49f1a4139f6d21d8fc2d364a4"
+    assert candidate.stable_hash() == "sha256:068fbcd4a4e13bb4d29784074db2a662e6ee53231205c661aa112142257cb15b"
 
 
 def test_graph_edge_schema_uses_canonical_actor_edges_and_evidence_links():

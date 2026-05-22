@@ -42,6 +42,7 @@ MUTATION_PUBLIC_KEYS = {
     "replacement_experience_id",
     "effective_time",
     "reason",
+    "graph",
 }
 
 REQUEST_PUBLIC_KEYS = {
@@ -317,4 +318,23 @@ def _public_mutation(
         if key in public:
             original_experience_id = str(public.get(key) or "")
             public[key] = experience_id_map.get(original_experience_id, original_experience_id)
+    if "graph" in public:
+        public["graph"] = _rewrite_graph_experience_ids(public["graph"], experience_id_map)
     return public
+
+
+def _rewrite_graph_experience_ids(value: Any, experience_id_map: Mapping[str, str]) -> Any:
+    if isinstance(value, Mapping):
+        rewritten = {}
+        for key, child in value.items():
+            if key in {"experience_id", "from_experience_id", "to_experience_id", "card_experience_id"}:
+                original = str(child or "")
+                rewritten[key] = experience_id_map.get(original, original)
+            elif key == "experience_ids" and isinstance(child, list):
+                rewritten[key] = [experience_id_map.get(str(item), str(item)) for item in child]
+            else:
+                rewritten[key] = _rewrite_graph_experience_ids(child, experience_id_map)
+        return rewritten
+    if isinstance(value, list):
+        return [_rewrite_graph_experience_ids(item, experience_id_map) for item in value]
+    return value

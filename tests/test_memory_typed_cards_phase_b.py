@@ -280,9 +280,11 @@ def test_model_extractor_prefers_structured_json_and_passes_schema() -> None:
     assert calls[0]["schema_name"] == "raw_memory_extraction"
     assert calls[0]["json_schema"] == raw_memory_extraction_schema()
     assert "retrieval_terms" in calls[0]["json_schema"]["properties"]["candidate"]["required"]
+    assert "graph_nodes" in calls[0]["json_schema"]["properties"]["candidate"]["required"]
     assert calls[0]["strict"] is True
     assert "default_scope_key" in calls[0]["prompt"]
     assert "retrieval_terms" in calls[0]["prompt"]
+    assert "graph_nodes" in calls[0]["prompt"]
 
 
 def test_approval_commit_separation_and_model_cannot_commit() -> None:
@@ -589,6 +591,53 @@ def test_retrieval_terms_preserve_discriminators_for_ranking_when_summary_is_gen
     assert result.ranked_evidence[0].support_experience_ids == ("exp_primary_badge",)
     assert "launch reviews" in result.ranked_evidence[0].metadata["retrieval_terms"]
     assert "cobalt" in result.ranked_evidence[0].metadata["retrieval_terms"]
+
+
+def test_raw_extractor_graph_nodes_become_proposal_graph_refs_for_expansion() -> None:
+    def extractor(request, provenance_event, scope):
+        graph_ref = "file:mew:main:src/mew/memory_typed_card_core.py"
+        return {
+            "decision": "candidate",
+            "candidate": {
+                "kind": "semantic_fact",
+                "summary": "Graph extraction keeps explicit file anchors.",
+                "details": None,
+                "retrieval_terms": ["Vega" if "Vega" in request.raw_text else "coverage"],
+                "confidence": 0.9,
+                "authority": {"source": "self", "strength": "hint"},
+                "valence": {"polarity": "neutral", "effect": "use"},
+                "applicability": {"applies_to": [_scope().scope_key()]},
+                "graph_nodes": [
+                    {
+                        "node_type": "file",
+                        "canonical_ref": graph_ref,
+                        "display_name": "memory_typed_card_core.py",
+                        "content_hash": None,
+                        "metadata": {},
+                    }
+                ],
+                "proposed_by": "model",
+            },
+        }
+
+    core = TypedMemoryCore(extractor=extractor, clock=_Clock())
+    seed = _ingest(core, raw_text="Vega anchor is attached to file:mew:main:src/mew/memory_typed_card_core.py")
+    related = _ingest(core, raw_text="Coverage note references file:mew:main:src/mew/memory_typed_card_core.py")
+    assert seed.proposal_card is not None
+    assert related.proposal_card is not None
+    assert seed.proposal_card.graph_refs.node_ids
+    assert seed.proposal_card.graph_refs.node_ids == related.proposal_card.graph_refs.node_ids
+    core.approve_and_commit_memory(seed.proposal_card.card_id, actor="debug")
+    core.approve_and_commit_memory(related.proposal_card.card_id, actor="debug")
+
+    result = core.retrieve(
+        MemoryRecallRequest(query="Vega anchor", scope=_scope(), expand_graph=True, graph_max_items=4, limit=2)
+    )
+
+    assert len(result.ranked_evidence) == 2
+    assert result.usage.index_mode == "graph_index"
+    assert result.usage.graph_nodes_expanded == 1
+    assert result.usage.graph_edges_expanded == 0
 
 
 def test_raw_retrieval_anchor_fallback_sanitizes_unbounded_tokens() -> None:

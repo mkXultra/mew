@@ -46,6 +46,7 @@ from .memory_typed_cards import (
     MemoryRevision,
     MemoryTimestamps,
     MemoryTraceEvent,
+    NodeType,
     PrivacyRules,
     ProjectionMode,
     ProvenanceEvent,
@@ -291,6 +292,7 @@ def raw_memory_extraction_schema() -> dict[str, Any]:
             "valence",
             "applicability",
             "evidence_links",
+            "graph_nodes",
             "proposed_by",
             "write_reason",
             "ambiguous",
@@ -364,6 +366,27 @@ def raw_memory_extraction_schema() -> dict[str, Any]:
                 },
                 "description": "If provided, cite the provenance_event_id as current_support.",
             },
+            "graph_nodes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["node_type", "canonical_ref", "display_name", "content_hash", "metadata"],
+                    "properties": {
+                        "node_type": {"type": "string", "enum": [item.value for item in NodeType]},
+                        "canonical_ref": {"type": "string"},
+                        "display_name": {"type": "string"},
+                        "content_hash": nullable_string,
+                        "metadata": {"type": "object", "additionalProperties": False, "properties": {}},
+                    },
+                },
+                "maxItems": 8,
+                "description": (
+                    "Optional graph anchors explicitly present in raw text. "
+                    "Use only file/symbol/test/command/error_signature/task refs that are directly stated; "
+                    "return [] when unsure."
+                ),
+            },
             "proposed_by": {"type": "string", "enum": [item.value for item in CandidateProducer]},
             "write_reason": {"type": "string"},
             "ambiguous": {"type": "boolean"},
@@ -421,6 +444,7 @@ def raw_memory_extraction_prompt(request: RawMemoryIngestRequest, provenance_eve
                 "valence": {"polarity": "neutral", "effect": "use"},
                 "applicability": {"applies_to": [], "does_not_apply_to": [], "prerequisites": [], "counterexamples": []},
                 "evidence_links": [],
+                "graph_nodes": [],
                 "proposed_by": "model",
                 "write_reason": "raw ingest extractor proposal",
                 "ambiguous": False,
@@ -441,6 +465,8 @@ def raw_memory_extraction_prompt(request: RawMemoryIngestRequest, provenance_eve
             "For applies_to, use trusted_runtime_context.default_scope_key when the candidate applies to the current scope and no narrower canonical typed ref is known.",
             "Use empty applicability arrays when unsure; typed validation will reject invalid refs.",
             "Do not emit invalidators from raw extraction; they are assigned by later governance paths when needed.",
+            "For graph_nodes, include only explicit raw references such as file paths, test names, command names, error signatures, tasks, or symbols. Do not invent nodes.",
+            "Canonical graph refs should be deterministic strings such as file:<repo>:<branch-or-main>:<path>, test:<repo>:<test-ref>, command:<normalized-command>, symbol:<repo>:<symbol-ref>, error:<signature>, or task:<task-ref>.",
         ],
         "trusted_runtime_context": {
             "provenance_event_id": provenance_event.event_id,
@@ -1109,7 +1135,7 @@ class TypedMemoryCore:
             contradiction_state=ContradictionState.NONE.value,
             approval_state=ApprovalState.PROPOSAL.value,
             projection_mode=ProjectionMode.DEBUG_ONLY.value,
-            graph_refs=GraphRefs(),
+            graph_refs=candidate.proposed_graph_refs,
             privacy=PrivacyRules(allowed_scope_ids=(candidate.proposed_scope.scope_key(),)),
             timestamps=MemoryTimestamps(created_at=timestamp, updated_at=timestamp),
             revision=MemoryRevision(version=1),
@@ -1715,10 +1741,14 @@ class TypedMemoryCore:
         )
         valence = Valence.from_dict(raw_candidate.get("valence") or {})
         applicability_payload = raw_candidate.get("applicability") if isinstance(raw_candidate.get("applicability"), Mapping) else {}
-        if not applicability_payload.get("applies_to"):
-            applicability_payload = {**applicability_payload, "applies_to": (scope.scope_key(),)}
+        applies_to = list(applicability_payload.get("applies_to") or ())
+        if scope.scope_key() not in applies_to:
+            applies_to.append(scope.scope_key())
+        applicability_payload = {**applicability_payload, "applies_to": tuple(applies_to)}
         applicability = Applicability.from_dict(applicability_payload)
         invalidators = tuple(Invalidator.from_dict(item) for item in raw_candidate.get("invalidators") or ())
+        graph_refs, graph_drops = self._graph_refs_from_extractor_payload(raw_candidate, scope=scope)
+        dropped.extend(graph_drops)
         proposed_by = raw_candidate.get("proposed_by") or CandidateProducer.MODEL.value
         evidence_links = (
             EvidenceLink(
@@ -1752,10 +1782,45 @@ class TypedMemoryCore:
             confidence=confidence,
             write_reason=_clean_text(raw_candidate.get("write_reason") or "raw ingest extractor proposal"),
             proposed_by=proposed_by,
+            proposed_graph_refs=graph_refs,
         )
         if confidence < 0.5:
             dropped.append(DroppedReason(reason="low_confidence", ref_id=provenance_event.event_id))
         return candidate, "candidate", tuple(dropped)
+
+    def _graph_refs_from_extractor_payload(
+        self,
+        raw_candidate: Mapping[str, Any],
+        *,
+        scope: Scope,
+    ) -> tuple[GraphRefs, tuple[DroppedReason, ...]]:
+        raw_nodes = raw_candidate.get("graph_nodes") or ()
+        if isinstance(raw_nodes, (str, bytes)) or not isinstance(raw_nodes, Sequence):
+            return GraphRefs(), (DroppedReason(reason="invalid_graph_material", detail="graph_nodes must be a sequence"),)
+        node_ids: list[str] = []
+        dropped: list[DroppedReason] = []
+        for raw_node in raw_nodes:
+            if not isinstance(raw_node, Mapping):
+                dropped.append(DroppedReason(reason="invalid_graph_material", detail="graph_nodes entries must be objects"))
+                continue
+            try:
+                now = self.clock()
+                node = GraphNode.build(
+                    node_type=str(raw_node.get("node_type") or raw_node.get("type") or ""),
+                    scope=scope,
+                    canonical_ref=str(raw_node.get("canonical_ref") or raw_node.get("ref") or ""),
+                    display_name=str(raw_node.get("display_name") or raw_node.get("canonical_ref") or ""),
+                    content_hash=_clean_text(raw_node.get("content_hash")) or None,
+                    metadata=raw_node.get("metadata") if isinstance(raw_node.get("metadata"), Mapping) else {},
+                    created_at=now,
+                    updated_at=now,
+                )
+            except Exception as exc:
+                dropped.append(DroppedReason(reason="invalid_graph_material", detail=str(exc)))
+                continue
+            self.add_graph_node(node)
+            node_ids.append(node.node_id)
+        return GraphRefs(node_ids=tuple(sorted(set(node_ids)))), tuple(dropped)
 
     def _mutate_update(self, target: MemoryCard, mutation: MemoryMutation) -> MemoryCard:
         if target.approval_state != ApprovalState.COMMITTED.value:

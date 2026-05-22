@@ -2401,6 +2401,7 @@ Current Phase D.1 implementation status, 2026-05-22:
 
 - `MemoryRecallRequest.expand_graph` enables one-hop expansion in the typed-card core; default is off。
 - the typed-card eval adapter accepts adapter-visible `filters.expand_graph` / `filters.graph_max_*` controls, and the live runner exposes `--expand-graph` for normal-suite no-regression scoring。
+- raw extraction can emit explicit `graph_nodes` from raw text; proposed graph refs are carried through proposal/commit and can be evaluated without `seed_graph` setup。
 - expansion seeds only from cards that passed normal recall governance and direct relevance filtering。
 - candidate cards found through graph expansion still pass privacy, authorization scope, memory scope, applicability, lifecycle, staleness, contradiction, invalidator, and visible-support gates before scoring。
 - expansion uses fresh canonical `graph_nodes` and durable `graph_edges`; unresolved or stale endpoints are ignored for expansion。
@@ -2408,7 +2409,9 @@ Current Phase D.1 implementation status, 2026-05-22:
 - unresolved or stale graph endpoints are counted by reason in caller-visible aggregate drop counts, while node/edge IDs remain internal-audit only。
 - graph-expanded cards receive an explicit deterministic `graph_modifier` score component, and usage records `index_mode=graph_index`, `graph_nodes_expanded`, and `graph_edges_expanded`。
 - graph-on live normal suite passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_suite_graph_on_20260522`, 9/9 passed); because current P0/P1 fixtures contain no graph seed material, all graph expansion counts were zero and this run is a no-regression check, not graph retrieval quality proof。
-- remaining Phase D work: public adapter graph fixture seeding, graph-specific memory-eval scoring fixtures, separate fanout/node/card/latency budgets, graph invalidation hooks, and rebuild verification for derived graph-aware indexes。
+- graph-generation live fixture passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_graph_generation_20260522_v3`): `raw_text -> LLM extractor graph_nodes -> proposal/commit -> graph-on recall` returned the graph-related support with `index_mode=graph_index` and `graph_nodes_expanded=1`。
+- `seed_graph` remains an explicit fixture/debug setup path for isolating recall expansion from extraction quality; it is not evidence that ingest generates graph material。
+- remaining Phase D work: broader graph-specific memory-eval fixtures, separate fanout/node/card/latency budgets, graph invalidation hooks, and rebuild verification for derived graph-aware indexes。
 
 ### Phase E: MemoryContextBuilder / evidence packet
 

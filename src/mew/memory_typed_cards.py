@@ -1913,6 +1913,7 @@ class MemoryCandidate:
     write_reason: str
     proposed_by: str
     retrieval_terms: tuple[str, ...] = ()
+    proposed_graph_refs: GraphRefs = field(default_factory=GraphRefs)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "candidate_id", _text(self.candidate_id, allow_empty=False, field_name="candidate_id"))
@@ -1957,6 +1958,13 @@ class MemoryCandidate:
         object.__setattr__(self, "write_reason", _text(self.write_reason, allow_empty=False, field_name="write_reason"))
         object.__setattr__(self, "proposed_by", _enum_value(CandidateProducer, self.proposed_by, "proposed_by"))
         object.__setattr__(self, "retrieval_terms", _retrieval_terms(self.retrieval_terms))
+        object.__setattr__(
+            self,
+            "proposed_graph_refs",
+            self.proposed_graph_refs
+            if isinstance(self.proposed_graph_refs, GraphRefs)
+            else GraphRefs.from_dict(self.proposed_graph_refs),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1974,6 +1982,7 @@ class MemoryCandidate:
             "write_reason": self.write_reason,
             "proposed_by": self.proposed_by,
             "retrieval_terms": list(self.retrieval_terms),
+            "proposed_graph_refs": self.proposed_graph_refs.to_dict(),
         }
 
     def stable_hash(self) -> str:
