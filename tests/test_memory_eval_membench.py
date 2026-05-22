@@ -2,20 +2,25 @@ import json
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
+
 from mew.memory_eval.fixtures import split_fixture
 from mew.memory_eval.hashing import canonical_json
 from mew.memory_eval.membench import (
+    MembenchConversionError,
     audit_mteb_source_manifest,
     build_ephemeral_fixtures_from_dry_run,
     build_typed_cards_ephemeral_fixtures_from_dry_run,
     convert_mteb_qrels_dry_run,
     main as membench_main,
+    validate_mteb_source_manifest,
     validate_mteb_qrels_dry_run,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MEMORY_EVAL_FIXTURES = ROOT / "fixtures" / "memory_eval"
+PINNED_SOURCE_REVISION = "0123456789abcdef0123456789abcdef01234567"
 
 
 def test_mteb_source_audit_records_external_no_vendor_manifest(tmp_path):
@@ -33,7 +38,7 @@ def test_mteb_source_audit_records_external_no_vendor_manifest(tmp_path):
 
     manifest = audit_mteb_source_manifest(
         tmp_path,
-        source_revision="0123456789abcdef",
+        source_revision=PINNED_SOURCE_REVISION,
         source_subset="single_hop",
         declared_license="MIT",
         license_source="synthetic test audit",
@@ -58,6 +63,265 @@ def test_mteb_source_audit_records_external_no_vendor_manifest(tmp_path):
     assert all(
         item["sha256"].startswith("sha256:") for item in manifest["raw_file_hashes"]
     )
+
+
+def test_mteb_source_manifest_default_private_only_blocks_phase_c_fixture_commit(
+    tmp_path,
+):
+    fixture_tree_before = _fixture_tree_snapshot()
+    _write_minimal_mteb_source(tmp_path)
+
+    manifest = audit_mteb_source_manifest(
+        tmp_path,
+        source_revision=PINNED_SOURCE_REVISION,
+        declared_license="mit",
+        license_source="Hugging Face dataset card",
+        citation_targets=["mteb/MemBench dataset card", "MTEB"],
+    )
+    report = validate_mteb_source_manifest(manifest)
+
+    assert manifest["redistribution_status"] == "private_only"
+    assert manifest["source_host"] == "Hugging Face"
+    assert manifest["source_url"] == "https://huggingface.co/datasets/mteb/MemBench"
+    assert manifest["third_party_notice_file"] == "docs/THIRD_PARTY_DATA.md"
+    assert report["phase_c_commit_preconditions"] == {
+        "status": "private_only",
+        "generated_fixture_commit_allowed": False,
+        "raw_source_commit_allowed": False,
+        "local_evaluation_allowed": True,
+        "missing_required_fields": [],
+        "reasons": [
+            "redistribution_status is private_only; generated fixtures remain local-only"
+        ],
+    }
+    assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+def test_mteb_source_manifest_commit_allowed_requires_complete_notice_fields(
+    tmp_path,
+):
+    fixture_tree_before = _fixture_tree_snapshot()
+    manifest = _commit_allowed_ready_manifest(tmp_path)
+    report = validate_mteb_source_manifest(manifest)
+
+    assert report["redistribution_status"] == "commit_allowed"
+    assert report["phase_c_commit_preconditions"] == {
+        "status": "commit_allowed_ready",
+        "generated_fixture_commit_allowed": True,
+        "raw_source_commit_allowed": False,
+        "local_evaluation_allowed": True,
+        "missing_required_fields": [],
+        "reasons": [],
+    }
+    assert report["notice_citation"]["declared_license"] == "mit"
+    assert report["provenance"]["raw_file_hash_count"] == 3
+    assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+@pytest.mark.parametrize(
+    ("case_name", "expected_missing_field"),
+    [
+        ("placeholder_source_dataset", "source_dataset"),
+        ("placeholder_source_host", "source_host"),
+        ("placeholder_source_url", "source_url:absolute"),
+        ("relative_source_url", "source_url:absolute"),
+        ("placeholder_declared_license", "declared_license"),
+        ("placeholder_license_source", "license_source"),
+        ("short_revision_marked_pinned", "source_revision:immutable"),
+        ("placeholder_license_source_url", "license_source_url:absolute"),
+        ("relative_license_source_url", "license_source_url:absolute"),
+        (
+            "contradictory_generated_fixture_commit_policy",
+            "generated_fixture_commit_policy:no_vendor_by_default",
+        ),
+        (
+            "missing_notice_source_provenance_flag",
+            "notice_requirements.include_source_provenance",
+        ),
+        ("short_raw_file_hash", "raw_file_hashes[0]"),
+        ("raw_file_hash_without_sha256_prefix", "raw_file_hashes[0]"),
+    ],
+)
+def test_mteb_source_manifest_commit_allowed_rejects_placeholder_or_contradictory_fields(
+    tmp_path,
+    case_name,
+    expected_missing_field,
+):
+    manifest = _commit_allowed_ready_manifest(tmp_path)
+
+    if case_name == "placeholder_source_dataset":
+        manifest["source_dataset"] = "unknown"
+    elif case_name == "placeholder_source_host":
+        manifest["source_host"] = "todo"
+    elif case_name == "placeholder_source_url":
+        manifest["source_url"] = "unknown"
+    elif case_name == "relative_source_url":
+        manifest["source_url"] = "datasets/mteb/MemBench"
+    elif case_name == "placeholder_declared_license":
+        manifest["declared_license"] = "unknown"
+    elif case_name == "placeholder_license_source":
+        manifest["license_source"] = "source audit required"
+    elif case_name == "short_revision_marked_pinned":
+        manifest["source_revision"] = "0123456789abcdef"
+        manifest["source_revision_status"] = "pinned"
+    elif case_name == "placeholder_license_source_url":
+        manifest["license_source_url"] = "source audit required"
+    elif case_name == "relative_license_source_url":
+        manifest["license_source_url"] = "docs/THIRD_PARTY_DATA.md"
+    elif case_name == "contradictory_generated_fixture_commit_policy":
+        manifest["generated_fixture_commit_policy"] = "commit_generated_fixtures"
+    elif case_name == "missing_notice_source_provenance_flag":
+        manifest["notice_requirements"]["include_source_provenance"] = False
+    elif case_name == "short_raw_file_hash":
+        manifest["raw_file_hashes"][0]["sha256"] = "sha256:abc"
+    elif case_name == "raw_file_hash_without_sha256_prefix":
+        manifest["raw_file_hashes"][0]["sha256"] = "a" * 64
+    else:  # pragma: no cover - protects future parameter additions.
+        raise AssertionError(case_name)
+
+    report = validate_mteb_source_manifest(manifest)
+
+    preconditions = report["phase_c_commit_preconditions"]
+    assert preconditions["status"] == "commit_allowed_not_ready"
+    assert preconditions["generated_fixture_commit_allowed"] is False
+    assert expected_missing_field in preconditions["missing_required_fields"]
+    assert expected_missing_field in {finding["field"] for finding in report["findings"]}
+
+
+def test_mteb_source_manifest_commit_allowed_missing_fields_is_not_ready(
+    tmp_path,
+):
+    fixture_tree_before = _fixture_tree_snapshot()
+    _write_minimal_mteb_source(tmp_path)
+
+    manifest = audit_mteb_source_manifest(
+        tmp_path,
+        source_revision="latest",
+        redistribution_status="commit_allowed",
+    )
+    manifest["citation_targets"] = []
+    manifest.pop("third_party_notice_file")
+    manifest.pop("notice_requirements")
+    report = validate_mteb_source_manifest(manifest)
+
+    preconditions = report["phase_c_commit_preconditions"]
+    assert preconditions["status"] == "commit_allowed_not_ready"
+    assert preconditions["generated_fixture_commit_allowed"] is False
+    assert {
+        "source_revision:immutable",
+        "source_revision_status:pinned",
+        "declared_license",
+        "license_source",
+        "third_party_notice_file",
+        "citation_targets",
+    } <= set(preconditions["missing_required_fields"])
+    assert {finding["severity"] for finding in report["findings"]} == {"error"}
+    assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+def test_mteb_source_manifest_blocked_prevents_local_and_committed_fixtures(
+    tmp_path,
+):
+    _write_minimal_mteb_source(tmp_path)
+
+    manifest = audit_mteb_source_manifest(
+        tmp_path,
+        source_revision=PINNED_SOURCE_REVISION,
+        declared_license="mit",
+        license_source="Hugging Face dataset card",
+        citation_targets=["mteb/MemBench dataset card", "MTEB"],
+        redistribution_status="blocked",
+    )
+    report = validate_mteb_source_manifest(manifest)
+
+    assert report["phase_c_commit_preconditions"]["status"] == "blocked"
+    assert (
+        report["phase_c_commit_preconditions"][
+            "generated_fixture_commit_allowed"
+        ]
+        is False
+    )
+    assert report["phase_c_commit_preconditions"]["local_evaluation_allowed"] is False
+    assert report["phase_c_commit_preconditions"]["reasons"] == [
+        "redistribution_status is blocked"
+    ]
+
+
+def test_mteb_qrels_dry_run_refuses_blocked_source_manifest(tmp_path):
+    _write_minimal_mteb_source(tmp_path)
+    manifest = audit_mteb_source_manifest(
+        tmp_path,
+        source_revision=PINNED_SOURCE_REVISION,
+        declared_license="mit",
+        license_source="Hugging Face dataset card",
+        citation_targets=["mteb/MemBench dataset card", "MTEB"],
+        redistribution_status="blocked",
+    )
+
+    with pytest.raises(MembenchConversionError, match="blocked"):
+        convert_mteb_qrels_dry_run(tmp_path, source_manifest=manifest)
+
+
+def test_mteb_qrels_dry_run_refuses_invalid_source_manifest_status(tmp_path):
+    _write_minimal_mteb_source(tmp_path)
+    manifest = audit_mteb_source_manifest(
+        tmp_path,
+        source_revision=PINNED_SOURCE_REVISION,
+        declared_license="mit",
+        license_source="Hugging Face dataset card",
+        citation_targets=["mteb/MemBench dataset card", "MTEB"],
+    )
+    manifest["redistribution_status"] = "maybe"
+
+    with pytest.raises(MembenchConversionError, match="invalid"):
+        convert_mteb_qrels_dry_run(tmp_path, source_manifest=manifest)
+
+
+def test_mteb_source_audit_rejects_unknown_redistribution_status(tmp_path):
+    _write_minimal_mteb_source(tmp_path)
+
+    with pytest.raises(ValueError, match="redistribution_status"):
+        audit_mteb_source_manifest(
+            tmp_path,
+            source_revision=PINNED_SOURCE_REVISION,
+            redistribution_status="maybe",
+        )
+
+
+def test_mteb_validate_source_manifest_cli_reports_phase_c_status(
+    tmp_path, capsys
+):
+    _write_minimal_mteb_source(tmp_path)
+    manifest = audit_mteb_source_manifest(
+        tmp_path,
+        source_revision=PINNED_SOURCE_REVISION,
+        declared_license="mit",
+        license_source="Hugging Face dataset card",
+        citation_targets=["mteb/MemBench dataset card", "MTEB"],
+        redistribution_status="commit_allowed",
+    )
+    manifest_path = tmp_path / "source_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+
+    assert (
+        membench_main(
+            [
+                "validate-source-manifest",
+                str(manifest_path),
+                "--require-commit-allowed",
+            ]
+        )
+        == 0
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["schema_version"] == "mew_membench_source_audit_report.v1"
+    assert output["phase_c_commit_preconditions"]["status"] == (
+        "commit_allowed_ready"
+    )
+    assert output["phase_c_commit_preconditions"][
+        "generated_fixture_commit_allowed"
+    ] is True
 
 
 def test_mteb_qrels_dry_run_maps_docs_through_corpus_manifest_and_hides_gold(tmp_path):
@@ -93,7 +357,7 @@ def test_mteb_qrels_dry_run_maps_docs_through_corpus_manifest_and_hides_gold(tmp
     )
     manifest = audit_mteb_source_manifest(
         tmp_path,
-        source_revision="0123456789abcdef",
+        source_revision=PINNED_SOURCE_REVISION,
         source_subset="single_hop",
         declared_license="MIT",
         license_source="synthetic test audit",
@@ -366,7 +630,7 @@ def test_mteb_qrels_dry_run_rejects_missing_qrel_doc(tmp_path):
     report = convert_mteb_qrels_dry_run(
         tmp_path,
         source_manifest=audit_mteb_source_manifest(
-            tmp_path, source_revision="0123456789abcdef"
+            tmp_path, source_revision=PINNED_SOURCE_REVISION
         ),
     )
 
@@ -394,7 +658,7 @@ def test_mteb_qrels_dry_run_rejects_ambiguous_duplicate_qrel_doc(tmp_path):
     report = convert_mteb_qrels_dry_run(
         tmp_path,
         source_manifest=audit_mteb_source_manifest(
-            tmp_path, source_revision="0123456789abcdef"
+            tmp_path, source_revision=PINNED_SOURCE_REVISION
         ),
     )
 
@@ -486,6 +750,38 @@ def _write_jsonl(path, rows):
     )
 
 
+def _write_minimal_mteb_source(tmp_path):
+    _write_jsonl(
+        tmp_path / "corpus.jsonl",
+        [{"_id": "doc-1", "text": "Aki keeps green tea nearby."}],
+    )
+    _write_jsonl(
+        tmp_path / "queries.jsonl",
+        [{"_id": "query-1", "text": "Which drink does Aki keep?"}],
+    )
+    (tmp_path / "qrels.tsv").write_text(
+        "query-id\tcorpus-id\tscore\nquery-1\tdoc-1\t1\n", encoding="utf-8"
+    )
+
+
+def _commit_allowed_ready_manifest(tmp_path):
+    _write_minimal_mteb_source(tmp_path)
+    return audit_mteb_source_manifest(
+        tmp_path,
+        source_revision=PINNED_SOURCE_REVISION,
+        declared_license="mit",
+        license_source="Hugging Face dataset card",
+        license_source_url="https://huggingface.co/datasets/mteb/MemBench",
+        citation_targets=[
+            "mteb/MemBench dataset card",
+            "LMEB",
+            "MMTEB",
+            "MTEB",
+        ],
+        redistribution_status="commit_allowed",
+    )
+
+
 def _fixture_tree_snapshot():
     return sorted(
         path.relative_to(MEMORY_EVAL_FIXTURES)
@@ -528,7 +824,7 @@ def _validation_ready_dry_run_report(tmp_path, *, seed=12345):
         tmp_path,
         source_manifest=audit_mteb_source_manifest(
             tmp_path,
-            source_revision="0123456789abcdef",
+            source_revision=PINNED_SOURCE_REVISION,
             source_subset="validation",
             declared_license="MIT",
             license_source="synthetic test audit",

@@ -30,15 +30,35 @@ from .runner import run_fixture
 
 
 SOURCE_MANIFEST_SCHEMA_VERSION = "mew_membench_source_manifest.v1"
+SOURCE_AUDIT_REPORT_SCHEMA_VERSION = "mew_membench_source_audit_report.v1"
 DRY_RUN_SCHEMA_VERSION = "mew_membench_mteb_qrels_dry_run.v1"
 DRY_RUN_VALIDATION_SCHEMA_VERSION = "mew_membench_dry_run_validation.v1"
 CONVERTER_ID = "mew_membench_mteb_qrels_converter"
 CONVERTER_VERSION = "0.1.0"
 MEMBENCH_HF_DATASET = "mteb/MemBench"
+MEMBENCH_HF_SOURCE_HOST = "Hugging Face"
+MEMBENCH_HF_DATASET_URL = "https://huggingface.co/datasets/mteb/MemBench"
+MEMBENCH_THIRD_PARTY_NOTICE_FILE = "docs/THIRD_PARTY_DATA.md"
 DEFAULT_EVALUATION_TIME = "2026-05-22T00:00:00Z"
 DEFAULT_SCOPE_ID = "tenant_mb/user_000001"
 DEFAULT_QUERY_TIME = "2026-05-22T00:00:00Z"
 DEFAULT_VALIDATION_CREATED_AT = "2026-05-22T00:00:00Z"
+REDISTRIBUTION_STATUSES = ("private_only", "commit_allowed", "blocked")
+UNPINNED_REVISION_VALUES = {"", "latest", "main", "master", "unresolved"}
+PINNED_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
+PLACEHOLDER_TEXT_VALUES = {
+    "",
+    "n/a",
+    "none",
+    "placeholder",
+    "source audit required",
+    "tbd",
+    "todo",
+    "unknown",
+    "unreviewed",
+    "unresolved",
+}
 
 CORPUS_ID_KEYS = ("_id", "id", "doc_id", "docid", "corpus_id", "corpus-id")
 QUERY_ID_KEYS = ("_id", "id", "query_id", "query-id", "qid")
@@ -137,13 +157,17 @@ def audit_mteb_source_manifest(
     *,
     manifest_path: str | Path | None = None,
     source_dataset: str = MEMBENCH_HF_DATASET,
+    source_host: str | None = None,
+    source_url: str | None = None,
     source_revision: str | None = None,
     source_subset: str | Iterable[str] | None = None,
     declared_license: str | None = None,
     license_source: str | None = None,
+    license_source_url: str | None = None,
     citation_required: bool = True,
     citation_targets: Iterable[str] | None = None,
-    redistribution_status: str = "private_only",
+    third_party_notice_file: str | None = None,
+    redistribution_status: str | None = None,
 ) -> dict[str, Any]:
     """Build a conservative external-source manifest from local cached files.
 
@@ -163,6 +187,16 @@ def audit_mteb_source_manifest(
     subset = _source_subset_value(
         source_subset if source_subset is not None else existing.get("source_subset")
     )
+    source_host_value = (
+        source_host
+        if source_host is not None
+        else existing.get("source_host") or MEMBENCH_HF_SOURCE_HOST
+    )
+    source_url_value = (
+        source_url
+        if source_url is not None
+        else existing.get("source_url") or MEMBENCH_HF_DATASET_URL
+    )
     revision = (
         source_revision
         if source_revision is not None
@@ -176,6 +210,11 @@ def audit_mteb_source_manifest(
     license_origin = (
         license_source if license_source is not None else existing.get("license_source")
     )
+    license_url = (
+        license_source_url
+        if license_source_url is not None
+        else existing.get("license_source_url") or source_url_value
+    )
     targets = (
         list(citation_targets)
         if citation_targets is not None
@@ -183,14 +222,22 @@ def audit_mteb_source_manifest(
     )
     if not targets:
         targets = ["mteb/MemBench dataset card", "MTEB"]
+    notice_file = (
+        third_party_notice_file
+        if third_party_notice_file is not None
+        else existing.get("third_party_notice_file")
+        or existing.get("notice_file")
+        or MEMBENCH_THIRD_PARTY_NOTICE_FILE
+    )
+    redistribution_status_value = _validated_redistribution_status(
+        redistribution_status
+        if redistribution_status is not None
+        else existing.get("redistribution_status")
+        or "private_only"
+    )
 
     warnings = []
-    if not revision or str(revision).lower() in {
-        "latest",
-        "main",
-        "master",
-        "unresolved",
-    }:
+    if not _is_pinned_revision(revision):
         warnings.append("source_revision is not pinned to an immutable revision")
     if not license_value:
         warnings.append(
@@ -198,29 +245,40 @@ def audit_mteb_source_manifest(
         )
     if not raw_hashes:
         warnings.append("no local raw source files were found for hashing")
-    if redistribution_status not in {"private_only", "commit_allowed", "blocked"}:
+    if redistribution_status_value == "blocked":
         warnings.append(
-            f"redistribution_status {redistribution_status!r} is not a recognized status"
+            "redistribution_status is blocked; generated fixture commits are disallowed"
         )
 
     manifest = {
         "schema_version": SOURCE_MANIFEST_SCHEMA_VERSION,
         "source_mode": "external_huggingface",
         "source_dataset": source_dataset,
+        "source_host": source_host_value,
+        "source_url": source_url_value,
         "source_revision": revision or "unresolved",
         "source_revision_status": "pinned"
-        if revision
-        and str(revision).lower() not in {"latest", "main", "master", "unresolved"}
+        if _is_pinned_revision(revision)
         else "unresolved",
         "source_subset": subset,
         "declared_license": license_value or "unreviewed",
         "license_source": license_origin or "source audit required",
+        "license_source_url": license_url or "source audit required",
         "license_certainty": "declared_unverified" if license_value else "unknown",
         "citation_required": bool(citation_required),
         "citation_targets": targets,
         "local_cache_only": True,
         "generated_fixture_commit_policy": "no_vendor_by_default",
-        "redistribution_status": redistribution_status,
+        "third_party_notice_file": notice_file,
+        "notice_requirements": {
+            "notice_file": notice_file,
+            "required_if_generated_fixtures_committed": True,
+            "include_declared_license": True,
+            "include_citation_targets": True,
+            "include_source_provenance": True,
+        },
+        "redistribution_status": redistribution_status_value,
+        "redistribution_status_options": list(REDISTRIBUTION_STATUSES),
         "redistribution_certainty": "reviewer_required",
         "notice_file_required_if_committed": True,
         "raw_file_hashes": raw_hashes,
@@ -232,6 +290,136 @@ def audit_mteb_source_manifest(
         {key: value for key, value in manifest.items() if key != "source_manifest_hash"}
     )
     return manifest
+
+
+def validate_mteb_source_manifest(
+    source_manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Report whether a MemBench source manifest permits Phase C fixture commits."""
+
+    manifest = dict(source_manifest)
+    status_value = str(manifest.get("redistribution_status") or "private_only")
+    findings: list[dict[str, Any]] = []
+    if status_value not in REDISTRIBUTION_STATUSES:
+        findings.append(
+            _source_audit_finding(
+                severity="error",
+                field="redistribution_status",
+                message=(
+                    f"redistribution_status {status_value!r} is not one of "
+                    f"{', '.join(REDISTRIBUTION_STATUSES)}"
+                ),
+            )
+        )
+        status = "invalid"
+    else:
+        status = status_value
+
+    missing_commit_fields: list[str] = []
+    if status == "commit_allowed":
+        missing_commit_fields = _missing_phase_c_commit_fields(manifest)
+        for field in missing_commit_fields:
+            findings.append(
+                _source_audit_finding(
+                    severity="error",
+                    field=field,
+                    message=(
+                        f"{field} is required before generated MemBench-derived "
+                        "fixtures may be committed"
+                    ),
+                )
+            )
+
+    if status == "invalid":
+        phase_c_status = "invalid"
+        commit_allowed = False
+        local_evaluation_allowed = False
+        reasons = ["unrecognized redistribution_status"]
+    elif status == "blocked":
+        phase_c_status = "blocked"
+        commit_allowed = False
+        local_evaluation_allowed = False
+        reasons = ["redistribution_status is blocked"]
+    elif status == "private_only":
+        phase_c_status = "private_only"
+        commit_allowed = False
+        local_evaluation_allowed = True
+        reasons = [
+            "redistribution_status is private_only; generated fixtures remain local-only"
+        ]
+    elif missing_commit_fields:
+        phase_c_status = "commit_allowed_not_ready"
+        commit_allowed = False
+        local_evaluation_allowed = True
+        reasons = ["commit_allowed requires complete notice, citation, and provenance fields"]
+    else:
+        phase_c_status = "commit_allowed_ready"
+        commit_allowed = True
+        local_evaluation_allowed = True
+        reasons = []
+
+    report = {
+        "schema_version": SOURCE_AUDIT_REPORT_SCHEMA_VERSION,
+        "source_dataset": manifest.get("source_dataset") or MEMBENCH_HF_DATASET,
+        "source_host": manifest.get("source_host") or MEMBENCH_HF_SOURCE_HOST,
+        "source_url": manifest.get("source_url"),
+        "source_manifest_hash": manifest.get("source_manifest_hash")
+        or stable_hash(manifest),
+        "redistribution_status": status_value,
+        "redistribution_status_options": list(REDISTRIBUTION_STATUSES),
+        "phase_c_commit_preconditions": {
+            "status": phase_c_status,
+            "generated_fixture_commit_allowed": commit_allowed,
+            "raw_source_commit_allowed": False,
+            "local_evaluation_allowed": local_evaluation_allowed,
+            "missing_required_fields": missing_commit_fields,
+            "reasons": reasons,
+        },
+        "notice_citation": {
+            "third_party_notice_file": manifest.get("third_party_notice_file")
+            or (manifest.get("notice_requirements") or {}).get("notice_file"),
+            "declared_license": manifest.get("declared_license"),
+            "license_source": manifest.get("license_source"),
+            "license_source_url": manifest.get("license_source_url"),
+            "citation_required": bool(manifest.get("citation_required")),
+            "citation_targets": list(manifest.get("citation_targets") or []),
+        },
+        "provenance": {
+            "source_revision": manifest.get("source_revision"),
+            "source_revision_status": manifest.get("source_revision_status"),
+            "raw_file_hash_status": manifest.get("raw_file_hash_status"),
+            "raw_file_hash_count": len(manifest.get("raw_file_hashes") or []),
+            "local_cache_only": bool(manifest.get("local_cache_only")),
+            "generated_fixture_commit_policy": manifest.get(
+                "generated_fixture_commit_policy"
+            ),
+        },
+        "findings": findings,
+        "legal_review_note": (
+            "This report records source-audit metadata and declared upstream "
+            "fields; it is not legal advice."
+        ),
+    }
+    report["source_audit_report_hash"] = stable_hash(
+        {
+            key: value
+            for key, value in report.items()
+            if key != "source_audit_report_hash"
+        }
+    )
+    return report
+
+
+def _raise_if_source_audit_blocks_conversion(
+    source_audit_report: Mapping[str, Any],
+) -> None:
+    preconditions = source_audit_report.get("phase_c_commit_preconditions") or {}
+    status = str(preconditions.get("status") or "")
+    if status in {"blocked", "invalid"}:
+        raise MembenchConversionError(
+            "MemBench source manifest is not eligible for dry-run conversion: "
+            f"{status}"
+        )
 
 
 def convert_mteb_qrels_dry_run(
@@ -256,6 +444,8 @@ def convert_mteb_qrels_dry_run(
             source_subset=source_subset,
         )
     )
+    source_audit_report = validate_mteb_source_manifest(manifest)
+    _raise_if_source_audit_blocks_conversion(source_audit_report)
     source = _find_source_files(root, manifest)
     corpus_records, duplicate_doc_ids = _load_corpus(source.corpus_path)
     queries = _load_queries(source.queries_path)
@@ -358,6 +548,7 @@ def convert_mteb_qrels_dry_run(
             "converter_version": CONVERTER_VERSION,
         },
         "source_manifest": manifest,
+        "source_audit_report": source_audit_report,
         "source_files": _source_file_manifest(source),
         "seed": seed,
         "conversion_manifest_hash": stable_hash(
@@ -406,6 +597,13 @@ def convert_mteb_qrels_dry_run(
         "commit_policy": {
             "raw_source_committed": False,
             "generated_fixture_pack_committed": False,
+            "phase_c_generated_fixture_commit_allowed": source_audit_report[
+                "phase_c_commit_preconditions"
+            ]["generated_fixture_commit_allowed"],
+            "phase_c_status": source_audit_report["phase_c_commit_preconditions"][
+                "status"
+            ],
+            "redistribution_status": source_audit_report["redistribution_status"],
             "dry_run_artifact_policy": "local_only_unless_source_audit_commit_allowed",
         },
     }
@@ -633,13 +831,24 @@ def main(argv: list[str] | None = None) -> int:
     audit_parser = subcommands.add_parser("audit-source")
     audit_parser.add_argument("source_dir")
     audit_parser.add_argument("--manifest")
+    audit_parser.add_argument("--source-host")
+    audit_parser.add_argument("--source-url")
     audit_parser.add_argument("--source-revision")
     audit_parser.add_argument("--source-subset", action="append")
     audit_parser.add_argument("--declared-license")
     audit_parser.add_argument("--license-source")
+    audit_parser.add_argument("--license-source-url")
     audit_parser.add_argument("--citation-target", action="append")
-    audit_parser.add_argument("--redistribution-status", default="private_only")
+    audit_parser.add_argument("--third-party-notice-file")
+    audit_parser.add_argument(
+        "--redistribution-status", choices=REDISTRIBUTION_STATUSES
+    )
     audit_parser.add_argument("--output", required=True)
+
+    source_report_parser = subcommands.add_parser("validate-source-manifest")
+    source_report_parser.add_argument("source_manifest")
+    source_report_parser.add_argument("--require-commit-allowed", action="store_true")
+    source_report_parser.add_argument("--output")
 
     dry_run_parser = subcommands.add_parser("dry-run-mteb-qrels")
     dry_run_parser.add_argument("source_dir")
@@ -671,15 +880,27 @@ def main(argv: list[str] | None = None) -> int:
         manifest = audit_mteb_source_manifest(
             args.source_dir,
             manifest_path=args.manifest,
+            source_host=args.source_host,
+            source_url=args.source_url,
             source_revision=args.source_revision,
             source_subset=args.source_subset,
             declared_license=args.declared_license,
             license_source=args.license_source,
+            license_source_url=args.license_source_url,
             citation_targets=args.citation_target,
+            third_party_notice_file=args.third_party_notice_file,
             redistribution_status=args.redistribution_status,
         )
         write_json_artifact(args.output, manifest)
         return 0
+
+    if args.command == "validate-source-manifest":
+        report = validate_mteb_source_manifest(_load_json_object(args.source_manifest))
+        _write_or_print_json(report, args.output)
+        preconditions = report["phase_c_commit_preconditions"]
+        if args.require_commit_allowed:
+            return 0 if preconditions["generated_fixture_commit_allowed"] else 1
+        return 0 if preconditions["status"] != "invalid" else 1
 
     if args.command == "validate-dry-run-report":
         report = validate_mteb_qrels_dry_run(
@@ -1239,6 +1460,124 @@ def _counts(values: Iterable[str]) -> dict[str, int]:
     for value in values:
         counts[value] = counts.get(value, 0) + 1
     return counts
+
+
+def _validated_redistribution_status(value: Any) -> str:
+    status = str(value or "private_only")
+    if status not in REDISTRIBUTION_STATUSES:
+        raise MembenchConversionError(
+            "redistribution_status must be one of "
+            + ", ".join(REDISTRIBUTION_STATUSES)
+        )
+    return status
+
+
+def _is_pinned_revision(value: Any) -> bool:
+    revision = str(value or "").strip()
+    return bool(PINNED_REVISION_RE.fullmatch(revision))
+
+
+def _missing_phase_c_commit_fields(manifest: Mapping[str, Any]) -> list[str]:
+    missing = []
+    required_non_placeholder_text_fields = [
+        "source_dataset",
+        "source_host",
+        "declared_license",
+        "license_source",
+    ]
+    for field in required_non_placeholder_text_fields:
+        if _manifest_text_missing(manifest.get(field)) or _is_placeholder_text(
+            manifest.get(field)
+        ):
+            missing.append(field)
+    if not _is_absolute_non_placeholder_url(manifest.get("source_url")):
+        missing.append("source_url:absolute")
+    if not _is_pinned_revision(manifest.get("source_revision")):
+        missing.append("source_revision:immutable")
+    if manifest.get("source_revision_status") != "pinned":
+        missing.append("source_revision_status:pinned")
+    if not manifest.get("local_cache_only"):
+        missing.append("local_cache_only:true")
+    if not _is_absolute_non_placeholder_url(manifest.get("license_source_url")):
+        _append_missing_once(missing, "license_source_url:absolute")
+    if manifest.get("generated_fixture_commit_policy") != "no_vendor_by_default":
+        _append_missing_once(
+            missing,
+            "generated_fixture_commit_policy:no_vendor_by_default",
+        )
+    if _manifest_text_missing(manifest.get("declared_license")) or str(
+        manifest.get("declared_license") or ""
+    ).lower() == "unreviewed":
+        _append_missing_once(missing, "declared_license")
+    if _manifest_text_missing(manifest.get("license_source")) or str(
+        manifest.get("license_source") or ""
+    ).lower() == "source audit required":
+        _append_missing_once(missing, "license_source")
+    citation_targets = manifest.get("citation_targets")
+    if manifest.get("citation_required", True) and not citation_targets:
+        missing.append("citation_targets")
+    raw_hashes = manifest.get("raw_file_hashes") or []
+    if not raw_hashes:
+        missing.append("raw_file_hashes")
+    else:
+        for index, item in enumerate(raw_hashes):
+            if not isinstance(item, Mapping) or _manifest_text_missing(
+                item.get("path")
+            ) or not _is_full_sha256_digest(item.get("sha256")):
+                missing.append(f"raw_file_hashes[{index}]")
+                break
+    notice_requirements = manifest.get("notice_requirements") or {}
+    notice_file = manifest.get("third_party_notice_file")
+    if _manifest_text_missing(notice_file) and isinstance(
+        notice_requirements, Mapping
+    ):
+        notice_file = notice_requirements.get("notice_file")
+    if _manifest_text_missing(notice_file):
+        missing.append("third_party_notice_file")
+    if not isinstance(notice_requirements, Mapping) or not notice_requirements.get(
+        "required_if_generated_fixtures_committed"
+    ):
+        missing.append("notice_requirements.required_if_generated_fixtures_committed")
+    for flag in (
+        "include_declared_license",
+        "include_citation_targets",
+        "include_source_provenance",
+    ):
+        if not isinstance(notice_requirements, Mapping) or not notice_requirements.get(
+            flag
+        ):
+            missing.append(f"notice_requirements.{flag}")
+    return missing
+
+
+def _manifest_text_missing(value: Any) -> bool:
+    return not str(value or "").strip()
+
+
+def _is_placeholder_text(value: Any) -> bool:
+    return str(value or "").strip().lower() in PLACEHOLDER_TEXT_VALUES
+
+
+def _is_absolute_non_placeholder_url(value: Any) -> bool:
+    text = str(value or "").strip()
+    if _is_placeholder_text(text):
+        return False
+    return bool(re.fullmatch(r"https?://[^/\s]+(?:/[^ \t\r\n]*)?", text))
+
+
+def _is_full_sha256_digest(value: Any) -> bool:
+    return bool(SHA256_DIGEST_RE.fullmatch(str(value or "").strip()))
+
+
+def _append_missing_once(missing: list[str], field: str) -> None:
+    if field not in missing:
+        missing.append(field)
+
+
+def _source_audit_finding(
+    *, severity: str, field: str, message: str
+) -> dict[str, Any]:
+    return {"severity": severity, "field": field, "message": message}
 
 
 def _load_default_manifest(root: Path) -> dict[str, Any]:

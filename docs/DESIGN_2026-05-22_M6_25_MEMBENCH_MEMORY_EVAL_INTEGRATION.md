@@ -732,6 +732,19 @@ overstate legal certainty: the Hugging Face dataset card currently shows MIT
 and citation expectations, but source audit and revision/hash pinning remain
 mandatory.
 
+Phase 4a implementation note: source manifests now carry
+`redistribution_status` with allowed values `private_only`, `commit_allowed`,
+and `blocked`, plus notice/citation/provenance fields used by
+`validate-source-manifest` to report Phase C fixture-commit readiness.
+`private_only` remains the default and disallows committed generated fixtures.
+`commit_allowed` is not sufficient by name alone; the source manifest must also
+validate with an immutable pinned revision, full `sha256:` raw-file hashes,
+non-placeholder source dataset/host/license fields, absolute non-placeholder
+source and license-source URLs, declared license source, citation targets,
+`generated_fixture_commit_policy: no_vendor_by_default`, and complete
+`docs/THIRD_PARTY_DATA.md` notice metadata present. `blocked` and invalid
+source-audit states refuse MTEB qrels dry-run conversion.
+
 ### Phase A: Source Audit
 
 Generated MemBench-derived fixtures MUST NOT be committed until:
