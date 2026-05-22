@@ -5,11 +5,13 @@ from pathlib import Path
 
 from mew.memory_eval.fixtures import load_fixture
 from mew.memory_eval_live_runner import (
+    GRAPH_ON_FIXTURE_SUFFIX,
     LIVE_FIXTURE_SUFFIX,
     NORMAL_9_SUITE,
     add_seed_lifecycle,
     build_parser,
     compact_suite_summary,
+    enable_graph_retrieval,
     exit_code_for_artifact,
     exit_code_for_suite,
     resolve_output_path,
@@ -60,6 +62,19 @@ def test_add_seed_lifecycle_preserves_existing_mutations_after_setup() -> None:
     ).index("mut_update_folder")
 
 
+def test_enable_graph_retrieval_marks_every_request() -> None:
+    source = load_fixture(P1_FIXTURES / "memory_on_happy_path_basic.json")
+    rewritten = enable_graph_retrieval(source, graph_max_depth=1, graph_max_items=7)
+
+    assert rewritten["fixture_id"] == f"memory_on_happy_path_basic{GRAPH_ON_FIXTURE_SUFFIX}"
+    request = rewritten["requests"][0]
+    assert request["filters"]["valid_at"] == "2026-03-01T12:00:00Z"
+    assert request["filters"]["expand_graph"] is True
+    assert request["filters"]["graph_max_depth"] == 1
+    assert request["filters"]["graph_max_items"] == 7
+    assert "gold" in source["requests"][0]
+
+
 def test_live_runner_parser_defaults_to_home_codex_auth() -> None:
     args = build_parser().parse_args(["fixtures/memory_eval/p1/memory_on_happy_path_basic.json"])
 
@@ -68,6 +83,24 @@ def test_live_runner_parser_defaults_to_home_codex_auth() -> None:
     assert args.call_interface == "call_model_structured_json"
     assert str(args.auth_json).endswith(".codex/auth.json")
     assert args.seed_lifecycle is True
+    assert args.expand_graph is False
+
+
+def test_live_runner_parser_accepts_graph_controls() -> None:
+    args = build_parser().parse_args(
+        [
+            "fixtures/memory_eval/p1/memory_on_happy_path_basic.json",
+            "--expand-graph",
+            "--graph-max-depth",
+            "1",
+            "--graph-max-items",
+            "9",
+        ]
+    )
+
+    assert args.expand_graph is True
+    assert args.graph_max_depth == 1
+    assert args.graph_max_items == 9
 
 
 def test_live_runner_parser_accepts_normal_suite_without_fixture() -> None:
@@ -184,6 +217,7 @@ def test_compact_suite_summary_omits_verbose_request_details(tmp_path: Path) -> 
     compact = compact_suite_summary(summary, tmp_path / "summary.json")
 
     assert compact["output"] == str(tmp_path / "summary.json")
+    assert compact["expand_graph"] is False
     assert compact["fixtures"] == [
         {
             "source_fixture": "fixtures/memory_eval/p0/dummy_happy_path.json",
@@ -224,6 +258,8 @@ def test_run_live_typed_cards_suite_uses_injected_runner_and_writes_summary(tmp_
         auth_json="/tmp/auth.json",
         run_id="suite_run",
         output_dir=tmp_path,
+        expand_graph=True,
+        graph_max_items=9,
         run_fixture_fn=fake_run_fixture,
     )
 
@@ -236,7 +272,10 @@ def test_run_live_typed_cards_suite_uses_injected_runner_and_writes_summary(tmp_
     assert summary["failed_fixtures"][0]["source_fixture"].endswith("budget_limited_basic.json")
     assert calls[0][1]["auth_json"] == "/tmp/auth.json"
     assert calls[0][1]["fixture_ordinal"] == 1
+    assert calls[0][1]["expand_graph"] is True
+    assert calls[0][1]["graph_max_items"] == 9
     assert calls[-1][1]["fixture_ordinal"] == 9
+    assert summary["expand_graph"] is True
 
 
 def test_exit_code_for_suite_fails_when_any_fixture_failed() -> None:

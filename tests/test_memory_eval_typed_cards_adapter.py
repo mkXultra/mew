@@ -8,6 +8,7 @@ import pytest
 
 from mew.memory_eval.adapters import TypedCardsMemoryEvalAdapter
 from mew.memory_eval.runner import run_fixture
+from mew.memory_typed_cards import EvidenceLink, GraphEdge, GraphNode, GraphRefs
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -371,6 +372,83 @@ def test_lifecycle_seed_eval_round_trips_current_support_from_typed_provenance()
     assert ranked["provenance_refs"] == ranked["metadata"]["provenance_refs_by_role"]["current_support"]
     assert {"Mira", "green", "tea", "planning", "breaks"}.issubset(set(ranked["metadata"]["retrieval_terms"]))
     assert ranked["scope_id"] == "tenant_a/user_a"
+
+
+def test_adapter_retrieve_accepts_graph_on_query_controls() -> None:
+    adapter = TypedCardsMemoryEvalAdapter()
+    adapter.reset({"fixture_id": "fx_graph_on", "evaluation_time": "2026-05-21T00:00:00Z"})
+    adapter.ingest(
+        [
+            _experience("ex_seed", text="Apollo anchor belongs to the seed memory."),
+            _experience("ex_related", text="Graph-only related regression coverage lives in typed adapter tests."),
+        ]
+    )
+    seed = adapter.mutate([{"op_id": "seed_graph", "lifecycle_type": "seed_eval", "target_experience_id": "ex_seed"}])[0]
+    related = adapter.mutate([{"op_id": "seed_related", "lifecycle_type": "seed_eval", "target_experience_id": "ex_related"}])[0]
+    scope = adapter._scope_from_public("tenant_a/user_a")
+    created = "2026-05-21T00:00:00Z"
+    seed_node = GraphNode.build(
+        node_type="file",
+        scope=scope,
+        canonical_ref="file:mew:main:src/mew/memory_typed_card_core.py",
+        display_name="memory_typed_card_core.py",
+        created_at=created,
+        updated_at=created,
+    )
+    related_node = GraphNode.build(
+        node_type="test",
+        scope=scope,
+        canonical_ref="test:mew:tests/test_memory_eval_typed_cards_adapter.py",
+        display_name="test_memory_eval_typed_cards_adapter.py",
+        created_at=created,
+        updated_at=created,
+    )
+    adapter.core.add_graph_node(seed_node)
+    adapter.core.add_graph_node(related_node)
+    seed_card = adapter.core.memory_cards[seed["card_ids"][0]]
+    related_card = adapter.core.memory_cards[related["card_ids"][0]]
+    adapter.core.memory_cards[seed_card.card_id] = replace(seed_card, graph_refs=GraphRefs(node_ids=(seed_node.node_id,)))
+    adapter.core.memory_cards[related_card.card_id] = replace(related_card, graph_refs=GraphRefs(node_ids=(related_node.node_id,)))
+    edge = GraphEdge.build(
+        from_node_id=seed_node.node_id,
+        from_node_type="file",
+        to_node_id=related_node.node_id,
+        to_node_type="test",
+        edge_type="related",
+        scope=scope,
+        evidence_links=(EvidenceLink(ref_id=seed_card.evidence_links[0].ref_id, role="current_support"),),
+        created_at=created,
+        updated_at=created,
+    )
+    adapter.core.add_graph_edge(edge)
+
+    direct = adapter.retrieve(
+        {
+            "request_id": "rq_direct",
+            "scope_id": "tenant_a/user_a",
+            "query": {"text": "Apollo anchor"},
+            "k": 5,
+            "budget": {"max_evidence_items": 5},
+        }
+    )
+    graph_on = adapter.retrieve(
+        {
+            "request_id": "rq_graph",
+            "scope_id": "tenant_a/user_a",
+            "query": {"text": "Apollo anchor"},
+            "k": 5,
+            "filters": {"expand_graph": True, "graph_max_items": 4},
+            "budget": {"max_evidence_items": 5},
+        }
+    )
+
+    assert [item["support_experience_ids"] for item in direct["ranked_evidence"]] == [["ex_seed"]]
+    support_ids = [item["support_experience_ids"][0] for item in graph_on["ranked_evidence"]]
+    assert "ex_seed" in support_ids
+    assert "ex_related" in support_ids
+    assert graph_on["usage"]["counts"]["index_mode"] == "graph_index"
+    assert graph_on["usage"]["counts"]["graph_nodes_expanded"] == 2
+    assert graph_on["usage"]["counts"]["graph_edges_expanded"] == 1
 
 
 def test_deterministic_replay_retrieval_terms_skip_speaker_roles_and_overlong_tokens() -> None:

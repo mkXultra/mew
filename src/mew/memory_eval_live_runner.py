@@ -27,6 +27,7 @@ DEFAULT_MODEL = "gpt-5.5"
 DEFAULT_BACKEND = "codex"
 DEFAULT_TIMEOUT = 120
 LIVE_FIXTURE_SUFFIX = "_typed_live_lifecycle"
+GRAPH_ON_FIXTURE_SUFFIX = "_graph_on"
 NORMAL_9_SUITE = "normal-9"
 SUITES = (NORMAL_9_SUITE,)
 NORMAL_9_FIXTURES = (
@@ -101,6 +102,32 @@ def add_seed_lifecycle(
     return rewritten
 
 
+def enable_graph_retrieval(
+    fixture: Mapping[str, Any],
+    *,
+    graph_max_depth: int = 1,
+    graph_max_items: int = 16,
+    fixture_id_suffix: str = GRAPH_ON_FIXTURE_SUFFIX,
+) -> dict[str, Any]:
+    """Turn on adapter-visible graph retrieval controls for every request."""
+
+    rewritten = dict(fixture)
+    fixture_id = str(rewritten.get("fixture_id") or "")
+    if fixture_id_suffix and fixture_id and not fixture_id.endswith(fixture_id_suffix):
+        rewritten["fixture_id"] = f"{fixture_id}{fixture_id_suffix}"
+    rewritten_requests = []
+    for request in rewritten.get("requests") or []:
+        current = dict(request)
+        filters = dict(current.get("filters") or {})
+        filters["expand_graph"] = True
+        filters["graph_max_depth"] = int(graph_max_depth)
+        filters["graph_max_items"] = int(graph_max_items)
+        current["filters"] = filters
+        rewritten_requests.append(current)
+    rewritten["requests"] = rewritten_requests
+    return rewritten
+
+
 def run_live_typed_cards_fixture(
     fixture_path: str | Path,
     *,
@@ -116,12 +143,21 @@ def run_live_typed_cards_fixture(
     output: str | Path | None = None,
     output_dir: str | Path = DEFAULT_OUTPUT_ROOT,
     seed_lifecycle: bool = True,
+    expand_graph: bool = False,
+    graph_max_depth: int = 1,
+    graph_max_items: int = 16,
 ) -> tuple[dict[str, Any], Path]:
     fixture_path = Path(fixture_path)
     run_id = run_id or default_run_id(fixture_path)
     fixture = load_fixture(fixture_path)
     if seed_lifecycle:
         fixture = add_seed_lifecycle(fixture)
+    if expand_graph:
+        fixture = enable_graph_retrieval(
+            fixture,
+            graph_max_depth=graph_max_depth,
+            graph_max_items=graph_max_items,
+        )
 
     extractor_config = RawMemoryExtractorConfig(
         backend=backend,
@@ -141,6 +177,9 @@ def run_live_typed_cards_fixture(
         adapter_config={
             "extractor": extractor_config.to_dict(),
             "seed_lifecycle": seed_lifecycle,
+            "expand_graph": expand_graph,
+            "graph_max_depth": graph_max_depth,
+            "graph_max_items": graph_max_items,
         },
         run_id=run_id,
         created_at=created_at,
@@ -168,6 +207,9 @@ def run_live_typed_cards_suite(
     output: str | Path | None = None,
     output_dir: str | Path = DEFAULT_OUTPUT_ROOT,
     seed_lifecycle: bool = True,
+    expand_graph: bool = False,
+    graph_max_depth: int = 1,
+    graph_max_items: int = 16,
     run_fixture_fn: Any = None,
 ) -> tuple[dict[str, Any], Path]:
     suite = _normalize_suite_name(suite)
@@ -192,6 +234,9 @@ def run_live_typed_cards_suite(
             output=None,
             output_dir=suite_dir,
             seed_lifecycle=seed_lifecycle,
+            expand_graph=expand_graph,
+            graph_max_depth=graph_max_depth,
+            graph_max_items=graph_max_items,
         )
         summary = summarize_artifact(artifact, artifact_path)
         summary["source_fixture"] = str(fixture)
@@ -207,6 +252,7 @@ def run_live_typed_cards_suite(
         failed=failed,
         model=model,
         backend=backend,
+        expand_graph=expand_graph,
     )
     output_path = resolve_suite_output_path(output, output_dir=suite_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -233,6 +279,7 @@ def summarize_suite(
     failed: Sequence[Mapping[str, Any]],
     model: str,
     backend: str,
+    expand_graph: bool = False,
 ) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     for fixture in fixtures:
@@ -244,6 +291,7 @@ def summarize_suite(
         "output_dir": str(output_dir),
         "backend": backend,
         "model": model,
+        "expand_graph": bool(expand_graph),
         "fixture_count": len(fixtures),
         "failed_count": len(failed),
         "status_counts": status_counts,
@@ -270,6 +318,7 @@ def compact_suite_summary(summary: Mapping[str, Any], output_path: str | Path) -
         "output_dir": summary.get("output_dir"),
         "backend": summary.get("backend"),
         "model": summary.get("model"),
+        "expand_graph": bool(summary.get("expand_graph")),
         "fixture_count": summary.get("fixture_count"),
         "failed_count": summary.get("failed_count"),
         "status_counts": dict(summary.get("status_counts") or {}),
@@ -404,6 +453,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not insert eval-only seed_eval mutations after ingests.",
     )
     parser.add_argument(
+        "--expand-graph",
+        action="store_true",
+        help="Set adapter-visible graph expansion controls on every request.",
+    )
+    parser.add_argument("--graph-max-depth", type=int, default=1)
+    parser.add_argument("--graph-max-items", type=int, default=16)
+    parser.add_argument(
         "--allow-failures",
         action="store_true",
         help="Always exit 0 after writing the artifact, even if scoring failed.",
@@ -429,6 +485,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             output=args.output,
             output_dir=args.output_dir,
             seed_lifecycle=args.seed_lifecycle,
+            expand_graph=args.expand_graph,
+            graph_max_depth=args.graph_max_depth,
+            graph_max_items=args.graph_max_items,
         )
         print(json.dumps(compact_suite_summary(summary, output_path), ensure_ascii=False, sort_keys=True))
         if args.print_artifact:
@@ -451,6 +510,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         output=args.output,
         output_dir=args.output_dir,
         seed_lifecycle=args.seed_lifecycle,
+        expand_graph=args.expand_graph,
+        graph_max_depth=args.graph_max_depth,
+        graph_max_items=args.graph_max_items,
     )
     print(json.dumps(summarize_artifact(artifact, output_path), ensure_ascii=False, sort_keys=True))
     if args.print_artifact:
