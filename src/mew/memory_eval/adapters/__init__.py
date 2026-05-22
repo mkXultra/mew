@@ -14,6 +14,7 @@ from .broken import (
 )
 from .dummy import DummyPassAdapter
 from .reference import ReferenceP1Adapter
+from .typed_cards import TypedCardsMemoryEvalAdapter
 
 __all__ = [
     "CrossScopeExposureAdapter",
@@ -27,5 +28,6 @@ __all__ = [
     "ReferenceP1Adapter",
     "StaleAsFreshAdapter",
     "SupportSourceMismatchAdapter",
+    "TypedCardsMemoryEvalAdapter",
     "UnscorableEvidenceAdapter",
 ]

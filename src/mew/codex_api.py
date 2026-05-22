@@ -1018,6 +1018,23 @@ def call_codex_responses_raw(auth, body, base_url, timeout, on_text_delta=None):
     return raw, content_type
 
 
+def _extract_response_text_or_refusal(raw, content_type):
+    if "text/event-stream" in content_type or raw.lstrip().startswith(("event:", "data:")):
+        response_parts = extract_sse_response_parts(raw)
+        return response_parts.get("text") or "", response_parts.get("refusal") or ""
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CodexApiError(f"non-JSON response: {_bounded_raw_context(raw, 200)}") from exc
+    return extract_response_text(payload), extract_response_refusal(payload)
+
+
+def _bounded_raw_context(value, limit=500):
+    text = str(value or "")
+    return text[:limit].replace("\n", " ")
+
+
 def extract_json_object(text):
     stripped = text.strip()
     if stripped.startswith("```"):
@@ -1050,3 +1067,75 @@ def call_codex_json(auth, prompt, model, base_url, timeout, on_text_delta=None):
         return extract_json_object(text)
     except (json.JSONDecodeError, CodexApiError) as exc:
         raise CodexApiError(f"failed to parse JSON plan: {exc}; raw={text[:500]}") from exc
+
+
+def call_codex_structured_json(
+    auth,
+    prompt,
+    model,
+    base_url,
+    timeout,
+    *,
+    schema_name,
+    json_schema,
+    strict=True,
+    on_text_delta=None,
+):
+    """Call Codex Responses with provider-native structured JSON output."""
+
+    schema_name = str(schema_name or "").strip()
+    if not schema_name:
+        raise CodexApiError("structured JSON schema_name must not be empty")
+    if not isinstance(json_schema, dict):
+        raise CodexApiError("structured JSON json_schema must be an object")
+
+    reasoning_effort = os.environ.get("MEW_CODEX_REASONING_EFFORT", DEFAULT_CODEX_REASONING_EFFORT).strip()
+    body = {
+        "model": model,
+        "instructions": (
+            "You are mew, a passive personal task-management agent. "
+            "Use the provided local state only. Be concise. "
+            "If the user writes Japanese, answer in Japanese."
+        ),
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": prompt,
+                    }
+                ],
+            }
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": schema_name,
+                "strict": bool(strict),
+                "schema": json_schema,
+            }
+        },
+        "stream": True,
+        "store": False,
+    }
+    if reasoning_effort:
+        body["reasoning"] = {"effort": reasoning_effort}
+
+    raw, content_type = call_codex_responses_raw(
+        auth,
+        body,
+        base_url,
+        timeout,
+        on_text_delta=on_text_delta,
+    )
+    text, refusal = _extract_response_text_or_refusal(raw, content_type)
+    if refusal:
+        raise CodexRefusalError(f"model returned refusal: {refusal}")
+    if not text:
+        raise CodexApiError("response did not contain assistant text")
+    try:
+        return extract_json_object(text)
+    except (json.JSONDecodeError, CodexApiError) as exc:
+        context = _bounded_raw_context(text)
+        raise CodexApiError(f"failed to parse structured JSON response: {exc}; raw={context}") from exc

@@ -16,6 +16,7 @@ from mew.codex_api import (
     CODEX_RESPONSES_WEBSOCKET_BETA,
     call_codex_json,
     call_codex_responses_raw,
+    call_codex_structured_json,
     call_codex_web_api,
     codex_websocket_headers,
     decode_sse_data_line,
@@ -244,6 +245,73 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(captured["url"], "https://example.invalid/api/responses")
         self.assertEqual(content_type, "text/event-stream")
         self.assertIn("response.completed", raw)
+
+    def test_call_codex_structured_json_sends_text_format_schema(self):
+        captured = {}
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["decision"],
+            "properties": {"decision": {"type": "string", "enum": ["reject"]}},
+        }
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["url"] = request.full_url
+            return FakeUrlopenResponse(
+                [json.dumps({"output_text": "{\"decision\":\"reject\"}"}).encode("utf-8")],
+                headers={"content-type": "application/json"},
+            )
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            payload = call_codex_structured_json(
+                {"access_token": "secret-token"},
+                "prompt",
+                "gpt-5.5",
+                "https://example.invalid/api",
+                1,
+                schema_name="raw_memory_extraction",
+                json_schema=schema,
+            )
+
+        self.assertEqual(payload, {"decision": "reject"})
+        self.assertEqual(captured["url"], "https://example.invalid/api/responses")
+        self.assertEqual(
+            captured["body"]["text"]["format"],
+            {
+                "type": "json_schema",
+                "name": "raw_memory_extraction",
+                "strict": True,
+                "schema": schema,
+            },
+        )
+        self.assertTrue(captured["body"]["stream"])
+        self.assertFalse(captured["body"]["store"])
+        self.assertNotIn("secret-token", json.dumps(captured["body"]))
+
+    def test_call_codex_structured_json_parse_error_is_bounded_and_token_free(self):
+        def fake_urlopen(request, timeout):
+            return FakeUrlopenResponse(
+                [json.dumps({"output_text": "not json " + ("x" * 800)}).encode("utf-8")],
+                headers={"content-type": "application/json"},
+            )
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(CodexApiError) as context:
+                call_codex_structured_json(
+                    {"access_token": "secret-token"},
+                    "prompt",
+                    "gpt-5.5",
+                    "https://example.invalid/api",
+                    1,
+                    schema_name="raw_memory_extraction",
+                    json_schema={"type": "object"},
+                )
+
+        message = str(context.exception)
+        self.assertIn("failed to parse structured JSON response", message)
+        self.assertNotIn("secret-token", message)
+        self.assertLess(len(message), 700)
 
     def test_call_codex_responses_raw_salvages_partial_sse_on_incomplete_read(self):
         request_body = {
