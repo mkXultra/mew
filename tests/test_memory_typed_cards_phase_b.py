@@ -479,6 +479,39 @@ def test_graph_expansion_does_not_bypass_privacy_scope_gates() -> None:
     assert all(item.evidence_ref != private_related.card_id for item in expanded.ranked_evidence)
 
 
+def test_graph_expansion_counts_uncanonicalized_endpoints_without_caller_visible_ids() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    missing_node = _node("test", "test:mew:missing/test_memory.py")
+    core.add_graph_node(seed_node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph expansion seed uses gamma anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_missing_seed",
+    )
+    edge = GraphEdge.build(
+        from_node_id=seed_node.node_id,
+        from_node_type="file",
+        to_node_id=missing_node.node_id,
+        to_node_type="test",
+        edge_type="related",
+        scope=_scope(),
+        evidence_links=(EvidenceLink(ref_id=seed.evidence_links[0].ref_id, role="current_support"),),
+        created_at=CREATED,
+        updated_at=CREATED,
+    )
+    core.add_graph_edge(edge)
+
+    expanded = core.retrieve(MemoryRecallRequest(query="gamma anchor", scope=_scope(), expand_graph=True, graph_max_items=4))
+
+    assert [item.evidence_ref for item in expanded.ranked_evidence] == [seed.card_id]
+    assert expanded.usage.graph_edges_expanded == 0
+    assert expanded.dropped_count_by_reason["uncanonicalized_graph_endpoint"] == 1
+    assert all(item.evidence_ref != edge.edge_id for item in expanded.dropped)
+    assert any(item.reason == "uncanonicalized_graph_endpoint" and item.ref_id == edge.edge_id for item in expanded.audit_event.dropped)
+
+
 def test_retrieve_filters_lifecycle_state_scope_and_is_card_side_effect_free() -> None:
     core, committed = _committed_core("Direct scan retrieval returns approved committed cards.")
     before = stable_json({card_id: card.to_dict() for card_id, card in core.memory_cards.items()})

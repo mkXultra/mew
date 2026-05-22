@@ -690,6 +690,8 @@ class _GraphExpansionResult:
     card_modifiers: Mapping[str, Decimal]
     nodes_expanded: int
     edges_expanded: int
+    dropped_counts: Mapping[str, int] = field(default_factory=dict)
+    dropped: tuple[DroppedReason, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1433,6 +1435,9 @@ class TypedMemoryCore:
             existing_card_ids=set(scored_by_card),
             request=request,
         )
+        for reason, count in expansion.dropped_counts.items():
+            dropped_counts[reason] = dropped_counts.get(reason, 0) + count
+        internal_dropped.extend(expansion.dropped)
         for card_id, graph_modifier in expansion.card_modifiers.items():
             card = graph_candidates.get(card_id)
             if card is None or card_id in scored_by_card:
@@ -1999,9 +2004,17 @@ class TypedMemoryCore:
     ) -> _GraphExpansionResult:
         if not request.expand_graph or request.limit == 0 or request.graph_max_depth == 0 or request.graph_max_items == 0 or not seed_cards:
             return _GraphExpansionResult(card_modifiers={}, nodes_expanded=0, edges_expanded=0)
-        frontier = self._seed_graph_node_ids(seed_cards)
+        dropped_counts: dict[str, int] = {}
+        dropped: list[DroppedReason] = []
+        frontier = self._seed_graph_node_ids(seed_cards, dropped_counts=dropped_counts, dropped=dropped)
         if not frontier:
-            return _GraphExpansionResult(card_modifiers={}, nodes_expanded=0, edges_expanded=0)
+            return _GraphExpansionResult(
+                card_modifiers={},
+                nodes_expanded=0,
+                edges_expanded=0,
+                dropped_counts=dropped_counts,
+                dropped=tuple(dropped),
+            )
 
         edges_by_node = self._graph_edges_by_node()
         expanded_nodes: set[str] = set()
@@ -2013,6 +2026,12 @@ class TypedMemoryCore:
                 break
             node = self.graph_nodes.get(node_id)
             if node is None or node.staleness_state != StalenessState.FRESH.value:
+                _add_graph_drop(
+                    "uncanonicalized_graph_endpoint" if node is None else "stale_graph_node",
+                    node_id,
+                    dropped_counts,
+                    dropped,
+                )
                 continue
             expanded_nodes.add(node_id)
             for edge in edges_by_node.get(node_id, ()):
@@ -2021,8 +2040,10 @@ class TypedMemoryCore:
                 if edge.edge_id in expanded_edges or edge.edge_type not in _GRAPH_EXPANSION_EDGE_TYPES:
                     continue
                 if edge.staleness_state != StalenessState.FRESH.value:
+                    _add_graph_drop("stale_graph_edge", edge.edge_id, dropped_counts, dropped)
                     continue
                 if edge.from_node_id not in self.graph_nodes or edge.to_node_id not in self.graph_nodes:
+                    _add_graph_drop("uncanonicalized_graph_endpoint", edge.edge_id, dropped_counts, dropped)
                     continue
                 expanded_edges.add(edge.edge_id)
                 if len(expanded_nodes) + len(expanded_edges) >= total_budget:
@@ -2031,6 +2052,10 @@ class TypedMemoryCore:
                 other_node = self.graph_nodes.get(other_node_id)
                 if other_node is not None and other_node.staleness_state == StalenessState.FRESH.value:
                     expanded_nodes.add(other_node_id)
+                elif other_node is None:
+                    _add_graph_drop("uncanonicalized_graph_endpoint", other_node_id, dropped_counts, dropped)
+                else:
+                    _add_graph_drop("stale_graph_node", other_node_id, dropped_counts, dropped)
 
         card_modifiers: dict[str, Decimal] = {}
         for card_id, card in sorted(candidate_cards.items()):
@@ -2042,20 +2067,37 @@ class TypedMemoryCore:
             card_modifiers=card_modifiers,
             nodes_expanded=len(expanded_nodes),
             edges_expanded=len(expanded_edges),
+            dropped_counts=dropped_counts,
+            dropped=tuple(dropped),
         )
 
-    def _seed_graph_node_ids(self, seed_cards: Sequence[MemoryCard]) -> set[str]:
+    def _seed_graph_node_ids(
+        self,
+        seed_cards: Sequence[MemoryCard],
+        *,
+        dropped_counts: dict[str, int],
+        dropped: list[DroppedReason],
+    ) -> set[str]:
         node_ids: set[str] = set()
         for card in seed_cards:
-            node_ids.update(node_id for node_id in card.graph_refs.node_ids if node_id in self.graph_nodes)
+            for node_id in card.graph_refs.node_ids:
+                if node_id in self.graph_nodes:
+                    node_ids.add(node_id)
+                else:
+                    _add_graph_drop("uncanonicalized_graph_endpoint", node_id, dropped_counts, dropped)
             for edge_id in card.graph_refs.edge_ids:
                 edge = self.graph_edges.get(edge_id)
                 if edge is None:
+                    _add_graph_drop("uncanonicalized_graph_edge", edge_id, dropped_counts, dropped)
                     continue
                 if edge.from_node_id in self.graph_nodes:
                     node_ids.add(edge.from_node_id)
+                else:
+                    _add_graph_drop("uncanonicalized_graph_endpoint", edge.edge_id, dropped_counts, dropped)
                 if edge.to_node_id in self.graph_nodes:
                     node_ids.add(edge.to_node_id)
+                else:
+                    _add_graph_drop("uncanonicalized_graph_endpoint", edge.edge_id, dropped_counts, dropped)
         return node_ids
 
     def _graph_edges_by_node(self) -> dict[str, tuple[GraphEdge, ...]]:
@@ -2578,6 +2620,16 @@ def _add_drop(
         dropped.append(CallerVisibleDroppedRecord(reason=reason, evidence_ref=card.card_id))
     else:
         dropped.append(CallerVisibleDroppedRecord(reason=reason, evidence_ref=None))
+
+
+def _add_graph_drop(
+    reason: str,
+    ref_id: str,
+    counts: dict[str, int],
+    internal_dropped: list[DroppedReason],
+) -> None:
+    counts[reason] = counts.get(reason, 0) + 1
+    internal_dropped.append(DroppedReason(reason=reason, ref_id=ref_id))
 
 
 def _privacy_allows(card: MemoryCard, authorization_scope: Scope, *, shared_policy_ids: Sequence[str]) -> bool:

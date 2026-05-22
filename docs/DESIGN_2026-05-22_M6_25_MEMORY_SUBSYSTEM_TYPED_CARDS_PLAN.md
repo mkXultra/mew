@@ -2404,8 +2404,9 @@ Current Phase D.1 implementation status, 2026-05-22:
 - candidate cards found through graph expansion still pass privacy, authorization scope, memory scope, applicability, lifecycle, staleness, contradiction, invalidator, and visible-support gates before scoring。
 - expansion uses fresh canonical `graph_nodes` and durable `graph_edges`; unresolved or stale endpoints are ignored for expansion。
 - actor/lineage and negative governance edge types do not contribute scored retrieval support; only allowlisted retrieval edges such as `related`, `mentions`, `supports`, `proved_by`, `located_in`, and `fixes` expand。
+- unresolved or stale graph endpoints are counted by reason in caller-visible aggregate drop counts, while node/edge IDs remain internal-audit only。
 - graph-expanded cards receive an explicit deterministic `graph_modifier` score component, and usage records `index_mode=graph_index`, `graph_nodes_expanded`, and `graph_edges_expanded`。
-- remaining Phase D work: public adapter graph fixture seeding, separate fanout/node/card/latency budgets, dropped expansion reason accounting without ID leakage, graph invalidation hooks, and rebuild verification for derived graph-aware indexes。
+- remaining Phase D work: public adapter graph fixture seeding, separate fanout/node/card/latency budgets, graph invalidation hooks, and rebuild verification for derived graph-aware indexes。
 
 ### Phase E: MemoryContextBuilder / evidence packet
 
