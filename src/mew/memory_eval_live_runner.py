@@ -27,6 +27,19 @@ DEFAULT_MODEL = "gpt-5.5"
 DEFAULT_BACKEND = "codex"
 DEFAULT_TIMEOUT = 120
 LIVE_FIXTURE_SUFFIX = "_typed_live_lifecycle"
+NORMAL_9_SUITE = "normal-9"
+SUITES = (NORMAL_9_SUITE,)
+NORMAL_9_FIXTURES = (
+    Path("fixtures/memory_eval/p0/dummy_happy_path.json"),
+    Path("fixtures/memory_eval/p1/memory_off_no_prior_memory_basic.json"),
+    Path("fixtures/memory_eval/p1/budget_limited_basic.json"),
+    Path("fixtures/memory_eval/p1/scope_isolation_basic.json"),
+    Path("fixtures/memory_eval/p1/memory_on_happy_path_basic.json"),
+    Path("fixtures/memory_eval/p1/retrieval_ranking_basic.json"),
+    Path("fixtures/memory_eval/p1/abstention_no_memory_basic.json"),
+    Path("fixtures/memory_eval/p1/update_forget_basic.json"),
+    Path("fixtures/memory_eval/p1/stale_conflict_supersede_basic.json"),
+)
 
 
 def add_seed_lifecycle(
@@ -141,10 +154,149 @@ def run_live_typed_cards_fixture(
     return artifact, output_path
 
 
+def run_live_typed_cards_suite(
+    suite: str,
+    *,
+    auth_json: str | Path = DEFAULT_AUTH_JSON,
+    model: str = DEFAULT_MODEL,
+    backend: str = DEFAULT_BACKEND,
+    call_interface: str = "call_model_structured_json",
+    timeout: int = DEFAULT_TIMEOUT,
+    seed: int = 12345,
+    run_id: str | None = None,
+    created_at: str | None = None,
+    output: str | Path | None = None,
+    output_dir: str | Path = DEFAULT_OUTPUT_ROOT,
+    seed_lifecycle: bool = True,
+    run_fixture_fn: Any = None,
+) -> tuple[dict[str, Any], Path]:
+    suite = _normalize_suite_name(suite)
+    run_id = run_id or default_suite_run_id(suite)
+    suite_dir = Path(output_dir) / _safe_path_stem(run_id)
+    run_fixture_fn = run_fixture_fn or run_live_typed_cards_fixture
+    fixture_summaries = []
+    failed = []
+    for index, fixture in enumerate(suite_fixture_paths(suite), start=1):
+        fixture_run_id = f"{run_id}_{index:02d}_{fixture.stem}"
+        artifact, artifact_path = run_fixture_fn(
+            fixture,
+            auth_json=auth_json,
+            model=model,
+            backend=backend,
+            call_interface=call_interface,
+            timeout=timeout,
+            seed=seed,
+            fixture_ordinal=index,
+            run_id=fixture_run_id,
+            created_at=created_at,
+            output=None,
+            output_dir=suite_dir,
+            seed_lifecycle=seed_lifecycle,
+        )
+        summary = summarize_artifact(artifact, artifact_path)
+        summary["source_fixture"] = str(fixture)
+        fixture_summaries.append(summary)
+        if summary["status_counts"].get("failed") or summary["failure_count"]:
+            failed.append(summary)
+
+    suite_summary = summarize_suite(
+        suite=suite,
+        run_id=run_id,
+        output_dir=suite_dir,
+        fixtures=fixture_summaries,
+        failed=failed,
+        model=model,
+        backend=backend,
+    )
+    output_path = resolve_suite_output_path(output, output_dir=suite_dir)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(suite_summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return suite_summary, output_path
+
+
+def suite_fixture_paths(suite: str) -> tuple[Path, ...]:
+    suite = _normalize_suite_name(suite)
+    if suite == NORMAL_9_SUITE:
+        return NORMAL_9_FIXTURES
+    raise ValueError(f"unsupported live memory-eval suite: {suite}")
+
+
+def summarize_suite(
+    *,
+    suite: str,
+    run_id: str,
+    output_dir: str | Path,
+    fixtures: Sequence[Mapping[str, Any]],
+    failed: Sequence[Mapping[str, Any]],
+    model: str,
+    backend: str,
+) -> dict[str, Any]:
+    status_counts: dict[str, int] = {}
+    for fixture in fixtures:
+        for status, count in dict(fixture.get("status_counts") or {}).items():
+            status_counts[str(status)] = status_counts.get(str(status), 0) + int(count)
+    return {
+        "suite": suite,
+        "run_id": run_id,
+        "output_dir": str(output_dir),
+        "backend": backend,
+        "model": model,
+        "fixture_count": len(fixtures),
+        "failed_count": len(failed),
+        "status_counts": status_counts,
+        "failed_fixtures": [
+            {
+                "source_fixture": item.get("source_fixture"),
+                "fixture_id": item.get("fixture_id"),
+                "status_counts": dict(item.get("status_counts") or {}),
+                "failure_count": item.get("failure_count"),
+                "failure_types": list(item.get("failure_types") or []),
+                "output": item.get("output"),
+            }
+            for item in failed
+        ],
+        "fixtures": list(fixtures),
+    }
+
+
+def compact_suite_summary(summary: Mapping[str, Any], output_path: str | Path) -> dict[str, Any]:
+    return {
+        "suite": summary.get("suite"),
+        "run_id": summary.get("run_id"),
+        "output": str(output_path),
+        "output_dir": summary.get("output_dir"),
+        "backend": summary.get("backend"),
+        "model": summary.get("model"),
+        "fixture_count": summary.get("fixture_count"),
+        "failed_count": summary.get("failed_count"),
+        "status_counts": dict(summary.get("status_counts") or {}),
+        "failed_fixtures": list(summary.get("failed_fixtures") or []),
+        "fixtures": [
+            {
+                "source_fixture": item.get("source_fixture"),
+                "fixture_id": item.get("fixture_id"),
+                "status_counts": dict(item.get("status_counts") or {}),
+                "failure_count": item.get("failure_count"),
+                "output": item.get("output"),
+            }
+            for item in summary.get("fixtures") or []
+            if isinstance(item, Mapping)
+        ],
+    }
+
+
 def default_run_id(fixture_path: str | Path) -> str:
     timestamp = datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y%m%dT%H%M%SZ")
     stem = _safe_path_stem(Path(fixture_path).stem)
     return f"live_typed_cards_{stem}_{timestamp}"
+
+
+def default_suite_run_id(suite: str) -> str:
+    timestamp = datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y%m%dT%H%M%SZ")
+    return f"live_typed_cards_{_safe_path_stem(suite)}_{timestamp}"
 
 
 def resolve_output_path(
@@ -156,6 +308,12 @@ def resolve_output_path(
     if output is not None:
         return Path(output)
     return Path(output_dir) / f"{_safe_path_stem(run_id)}.json"
+
+
+def resolve_suite_output_path(output: str | Path | None, *, output_dir: str | Path) -> Path:
+    if output is not None:
+        return Path(output)
+    return Path(output_dir) / "summary.json"
 
 
 def summarize_artifact(artifact: Mapping[str, Any], output_path: str | Path) -> dict[str, Any]:
@@ -205,11 +363,25 @@ def exit_code_for_artifact(artifact: Mapping[str, Any], *, allow_failures: bool 
     return 0
 
 
+def exit_code_for_suite(summary: Mapping[str, Any], *, allow_failures: bool = False) -> int:
+    if allow_failures:
+        return 0
+    return 1 if int(summary.get("failed_count") or 0) else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run typed-card memory-eval fixtures through the live raw-memory LLM extractor."
     )
-    parser.add_argument("fixture", type=Path, help="Memory-eval fixture JSON path.")
+    parser.add_argument("fixture", type=Path, nargs="?", help="Memory-eval fixture JSON path.")
+    parser.add_argument("--suite", choices=SUITES, help="Run a built-in fixture suite instead of a single fixture.")
+    parser.add_argument(
+        "--all-normal",
+        action="store_const",
+        const=NORMAL_9_SUITE,
+        dest="suite",
+        help="Alias for --suite normal-9.",
+    )
     parser.add_argument("--auth-json", type=Path, default=DEFAULT_AUTH_JSON)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--backend", default=DEFAULT_BACKEND)
@@ -243,6 +415,28 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.suite:
+        summary, output_path = run_live_typed_cards_suite(
+            args.suite,
+            auth_json=args.auth_json,
+            model=args.model,
+            backend=args.backend,
+            call_interface=args.call_interface,
+            timeout=args.timeout,
+            seed=args.seed,
+            run_id=args.run_id,
+            created_at=args.created_at,
+            output=args.output,
+            output_dir=args.output_dir,
+            seed_lifecycle=args.seed_lifecycle,
+        )
+        print(json.dumps(compact_suite_summary(summary, output_path), ensure_ascii=False, sort_keys=True))
+        if args.print_artifact:
+            print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+        return exit_code_for_suite(summary, allow_failures=args.allow_failures)
+
+    if args.fixture is None:
+        raise SystemExit("fixture is required unless --suite or --all-normal is provided")
     artifact, output_path = run_live_typed_cards_fixture(
         args.fixture,
         auth_json=args.auth_json,
@@ -275,6 +469,15 @@ def _next_seed_op_id(index: int, existing_op_ids: set[str]) -> str:
 def _safe_path_stem(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value or "").strip())
     return cleaned.strip("._-") or "run"
+
+
+def _normalize_suite_name(value: str) -> str:
+    normalized = str(value or "").strip()
+    if normalized == "normal_9":
+        normalized = NORMAL_9_SUITE
+    if normalized not in SUITES:
+        raise ValueError(f"unsupported live memory-eval suite: {value}")
+    return normalized
 
 
 if __name__ == "__main__":  # pragma: no cover

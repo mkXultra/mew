@@ -93,6 +93,14 @@ top_1_support: ["exp_primary_badge"]
 
 Full normal 9-fixture live smoke was rerun with `gpt-5.5` and explicit `/Users/mk/.codex/auth.json`.
 
+The smoke is now available as a first-class runner suite:
+
+```bash
+uv run python -m mew.memory_eval_live_runner \
+  --suite normal-9 \
+  --auth-json /Users/mk/.codex/auth.json
+```
+
 Artifacts:
 
 - `.codex-artifacts/memory-eval-live/manual-normal-9-20260522-rerun/`
@@ -141,7 +149,5 @@ Multi-review controller result:
 
 Recommended next step before Phase D:
 
-1. Add a small CLI/report command or documented script for running the normal 9-fixture live smoke without ad hoc Python snippets.
-2. Decide whether `retrieval_terms` should be surfaced in debug/inspect output, and under which privacy gate.
-3. Only then start Phase D graph/index expansion, keeping indexes derived and rebuildable.
-
+1. Decide whether `retrieval_terms` should be surfaced in debug/inspect output, and under which privacy gate.
+2. Only then start Phase D graph/index expansion, keeping indexes derived and rebuildable.

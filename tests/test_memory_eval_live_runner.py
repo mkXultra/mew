@@ -6,11 +6,16 @@ from pathlib import Path
 from mew.memory_eval.fixtures import load_fixture
 from mew.memory_eval_live_runner import (
     LIVE_FIXTURE_SUFFIX,
+    NORMAL_9_SUITE,
     add_seed_lifecycle,
     build_parser,
+    compact_suite_summary,
     exit_code_for_artifact,
+    exit_code_for_suite,
     resolve_output_path,
+    run_live_typed_cards_suite,
     summarize_artifact,
+    suite_fixture_paths,
 )
 
 
@@ -63,6 +68,36 @@ def test_live_runner_parser_defaults_to_home_codex_auth() -> None:
     assert args.call_interface == "call_model_structured_json"
     assert str(args.auth_json).endswith(".codex/auth.json")
     assert args.seed_lifecycle is True
+
+
+def test_live_runner_parser_accepts_normal_suite_without_fixture() -> None:
+    args = build_parser().parse_args(["--suite", "normal-9"])
+
+    assert args.fixture is None
+    assert args.suite == NORMAL_9_SUITE
+
+
+def test_live_runner_parser_accepts_all_normal_alias_without_fixture() -> None:
+    args = build_parser().parse_args(["--all-normal"])
+
+    assert args.fixture is None
+    assert args.suite == NORMAL_9_SUITE
+
+
+def test_normal_9_suite_fixture_order_is_stable() -> None:
+    fixtures = suite_fixture_paths(NORMAL_9_SUITE)
+
+    assert [path.name for path in fixtures] == [
+        "dummy_happy_path.json",
+        "memory_off_no_prior_memory_basic.json",
+        "budget_limited_basic.json",
+        "scope_isolation_basic.json",
+        "memory_on_happy_path_basic.json",
+        "retrieval_ranking_basic.json",
+        "abstention_no_memory_basic.json",
+        "update_forget_basic.json",
+        "stale_conflict_supersede_basic.json",
+    ]
 
 
 def test_resolve_output_path_uses_run_id_when_output_is_omitted(tmp_path: Path) -> None:
@@ -120,3 +155,92 @@ def test_exit_code_for_artifact_fails_on_scoring_failure() -> None:
 
     assert exit_code_for_artifact(failed) == 1
     assert exit_code_for_artifact(failed, allow_failures=True) == 0
+
+
+def test_compact_suite_summary_omits_verbose_request_details(tmp_path: Path) -> None:
+    summary = {
+        "suite": NORMAL_9_SUITE,
+        "run_id": "suite_run",
+        "output_dir": str(tmp_path),
+        "backend": "codex",
+        "model": "gpt-5.5",
+        "fixture_count": 1,
+        "failed_count": 0,
+        "status_counts": {"passed": 1},
+        "failed_fixtures": [],
+        "fixtures": [
+            {
+                "source_fixture": "fixtures/memory_eval/p0/dummy_happy_path.json",
+                "fixture_id": "dummy_happy_path",
+                "status_counts": {"passed": 1},
+                "failure_count": 0,
+                "output": str(tmp_path / "dummy.json"),
+                "requests": [{"metrics": {"recall_at_k": 1.0}}],
+                "hard_gates": [{"gate_id": "valid_rank_ordering", "passed": True}],
+            }
+        ],
+    }
+
+    compact = compact_suite_summary(summary, tmp_path / "summary.json")
+
+    assert compact["output"] == str(tmp_path / "summary.json")
+    assert compact["fixtures"] == [
+        {
+            "source_fixture": "fixtures/memory_eval/p0/dummy_happy_path.json",
+            "fixture_id": "dummy_happy_path",
+            "status_counts": {"passed": 1},
+            "failure_count": 0,
+            "output": str(tmp_path / "dummy.json"),
+        }
+    ]
+
+
+def test_run_live_typed_cards_suite_uses_injected_runner_and_writes_summary(tmp_path: Path) -> None:
+    calls = []
+
+    def fake_run_fixture(fixture_path, **kwargs):
+        calls.append((Path(fixture_path), kwargs))
+        status = "passed"
+        failures = []
+        if Path(fixture_path).name == "budget_limited_basic.json":
+            failures = [{"type": "missing_relevant_support"}]
+            status = "failed"
+        artifact = {
+            "run_id": kwargs["run_id"],
+            "fixture": {"fixture_id": Path(fixture_path).stem},
+            "adapter": {
+                "adapter_id": "mew_typed_cards_memory_eval",
+                "external_model_ids": ["codex:gpt-5.5"],
+            },
+            "aggregate_metrics": {"status_counts": {status: 1}},
+            "hard_gates": [],
+            "failures": failures,
+            "requests": [],
+        }
+        return artifact, Path(kwargs["output_dir"]) / f"{kwargs['run_id']}.json"
+
+    summary, output = run_live_typed_cards_suite(
+        NORMAL_9_SUITE,
+        auth_json="/tmp/auth.json",
+        run_id="suite_run",
+        output_dir=tmp_path,
+        run_fixture_fn=fake_run_fixture,
+    )
+
+    assert output == tmp_path / "suite_run" / "summary.json"
+    assert output.exists()
+    assert summary["suite"] == NORMAL_9_SUITE
+    assert summary["fixture_count"] == 9
+    assert summary["failed_count"] == 1
+    assert summary["status_counts"] == {"passed": 8, "failed": 1}
+    assert summary["failed_fixtures"][0]["source_fixture"].endswith("budget_limited_basic.json")
+    assert calls[0][1]["auth_json"] == "/tmp/auth.json"
+    assert calls[0][1]["fixture_ordinal"] == 1
+    assert calls[-1][1]["fixture_ordinal"] == 9
+
+
+def test_exit_code_for_suite_fails_when_any_fixture_failed() -> None:
+    failed = {"failed_count": 1}
+
+    assert exit_code_for_suite(failed) == 1
+    assert exit_code_for_suite(failed, allow_failures=True) == 0
