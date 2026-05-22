@@ -195,6 +195,8 @@ def split_fixture(
         "requests": requests_scorer,
         "operation_sequence": operation_sequence_scorer,
     }
+    if "source_benchmark" in source:
+        scorer_view["source_benchmark"] = _copy_json(source.get("source_benchmark") or {})
 
     return FixtureViews(
         source=dict(source),
