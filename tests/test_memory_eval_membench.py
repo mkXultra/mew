@@ -1,12 +1,20 @@
 import json
 from copy import deepcopy
+from pathlib import Path
 
 from mew.memory_eval.fixtures import split_fixture
 from mew.memory_eval.hashing import canonical_json
 from mew.memory_eval.membench import (
     audit_mteb_source_manifest,
+    build_ephemeral_fixtures_from_dry_run,
     convert_mteb_qrels_dry_run,
+    main as membench_main,
+    validate_mteb_qrels_dry_run,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MEMORY_EVAL_FIXTURES = ROOT / "fixtures" / "memory_eval"
 
 
 def test_mteb_source_audit_records_external_no_vendor_manifest(tmp_path):
@@ -92,6 +100,7 @@ def test_mteb_qrels_dry_run_maps_docs_through_corpus_manifest_and_hides_gold(tmp
 
     report = convert_mteb_qrels_dry_run(tmp_path, source_manifest=manifest)
 
+    assert report["seed"] == 12345
     assert report["candidate_counts"]["selected_fixture_previews"] == 1
     assert report["candidate_counts"]["skipped_examples"] == 0
     assert report["adapter_view_check_summary"] == {
@@ -100,6 +109,7 @@ def test_mteb_qrels_dry_run_maps_docs_through_corpus_manifest_and_hides_gold(tmp
         "failure_count": 0,
     }
     preview = report["fixture_previews"][0]
+    assert preview["adapter_fixture_id"] == "fx_000001"
     scorer_request = preview["scorer_view"]["requests"][0]
     assert scorer_request["gold"]["relevant_evidence_ids"] == ["exp_src_000002"]
     assert (
@@ -130,6 +140,128 @@ def test_mteb_qrels_dry_run_maps_docs_through_corpus_manifest_and_hides_gold(tmp
     assert "target_step_id" not in adapter_json
     assert "mteb/MemBench" not in adapter_json
     assert preview["adapter_view"]["experiences"][0]["experience_id"] == "ex_000001"
+
+
+def test_mteb_dry_run_validation_uses_ephemeral_fixtures_without_pack_writes(
+    tmp_path,
+):
+    fixture_tree_before = _fixture_tree_snapshot()
+    report = _validation_ready_dry_run_report(tmp_path)
+
+    fixtures = build_ephemeral_fixtures_from_dry_run(report)
+    assert len(fixtures) == 1
+    assert {item["experience_id"] for item in fixtures[0]["experiences"]} == {
+        "exp_src_000001",
+        "exp_src_000002",
+    }
+
+    preview = report["fixture_previews"][0]
+    views = split_fixture(fixtures[0])
+    assert views.fixture_public_hash == preview["fixture_public_hash"]
+    assert views.fixture_gold_hash == preview["fixture_gold_hash"]
+    assert views.fixture_full_hash == preview["fixture_full_hash"]
+
+    validation = validate_mteb_qrels_dry_run(report)
+
+    assert validation["validation_status"] == "passed"
+    assert validation["ephemeral_fixture_policy"]["storage"] == "in_memory_only"
+    assert validation["ephemeral_fixture_policy"]["writes_fixture_pack"] is False
+    assert validation["selected_fixture_count"] == 1
+    assert validation["reference_adapter"]["result_summary"]["passed"] is True
+    reference = validation["reference_adapter"]["results"][0]
+    assert reference["result_status"] == "passed"
+    assert reference["hash_match"] == {
+        "fixture_public_hash_matches_preview": True,
+        "fixture_gold_hash_matches_preview": True,
+        "fixture_full_hash_matches_preview": True,
+    }
+    assert reference["adapter_view_leakage_failure_count"] == 0
+    assert (
+        reference["fixture_hashes"]["fixture_public_hash"]
+        == preview["fixture_public_hash"]
+    )
+
+    controls = {
+        item["control_id"]: item for item in validation["negative_controls"]["results"]
+    }
+    assert {
+        "duplicate_support",
+        "missing_usage",
+        "support_source_mismatch",
+        "unscorable_evidence",
+    } <= set(controls)
+    assert all(
+        item["negative_control_status"] == "passed" for item in controls.values()
+    )
+    assert (
+        "no_duplicate_support_reference"
+        in controls["duplicate_support"]["observed_failed_gate_ids"]
+    )
+    assert (
+        "required_support_mapping_present"
+        in controls["unscorable_evidence"]["observed_failed_gate_ids"]
+    )
+    assert (
+        "required_usage_present"
+        in controls["missing_usage"]["observed_failed_gate_ids"]
+    )
+    assert (
+        "support_source_consistency"
+        in controls["support_source_mismatch"]["observed_failed_gate_ids"]
+    )
+    assert {
+        item["control_id"] for item in validation["negative_controls"]["not_run"]
+    } >= {"cross_scope_exposure", "future_support", "stale_as_fresh"}
+
+    adapter_json = canonical_json(views.adapter_view)
+    assert "source_benchmark" not in adapter_json
+    assert "source_qrels" not in adapter_json
+    assert "source_locator" not in adapter_json
+    assert "doc-green" not in adapter_json
+    assert "qrels.tsv" not in adapter_json
+    assert "target_step_id" not in adapter_json
+    assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+def test_mteb_validate_dry_run_report_cli_emits_stdout_json(tmp_path, capsys):
+    report = _validation_ready_dry_run_report(tmp_path)
+    report_path = tmp_path / "dry_run.json"
+    report_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+
+    assert membench_main(["validate-dry-run-report", str(report_path)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["schema_version"] == "mew_membench_dry_run_validation.v1"
+    assert output["validation_status"] == "passed"
+    assert (
+        output["ephemeral_fixture_policy"]["generated_fixture_pack_committed"] is False
+    )
+
+
+def test_mteb_validate_dry_run_report_infers_non_default_seed(tmp_path, capsys):
+    report = _validation_ready_dry_run_report(tmp_path, seed=6789)
+    report_path = tmp_path / "dry_run_non_default_seed.json"
+    saved_report = deepcopy(report)
+    saved_report.pop("seed")
+    report_path.write_text(json.dumps(saved_report, sort_keys=True), encoding="utf-8")
+
+    assert report["seed"] == 6789
+    assert report["fixture_previews"][0]["adapter_view"]["seed"] == 6789
+    assert membench_main(["validate-dry-run-report", str(report_path)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    reference = output["reference_adapter"]["results"][0]
+    assert output["seed"] == 6789
+    assert output["validation_status"] == "passed"
+    assert reference["hash_match"] == {
+        "fixture_public_hash_matches_preview": True,
+        "fixture_gold_hash_matches_preview": True,
+        "fixture_full_hash_matches_preview": True,
+    }
+    assert (
+        reference["fixture_hashes"]["fixture_public_hash"]
+        == report["fixture_previews"][0]["fixture_public_hash"]
+    )
 
 
 def test_mteb_qrels_dry_run_rejects_missing_qrel_doc(tmp_path):
@@ -266,4 +398,55 @@ def _write_jsonl(path, rows):
     path.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
         encoding="utf-8",
+    )
+
+
+def _fixture_tree_snapshot():
+    return sorted(
+        path.relative_to(MEMORY_EVAL_FIXTURES)
+        for path in MEMORY_EVAL_FIXTURES.rglob("*")
+        if path.is_file()
+    )
+
+
+def _validation_ready_dry_run_report(tmp_path, *, seed=12345):
+    _write_jsonl(
+        tmp_path / "corpus.jsonl",
+        [
+            {
+                "_id": "doc-green",
+                "text": "Aki stores the green tea tin beside the kettle.",
+            },
+            {
+                "_id": "doc-bike",
+                "text": "Rin parks the blue bicycle near the station gate.",
+            },
+        ],
+    )
+    _write_jsonl(
+        tmp_path / "queries.jsonl",
+        [
+            {
+                "_id": "query-green",
+                "text": "Where does Aki store the green tea tin?",
+                "choices": ["desk", "kettle"],
+                "answer": "kettle",
+                "ground_truth": "B",
+            }
+        ],
+    )
+    (tmp_path / "qrels.tsv").write_text(
+        "query-id\tcorpus-id\tscore\nquery-green\tdoc-green\t1\n",
+        encoding="utf-8",
+    )
+    return convert_mteb_qrels_dry_run(
+        tmp_path,
+        source_manifest=audit_mteb_source_manifest(
+            tmp_path,
+            source_revision="0123456789abcdef",
+            source_subset="validation",
+            declared_license="MIT",
+            license_source="synthetic test audit",
+        ),
+        seed=seed,
     )

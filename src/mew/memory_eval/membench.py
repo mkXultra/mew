@@ -10,24 +10,35 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from .fixtures import find_label_leakage, split_fixture
+from .adapters.broken import (
+    DuplicateSupportAdapter,
+    MissingUsageAdapter,
+    SupportSourceMismatchAdapter,
+    UnscorableEvidenceAdapter,
+)
+from .adapters.reference import ReferenceP1Adapter
+from .fixtures import FIXTURE_SCHEMA_VERSION, find_label_leakage, split_fixture
 from .hashing import stable_hash
+from .runner import run_fixture
 
 
 SOURCE_MANIFEST_SCHEMA_VERSION = "mew_membench_source_manifest.v1"
 DRY_RUN_SCHEMA_VERSION = "mew_membench_mteb_qrels_dry_run.v1"
+DRY_RUN_VALIDATION_SCHEMA_VERSION = "mew_membench_dry_run_validation.v1"
 CONVERTER_ID = "mew_membench_mteb_qrels_converter"
 CONVERTER_VERSION = "0.1.0"
 MEMBENCH_HF_DATASET = "mteb/MemBench"
 DEFAULT_EVALUATION_TIME = "2026-05-22T00:00:00Z"
 DEFAULT_SCOPE_ID = "tenant_mb/user_000001"
 DEFAULT_QUERY_TIME = "2026-05-22T00:00:00Z"
+DEFAULT_VALIDATION_CREATED_AT = "2026-05-22T00:00:00Z"
 
 CORPUS_ID_KEYS = ("_id", "id", "doc_id", "docid", "corpus_id", "corpus-id")
 QUERY_ID_KEYS = ("_id", "id", "query_id", "query-id", "qid")
@@ -46,6 +57,23 @@ SCORER_ONLY_FIELD_PATHS = [
     "requests[].gold.support_coverage_policy",
     "requests[].gold.source_qrels",
 ]
+
+REQUEST_PUBLIC_FIELD_NAMES = (
+    "scope_id",
+    "query_time",
+    "query",
+    "k",
+    "filters",
+    "budget",
+)
+
+REQUEST_SCORER_FIELD_NAMES = (
+    "mode",
+    "requires_capabilities",
+    "on_unsupported",
+    "gold",
+    "expected_failure_types",
+)
 
 MEMBENCH_PRIVATE_STRUCTURAL_KEYS = {
     "answer",
@@ -307,6 +335,7 @@ def convert_mteb_qrels_dry_run(
         fixture_previews.append(
             {
                 "fixture_id": fixture["fixture_id"],
+                "adapter_fixture_id": views.adapter_fixture_id,
                 "query_id_hash": stable_hash(query_id),
                 "source_fixture_experience_namespace": "exp_src_*",
                 "adapter_view": views.adapter_view,
@@ -330,6 +359,7 @@ def convert_mteb_qrels_dry_run(
         },
         "source_manifest": manifest,
         "source_files": _source_file_manifest(source),
+        "seed": seed,
         "conversion_manifest_hash": stable_hash(
             {
                 "converter_id": CONVERTER_ID,
@@ -381,6 +411,131 @@ def convert_mteb_qrels_dry_run(
     }
     report["dry_run_hash"] = stable_hash(
         {key: value for key, value in report.items() if key != "dry_run_hash"}
+    )
+    return report
+
+
+def build_ephemeral_fixtures_from_dry_run(
+    dry_run_report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Rebuild temporary memory_eval fixture objects from dry-run previews.
+
+    The returned fixtures are in-memory source fixture objects with internal
+    `exp_src_*` evidence IDs restored from the scorer view. They are suitable
+    for `run_fixture()` and intentionally do not write fixture packs.
+    """
+
+    return [
+        _fixture_from_dry_run_preview(preview)
+        for preview in dry_run_report.get("fixture_previews") or []
+    ]
+
+
+def validate_mteb_qrels_dry_run(
+    dry_run_report: Mapping[str, Any],
+    *,
+    seed: int | None = None,
+    run_broken_controls: bool = True,
+) -> dict[str, Any]:
+    """Validate dry-run selected previews with in-memory memory_eval fixtures."""
+
+    validation_seed = _validation_seed(dry_run_report, explicit_seed=seed)
+    previews = list(dry_run_report.get("fixture_previews") or [])
+    fixtures = build_ephemeral_fixtures_from_dry_run(dry_run_report)
+    reference_results = []
+    negative_control_results = []
+
+    for index, (preview, fixture) in enumerate(zip(previews, fixtures), start=1):
+        fixture_ordinal = _preview_fixture_ordinal(preview, default=index)
+        views = split_fixture(
+            fixture, fixture_ordinal=fixture_ordinal, seed=validation_seed
+        )
+        leakage = find_membench_adapter_leakage(views.adapter_view)
+        leakage.extend(find_label_leakage(views.adapter_view))
+        hash_match = {
+            "fixture_public_hash_matches_preview": views.fixture_public_hash
+            == preview.get("fixture_public_hash"),
+            "fixture_gold_hash_matches_preview": views.fixture_gold_hash
+            == preview.get("fixture_gold_hash"),
+            "fixture_full_hash_matches_preview": views.fixture_full_hash
+            == preview.get("fixture_full_hash"),
+        }
+
+        reference_artifact = run_fixture(
+            fixture,
+            ReferenceP1Adapter(),
+            seed=validation_seed,
+            fixture_ordinal=fixture_ordinal,
+            run_id=f"run_membench_reference_{fixture_ordinal:06d}",
+            created_at=DEFAULT_VALIDATION_CREATED_AT,
+        )
+        reference_results.append(
+            {
+                **_run_validation_summary(
+                    artifact=reference_artifact,
+                    preview=preview,
+                    fixture_ordinal=fixture_ordinal,
+                ),
+                "hash_match": hash_match,
+                "adapter_view_leakage_failure_count": len(leakage),
+                "adapter_view_leakage_failures": leakage,
+            }
+        )
+
+        if run_broken_controls:
+            for control in _applicable_negative_controls(fixture):
+                artifact = run_fixture(
+                    fixture,
+                    control["adapter_factory"](),
+                    seed=validation_seed,
+                    fixture_ordinal=fixture_ordinal,
+                    run_id=(
+                        f"run_membench_{control['control_id']}_{fixture_ordinal:06d}"
+                    ),
+                    created_at=DEFAULT_VALIDATION_CREATED_AT,
+                )
+                negative_control_results.append(
+                    _negative_control_summary(
+                        artifact=artifact,
+                        preview=preview,
+                        fixture_ordinal=fixture_ordinal,
+                        control=control,
+                    )
+                )
+
+    report = {
+        "schema_version": DRY_RUN_VALIDATION_SCHEMA_VERSION,
+        "validation_target": "membench_mteb_qrels_dry_run_previews",
+        "source_dry_run_schema_version": dry_run_report.get("schema_version"),
+        "source_dry_run_hash": dry_run_report.get("dry_run_hash"),
+        "converter": dict(dry_run_report.get("converter") or {}),
+        "seed": validation_seed,
+        "created_at": DEFAULT_VALIDATION_CREATED_AT,
+        "ephemeral_fixture_policy": {
+            "storage": "in_memory_only",
+            "writes_fixture_pack": False,
+            "fixtures_memory_eval_write_allowed": False,
+            "raw_source_committed": False,
+            "generated_fixture_pack_committed": False,
+        },
+        "selected_fixture_count": len(fixtures),
+        "reference_adapter": {
+            "adapter_id": "memory_eval_reference_p1",
+            "result_summary": _validation_result_summary(reference_results),
+            "results": reference_results,
+        },
+        "negative_controls": {
+            "run": bool(run_broken_controls),
+            "result_summary": _negative_control_result_summary(
+                negative_control_results
+            ),
+            "results": negative_control_results,
+            "not_run": _negative_controls_not_run_notes(),
+        },
+    }
+    report["validation_status"] = _validation_status(report)
+    report["validation_hash"] = stable_hash(
+        {key: value for key, value in report.items() if key != "validation_hash"}
     )
     return report
 
@@ -445,7 +600,22 @@ def main(argv: list[str] | None = None) -> int:
     dry_run_parser.add_argument("--source-revision")
     dry_run_parser.add_argument("--source-subset", action="append")
     dry_run_parser.add_argument("--max-queries", type=int)
+    dry_run_parser.add_argument("--seed", type=int, default=12345)
     dry_run_parser.add_argument("--output", required=True)
+
+    validate_report_parser = subcommands.add_parser("validate-dry-run-report")
+    validate_report_parser.add_argument("dry_run_report")
+    validate_report_parser.add_argument("--seed", type=int)
+    validate_report_parser.add_argument("--output")
+
+    validate_parser = subcommands.add_parser("validate-dry-run-mteb-qrels")
+    validate_parser.add_argument("source_dir")
+    validate_parser.add_argument("--manifest")
+    validate_parser.add_argument("--source-revision")
+    validate_parser.add_argument("--source-subset", action="append")
+    validate_parser.add_argument("--max-queries", type=int)
+    validate_parser.add_argument("--seed", type=int, default=12345)
+    validate_parser.add_argument("--output")
 
     args = parser.parse_args(argv)
     if args.command == "audit-source":
@@ -462,15 +632,346 @@ def main(argv: list[str] | None = None) -> int:
         write_json_artifact(args.output, manifest)
         return 0
 
+    if args.command == "validate-dry-run-report":
+        report = validate_mteb_qrels_dry_run(
+            _load_json_object(args.dry_run_report),
+            seed=args.seed,
+        )
+        _write_or_print_json(report, args.output)
+        return 0 if report["validation_status"] == "passed" else 1
+
     report = convert_mteb_qrels_dry_run(
         args.source_dir,
         manifest_path=args.manifest,
         source_revision=args.source_revision,
         source_subset=args.source_subset,
         max_queries=args.max_queries,
+        seed=args.seed,
     )
-    write_json_artifact(args.output, report)
-    return 0
+    if args.command == "dry-run-mteb-qrels":
+        write_json_artifact(args.output, report)
+        return 0
+
+    report = validate_mteb_qrels_dry_run(report, seed=args.seed)
+    _write_or_print_json(report, args.output)
+    return 0 if report["validation_status"] == "passed" else 1
+
+
+def _write_or_print_json(value: Mapping[str, Any], output: str | None) -> None:
+    if output:
+        write_json_artifact(output, value)
+        return
+    print(json.dumps(value, indent=2, sort_keys=True))
+
+
+def _fixture_from_dry_run_preview(preview: Mapping[str, Any]) -> dict[str, Any]:
+    scorer_view = dict(preview.get("scorer_view") or {})
+    adapter_view = dict(preview.get("adapter_view") or {})
+    adapter_requests = {
+        str(request.get("request_id") or ""): request
+        for request in adapter_view.get("requests") or []
+    }
+    requests = []
+    for scorer_request in scorer_view.get("requests") or []:
+        adapter_request_id = str(scorer_request.get("adapter_request_id") or "")
+        adapter_request = adapter_requests.get(adapter_request_id)
+        if adapter_request is None:
+            raise MembenchConversionError(
+                f"Dry-run preview missing adapter request {adapter_request_id!r}"
+            )
+        request = {
+            key: deepcopy(adapter_request.get(key))
+            for key in REQUEST_PUBLIC_FIELD_NAMES
+            if key in adapter_request
+        }
+        request["request_id"] = scorer_request.get("request_id")
+        for key in REQUEST_SCORER_FIELD_NAMES:
+            if key in scorer_request:
+                value = deepcopy(scorer_request.get(key))
+                if key == "expected_failure_types" and not value:
+                    continue
+                request[key] = value
+        requests.append(request)
+
+    fixture = {
+        "schema_version": scorer_view.get("schema_version") or FIXTURE_SCHEMA_VERSION,
+        "fixture_id": scorer_view.get("fixture_id"),
+        "fixture_version": scorer_view.get("fixture_version"),
+        "fixture_family": scorer_view.get("fixture_family"),
+        "phase": scorer_view.get("phase"),
+        "evaluation_time": scorer_view.get("evaluation_time"),
+        "experiences": deepcopy(scorer_view.get("experiences") or []),
+        "mutations": deepcopy(scorer_view.get("mutations") or []),
+        "requests": requests,
+        "operation_sequence": deepcopy(scorer_view.get("operation_sequence") or []),
+    }
+    if "source_benchmark" in scorer_view:
+        fixture["source_benchmark"] = deepcopy(scorer_view["source_benchmark"])
+    return fixture
+
+
+def _preview_fixture_ordinal(preview: Mapping[str, Any], *, default: int) -> int:
+    match = re.fullmatch(r"fx_(\d+)", str(preview.get("adapter_fixture_id") or ""))
+    return int(match.group(1)) if match else default
+
+
+def _validation_seed(
+    dry_run_report: Mapping[str, Any], *, explicit_seed: int | None
+) -> int:
+    if explicit_seed is not None:
+        return explicit_seed
+    report_seed = _optional_int(dry_run_report.get("seed"))
+    if report_seed is not None:
+        return report_seed
+    for preview in dry_run_report.get("fixture_previews") or []:
+        if not isinstance(preview, Mapping):
+            continue
+        adapter_view = preview.get("adapter_view") or {}
+        if not isinstance(adapter_view, Mapping):
+            continue
+        preview_seed = _optional_int(adapter_view.get("seed"))
+        if preview_seed is not None:
+            return preview_seed
+    return 12345
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _run_validation_summary(
+    *,
+    artifact: Mapping[str, Any],
+    preview: Mapping[str, Any],
+    fixture_ordinal: int,
+) -> dict[str, Any]:
+    requests = list(artifact.get("requests") or [])
+    failed_gate_ids = sorted(
+        {
+            str(gate.get("gate_id"))
+            for request in requests
+            for gate in request.get("hard_gates") or []
+            if gate.get("passed") is False
+        }
+    )
+    failure_types = sorted(
+        {
+            str(failure.get("type"))
+            for request in requests
+            for failure in request.get("failures") or []
+        }
+    )
+    result_statuses = [str(request.get("result_status")) for request in requests]
+    return {
+        "fixture_ordinal": fixture_ordinal,
+        "fixture_id": preview.get("fixture_id"),
+        "adapter_fixture_id": preview.get("adapter_fixture_id"),
+        "query_id_hash": preview.get("query_id_hash"),
+        "result_status": "passed"
+        if result_statuses and all(status == "passed" for status in result_statuses)
+        else "failed",
+        "request_statuses": result_statuses,
+        "failed_gate_ids": failed_gate_ids,
+        "failure_types": failure_types,
+        "artifact_hashes": dict(artifact.get("artifact_hashes") or {}),
+        "fixture_hashes": dict(artifact.get("fixture") or {}),
+        "hard_gate_summary": list(artifact.get("hard_gates") or []),
+        "aggregate_metrics": dict(artifact.get("aggregate_metrics") or {}),
+    }
+
+
+def _negative_control_summary(
+    *,
+    artifact: Mapping[str, Any],
+    preview: Mapping[str, Any],
+    fixture_ordinal: int,
+    control: Mapping[str, Any],
+) -> dict[str, Any]:
+    summary = _run_validation_summary(
+        artifact=artifact,
+        preview=preview,
+        fixture_ordinal=fixture_ordinal,
+    )
+    expected_failure_types = set(control.get("expected_failure_types") or [])
+    expected_gate_ids = set(control.get("expected_gate_ids") or [])
+    observed_failure_types = set(summary["failure_types"])
+    observed_gate_ids = set(summary["failed_gate_ids"])
+    expected_observed = bool(
+        expected_failure_types <= observed_failure_types
+        and expected_gate_ids <= observed_gate_ids
+        and summary["request_statuses"]
+        and all(status == "failed" for status in summary["request_statuses"])
+    )
+    return {
+        "control_id": control.get("control_id"),
+        "adapter_id": control.get("adapter_id"),
+        "fixture_ordinal": fixture_ordinal,
+        "fixture_id": preview.get("fixture_id"),
+        "adapter_fixture_id": preview.get("adapter_fixture_id"),
+        "query_id_hash": preview.get("query_id_hash"),
+        "expected_failure_types": sorted(expected_failure_types),
+        "expected_gate_ids": sorted(expected_gate_ids),
+        "observed_failure_types": summary["failure_types"],
+        "observed_failed_gate_ids": summary["failed_gate_ids"],
+        "negative_control_status": "passed" if expected_observed else "failed",
+        "request_statuses": summary["request_statuses"],
+        "artifact_hashes": summary["artifact_hashes"],
+        "fixture_hashes": summary["fixture_hashes"],
+        "hard_gate_summary": summary["hard_gate_summary"],
+        "applicability": control.get("applicability"),
+    }
+
+
+def _applicable_negative_controls(
+    fixture: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    experience_count = len(fixture.get("experiences") or [])
+    controls = [
+        {
+            "control_id": "duplicate_support",
+            "adapter_id": "memory_eval_broken_duplicate_support",
+            "adapter_factory": DuplicateSupportAdapter,
+            "expected_failure_types": ["duplicate_support_reference"],
+            "expected_gate_ids": ["no_duplicate_support_reference"],
+            "min_experiences": 1,
+            "applicability": (
+                "Uses the first applied public evidence ID twice, so it remains "
+                "applicable to ordinary all-ingested MemBench dry-run fixtures."
+            ),
+        },
+        {
+            "control_id": "unscorable_evidence",
+            "adapter_id": "memory_eval_broken_unscorable_evidence",
+            "adapter_factory": UnscorableEvidenceAdapter,
+            "expected_failure_types": ["unscorable_evidence"],
+            "expected_gate_ids": ["required_support_mapping_present"],
+            "min_experiences": 0,
+            "applicability": (
+                "Returns evidence without support_experience_ids, exercising "
+                "the scorer support-mapping gate without fixture mutation."
+            ),
+        },
+        {
+            "control_id": "missing_usage",
+            "adapter_id": "memory_eval_broken_missing_usage",
+            "adapter_factory": MissingUsageAdapter,
+            "expected_failure_types": ["missing_usage"],
+            "expected_gate_ids": ["required_usage_present"],
+            "min_experiences": 1,
+            "applicability": (
+                "Returns a normal-looking item but omits usage despite the "
+                "manifest's latency-reporting capability."
+            ),
+        },
+        {
+            "control_id": "support_source_mismatch",
+            "adapter_id": "memory_eval_broken_support_source_mismatch",
+            "adapter_factory": SupportSourceMismatchAdapter,
+            "expected_failure_types": ["support_source_mismatch"],
+            "expected_gate_ids": ["support_source_consistency"],
+            "min_experiences": 2,
+            "applicability": (
+                "Requires two applied public evidence IDs so support and "
+                "source IDs can intentionally disagree."
+            ),
+        },
+    ]
+    return [
+        control
+        for control in controls
+        if experience_count >= int(control.get("min_experiences") or 0)
+    ]
+
+
+def _negative_controls_not_run_notes() -> list[dict[str, str]]:
+    return [
+        {
+            "control_id": "future_support",
+            "adapter_id": "memory_eval_broken_future_support",
+            "reason": (
+                "MTEB qrels dry-run fixtures ingest the selected corpus before "
+                "the request, so the hard-coded ex_000002 reference is not a "
+                "future support reference without reshaping the fixture."
+            ),
+        },
+        {
+            "control_id": "cross_scope_exposure",
+            "adapter_id": "memory_eval_broken_cross_scope_exposure",
+            "reason": (
+                "The dry-run converter intentionally emits one opaque scope; "
+                "cross-scope gates need a fixture with a second scorer-visible "
+                "scope."
+            ),
+        },
+        {
+            "control_id": "stale_as_fresh",
+            "adapter_id": "memory_eval_broken_stale_as_fresh",
+            "reason": (
+                "MTEB qrels dry-run previews have no mutation sequence or "
+                "stale evidence gold, so stale controls belong to future "
+                "update/supersede MemBench fixtures."
+            ),
+        },
+    ]
+
+
+def _validation_result_summary(results: list[Mapping[str, Any]]) -> dict[str, Any]:
+    status_counts = _counts(str(result.get("result_status")) for result in results)
+    hash_mismatch_count = sum(
+        1 for result in results if not all((result.get("hash_match") or {}).values())
+    )
+    leakage_failure_count = sum(
+        int(result.get("adapter_view_leakage_failure_count") or 0) for result in results
+    )
+    return {
+        "example_count": len(results),
+        "status_counts": status_counts,
+        "passed": bool(results)
+        and status_counts.get("passed", 0) == len(results)
+        and hash_mismatch_count == 0
+        and leakage_failure_count == 0,
+        "hash_mismatch_count": hash_mismatch_count,
+        "adapter_view_leakage_failure_count": leakage_failure_count,
+    }
+
+
+def _negative_control_result_summary(
+    results: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    status_counts = _counts(
+        str(result.get("negative_control_status")) for result in results
+    )
+    return {
+        "run_count": len(results),
+        "status_counts": status_counts,
+        "passed": bool(results) and status_counts.get("passed", 0) == len(results),
+    }
+
+
+def _validation_status(report: Mapping[str, Any]) -> str:
+    reference = (report.get("reference_adapter") or {}).get("result_summary") or {}
+    controls = (report.get("negative_controls") or {}).get("result_summary") or {}
+    if not report.get("selected_fixture_count"):
+        return "failed"
+    if not reference.get("passed"):
+        return "failed"
+    if (report.get("negative_controls") or {}).get("run") and not controls.get(
+        "passed"
+    ):
+        return "failed"
+    return "passed"
+
+
+def _counts(values: Iterable[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return counts
 
 
 def _load_default_manifest(root: Path) -> dict[str, Any]:
