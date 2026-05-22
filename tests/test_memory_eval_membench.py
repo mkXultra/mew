@@ -115,7 +115,99 @@ def test_mteb_source_manifest_commit_allowed_requires_complete_notice_fields(
     }
     assert report["notice_citation"]["declared_license"] == "mit"
     assert report["provenance"]["raw_file_hash_count"] == 3
+    assert report["redistribution_review"] == {
+        "approved": True,
+        "reviewer": "M6.25 source audit reviewer",
+        "reviewed_at": "2026-05-23",
+        "decision_basis": (
+            "Declared MIT dataset card terms, citation targets, pinned source "
+            "revision, local raw-source cache, and no-vendor fixture policy reviewed."
+        ),
+        "scope": "generated_fixtures_only",
+    }
     assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+def test_mteb_source_manifest_commit_allowed_requires_reviewer_approval_metadata(
+    tmp_path,
+):
+    manifest = _commit_allowed_ready_manifest(tmp_path)
+    manifest.pop("redistribution_review")
+
+    report = validate_mteb_source_manifest(manifest)
+
+    preconditions = report["phase_c_commit_preconditions"]
+    assert preconditions["status"] == "commit_allowed_not_ready"
+    assert preconditions["generated_fixture_commit_allowed"] is False
+    assert preconditions["raw_source_commit_allowed"] is False
+    assert {
+        "redistribution_review.approved:true",
+        "redistribution_review.reviewer",
+        "redistribution_review.reviewed_at",
+        "redistribution_review.decision_basis",
+        "redistribution_review.scope:generated_fixtures_only",
+    } <= set(preconditions["missing_required_fields"])
+
+
+@pytest.mark.parametrize(
+    ("case_name", "expected_missing_field"),
+    [
+        ("approval_false", "redistribution_review.approved:true"),
+        ("approval_string", "redistribution_review.approved:true"),
+        ("missing_reviewer", "redistribution_review.reviewer"),
+        ("placeholder_reviewer", "redistribution_review.reviewer"),
+        ("missing_reviewed_at", "redistribution_review.reviewed_at"),
+        ("placeholder_reviewed_at", "redistribution_review.reviewed_at"),
+        ("datetime_reviewed_at", "redistribution_review.reviewed_at"),
+        ("invalid_month_reviewed_at", "redistribution_review.reviewed_at"),
+        ("invalid_day_reviewed_at", "redistribution_review.reviewed_at"),
+        ("missing_decision_basis", "redistribution_review.decision_basis"),
+        ("placeholder_decision_basis", "redistribution_review.decision_basis"),
+        ("wrong_scope", "redistribution_review.scope:generated_fixtures_only"),
+    ],
+)
+def test_mteb_source_manifest_commit_allowed_rejects_invalid_review_approval(
+    tmp_path,
+    case_name,
+    expected_missing_field,
+):
+    manifest = _commit_allowed_ready_manifest(tmp_path)
+    review = manifest["redistribution_review"]
+
+    if case_name == "approval_false":
+        review["approved"] = False
+    elif case_name == "approval_string":
+        review["approved"] = "true"
+    elif case_name == "missing_reviewer":
+        review.pop("reviewer")
+    elif case_name == "placeholder_reviewer":
+        review["reviewer"] = "todo"
+    elif case_name == "missing_reviewed_at":
+        review.pop("reviewed_at")
+    elif case_name == "placeholder_reviewed_at":
+        review["reviewed_at"] = "unknown"
+    elif case_name == "datetime_reviewed_at":
+        review["reviewed_at"] = "2026-05-23T00:00:00Z"
+    elif case_name == "invalid_month_reviewed_at":
+        review["reviewed_at"] = "2026-99-99"
+    elif case_name == "invalid_day_reviewed_at":
+        review["reviewed_at"] = "2026-02-30"
+    elif case_name == "missing_decision_basis":
+        review.pop("decision_basis")
+    elif case_name == "placeholder_decision_basis":
+        review["decision_basis"] = "source audit required"
+    elif case_name == "wrong_scope":
+        review["scope"] = "raw_sources"
+    else:  # pragma: no cover - protects future parameter additions.
+        raise AssertionError(case_name)
+
+    report = validate_mteb_source_manifest(manifest)
+
+    preconditions = report["phase_c_commit_preconditions"]
+    assert preconditions["status"] == "commit_allowed_not_ready"
+    assert preconditions["generated_fixture_commit_allowed"] is False
+    assert expected_missing_field in preconditions["missing_required_fields"]
+    assert expected_missing_field in {finding["field"] for finding in report["findings"]}
 
 
 @pytest.mark.parametrize(
@@ -288,18 +380,55 @@ def test_mteb_source_audit_rejects_unknown_redistribution_status(tmp_path):
         )
 
 
+def test_mteb_audit_source_cli_records_review_approval_metadata(tmp_path):
+    _write_minimal_mteb_source(tmp_path)
+    output_path = tmp_path / "source_manifest.json"
+
+    assert (
+        membench_main(
+            [
+                "audit-source",
+                str(tmp_path),
+                "--source-revision",
+                PINNED_SOURCE_REVISION,
+                "--declared-license",
+                "mit",
+                "--license-source",
+                "Hugging Face dataset card",
+                "--license-source-url",
+                "https://huggingface.co/datasets/mteb/MemBench",
+                "--citation-target",
+                "mteb/MemBench dataset card",
+                "--redistribution-status",
+                "commit_allowed",
+                "--redistribution-review-approved",
+                "--redistribution-reviewer",
+                "M6.25 source audit reviewer",
+                "--redistribution-reviewed-at",
+                "2026-05-23",
+                "--redistribution-decision-basis",
+                "Pinned source, declared license, citations, and no-vendor policy reviewed.",
+                "--redistribution-review-scope",
+                "generated_fixtures_only",
+                "--output",
+                str(output_path),
+            ]
+        )
+        == 0
+    )
+
+    manifest = json.loads(output_path.read_text(encoding="utf-8"))
+    report = validate_mteb_source_manifest(manifest)
+
+    assert manifest["redistribution_review"]["approved"] is True
+    assert report["phase_c_commit_preconditions"]["status"] == "commit_allowed_ready"
+    assert report["phase_c_commit_preconditions"]["raw_source_commit_allowed"] is False
+
+
 def test_mteb_validate_source_manifest_cli_reports_phase_c_status(
     tmp_path, capsys
 ):
-    _write_minimal_mteb_source(tmp_path)
-    manifest = audit_mteb_source_manifest(
-        tmp_path,
-        source_revision=PINNED_SOURCE_REVISION,
-        declared_license="mit",
-        license_source="Hugging Face dataset card",
-        citation_targets=["mteb/MemBench dataset card", "MTEB"],
-        redistribution_status="commit_allowed",
-    )
+    manifest = _commit_allowed_ready_manifest(tmp_path)
     manifest_path = tmp_path / "source_manifest.json"
     manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
 
@@ -779,6 +908,14 @@ def _commit_allowed_ready_manifest(tmp_path):
             "MTEB",
         ],
         redistribution_status="commit_allowed",
+        redistribution_review_approved=True,
+        redistribution_reviewer="M6.25 source audit reviewer",
+        redistribution_reviewed_at="2026-05-23",
+        redistribution_decision_basis=(
+            "Declared MIT dataset card terms, citation targets, pinned source "
+            "revision, local raw-source cache, and no-vendor fixture policy reviewed."
+        ),
+        redistribution_review_scope="generated_fixtures_only",
     )
 
 

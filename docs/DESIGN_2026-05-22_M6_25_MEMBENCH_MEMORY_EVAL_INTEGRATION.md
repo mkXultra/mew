@@ -715,6 +715,12 @@ raw_file_hashes: required
 local_cache_only: true
 generated_fixture_commit_policy: no_vendor_by_default
 redistribution_status: private_only | commit_allowed | blocked
+redistribution_review:
+  approved: true
+  reviewer: "<reviewer name or handle>"
+  reviewed_at: "calendar-valid YYYY-MM-DD"
+  decision_basis: "<non-placeholder summary of the review basis>"
+  scope: generated_fixtures_only
 notice_file_required_if_committed: true
 ```
 
@@ -745,6 +751,15 @@ source and license-source URLs, declared license source, citation targets,
 `docs/THIRD_PARTY_DATA.md` notice metadata present. `blocked` and invalid
 source-audit states refuse MTEB qrels dry-run conversion.
 
+Phase 4b implementation note: `commit_allowed` also requires explicit
+`redistribution_review` metadata before
+`phase_c_commit_preconditions.status` can become `commit_allowed_ready`.
+The review block must have `approved: true`, non-placeholder `reviewer`,
+`reviewed_at` as a calendar-valid `YYYY-MM-DD` date, non-placeholder
+`decision_basis`, and `scope: generated_fixtures_only`. This approval covers
+only generated fixture commit readiness. It never changes
+`raw_source_commit_allowed: false` and is not legal advice.
+
 ### Phase A: Source Audit
 
 Generated MemBench-derived fixtures MUST NOT be committed until:
@@ -754,7 +769,8 @@ Generated MemBench-derived fixtures MUST NOT be committed until:
 - code license and data license are reviewed separately;
 - redistribution permission for generated fixtures is classified as
   `commit_allowed`, `private_only`, or `blocked`;
-- a reviewer explicitly approves the selected redistribution status.
+- a reviewer explicitly approves generated fixture commit readiness in
+  `redistribution_review` when `redistribution_status` is `commit_allowed`.
 
 Before any fixture generation, also verify whether data is available through
 the GitHub repository, Git LFS, Google Drive, Baidu, or another source, and
@@ -839,8 +855,10 @@ remain required before any generated MemBench-derived fixtures are committed.
 Phase C fixture generation is blocked unless Phase A marks selected source
 files as `commit_allowed` or explicitly `private_only` for local-only
 evaluation. A generated fixture pack may be committed only when the selected
-source audit status is `commit_allowed`; `private_only` permits local-only
-evaluation artifacts but not committed fixtures.
+source audit status is `commit_allowed` and the manifest includes complete
+`redistribution_review` approval metadata scoped to
+`generated_fixtures_only`; `private_only` permits local-only evaluation
+artifacts but not committed fixtures.
 
 Create a first reviewed pack only after Phase A and B pass:
 
@@ -857,6 +875,8 @@ map cleanly. Do not chase category coverage at the cost of unclear gold.
 First generated fixture pack acceptance gate:
 
 - source audit status is `commit_allowed` for committed fixtures;
+- `redistribution_review.approved` is exactly `true`, with non-placeholder
+  reviewer, review date, decision basis, and `scope: generated_fixtures_only`;
 - converter dry-run report has been reviewed;
 - every qrel maps to exactly known source messages;
 - every target support is applied before request time;
@@ -987,7 +1007,7 @@ The implementation phase should be reproducible without live network access:
 
 | Risk | Mitigation |
 | --- | --- |
-| License or redistribution ambiguity | Treat as a hard blocker before committing derived fixtures; classify redistribution as `commit_allowed`, `private_only`, or `blocked` and require reviewer approval. |
+| License or redistribution ambiguity | Treat as a hard blocker before committing derived fixtures; classify redistribution as `commit_allowed`, `private_only`, or `blocked` and require explicit `redistribution_review` approval for generated fixtures only. |
 | Synthetic data quality | Start with manually reviewed small packs; document skipped examples and known artifacts. |
 | Public benchmark leakage | Do not claim MemBench leaderboard comparability; keep held-out mew splits for regression. |
 | Answer-model contamination | Keep answer artifacts secondary and exclude them from primary `memory_eval` scores. |
@@ -1007,8 +1027,8 @@ Reviewers should verify:
 - The design keeps MemBench official answer accuracy out of primary
   `memory_eval` scoring.
 - License and redistribution status are explicit, separately reviewing code
-  and data licenses, with a reviewer-approved status of `commit_allowed`,
-  `private_only`, or `blocked`.
+  and data licenses, with `commit_allowed` gated by complete
+  `redistribution_review` metadata for generated fixtures only.
 - Converter tests cover integer target IDs, multiple target IDs, high-level
   pair-like IDs, nested first-agent sessions, noise relocation, ambiguous
   rejection, duplicate source locator disambiguation, missing-message qrels,

@@ -28,12 +28,30 @@ conversion dry runs, and in-memory validation, but generated fixture commits
 remain disallowed.
 
 `commit_allowed` means a reviewer has selected the status and the source
-manifest must include notice, citation, and provenance fields: source dataset,
-source host, declared license, and license source as non-placeholder values;
-absolute non-placeholder source and license-source URLs; immutable revision;
-raw file hashes in full `sha256:<64 hex>` form; citation targets when
-required; `generated_fixture_commit_policy: no_vendor_by_default`; and this
-notice file with complete coverage flags.
+manifest must include notice, citation, provenance, and explicit reviewer
+approval fields: source dataset, source host, declared license, and license
+source as non-placeholder values; absolute non-placeholder source and
+license-source URLs; immutable revision; raw file hashes in full
+`sha256:<64 hex>` form; citation targets when required;
+`generated_fixture_commit_policy: no_vendor_by_default`; this notice file with
+complete coverage flags; and a `redistribution_review` block.
+
+The required `redistribution_review` block is:
+
+```json
+{
+  "approved": true,
+  "reviewer": "reviewer name or handle",
+  "reviewed_at": "calendar-valid YYYY-MM-DD",
+  "decision_basis": "short non-placeholder basis for the decision",
+  "scope": "generated_fixtures_only"
+}
+```
+
+This approval scope never permits raw MemBench source vendoring. It only
+records that a reviewer approved generated fixture commit readiness based on
+the manifest, notices, citations, and source provenance. It is still not legal
+advice.
 
 `blocked` means neither committed generated fixtures nor local generated fixture
 packs should proceed from that source manifest until the status changes.
@@ -46,4 +64,5 @@ whose `phase_c_commit_preconditions.status` is `commit_allowed_ready`.
 
 This gate does not permit raw-source vendoring. It only permits a later reviewed
 MemBench-derived fixture pack when the source manifest, notices, citations, and
-hash provenance are complete.
+hash provenance are complete and `redistribution_review.approved` is exactly
+`true` for `scope: generated_fixtures_only`.

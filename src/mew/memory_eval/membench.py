@@ -14,6 +14,7 @@ import re
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -44,11 +45,14 @@ DEFAULT_SCOPE_ID = "tenant_mb/user_000001"
 DEFAULT_QUERY_TIME = "2026-05-22T00:00:00Z"
 DEFAULT_VALIDATION_CREATED_AT = "2026-05-22T00:00:00Z"
 REDISTRIBUTION_STATUSES = ("private_only", "commit_allowed", "blocked")
+REDISTRIBUTION_REVIEW_SCOPE = "generated_fixtures_only"
 UNPINNED_REVISION_VALUES = {"", "latest", "main", "master", "unresolved"}
 PINNED_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
+REVIEWED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PLACEHOLDER_TEXT_VALUES = {
     "",
+    "...",
     "n/a",
     "none",
     "placeholder",
@@ -168,6 +172,11 @@ def audit_mteb_source_manifest(
     citation_targets: Iterable[str] | None = None,
     third_party_notice_file: str | None = None,
     redistribution_status: str | None = None,
+    redistribution_review_approved: bool | None = None,
+    redistribution_reviewer: str | None = None,
+    redistribution_reviewed_at: str | None = None,
+    redistribution_decision_basis: str | None = None,
+    redistribution_review_scope: str | None = None,
 ) -> dict[str, Any]:
     """Build a conservative external-source manifest from local cached files.
 
@@ -235,6 +244,14 @@ def audit_mteb_source_manifest(
         else existing.get("redistribution_status")
         or "private_only"
     )
+    redistribution_review = _redistribution_review_manifest(
+        existing=existing.get("redistribution_review"),
+        approved=redistribution_review_approved,
+        reviewer=redistribution_reviewer,
+        reviewed_at=redistribution_reviewed_at,
+        decision_basis=redistribution_decision_basis,
+        scope=redistribution_review_scope,
+    )
 
     warnings = []
     if not _is_pinned_revision(revision):
@@ -280,6 +297,7 @@ def audit_mteb_source_manifest(
         "redistribution_status": redistribution_status_value,
         "redistribution_status_options": list(REDISTRIBUTION_STATUSES),
         "redistribution_certainty": "reviewer_required",
+        "redistribution_review": redistribution_review,
         "notice_file_required_if_committed": True,
         "raw_file_hashes": raw_hashes,
         "raw_file_hash_status": "present" if raw_hashes else "missing",
@@ -351,7 +369,10 @@ def validate_mteb_source_manifest(
         phase_c_status = "commit_allowed_not_ready"
         commit_allowed = False
         local_evaluation_allowed = True
-        reasons = ["commit_allowed requires complete notice, citation, and provenance fields"]
+        reasons = [
+            "commit_allowed requires complete notice, citation, provenance, "
+            "and reviewer approval fields"
+        ]
     else:
         phase_c_status = "commit_allowed_ready"
         commit_allowed = True
@@ -394,6 +415,11 @@ def validate_mteb_source_manifest(
                 "generated_fixture_commit_policy"
             ),
         },
+        "redistribution_review": dict(
+            manifest.get("redistribution_review")
+            if isinstance(manifest.get("redistribution_review"), Mapping)
+            else {}
+        ),
         "findings": findings,
         "legal_review_note": (
             "This report records source-audit metadata and declared upstream "
@@ -843,6 +869,22 @@ def main(argv: list[str] | None = None) -> int:
     audit_parser.add_argument(
         "--redistribution-status", choices=REDISTRIBUTION_STATUSES
     )
+    audit_parser.add_argument(
+        "--redistribution-review-approved",
+        action="store_true",
+        help=(
+            "Record explicit reviewer approval for generated fixture commit "
+            "readiness; raw source vendoring remains disallowed."
+        ),
+    )
+    audit_parser.add_argument("--redistribution-reviewer")
+    audit_parser.add_argument("--redistribution-reviewed-at")
+    audit_parser.add_argument("--redistribution-decision-basis")
+    audit_parser.add_argument(
+        "--redistribution-review-scope",
+        default=None,
+        choices=[REDISTRIBUTION_REVIEW_SCOPE],
+    )
     audit_parser.add_argument("--output", required=True)
 
     source_report_parser = subcommands.add_parser("validate-source-manifest")
@@ -890,6 +932,12 @@ def main(argv: list[str] | None = None) -> int:
             citation_targets=args.citation_target,
             third_party_notice_file=args.third_party_notice_file,
             redistribution_status=args.redistribution_status,
+            redistribution_review_approved=args.redistribution_review_approved
+            or None,
+            redistribution_reviewer=args.redistribution_reviewer,
+            redistribution_reviewed_at=args.redistribution_reviewed_at,
+            redistribution_decision_basis=args.redistribution_decision_basis,
+            redistribution_review_scope=args.redistribution_review_scope,
         )
         write_json_artifact(args.output, manifest)
         return 0
@@ -1472,6 +1520,29 @@ def _validated_redistribution_status(value: Any) -> str:
     return status
 
 
+def _redistribution_review_manifest(
+    *,
+    existing: Any,
+    approved: bool | None,
+    reviewer: str | None,
+    reviewed_at: str | None,
+    decision_basis: str | None,
+    scope: str | None,
+) -> dict[str, Any]:
+    review = dict(existing) if isinstance(existing, Mapping) else {}
+    if approved is not None:
+        review["approved"] = approved
+    if reviewer is not None:
+        review["reviewer"] = reviewer
+    if reviewed_at is not None:
+        review["reviewed_at"] = reviewed_at
+    if decision_basis is not None:
+        review["decision_basis"] = decision_basis
+    if scope is not None:
+        review["scope"] = scope
+    return review
+
+
 def _is_pinned_revision(value: Any) -> bool:
     revision = str(value or "").strip()
     return bool(PINNED_REVISION_RE.fullmatch(revision))
@@ -1547,6 +1618,38 @@ def _missing_phase_c_commit_fields(manifest: Mapping[str, Any]) -> list[str]:
             flag
         ):
             missing.append(f"notice_requirements.{flag}")
+    missing.extend(_missing_redistribution_review_fields(manifest))
+    return missing
+
+
+def _missing_redistribution_review_fields(
+    manifest: Mapping[str, Any],
+) -> list[str]:
+    review = manifest.get("redistribution_review")
+    if not isinstance(review, Mapping):
+        return [
+            "redistribution_review.approved:true",
+            "redistribution_review.reviewer",
+            "redistribution_review.reviewed_at",
+            "redistribution_review.decision_basis",
+            "redistribution_review.scope:generated_fixtures_only",
+        ]
+
+    missing = []
+    if review.get("approved") is not True:
+        missing.append("redistribution_review.approved:true")
+    if _manifest_text_missing(review.get("reviewer")) or _is_placeholder_text(
+        review.get("reviewer")
+    ):
+        missing.append("redistribution_review.reviewer")
+    if not _is_reviewed_at_value(review.get("reviewed_at")):
+        missing.append("redistribution_review.reviewed_at")
+    if _manifest_text_missing(review.get("decision_basis")) or _is_placeholder_text(
+        review.get("decision_basis")
+    ):
+        missing.append("redistribution_review.decision_basis")
+    if review.get("scope") != REDISTRIBUTION_REVIEW_SCOPE:
+        missing.append("redistribution_review.scope:generated_fixtures_only")
     return missing
 
 
@@ -1567,6 +1670,19 @@ def _is_absolute_non_placeholder_url(value: Any) -> bool:
 
 def _is_full_sha256_digest(value: Any) -> bool:
     return bool(SHA256_DIGEST_RE.fullmatch(str(value or "").strip()))
+
+
+def _is_reviewed_at_value(value: Any) -> bool:
+    text = str(value or "").strip()
+    if _is_placeholder_text(text):
+        return False
+    if not REVIEWED_AT_RE.fullmatch(text):
+        return False
+    try:
+        date.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
 
 
 def _append_missing_once(missing: list[str], field: str) -> None:
