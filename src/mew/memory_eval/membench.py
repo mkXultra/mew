@@ -12,6 +12,7 @@ import hashlib
 import json
 import random
 import re
+import shutil
 import sys
 from collections import Counter, defaultdict
 from copy import deepcopy
@@ -19,6 +20,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
+from urllib.request import urlopen
 
 from .adapters.broken import (
     DuplicateSupportAdapter,
@@ -52,6 +54,8 @@ DEFAULT_VALIDATION_CREATED_AT = "2026-05-22T00:00:00Z"
 REDISTRIBUTION_STATUSES = ("private_only", "commit_allowed", "blocked")
 REDISTRIBUTION_REVIEW_SCOPE = "generated_fixtures_only"
 CORPUS_SAMPLE_POLICIES = ("full", "qrel_plus_prefix", "qrel_plus_random")
+PROFILE_SCHEMA_VERSION = "mew_membench_profile_run.v1"
+PROFILE_NAMES = ("membench-smoke200-typed",)
 UNPINNED_REVISION_VALUES = {"", "latest", "main", "master", "unresolved"}
 PINNED_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
@@ -1052,6 +1056,136 @@ def validate_mteb_qrels_dry_run(
     return report
 
 
+def run_profile(
+    profile_name: str,
+    *,
+    work_dir: str | Path = "tmp/membench-profiles",
+    revision: str | None = None,
+    clean: bool = False,
+    loader: HfDatasetLoader | None = None,
+) -> dict[str, Any]:
+    if profile_name not in PROFILE_NAMES:
+        raise MembenchConversionError(
+            f"unknown MemBench profile {profile_name!r}; available profiles: "
+            + ", ".join(PROFILE_NAMES)
+        )
+    if profile_name != "membench-smoke200-typed":
+        raise MembenchConversionError(f"profile is not implemented: {profile_name}")
+    source_revision = revision or _resolve_hf_membench_revision()
+    if not _is_pinned_revision(source_revision):
+        raise MembenchConversionError(
+            "MemBench profile requires a pinned 40-character dataset revision"
+        )
+
+    profile_dir = Path(work_dir) / profile_name
+    source_dir = profile_dir / "source"
+    dry_run_path = profile_dir / "dry_run.json"
+    validation_path = profile_dir / "validation.json"
+    report_path = profile_dir / "profile_report.json"
+    if clean and profile_dir.exists():
+        shutil.rmtree(profile_dir)
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    phases: dict[str, Any] = {}
+    prepared = prepare_hf_mteb_qrels_source(
+        source_dir,
+        dataset=MEMBENCH_HF_DATASET,
+        subset="single_hop",
+        revision=source_revision,
+        loader=loader,
+        declared_license="mit",
+        license_source="Hugging Face dataset card",
+        license_source_url=MEMBENCH_HF_DATASET_URL,
+        citation_targets=["mteb/MemBench dataset card", "MTEB"],
+    )
+    phases["setup.prepare"] = {
+        "status": "passed",
+        "source_dir": str(prepared.source_dir),
+        "source_manifest": str(prepared.manifest_path),
+        "source_files": _source_file_manifest(prepared),
+        "raw_source_committed": False,
+        "generated_fixture_pack_committed": False,
+    }
+
+    source_gate = validate_mteb_source_manifest(_load_json_object(prepared.manifest_path))
+    phases["setup.source_gate"] = {
+        "status": source_gate["phase_c_commit_preconditions"]["status"],
+        "generated_fixture_commit_allowed": source_gate[
+            "phase_c_commit_preconditions"
+        ]["generated_fixture_commit_allowed"],
+        "local_evaluation_allowed": source_gate["phase_c_commit_preconditions"][
+            "local_evaluation_allowed"
+        ],
+        "raw_source_commit_allowed": source_gate["phase_c_commit_preconditions"][
+            "raw_source_commit_allowed"
+        ],
+        "source_audit_report_hash": source_gate["source_audit_report_hash"],
+    }
+
+    dry_run = convert_mteb_qrels_dry_run(
+        prepared.source_dir,
+        manifest_path=prepared.manifest_path,
+        max_queries=1,
+        corpus_sample_policy="qrel_plus_prefix",
+        max_corpus_docs=200,
+    )
+    write_json_artifact(dry_run_path, dry_run)
+    phases["setup.dry_run"] = {
+        "status": "passed"
+        if dry_run["adapter_view_check_summary"]["passed"]
+        and dry_run["qrel_mapping"]["success_count"] > 0
+        else "failed",
+        "artifact": str(dry_run_path),
+        "dry_run_hash": dry_run["dry_run_hash"],
+        "candidate_counts": dry_run["candidate_counts"],
+        "corpus_sampling": dry_run["corpus_sampling"],
+        "adapter_view_check_summary": dry_run["adapter_view_check_summary"],
+    }
+
+    validation = validate_mteb_qrels_dry_run(dry_run, include_typed_cards=True)
+    write_json_artifact(validation_path, validation)
+    phases["run.validation"] = {
+        "status": validation["validation_status"],
+        "artifact": str(validation_path),
+        "validation_hash": validation["validation_hash"],
+        "qrels_oracle": validation["reference_adapter"]["result_summary"],
+        "typed_cards": validation["typed_cards_adapter"]["result_summary"],
+        "negative_controls": validation["negative_controls"]["result_summary"],
+    }
+    report = {
+        "schema_version": PROFILE_SCHEMA_VERSION,
+        "profile": profile_name,
+        "profile_config": {
+            "dataset": MEMBENCH_HF_DATASET,
+            "subset": "single_hop",
+            "revision": source_revision,
+            "max_queries": 1,
+            "corpus_sample_policy": "qrel_plus_prefix",
+            "max_corpus_docs": 200,
+            "include_typed_cards": True,
+        },
+        "artifacts": {
+            "source_dir": str(prepared.source_dir),
+            "source_manifest": str(prepared.manifest_path),
+            "dry_run": str(dry_run_path),
+            "validation": str(validation_path),
+            "profile_report": str(report_path),
+        },
+        "phases": phases,
+        "summary": _profile_summary(phases),
+        "commit_policy": {
+            "raw_source_committed": False,
+            "generated_fixture_pack_committed": False,
+            "profile_artifacts_local_only": True,
+        },
+    }
+    report["profile_hash"] = stable_hash(
+        {key: value for key, value in report.items() if key != "profile_hash"}
+    )
+    write_json_artifact(report_path, report)
+    return report
+
+
 def find_membench_adapter_leakage(
     adapter_view: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
@@ -1190,6 +1324,13 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--include-typed-cards", action="store_true")
     validate_parser.add_argument("--output")
 
+    profile_parser = subcommands.add_parser("profile")
+    profile_parser.add_argument("profile_name", choices=PROFILE_NAMES)
+    profile_parser.add_argument("--work-dir", default="tmp/membench-profiles")
+    profile_parser.add_argument("--revision")
+    profile_parser.add_argument("--clean", action="store_true")
+    profile_parser.add_argument("--output")
+
     args = parser.parse_args(argv)
     if args.command == "audit-source":
         manifest = audit_mteb_source_manifest(
@@ -1265,6 +1406,20 @@ def main(argv: list[str] | None = None) -> int:
         _write_or_print_json(report, args.output)
         return 0 if report["validation_status"] == "passed" else 1
 
+    if args.command == "profile":
+        try:
+            report = run_profile(
+                args.profile_name,
+                work_dir=args.work_dir,
+                revision=args.revision,
+                clean=args.clean,
+            )
+        except MembenchConversionError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        _write_or_print_json(report, args.output)
+        return 0 if report["summary"]["status"] == "passed" else 1
+
     report = convert_mteb_qrels_dry_run(
         args.source_dir,
         manifest_path=args.manifest,
@@ -1291,6 +1446,56 @@ def _write_or_print_json(value: Mapping[str, Any], output: str | None) -> None:
         write_json_artifact(output, value)
         return
     print(json.dumps(value, indent=2, sort_keys=True))
+
+
+def _resolve_hf_membench_revision() -> str:
+    try:
+        with urlopen(
+            "https://huggingface.co/api/datasets/mteb/MemBench",
+            timeout=20,
+        ) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        raise MembenchConversionError(
+            "Could not resolve mteb/MemBench revision from Hugging Face API; "
+            "pass --revision <40-character commit sha>."
+        ) from exc
+    revision = str(payload.get("sha") or "")
+    if not _is_pinned_revision(revision):
+        raise MembenchConversionError(
+            "Hugging Face API did not return a pinned mteb/MemBench revision; "
+            "pass --revision <40-character commit sha>."
+        )
+    return revision
+
+
+def _profile_summary(phases: Mapping[str, Any]) -> dict[str, Any]:
+    source_gate_status = str((phases.get("setup.source_gate") or {}).get("status"))
+    dry_run_status = str((phases.get("setup.dry_run") or {}).get("status"))
+    validation_status = str((phases.get("run.validation") or {}).get("status"))
+    qrels_oracle = (phases.get("run.validation") or {}).get("qrels_oracle") or {}
+    typed_cards = (phases.get("run.validation") or {}).get("typed_cards") or {}
+    setup_passed = (
+        (phases.get("setup.prepare") or {}).get("status") == "passed"
+        and source_gate_status in {"private_only", "commit_allowed_ready"}
+        and dry_run_status == "passed"
+    )
+    qrels_oracle_passed = qrels_oracle.get("passed") is True
+    typed_cards_passed = typed_cards.get("passed") is True
+    status = (
+        "passed"
+        if setup_passed and validation_status == "passed"
+        else "failed"
+    )
+    return {
+        "status": status,
+        "setup_passed": setup_passed,
+        "source_gate_status": source_gate_status,
+        "dry_run_status": dry_run_status,
+        "qrels_oracle_passed": qrels_oracle_passed,
+        "typed_cards_passed": typed_cards_passed,
+        "typed_cards_status_counts": dict(typed_cards.get("status_counts") or {}),
+    }
 
 
 def _fixture_from_dry_run_preview(preview: Mapping[str, Any]) -> dict[str, Any]:

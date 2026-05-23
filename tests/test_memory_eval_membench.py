@@ -17,6 +17,7 @@ from mew.memory_eval.membench import (
     convert_mteb_qrels_dry_run,
     main as membench_main,
     prepare_hf_mteb_qrels_source,
+    run_profile,
     validate_mteb_source_manifest,
     validate_mteb_qrels_dry_run,
 )
@@ -555,6 +556,77 @@ def test_prepare_hf_mteb_qrels_output_feeds_dry_run_and_validation(tmp_path):
         is False
     )
     assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+def test_mteb_profile_runs_setup_and_validation_with_fake_loader(tmp_path):
+    fixture_tree_before = _fixture_tree_snapshot()
+    calls = []
+
+    report = run_profile(
+        "membench-smoke200-typed",
+        work_dir=tmp_path / "profiles",
+        revision=PINNED_SOURCE_REVISION,
+        loader=_fake_hf_mteb_loader(calls),
+    )
+
+    assert [call["config_name"] for call in calls] == [
+        "single_hop-corpus",
+        "single_hop-queries",
+        "single_hop-qrels",
+    ]
+    assert report["schema_version"] == "mew_membench_profile_run.v1"
+    assert report["profile"] == "membench-smoke200-typed"
+    assert report["profile_config"] == {
+        "corpus_sample_policy": "qrel_plus_prefix",
+        "dataset": "mteb/MemBench",
+        "include_typed_cards": True,
+        "max_corpus_docs": 200,
+        "max_queries": 1,
+        "revision": PINNED_SOURCE_REVISION,
+        "subset": "single_hop",
+    }
+    assert report["phases"]["setup.prepare"]["status"] == "passed"
+    assert report["phases"]["setup.source_gate"]["status"] == "private_only"
+    assert report["phases"]["setup.dry_run"]["status"] == "passed"
+    assert report["phases"]["run.validation"]["qrels_oracle"]["passed"] is True
+    assert report["summary"]["setup_passed"] is True
+    assert report["summary"]["qrels_oracle_passed"] is True
+    assert report["commit_policy"] == {
+        "generated_fixture_pack_committed": False,
+        "profile_artifacts_local_only": True,
+        "raw_source_committed": False,
+    }
+    assert (tmp_path / "profiles" / "membench-smoke200-typed" / "dry_run.json").exists()
+    assert (
+        tmp_path / "profiles" / "membench-smoke200-typed" / "validation.json"
+    ).exists()
+    assert (
+        tmp_path / "profiles" / "membench-smoke200-typed" / "profile_report.json"
+    ).exists()
+    assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+def test_mteb_profile_cli_reports_revision_resolution_error_without_network(
+    tmp_path, monkeypatch, capsys
+):
+    def broken_urlopen(*args, **kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr("mew.memory_eval.membench.urlopen", broken_urlopen, raising=False)
+
+    assert (
+        membench_main(
+            [
+                "profile",
+                "membench-smoke200-typed",
+                "--work-dir",
+                str(tmp_path / "profiles"),
+            ]
+        )
+        == 1
+    )
+
+    assert "pass --revision" in capsys.readouterr().err
 
 
 def test_prepare_hf_mteb_qrels_missing_datasets_cli_message(

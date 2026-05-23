@@ -803,6 +803,23 @@ documents were included. Sampling is for local dry-run and adapter smoke
 validation; it does not create a committed fixture pack or change source-audit
 redistribution status.
 
+Phase 4f implementation note: `profile membench-smoke200-typed` is the
+operator-facing wrapper for the common local smoke run. It performs
+prepare/source-gate/dry-run/validation in one command, but the profile report
+keeps those phases separate:
+
+```text
+setup.prepare
+setup.source_gate
+setup.dry_run
+run.validation
+```
+
+The wrapper writes local artifacts under `tmp/membench-profiles` by default,
+uses `single_hop`, `max_queries=1`, `qrel_plus_prefix`, `max_corpus_docs=200`,
+and runs TypedCards validation. It is intended for local diagnosis and must not
+be treated as permission to commit raw source data or generated fixtures.
+
 ### Phase A: Source Audit
 
 Generated MemBench-derived fixtures MUST NOT be committed until:
