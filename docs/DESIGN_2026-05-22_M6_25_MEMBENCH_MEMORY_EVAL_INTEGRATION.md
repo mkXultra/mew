@@ -803,10 +803,9 @@ documents were included. Sampling is for local dry-run and adapter smoke
 validation; it does not create a committed fixture pack or change source-audit
 redistribution status.
 
-Phase 4f implementation note: `profile membench-smoke200-typed` is the
-operator-facing wrapper for the common local smoke run. It performs
-prepare/source-gate/dry-run/validation in one command, but the profile report
-keeps those phases separate:
+Phase 4f implementation note: MemBench profiles are operator-facing wrappers
+for local validation runs. They perform prepare/source-gate/dry-run/validation
+in one command, but the profile report keeps those phases separate:
 
 ```text
 setup.prepare
@@ -815,9 +814,15 @@ setup.dry_run
 run.validation
 ```
 
-The wrapper writes local artifacts under `tmp/membench-profiles` by default,
-uses `single_hop`, `max_queries=1`, `qrel_plus_prefix`, `max_corpus_docs=200`,
-and runs TypedCards validation. By default it pins Hugging Face
+Available initial profiles:
+
+| Profile | Purpose | Shape |
+| --- | --- | --- |
+| `membench-smoke200-typed` | Small wiring check. | `single_hop`, `max_queries=1`, `qrel_plus_prefix`, `max_corpus_docs=200`, TypedCards validation. |
+| `membench-sample1000-typed` | Intermediate local validation before a full profile. | `single_hop`, `max_queries=10`, `qrel_plus_prefix`, `max_corpus_docs=1000`, TypedCards validation. |
+
+The wrapper writes local artifacts under `tmp/membench-profiles` by default. By
+default it pins Hugging Face
 `mteb/MemBench` to dataset commit
 `1dd519e4d91573e2818d850eb4405fb290663ac2`; that revision is an upstream data
 snapshot pin for reproducibility, not a mew code version. The wrapper is

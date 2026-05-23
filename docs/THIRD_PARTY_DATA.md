@@ -55,19 +55,26 @@ The generated source manifest remains conservative: `local_cache_only: true`,
 local raw source files and a source manifest does not imply permission to
 commit raw data or generated fixtures.
 
-For the common smoke run, use the profile wrapper instead of the lower-level
-commands:
+For local profile runs, use the profile wrapper instead of the lower-level
+commands. The smoke profile is the smallest wiring check:
 
 ```sh
 python -m mew.memory_eval.membench profile membench-smoke200-typed
 ```
 
-The profile performs local source preparation, source-manifest validation,
-sampled dry-run conversion, and TypedCards validation. It uses the pinned
-Hugging Face `mteb/MemBench` dataset commit
-`1dd519e4d91573e2818d850eb4405fb290663ac2` by default so repeated smoke runs
-use the same upstream source snapshot. It still writes only local artifacts
-under `tmp/membench-profiles` by default and does not permit raw-source or
+The intermediate sample profile runs more queries against a larger sampled
+corpus before a future full profile:
+
+```sh
+python -m mew.memory_eval.membench profile membench-sample1000-typed
+```
+
+Profiles perform local source preparation, source-manifest validation, sampled
+dry-run conversion, and TypedCards validation. They use the pinned Hugging Face
+`mteb/MemBench` dataset commit
+`1dd519e4d91573e2818d850eb4405fb290663ac2` by default so repeated profile runs
+use the same upstream source snapshot. They still write only local artifacts
+under `tmp/membench-profiles` by default and do not permit raw-source or
 generated-fixture commits.
 
 ### Redistribution Status

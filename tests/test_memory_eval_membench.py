@@ -559,12 +559,21 @@ def test_prepare_hf_mteb_qrels_output_feeds_dry_run_and_validation(tmp_path):
     assert fixture_tree_before == _fixture_tree_snapshot()
 
 
-def test_mteb_profile_runs_setup_and_validation_with_fake_loader(tmp_path):
+@pytest.mark.parametrize(
+    ("profile_name", "max_queries", "max_corpus_docs"),
+    [
+        ("membench-smoke200-typed", 1, 200),
+        ("membench-sample1000-typed", 10, 1000),
+    ],
+)
+def test_mteb_profile_runs_setup_and_validation_with_fake_loader(
+    tmp_path, profile_name, max_queries, max_corpus_docs
+):
     fixture_tree_before = _fixture_tree_snapshot()
     calls = []
 
     report = run_profile(
-        "membench-smoke200-typed",
+        profile_name,
         work_dir=tmp_path / "profiles",
         loader=_fake_hf_mteb_loader(calls),
     )
@@ -576,13 +585,13 @@ def test_mteb_profile_runs_setup_and_validation_with_fake_loader(tmp_path):
     ]
     assert {call["revision"] for call in calls} == {MEMBENCH_HF_PROFILE_REVISION}
     assert report["schema_version"] == "mew_membench_profile_run.v1"
-    assert report["profile"] == "membench-smoke200-typed"
+    assert report["profile"] == profile_name
     assert report["profile_config"] == {
         "corpus_sample_policy": "qrel_plus_prefix",
         "dataset": "mteb/MemBench",
         "include_typed_cards": True,
-        "max_corpus_docs": 200,
-        "max_queries": 1,
+        "max_corpus_docs": max_corpus_docs,
+        "max_queries": max_queries,
         "revision": MEMBENCH_HF_PROFILE_REVISION,
         "subset": "single_hop",
     }
@@ -597,13 +606,10 @@ def test_mteb_profile_runs_setup_and_validation_with_fake_loader(tmp_path):
         "profile_artifacts_local_only": True,
         "raw_source_committed": False,
     }
-    assert (tmp_path / "profiles" / "membench-smoke200-typed" / "dry_run.json").exists()
-    assert (
-        tmp_path / "profiles" / "membench-smoke200-typed" / "validation.json"
-    ).exists()
-    assert (
-        tmp_path / "profiles" / "membench-smoke200-typed" / "profile_report.json"
-    ).exists()
+    profile_dir = tmp_path / "profiles" / profile_name
+    assert (profile_dir / "dry_run.json").exists()
+    assert (profile_dir / "validation.json").exists()
+    assert (profile_dir / "profile_report.json").exists()
     assert fixture_tree_before == _fixture_tree_snapshot()
 
 

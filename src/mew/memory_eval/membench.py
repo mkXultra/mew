@@ -54,11 +54,27 @@ REDISTRIBUTION_STATUSES = ("private_only", "commit_allowed", "blocked")
 REDISTRIBUTION_REVIEW_SCOPE = "generated_fixtures_only"
 CORPUS_SAMPLE_POLICIES = ("full", "qrel_plus_prefix", "qrel_plus_random")
 PROFILE_SCHEMA_VERSION = "mew_membench_profile_run.v1"
-PROFILE_NAMES = ("membench-smoke200-typed",)
 # Pinned Hugging Face dataset commit for `mteb/MemBench` used by the
-# `membench-smoke200-typed` profile. This is a dataset revision, not a code
-# release; pinning it keeps local source hashes and dry-run artifacts stable.
+# MemBench profiles. This is a dataset revision, not a code release; pinning it
+# keeps local source hashes and dry-run artifacts stable.
 MEMBENCH_HF_PROFILE_REVISION = "1dd519e4d91573e2818d850eb4405fb290663ac2"
+PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
+    "membench-smoke200-typed": {
+        "subset": "single_hop",
+        "max_queries": 1,
+        "corpus_sample_policy": "qrel_plus_prefix",
+        "max_corpus_docs": 200,
+        "include_typed_cards": True,
+    },
+    "membench-sample1000-typed": {
+        "subset": "single_hop",
+        "max_queries": 10,
+        "corpus_sample_policy": "qrel_plus_prefix",
+        "max_corpus_docs": 1000,
+        "include_typed_cards": True,
+    },
+}
+PROFILE_NAMES = tuple(PROFILE_CONFIGS)
 UNPINNED_REVISION_VALUES = {"", "latest", "main", "master", "unresolved"}
 PINNED_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
@@ -1072,8 +1088,7 @@ def run_profile(
             f"unknown MemBench profile {profile_name!r}; available profiles: "
             + ", ".join(PROFILE_NAMES)
         )
-    if profile_name != "membench-smoke200-typed":
-        raise MembenchConversionError(f"profile is not implemented: {profile_name}")
+    profile_config = PROFILE_CONFIGS[profile_name]
     source_revision = revision or MEMBENCH_HF_PROFILE_REVISION
     if not _is_pinned_revision(source_revision):
         raise MembenchConversionError(
@@ -1093,7 +1108,7 @@ def run_profile(
     prepared = prepare_hf_mteb_qrels_source(
         source_dir,
         dataset=MEMBENCH_HF_DATASET,
-        subset="single_hop",
+        subset=str(profile_config["subset"]),
         revision=source_revision,
         loader=loader,
         declared_license="mit",
@@ -1128,9 +1143,9 @@ def run_profile(
     dry_run = convert_mteb_qrels_dry_run(
         prepared.source_dir,
         manifest_path=prepared.manifest_path,
-        max_queries=1,
-        corpus_sample_policy="qrel_plus_prefix",
-        max_corpus_docs=200,
+        max_queries=int(profile_config["max_queries"]),
+        corpus_sample_policy=str(profile_config["corpus_sample_policy"]),
+        max_corpus_docs=int(profile_config["max_corpus_docs"]),
     )
     write_json_artifact(dry_run_path, dry_run)
     phases["setup.dry_run"] = {
@@ -1145,7 +1160,9 @@ def run_profile(
         "adapter_view_check_summary": dry_run["adapter_view_check_summary"],
     }
 
-    validation = validate_mteb_qrels_dry_run(dry_run, include_typed_cards=True)
+    validation = validate_mteb_qrels_dry_run(
+        dry_run, include_typed_cards=bool(profile_config["include_typed_cards"])
+    )
     write_json_artifact(validation_path, validation)
     phases["run.validation"] = {
         "status": validation["validation_status"],
@@ -1160,12 +1177,12 @@ def run_profile(
         "profile": profile_name,
         "profile_config": {
             "dataset": MEMBENCH_HF_DATASET,
-            "subset": "single_hop",
+            "subset": profile_config["subset"],
             "revision": source_revision,
-            "max_queries": 1,
-            "corpus_sample_policy": "qrel_plus_prefix",
-            "max_corpus_docs": 200,
-            "include_typed_cards": True,
+            "max_queries": profile_config["max_queries"],
+            "corpus_sample_policy": profile_config["corpus_sample_policy"],
+            "max_corpus_docs": profile_config["max_corpus_docs"],
+            "include_typed_cards": profile_config["include_typed_cards"],
         },
         "artifacts": {
             "source_dir": str(prepared.source_dir),
