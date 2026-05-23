@@ -10,6 +10,7 @@ from mew.memory_eval import membench as membench_module
 from mew.memory_eval.fixtures import split_fixture
 from mew.memory_eval.hashing import canonical_json
 from mew.memory_eval.membench import (
+    MEMBENCH_HF_PROFILE_REVISION,
     MembenchConversionError,
     audit_mteb_source_manifest,
     build_ephemeral_fixtures_from_dry_run,
@@ -565,7 +566,6 @@ def test_mteb_profile_runs_setup_and_validation_with_fake_loader(tmp_path):
     report = run_profile(
         "membench-smoke200-typed",
         work_dir=tmp_path / "profiles",
-        revision=PINNED_SOURCE_REVISION,
         loader=_fake_hf_mteb_loader(calls),
     )
 
@@ -574,6 +574,7 @@ def test_mteb_profile_runs_setup_and_validation_with_fake_loader(tmp_path):
         "single_hop-queries",
         "single_hop-qrels",
     ]
+    assert {call["revision"] for call in calls} == {MEMBENCH_HF_PROFILE_REVISION}
     assert report["schema_version"] == "mew_membench_profile_run.v1"
     assert report["profile"] == "membench-smoke200-typed"
     assert report["profile_config"] == {
@@ -582,7 +583,7 @@ def test_mteb_profile_runs_setup_and_validation_with_fake_loader(tmp_path):
         "include_typed_cards": True,
         "max_corpus_docs": 200,
         "max_queries": 1,
-        "revision": PINNED_SOURCE_REVISION,
+        "revision": MEMBENCH_HF_PROFILE_REVISION,
         "subset": "single_hop",
     }
     assert report["phases"]["setup.prepare"]["status"] == "passed"
@@ -604,29 +605,6 @@ def test_mteb_profile_runs_setup_and_validation_with_fake_loader(tmp_path):
         tmp_path / "profiles" / "membench-smoke200-typed" / "profile_report.json"
     ).exists()
     assert fixture_tree_before == _fixture_tree_snapshot()
-
-
-def test_mteb_profile_cli_reports_revision_resolution_error_without_network(
-    tmp_path, monkeypatch, capsys
-):
-    def broken_urlopen(*args, **kwargs):
-        raise OSError("offline")
-
-    monkeypatch.setattr("mew.memory_eval.membench.urlopen", broken_urlopen, raising=False)
-
-    assert (
-        membench_main(
-            [
-                "profile",
-                "membench-smoke200-typed",
-                "--work-dir",
-                str(tmp_path / "profiles"),
-            ]
-        )
-        == 1
-    )
-
-    assert "pass --revision" in capsys.readouterr().err
 
 
 def test_prepare_hf_mteb_qrels_missing_datasets_cli_message(

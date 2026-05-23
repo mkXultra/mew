@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
-from urllib.request import urlopen
 
 from .adapters.broken import (
     DuplicateSupportAdapter,
@@ -56,6 +55,10 @@ REDISTRIBUTION_REVIEW_SCOPE = "generated_fixtures_only"
 CORPUS_SAMPLE_POLICIES = ("full", "qrel_plus_prefix", "qrel_plus_random")
 PROFILE_SCHEMA_VERSION = "mew_membench_profile_run.v1"
 PROFILE_NAMES = ("membench-smoke200-typed",)
+# Pinned Hugging Face dataset commit for `mteb/MemBench` used by the
+# `membench-smoke200-typed` profile. This is a dataset revision, not a code
+# release; pinning it keeps local source hashes and dry-run artifacts stable.
+MEMBENCH_HF_PROFILE_REVISION = "1dd519e4d91573e2818d850eb4405fb290663ac2"
 UNPINNED_REVISION_VALUES = {"", "latest", "main", "master", "unresolved"}
 PINNED_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 SHA256_DIGEST_RE = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
@@ -1071,7 +1074,7 @@ def run_profile(
         )
     if profile_name != "membench-smoke200-typed":
         raise MembenchConversionError(f"profile is not implemented: {profile_name}")
-    source_revision = revision or _resolve_hf_membench_revision()
+    source_revision = revision or MEMBENCH_HF_PROFILE_REVISION
     if not _is_pinned_revision(source_revision):
         raise MembenchConversionError(
             "MemBench profile requires a pinned 40-character dataset revision"
@@ -1327,7 +1330,14 @@ def main(argv: list[str] | None = None) -> int:
     profile_parser = subcommands.add_parser("profile")
     profile_parser.add_argument("profile_name", choices=PROFILE_NAMES)
     profile_parser.add_argument("--work-dir", default="tmp/membench-profiles")
-    profile_parser.add_argument("--revision")
+    profile_parser.add_argument(
+        "--revision",
+        default=None,
+        help=(
+            "Override the profile's pinned Hugging Face dataset commit "
+            f"(default: {MEMBENCH_HF_PROFILE_REVISION})."
+        ),
+    )
     profile_parser.add_argument("--clean", action="store_true")
     profile_parser.add_argument("--output")
 
@@ -1446,27 +1456,6 @@ def _write_or_print_json(value: Mapping[str, Any], output: str | None) -> None:
         write_json_artifact(output, value)
         return
     print(json.dumps(value, indent=2, sort_keys=True))
-
-
-def _resolve_hf_membench_revision() -> str:
-    try:
-        with urlopen(
-            "https://huggingface.co/api/datasets/mteb/MemBench",
-            timeout=20,
-        ) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except Exception as exc:
-        raise MembenchConversionError(
-            "Could not resolve mteb/MemBench revision from Hugging Face API; "
-            "pass --revision <40-character commit sha>."
-        ) from exc
-    revision = str(payload.get("sha") or "")
-    if not _is_pinned_revision(revision):
-        raise MembenchConversionError(
-            "Hugging Face API did not return a pinned mteb/MemBench revision; "
-            "pass --revision <40-character commit sha>."
-        )
-    return revision
 
 
 def _profile_summary(phases: Mapping[str, Any]) -> dict[str, Any]:

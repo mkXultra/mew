@@ -817,8 +817,12 @@ run.validation
 
 The wrapper writes local artifacts under `tmp/membench-profiles` by default,
 uses `single_hop`, `max_queries=1`, `qrel_plus_prefix`, `max_corpus_docs=200`,
-and runs TypedCards validation. It is intended for local diagnosis and must not
-be treated as permission to commit raw source data or generated fixtures.
+and runs TypedCards validation. By default it pins Hugging Face
+`mteb/MemBench` to dataset commit
+`1dd519e4d91573e2818d850eb4405fb290663ac2`; that revision is an upstream data
+snapshot pin for reproducibility, not a mew code version. The wrapper is
+intended for local diagnosis and must not be treated as permission to commit
+raw source data or generated fixtures.
 
 ### Phase A: Source Audit
 
