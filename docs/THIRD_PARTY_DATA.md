@@ -40,14 +40,13 @@ The command loads configs named `<subset>-corpus`, `<subset>-queries`, and
 `top_ranked.jsonl`, and `source_manifest.json` in the chosen output
 directory. The output directory must not be under `fixtures/memory_eval`.
 
-This export path has an optional dependency on the Python `datasets` package.
-The project does not depend on `datasets` by default; if it is unavailable, the
-command fails with a clear message instead of downloading anything through a
-hidden fallback. When `datasets` is available, the default loader requests
-local-files-only cache access; a cache miss should fail rather than download
-MemBench during preparation. Older `datasets` versions that cannot provide
-`DownloadConfig(local_files_only=True)` should fail clearly instead of
-silently falling back to network access.
+This export path uses the Python `datasets` package from the development
+dependency group. Runtime installs do not need `datasets`; if it is unavailable,
+the command fails with a clear message instead of downloading anything through a
+hidden fallback. The default loader requests local-files-only cache access; a
+cache miss should fail rather than download MemBench during preparation. Older
+`datasets` versions that cannot provide `DownloadConfig(local_files_only=True)`
+should fail clearly instead of silently falling back to network access.
 
 `--revision` is required and must be an immutable-looking pinned commit SHA.
 The generated source manifest remains conservative: `local_cache_only: true`,

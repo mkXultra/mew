@@ -625,7 +625,7 @@ def test_prepare_hf_mteb_qrels_missing_datasets_cli_message(
     )
 
     captured = capsys.readouterr()
-    assert "Optional dependency 'datasets' is required" in captured.err
+    assert "Development dependency 'datasets' is required" in captured.err
     assert not (tmp_path / "hf_source").exists()
 
 

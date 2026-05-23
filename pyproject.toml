@@ -8,6 +8,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "datasets>=4.5.0",
     "pytest>=8.0",
     "pytest-testmon>=2.1",
     "ruff>=0.11",

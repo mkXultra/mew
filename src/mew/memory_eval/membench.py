@@ -2375,13 +2375,13 @@ def _default_hf_dataset_loader(
         from datasets import DownloadConfig, load_dataset
     except ModuleNotFoundError as exc:
         raise MembenchConversionError(
-            "Optional dependency 'datasets' is required to prepare Hugging Face "
-            "MemBench sources. Install it separately or pass an injected loader "
-            "in tests."
+            "Development dependency 'datasets' is required to prepare Hugging "
+            "Face MemBench sources. Install the dev dependencies or pass an "
+            "injected loader in tests."
         ) from exc
     except ImportError as exc:
         raise MembenchConversionError(
-            "Optional dependency 'datasets' must support "
+            "Development dependency 'datasets' must support "
             "DownloadConfig(local_files_only=True) for local/cache-only MemBench "
             "preparation. Upgrade datasets or pass an injected local-only loader."
         ) from exc

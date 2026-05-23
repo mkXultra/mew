@@ -769,14 +769,14 @@ loads configs named `<subset>-corpus`, `<subset>-queries`, and
 `<subset>-top_ranked`. It writes only local raw-source JSONL files and
 `source_manifest.json` under the chosen output directory, never under
 `fixtures/memory_eval`, and never creates a generated fixture pack. The helper
-has no hard project dependency on `datasets`; if the optional dependency is not
-installed, it fails clearly. When `datasets` is installed, the default loader
-uses a local-files-only download configuration so a cache miss fails rather
-than fetching raw MemBench during this preparation step. Older `datasets`
-versions that cannot provide `DownloadConfig(local_files_only=True)` must fail
-clearly instead of falling back to network access. The pinned `--revision`
-remains required before any Hugging Face load is attempted, and the generated
-manifest defaults to `local_cache_only: true`,
+uses the `datasets` development dependency; runtime installs still do not need
+`datasets`, and missing `datasets` should fail clearly. The default loader uses
+a local-files-only download configuration so a cache miss fails rather than
+fetching raw MemBench during this preparation step. Older `datasets` versions
+that cannot provide `DownloadConfig(local_files_only=True)` must fail clearly
+instead of falling back to network access. The pinned `--revision` remains
+required before any Hugging Face load is attempted, and the generated manifest
+defaults to `local_cache_only: true`,
 `generated_fixture_commit_policy: no_vendor_by_default`, and
 `redistribution_status: private_only`.
 
