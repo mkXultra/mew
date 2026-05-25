@@ -77,6 +77,21 @@ use the same upstream source snapshot. They still write only local artifacts
 under `tmp/membench-profiles` by default and do not permit raw-source or
 generated-fixture commits.
 
+TypedCards profile validation uses deterministic replay by default. Optional
+live extractor smoke is explicitly opt-in and non-gating by default:
+
+```sh
+python -m mew.memory_eval.membench validate-dry-run-report /path/to/dry_run.json \
+  --include-typed-cards \
+  --typed-cards-extractor-mode live_model \
+  --allow-live-model-tests \
+  --typed-cards-live-model gpt-5.5 \
+  --typed-cards-live-output-dir tmp/membench-live-model
+```
+
+Use live smoke for local extractor drift diagnostics only. Hermetic CI and
+release gates should keep deterministic replay as the source of truth.
+
 ### Redistribution Status
 
 `private_only` is the conservative default. It permits local-only audit,

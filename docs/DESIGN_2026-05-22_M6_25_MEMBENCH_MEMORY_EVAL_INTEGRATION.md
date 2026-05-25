@@ -910,10 +910,14 @@ against two adapter classes:
   MemBench-derived public experiences and return scorer-compatible support
   mappings through the neutral memory_eval adapter boundary.
 
-Initial MemBench runs against `TypedCardsMemoryEvalAdapter` should use its
-deterministic replay extractor mode. Live model extraction is out of scope
-until deterministic replay passes the curated dry-run fixture set and the
-converter/scorer checks are stable.
+Initial MemBench runs against `TypedCardsMemoryEvalAdapter` should keep
+deterministic replay extractor mode as the hermetic gating path. Live model
+extraction is now allowed only as an explicit local smoke/diagnostic path:
+`--typed-cards-extractor-mode live_model --allow-live-model-tests`. Live runs
+use the configured typed-card extractor backend, defaulting to codex
+`gpt-5.5`, write local artifacts, and are non-gating by default. A live failure
+should create diagnostics for extractor drift; it must not fail hermetic CI
+unless the operator explicitly opts into live-model gating.
 
 Adapter validation should not change fixture commit policy. Source audit,
 license/citation review, hash pinning, leakage checks, and reviewer approval
