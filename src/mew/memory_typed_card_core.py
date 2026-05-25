@@ -1000,6 +1000,91 @@ class OllamaVectorSummarySearchBackend(SummarySearchBackend):
         return tuple(hits[: max(0, limit)])
 
 
+class HybridSummarySearchBackend(SummarySearchBackend):
+    def __init__(
+        self,
+        *,
+        model_id: str = _DEFAULT_OLLAMA_EMBEDDING_MODEL,
+        base_url: str = _DEFAULT_OLLAMA_BASE_URL,
+        timeout_s: int = 30,
+        surface_config_hash: str | None = None,
+    ) -> None:
+        self.vector_backend = OllamaVectorSummarySearchBackend(
+            model_id=model_id,
+            base_url=base_url,
+            timeout_s=timeout_s,
+            surface_config_hash=surface_config_hash,
+        )
+        self.identity = SummarySearchBackendIdentity(
+            backend_kind="hybrid",
+            surface_config_hash=surface_config_hash or _default_retrieval_surface_config_hash(),
+            embedding_provider="ollama",
+            embedding_model_id=model_id,
+            backend_config_hash=stable_hash(
+                {
+                    "backend_kind": "hybrid",
+                    "embedding_provider": "ollama",
+                    "embedding_model_id": model_id,
+                    "base_url": base_url.rstrip("/"),
+                    "timeout_s": int(timeout_s or 30),
+                    "anchor_policy": "retrieval_terms_exact_v1",
+                    "vector_weight": "0.8500",
+                    "anchor_weight": "0.2500",
+                }
+            ),
+        )
+
+    def search(
+        self,
+        *,
+        query: str,
+        cards: Sequence[MemoryCard],
+        request: MemoryRecallRequest,
+        surface_config_hash: str,
+        limit: int,
+    ) -> tuple[SummarySearchHit, ...]:
+        vector_hits = {
+            hit.card_id: hit
+            for hit in self.vector_backend.search(
+                query=query,
+                cards=cards,
+                request=request,
+                surface_config_hash=surface_config_hash,
+                limit=len(cards),
+            )
+        }
+        query_tokens = _tokens(query)
+        identity = replace(self.identity, surface_config_hash=surface_config_hash)
+        hits = []
+        for card in sorted(cards, key=lambda item: item.card_id):
+            vector_hit = vector_hits.get(card.card_id)
+            vector_score = Decimal("0.0000") if vector_hit is None else Decimal(canonical_score(vector_hit.backend_score))
+            anchor_score = _retrieval_terms_anchor_score(card, query, query_tokens)
+            backend_score = min(
+                Decimal("1.0000"),
+                (vector_score * Decimal("0.8500")) + (anchor_score * Decimal("0.2500")),
+            )
+            matched_fields = set(vector_hit.matched_fields if vector_hit else ())
+            if anchor_score > 0:
+                matched_fields.add("retrieval_terms")
+            hits.append(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score=backend_score,
+                    score_components={
+                        "summary_backend_score": canonical_score(backend_score),
+                        "lexical_score": canonical_score(anchor_score),
+                        "vector_score": canonical_score(vector_score),
+                        "anchor_score": canonical_score(anchor_score),
+                    },
+                    matched_fields=tuple(sorted(matched_fields)),
+                    backend_identity=identity,
+                )
+            )
+        hits.sort(key=lambda item: (-item.backend_score, item.card_id))
+        return tuple(hits[: max(0, limit)])
+
+
 @dataclass(frozen=True)
 class _GraphExpansionResult:
     card_modifiers: Mapping[str, Decimal]
@@ -2587,9 +2672,14 @@ class TypedMemoryCore:
                 surface_config_hash=surface_config_hash,
             )
         if request.summary_search_backend == "hybrid":
-            # First implementation keeps hybrid pluggable but uses the deterministic
-            # anchor backend until vector+anchor fusion is wired behind replayable artifacts.
-            return DirectScanLexicalSummarySearchBackend(backend_kind="bm25", surface_config_hash=surface_config_hash)
+            if request.embedding_provider != "ollama":
+                raise ValueError("only ollama hybrid summary search is implemented")
+            return HybridSummarySearchBackend(
+                model_id=request.embedding_model_id or _DEFAULT_OLLAMA_EMBEDDING_MODEL,
+                base_url=request.embedding_base_url,
+                timeout_s=request.embedding_timeout_s,
+                surface_config_hash=surface_config_hash,
+            )
         raise ValueError("summary_search_backend is not implemented")
 
     def _invalidator_drop_reason(self, card: MemoryCard, current_evidence: CurrentEvidenceSnapshot | None) -> str | None:
@@ -2788,6 +2878,9 @@ class TypedMemoryCore:
             "budget_modifier": canonical_score(Decimal("0")),
             "final_score": canonical_score(final),
         }
+        if summary_hit is not None:
+            for key, value in summary_hit.score_components.items():
+                components.setdefault(key, value)
         return components, Decimal(components["final_score"]), exact_scope
 
     def _ranked_evidence(
@@ -3199,6 +3292,27 @@ def _vector_surface_text(card: MemoryCard) -> str:
         )
         if part
     )
+
+
+def _retrieval_terms_anchor_score(card: MemoryCard, query: str, query_tokens: set[str]) -> Decimal:
+    if not card.retrieval_terms:
+        return Decimal("0")
+    meaningful = _meaningful_query_tokens(query_tokens) or query_tokens
+    term_text = " ".join(card.retrieval_terms)
+    term_tokens = _tokens(term_text)
+    token_score = Decimal("0")
+    if meaningful:
+        token_score = Decimal(len(meaningful & term_tokens)) / Decimal(max(1, len(meaningful)))
+    normalized_query = _clean_text(query).casefold()
+    phrase_score = Decimal("0")
+    for term in card.retrieval_terms:
+        normalized_term = _clean_text(term).casefold()
+        if not normalized_term:
+            continue
+        if normalized_term in normalized_query or normalized_query in normalized_term:
+            phrase_score = Decimal("1.0000")
+            break
+    return max(token_score, phrase_score)
 
 
 def _index_mode_for_backend(backend_kind: str) -> str:

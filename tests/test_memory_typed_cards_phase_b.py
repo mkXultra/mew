@@ -16,6 +16,7 @@ from mew.memory_typed_card_core import (
     canonical_score,
     raw_memory_extraction_schema,
 )
+import mew.memory_typed_card_core as typed_card_core
 from mew.memory_typed_cards import (
     Applicability,
     Authority,
@@ -873,6 +874,59 @@ def test_summary_search_backend_receives_only_coarse_authorized_cards() -> None:
     assert backend.seen_card_ids == [visible.card_id]
     assert [item.evidence_ref for item in result.ranked_evidence] == [visible.card_id]
     assert result.dropped_count_by_reason["privacy_block"] == 1
+
+
+def test_hybrid_summary_search_combines_ollama_vector_and_retrieval_term_anchor(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_ollama_embed(*, model, inputs, base_url, timeout_s):
+        assert model == "qwen3-embedding:0.6b"
+        assert base_url == "http://localhost:11434"
+        assert timeout_s == 30
+        return [[1.0, 0.0] for _ in inputs]
+
+    def extractor(request, provenance_event, scope):
+        is_target = "TechInnovate" in request.raw_text
+        return {
+            "decision": "candidate",
+            "candidate": {
+                "kind": "semantic_fact",
+                "summary": "A family member has company information." if is_target else "A family member has unrelated travel information.",
+                "details": None,
+                "retrieval_terms": ["niece company", "TechInnovate Systems LLC"] if is_target else ["niece travel"],
+                "confidence": 0.9,
+                "authority": {"source": "self", "strength": "hint"},
+                "valence": {"polarity": "neutral", "effect": "use"},
+                "applicability": {"applies_to": [_scope().scope_key()]},
+                "proposed_by": "model",
+            },
+        }
+
+    monkeypatch.setattr(typed_card_core, "_ollama_embed", fake_ollama_embed)
+    core = TypedMemoryCore(extractor=extractor, clock=_Clock())
+    target = _ingest(core, raw_text="My niece runs TechInnovate Systems LLC.", source_experience_id="exp_target")
+    distractor = _ingest(core, raw_text="My niece asked about travel planning.", source_experience_id="exp_distractor")
+    assert target.proposal_card is not None
+    assert distractor.proposal_card is not None
+    _approved, target_commit = core.approve_and_commit_memory(target.proposal_card.card_id, actor="debug")
+    core.approve_and_commit_memory(distractor.proposal_card.card_id, actor="debug")
+
+    result = core.retrieve(
+        MemoryRecallRequest(
+            query="What is my niece company?",
+            scope=_scope(),
+            limit=2,
+            summary_search_backend="hybrid",
+            embedding_provider="ollama",
+            embedding_model_id="qwen3-embedding:0.6b",
+        )
+    )
+
+    top = result.ranked_evidence[0]
+    assert result.usage.index_mode == "hybrid"
+    assert top.evidence_ref == target_commit.card.card_id
+    assert top.score_components["vector_score"] == "1.0000"
+    assert top.score_components["anchor_score"] == "1.0000"
+    assert top.metadata["summary_search_backend"]["backend_kind"] == "hybrid"
+    assert top.metadata["summary_search_backend"]["embedding_model_id"] == "qwen3-embedding:0.6b"
 
 
 def test_raw_extractor_graph_nodes_become_proposal_graph_refs_for_expansion() -> None:
