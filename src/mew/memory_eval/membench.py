@@ -53,6 +53,15 @@ DEFAULT_VALIDATION_CREATED_AT = "2026-05-22T00:00:00Z"
 REDISTRIBUTION_STATUSES = ("private_only", "commit_allowed", "blocked")
 REDISTRIBUTION_REVIEW_SCOPE = "generated_fixtures_only"
 CORPUS_SAMPLE_POLICIES = ("full", "qrel_plus_prefix", "qrel_plus_random")
+TYPED_CARDS_SUMMARY_SEARCH_BACKENDS = (
+    "direct_scan_lexical",
+    "bm25",
+    "vector",
+    "hybrid",
+)
+TYPED_CARDS_VECTOR_BACKENDS = {"vector", "hybrid"}
+DEFAULT_TYPED_CARDS_EMBEDDING_PROVIDER = "ollama"
+DEFAULT_TYPED_CARDS_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
 PROFILE_SCHEMA_VERSION = "mew_membench_profile_run.v1"
 # Pinned Hugging Face dataset commit for `mteb/MemBench` used by the
 # MemBench profiles. This is a dataset revision, not a code release; pinning it
@@ -943,6 +952,9 @@ def validate_mteb_qrels_dry_run(
     seed: int | None = None,
     run_broken_controls: bool = True,
     include_typed_cards: bool = False,
+    typed_cards_summary_search_backend: str = "direct_scan_lexical",
+    typed_cards_embedding_provider: str = DEFAULT_TYPED_CARDS_EMBEDDING_PROVIDER,
+    typed_cards_embedding_model: str = DEFAULT_TYPED_CARDS_EMBEDDING_MODEL,
 ) -> dict[str, Any]:
     """Validate dry-run selected previews with in-memory memory_eval fixtures."""
 
@@ -1015,6 +1027,9 @@ def validate_mteb_qrels_dry_run(
             previews=previews,
             fixtures=fixtures,
             validation_seed=validation_seed,
+            summary_search_backend=typed_cards_summary_search_backend,
+            embedding_provider=typed_cards_embedding_provider,
+            embedding_model_id=typed_cards_embedding_model,
         )
 
     report = {
@@ -1044,6 +1059,13 @@ def validate_mteb_qrels_dry_run(
             "adapter_id": "mew_typed_cards_memory_eval",
             "extractor_mode": "deterministic_replay",
             "live_model_extraction": False,
+            "summary_search_backend": typed_cards_summary_search_backend,
+            "embedding_provider": typed_cards_embedding_provider
+            if typed_cards_summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
+            else None,
+            "embedding_model_id": typed_cards_embedding_model
+            if typed_cards_summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
+            else None,
             "setup_policy": "public_seed_eval_lifecycle_after_each_ingest",
             "result_summary": _validation_result_summary(typed_cards_results)
             if include_typed_cards
@@ -1082,6 +1104,9 @@ def run_profile(
     revision: str | None = None,
     clean: bool = False,
     loader: HfDatasetLoader | None = None,
+    typed_cards_summary_search_backend: str = "direct_scan_lexical",
+    typed_cards_embedding_provider: str = DEFAULT_TYPED_CARDS_EMBEDDING_PROVIDER,
+    typed_cards_embedding_model: str = DEFAULT_TYPED_CARDS_EMBEDDING_MODEL,
 ) -> dict[str, Any]:
     if profile_name not in PROFILE_NAMES:
         raise MembenchConversionError(
@@ -1161,7 +1186,11 @@ def run_profile(
     }
 
     validation = validate_mteb_qrels_dry_run(
-        dry_run, include_typed_cards=bool(profile_config["include_typed_cards"])
+        dry_run,
+        include_typed_cards=bool(profile_config["include_typed_cards"]),
+        typed_cards_summary_search_backend=typed_cards_summary_search_backend,
+        typed_cards_embedding_provider=typed_cards_embedding_provider,
+        typed_cards_embedding_model=typed_cards_embedding_model,
     )
     write_json_artifact(validation_path, validation)
     phases["run.validation"] = {
@@ -1183,6 +1212,15 @@ def run_profile(
             "corpus_sample_policy": profile_config["corpus_sample_policy"],
             "max_corpus_docs": profile_config["max_corpus_docs"],
             "include_typed_cards": profile_config["include_typed_cards"],
+        },
+        "typed_cards_adapter_config": {
+            "summary_search_backend": typed_cards_summary_search_backend,
+            "embedding_provider": typed_cards_embedding_provider
+            if typed_cards_summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
+            else None,
+            "embedding_model_id": typed_cards_embedding_model
+            if typed_cards_summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
+            else None,
         },
         "artifacts": {
             "source_dir": str(prepared.source_dir),
@@ -1242,6 +1280,28 @@ def write_json_artifact(path: str | Path, value: Mapping[str, Any]) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
         json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+
+def _add_typed_cards_backend_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--typed-cards-summary-search-backend",
+        choices=TYPED_CARDS_SUMMARY_SEARCH_BACKENDS,
+        default="direct_scan_lexical",
+        help=(
+            "Typed-card summary search backend used when --include-typed-cards "
+            "or a typed-card profile is enabled."
+        ),
+    )
+    parser.add_argument(
+        "--typed-cards-embedding-provider",
+        default=DEFAULT_TYPED_CARDS_EMBEDDING_PROVIDER,
+        help="Embedding provider for vector/hybrid typed-card summary search.",
+    )
+    parser.add_argument(
+        "--typed-cards-embedding-model",
+        default=DEFAULT_TYPED_CARDS_EMBEDDING_MODEL,
+        help="Embedding model for vector/hybrid typed-card summary search.",
     )
 
 
@@ -1326,6 +1386,7 @@ def main(argv: list[str] | None = None) -> int:
     validate_report_parser.add_argument("dry_run_report")
     validate_report_parser.add_argument("--seed", type=int)
     validate_report_parser.add_argument("--include-typed-cards", action="store_true")
+    _add_typed_cards_backend_args(validate_report_parser)
     validate_report_parser.add_argument("--output")
 
     validate_parser = subcommands.add_parser("validate-dry-run-mteb-qrels")
@@ -1342,6 +1403,7 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--max-corpus-docs", type=int)
     validate_parser.add_argument("--seed", type=int, default=12345)
     validate_parser.add_argument("--include-typed-cards", action="store_true")
+    _add_typed_cards_backend_args(validate_parser)
     validate_parser.add_argument("--output")
 
     profile_parser = subcommands.add_parser("profile")
@@ -1356,6 +1418,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     profile_parser.add_argument("--clean", action="store_true")
+    _add_typed_cards_backend_args(profile_parser)
     profile_parser.add_argument("--output")
 
     args = parser.parse_args(argv)
@@ -1429,6 +1492,11 @@ def main(argv: list[str] | None = None) -> int:
             _load_json_object(args.dry_run_report),
             seed=args.seed,
             include_typed_cards=args.include_typed_cards,
+            typed_cards_summary_search_backend=(
+                args.typed_cards_summary_search_backend
+            ),
+            typed_cards_embedding_provider=args.typed_cards_embedding_provider,
+            typed_cards_embedding_model=args.typed_cards_embedding_model,
         )
         _write_or_print_json(report, args.output)
         return 0 if report["validation_status"] == "passed" else 1
@@ -1440,6 +1508,11 @@ def main(argv: list[str] | None = None) -> int:
                 work_dir=args.work_dir,
                 revision=args.revision,
                 clean=args.clean,
+                typed_cards_summary_search_backend=(
+                    args.typed_cards_summary_search_backend
+                ),
+                typed_cards_embedding_provider=args.typed_cards_embedding_provider,
+                typed_cards_embedding_model=args.typed_cards_embedding_model,
             )
         except MembenchConversionError as exc:
             print(f"error: {exc}", file=sys.stderr)
@@ -1462,7 +1535,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     report = validate_mteb_qrels_dry_run(
-        report, seed=args.seed, include_typed_cards=args.include_typed_cards
+        report,
+        seed=args.seed,
+        include_typed_cards=args.include_typed_cards,
+        typed_cards_summary_search_backend=args.typed_cards_summary_search_backend,
+        typed_cards_embedding_provider=args.typed_cards_embedding_provider,
+        typed_cards_embedding_model=args.typed_cards_embedding_model,
     )
     _write_or_print_json(report, args.output)
     return 0 if report["validation_status"] == "passed" else 1
@@ -1616,6 +1694,9 @@ def _typed_cards_validation_results(
     previews: list[Mapping[str, Any]],
     fixtures: list[Mapping[str, Any]],
     validation_seed: int,
+    summary_search_backend: str = "direct_scan_lexical",
+    embedding_provider: str = DEFAULT_TYPED_CARDS_EMBEDDING_PROVIDER,
+    embedding_model_id: str = DEFAULT_TYPED_CARDS_EMBEDDING_MODEL,
 ) -> list[dict[str, Any]]:
     try:
         from .adapters.typed_cards import TypedCardsMemoryEvalAdapter
@@ -1644,7 +1725,12 @@ def _typed_cards_validation_results(
             typed_leakage = find_membench_adapter_leakage(typed_views.adapter_view)
             artifact = run_fixture(
                 typed_fixture,
-                TypedCardsMemoryEvalAdapter(extractor_mode="deterministic_replay"),
+                TypedCardsMemoryEvalAdapter(
+                    extractor_mode="deterministic_replay",
+                    summary_search_backend=summary_search_backend,
+                    embedding_provider=embedding_provider,
+                    embedding_model_id=embedding_model_id,
+                ),
                 seed=validation_seed,
                 fixture_ordinal=fixture_ordinal,
                 run_id=f"run_membench_typed_cards_{fixture_ordinal:06d}",
@@ -1692,6 +1778,17 @@ def _typed_cards_validation_results(
             "fixture_gold_hash": typed_views.fixture_gold_hash,
             "fixture_full_hash": typed_views.fixture_full_hash,
         }
+        summary["typed_cards_summary_search_backend"] = summary_search_backend
+        summary["typed_cards_embedding_provider"] = (
+            embedding_provider
+            if summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
+            else None
+        )
+        summary["typed_cards_embedding_model_id"] = (
+            embedding_model_id
+            if summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
+            else None
+        )
         if typed_leakage:
             summary["result_status"] = "failed"
             summary["failure_types"] = sorted(

@@ -595,6 +595,11 @@ def test_mteb_profile_runs_setup_and_validation_with_fake_loader(
         "revision": MEMBENCH_HF_PROFILE_REVISION,
         "subset": "single_hop",
     }
+    assert report["typed_cards_adapter_config"] == {
+        "embedding_model_id": None,
+        "embedding_provider": None,
+        "summary_search_backend": "direct_scan_lexical",
+    }
     assert report["phases"]["setup.prepare"]["status"] == "passed"
     assert report["phases"]["setup.source_gate"]["status"] == "private_only"
     assert report["phases"]["setup.dry_run"]["status"] == "passed"
@@ -1040,6 +1045,12 @@ def test_mteb_dry_run_validation_can_include_typed_cards_deterministic_replay(
     assert validation["typed_cards_adapter"]["run"] is True
     assert validation["typed_cards_adapter"]["extractor_mode"] == "deterministic_replay"
     assert validation["typed_cards_adapter"]["live_model_extraction"] is False
+    assert (
+        validation["typed_cards_adapter"]["summary_search_backend"]
+        == "direct_scan_lexical"
+    )
+    assert validation["typed_cards_adapter"]["embedding_provider"] is None
+    assert validation["typed_cards_adapter"]["embedding_model_id"] is None
     assert validation["typed_cards_adapter"]["result_summary"]["passed"] is True
     typed = validation["typed_cards_adapter"]["results"][0]
     assert typed["result_status"] == "passed"
@@ -1052,6 +1063,9 @@ def test_mteb_dry_run_validation_can_include_typed_cards_deterministic_replay(
         "fixture_full_hash_matches_preview": True,
     }
     assert typed["typed_cards_setup_mutation_count"] == 2
+    assert typed["typed_cards_summary_search_backend"] == "direct_scan_lexical"
+    assert typed["typed_cards_embedding_provider"] is None
+    assert typed["typed_cards_embedding_model_id"] is None
     assert typed["typed_cards_adapter_view_leakage_failure_count"] == 0
     assert typed["artifact_hashes"]["deterministic_result_hash"].startswith("sha256:")
     assert typed["artifact_hashes"]["retrieval_result_hash"].startswith("sha256:")
@@ -1065,6 +1079,28 @@ def test_mteb_dry_run_validation_can_include_typed_cards_deterministic_replay(
     assert typed["usage_summary"]["run_usage_reported"] is True
     assert typed["usage_summary"]["count_totals"]["cards_returned"] >= 1
     assert fixture_tree_before == _fixture_tree_snapshot()
+
+
+def test_mteb_dry_run_validation_can_select_typed_cards_summary_backend(
+    tmp_path,
+):
+    report = _validation_ready_dry_run_report(tmp_path)
+
+    validation = validate_mteb_qrels_dry_run(
+        report,
+        include_typed_cards=True,
+        typed_cards_summary_search_backend="bm25",
+    )
+
+    assert validation["validation_status"] == "passed"
+    assert validation["typed_cards_adapter"]["summary_search_backend"] == "bm25"
+    assert validation["typed_cards_adapter"]["embedding_provider"] is None
+    assert validation["typed_cards_adapter"]["embedding_model_id"] is None
+    typed = validation["typed_cards_adapter"]["results"][0]
+    assert typed["result_status"] == "passed"
+    assert typed["typed_cards_summary_search_backend"] == "bm25"
+    assert typed["typed_cards_embedding_provider"] is None
+    assert typed["typed_cards_embedding_model_id"] is None
 
 
 def test_mteb_validate_dry_run_report_cli_emits_stdout_json(tmp_path, capsys):
@@ -1096,6 +1132,8 @@ def test_mteb_validate_dry_run_report_cli_can_include_typed_cards(
                 "validate-dry-run-report",
                 str(report_path),
                 "--include-typed-cards",
+                "--typed-cards-summary-search-backend",
+                "bm25",
             ]
         )
         == 0
@@ -1104,6 +1142,7 @@ def test_mteb_validate_dry_run_report_cli_can_include_typed_cards(
     output = json.loads(capsys.readouterr().out)
     assert output["validation_status"] == "passed"
     assert output["typed_cards_adapter"]["run"] is True
+    assert output["typed_cards_adapter"]["summary_search_backend"] == "bm25"
     assert output["typed_cards_adapter"]["result_summary"]["passed"] is True
     assert output["typed_cards_adapter"]["results"][0]["result_status"] == "passed"
 
