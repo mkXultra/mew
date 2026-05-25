@@ -218,6 +218,9 @@ _QUERY_RELEVANCE_STOPWORDS = _ANCHOR_STOPWORDS | {
     "where",
     "why",
     "how",
+    "have",
+    "has",
+    "had",
 }
 _RAW_SPEAKER_ROLE_TOKENS = {"user", "assistant", "system", "tool", "developer"}
 
@@ -3216,17 +3219,17 @@ def _retrieval_anchor_terms(values: Any, raw_text: str) -> tuple[str, ...]:
         raw_values = values
     else:
         raw_values = ()
-    for match in _TOKEN_RE.finditer(raw_text or ""):
-        token = _raw_retrieval_anchor_token(match.group(0))
-        if token is None:
-            continue
-        terms.append(token)
     for value in raw_values:
         text = _clean_text(value)
         if len(text) > 96:
             text = text[:96].rstrip()
         if text:
             terms.append(text)
+    for match in _TOKEN_RE.finditer(raw_text or ""):
+        token = _raw_retrieval_anchor_token(match.group(0))
+        if token is None:
+            continue
+        terms.append(token)
     return tuple(_normalize_patch_retrieval_terms(terms)[:32])
 
 

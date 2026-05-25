@@ -900,31 +900,81 @@ def _add_second(value: str) -> str:
 
 
 def _clean_summary(text: str) -> str:
+    cleaned = _replay_user_surface(text)
+    cleaned = re.sub(r"^\s*(User|Assistant|System|Tool|Developer):\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned[:220].strip()
+    if cleaned:
+        return f"Memory: {cleaned}"
+    return "Memory extracted from public experience."
+
+
+def _replay_user_surface(text: str) -> str:
     cleaned = " ".join(str(text or "").split())
-    return cleaned[:512] or "Memory extracted from public experience."
+    user_match = re.search(
+        r"(?:^|\b)User:\s*(.*?)(?:\s*;\s*Assistant:|\s+Assistant:|$)",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if user_match:
+        return user_match.group(1).strip()
+    return cleaned
 
 
 def _replay_retrieval_terms(text: str) -> list[str]:
     terms = []
     seen = set()
-    for raw in str(text or "").split():
-        term = raw.strip(",:;!?()[]{}\"'")
+    surface = _replay_user_surface(text)
+
+    def add_term(raw_term: str) -> None:
+        term = raw_term.strip(",:;!?()[]{}\"'")
         if len(term) < 2:
-            continue
+            return
         key = term.casefold()
         if key in {"a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is", "of", "on", "or", "that", "the", "to", "use", "uses", "with"}:
-            continue
+            return
         if key in {"user", "assistant", "system", "tool", "developer"}:
-            continue
+            return
         if len(term) > 96:
-            continue
+            return
         if key in seen:
-            continue
+            return
         seen.add(key)
         terms.append(term)
+
+    for semantic_hint in _replay_semantic_hint_terms(surface):
+        add_term(semantic_hint)
+    for raw in surface.split():
+        add_term(raw)
         if len(terms) >= 32:
             break
     return terms
+
+
+def _replay_semantic_hint_terms(text: str) -> list[str]:
+    lowered = str(text or "").casefold()
+    hints: list[str] = []
+    if re.search(r"\b(mom|mother)\b", lowered):
+        hints.extend(["mother", "mom"])
+    if re.search(r"\b(dad|father)\b", lowered):
+        hints.extend(["father", "dad"])
+    if re.search(r"\bcowork'?s?\b|\bcoworker\b", lowered):
+        hints.extend(["coworker", "cowork"])
+    if re.search(r"\b(loves?|enjoys?|really into)\b", lowered) or re.search(
+        r"\binto\s+(?!it\b|that\b|this\b)\w+",
+        lowered,
+    ):
+        hints.extend(["hobby", "enjoy", "enjoys"])
+    if re.search(r"\bworks?\s+in\b", lowered):
+        hints.extend(["work", "works", "work location", "location"])
+    if re.search(r"\bfrom\s+[A-Z]", str(text or "")) or " hometown" in lowered:
+        hints.extend(["hometown", "home town", "location"])
+    if re.search(r"\bworks?\s+as\b|\bis\s+a\s+\w+", lowered):
+        hints.extend(["job", "occupation", "profession", "position", "living"])
+    if "email address" in lowered:
+        hints.extend(["email", "email address", "contact"])
+    if "company called" in lowered or "runs a company" in lowered:
+        hints.extend(["company", "work", "works"])
+    return hints
 
 
 def _replay_graph_nodes(text: str) -> list[dict[str, Any]]:

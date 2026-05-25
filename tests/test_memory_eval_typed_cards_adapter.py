@@ -552,6 +552,107 @@ def test_deterministic_replay_retrieval_terms_skip_speaker_roles_and_overlong_to
     assert all("test/" not in term.casefold() for term in committed.retrieval_terms)
 
 
+def test_deterministic_replay_synthesizes_short_transcript_summary() -> None:
+    adapter = TypedCardsMemoryEvalAdapter()
+    adapter.reset({"fixture_id": "fx_replay_short_transcript"})
+    receipt = adapter.ingest(
+        [
+            _experience(
+                "ex_short_transcript",
+                text=(
+                    "Data time: 09:05 AM\n\n"
+                    "User: My boss runs a company called Golden State Freight Lines.; "
+                    "Assistant: Noted."
+                ),
+            )
+        ]
+    )[0]
+
+    assert receipt["status"] == "success"
+    assert receipt["proposal_ids"]
+    assert receipt["dropped"] == []
+    proposal = adapter.core.memory_cards[receipt["proposal_ids"][0]]
+    assert proposal.summary == (
+        "Memory: My boss runs a company called Golden State Freight Lines."
+    )
+    assert "User:" not in proposal.summary
+    assert "Assistant:" not in proposal.summary
+
+
+def test_deterministic_replay_preserves_semantic_retrieval_hints_before_raw_tokens() -> None:
+    adapter = TypedCardsMemoryEvalAdapter()
+    adapter.reset({"fixture_id": "fx_replay_semantic_hints"})
+    metadata_words = " ".join(f"metadata{i}" for i in range(40))
+    receipt = adapter.ingest(
+        [
+            _experience(
+                "ex_hobby_hint",
+                text=(
+                    f"Data time: {metadata_words}\n\n"
+                    "User: My niece loves cooking and makes pasta every weekend.; "
+                    "Assistant: That sounds creative."
+                ),
+            )
+        ]
+    )[0]
+
+    assert receipt["status"] == "success"
+    proposal = adapter.core.memory_cards[receipt["proposal_ids"][0]]
+    assert {"hobby", "enjoy", "niece", "cooking"}.issubset(
+        set(proposal.retrieval_terms)
+    )
+    assert len(proposal.retrieval_terms) <= 32
+
+
+def test_deterministic_replay_ranks_hobby_relation_over_auxiliary_have_matches() -> None:
+    adapter = TypedCardsMemoryEvalAdapter()
+    adapter.reset({"fixture_id": "fx_replay_hobby_relation"})
+    adapter.ingest(
+        [
+            _experience(
+                "ex_boss_hobby",
+                text="User: My boss is really into sports; it's a big part of their life.",
+            ),
+            _experience(
+                "ex_boss_context",
+                text="User: Working with Maya is inspiring; it is nice to have a boss.",
+            ),
+            _experience(
+                "ex_hobby_context",
+                text="User: Clara would love to have me join her pottery hobby.",
+            ),
+        ]
+    )
+    adapter.mutate(
+        [
+            {
+                "op_id": f"seed_{experience_id}",
+                "lifecycle_type": "seed_eval",
+                "target_experience_id": experience_id,
+            }
+            for experience_id in (
+                "ex_boss_hobby",
+                "ex_boss_context",
+                "ex_hobby_context",
+            )
+        ]
+    )
+
+    result = adapter.retrieve(
+        {
+            "request_id": "rq_boss_hobby",
+            "scope_id": "tenant_a/user_a",
+            "query": {"text": "What hobby does the boss have?"},
+            "k": 3,
+            "budget": {"max_evidence_items": 3},
+        }
+    )
+
+    assert result["ranked_evidence"][0]["support_experience_ids"] == [
+        "ex_boss_hobby"
+    ]
+
+
 def test_update_forget_fixture_uses_current_support_and_does_not_leak_forgotten_ids() -> None:
     artifact = run_fixture(
         _fixture_with_seed_lifecycle(P1_FIXTURES / "update_forget_basic.json"),
