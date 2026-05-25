@@ -85,6 +85,9 @@ def test_live_runner_parser_defaults_to_home_codex_auth() -> None:
     assert str(args.auth_json).endswith(".codex/auth.json")
     assert args.seed_lifecycle is True
     assert args.expand_graph is False
+    assert args.summary_search_backend == "direct_scan_lexical"
+    assert args.embedding_provider == "ollama"
+    assert args.embedding_model == "qwen3-embedding:0.6b"
 
 
 def test_live_runner_parser_accepts_graph_controls() -> None:
@@ -102,6 +105,30 @@ def test_live_runner_parser_accepts_graph_controls() -> None:
     assert args.expand_graph is True
     assert args.graph_max_depth == 1
     assert args.graph_max_items == 9
+
+
+def test_live_runner_parser_accepts_summary_search_controls() -> None:
+    args = build_parser().parse_args(
+        [
+            "fixtures/memory_eval/p1/memory_on_happy_path_basic.json",
+            "--summary-search-backend",
+            "vector",
+            "--embedding-provider",
+            "ollama",
+            "--embedding-model",
+            "qwen3-embedding:0.6b",
+            "--embedding-base-url",
+            "http://localhost:11434",
+            "--embedding-timeout-s",
+            "45",
+        ]
+    )
+
+    assert args.summary_search_backend == "vector"
+    assert args.embedding_provider == "ollama"
+    assert args.embedding_model == "qwen3-embedding:0.6b"
+    assert args.embedding_base_url == "http://localhost:11434"
+    assert args.embedding_timeout_s == 45
 
 
 def test_live_runner_parser_accepts_normal_suite_without_fixture() -> None:
@@ -277,6 +304,8 @@ def test_run_live_typed_cards_suite_uses_injected_runner_and_writes_summary(tmp_
         output_dir=tmp_path,
         expand_graph=True,
         graph_max_items=9,
+        summary_search_backend="vector",
+        embedding_model_id="qwen3-embedding:0.6b",
         run_fixture_fn=fake_run_fixture,
     )
 
@@ -291,8 +320,13 @@ def test_run_live_typed_cards_suite_uses_injected_runner_and_writes_summary(tmp_
     assert calls[0][1]["fixture_ordinal"] == 1
     assert calls[0][1]["expand_graph"] is True
     assert calls[0][1]["graph_max_items"] == 9
+    assert calls[0][1]["summary_search_backend"] == "vector"
+    assert calls[0][1]["embedding_provider"] == "ollama"
+    assert calls[0][1]["embedding_model_id"] == "qwen3-embedding:0.6b"
     assert calls[-1][1]["fixture_ordinal"] == 9
     assert summary["expand_graph"] is True
+    assert summary["summary_search_backend"] == "vector"
+    assert summary["embedding_model_id"] == "qwen3-embedding:0.6b"
 
 
 def test_exit_code_for_suite_fails_when_any_fixture_failed() -> None:

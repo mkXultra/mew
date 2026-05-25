@@ -109,7 +109,7 @@ subsystem は、少なくとも adapter から以下の behavior を評価可能
 | `ingest(items)` | provenance capture + normal candidate/proposal ingest | Phase C adapter で fixture experience を provenance/support refs に変換する。 |
 | `setup(ops)` | public seed/approve/commit lifecycle setup | Phase C adapter で committed fixture memory を hash-covered public operations として作る。 |
 | `mutate(ops)` | update/delete/forget/supersede/tombstone | Phase B で core mutation semantics を deterministic に定義する。 |
-| `retrieve(query)` | recall pipeline | Phase B は structured/BM25 seed、Phase D は graph expansion を追加。 |
+| `retrieve(query)` | recall pipeline | Phase B は structured filters + injectable summary-search backend、Phase D は graph expansion を追加。 |
 | `report_usage(scope?)` | audit/log aggregation | Phase B から fixed `Usage` fields: latency source, card counts, graph counts, projection chars, and index mode を返す。 |
 | later `build_context` | MemoryContextBuilder / evidence packet | Phase E 以降。P0/P1 hard gate にはしない。 |
 | later `inspect_provenance` | provenance refs inspection | Phase E 以降。P0/P1 では support refs / role-bearing evidence links を最低限返す。 |
@@ -183,7 +183,7 @@ Read side
 ---------
 current task / query / scope / current repo evidence
   -> recall intent planning
-  -> seed retrieval by structured filters + BM25, vector later
+  -> seed retrieval by structured filters + injected summary-search backend
   -> bounded graph expansion
   -> governance filtering
   -> ranking
@@ -687,8 +687,12 @@ Rules:
 - terms must be concise tokens or short phrases, not full sentences, transcript excerpts, speaker-role prefixes, raw URLs, or long path/blob payloads。
 - duplicate terms are removed case-insensitively while preserving first occurrence order。
 - `retrieval_terms` participate in stable serialization and card hash lineage. Adding or changing them is a semantic retrieval mutation and must be audit-visible。
+- `retrieval_terms` inherit the card's `Scope` and `PrivacyRules`; they are never a separate cross-scope or lower-privacy search surface。
+- derived lexical/vector indexes over `retrieval_terms` must be invalidated, redacted, or rebuilt when the card or supporting provenance is forgotten, deleted, privacy-blocked, redacted, or scope-changed。
 - `retrieval_terms` must not include fixture gold labels, fixture modes, trap family names, or any scoring-only labels。
 - `retrieval_terms` do not replace `applicability`: anchors answer "what terms should match this claim"; applicability answers "where this claim may be used"。
+- every write path that can create or update searchable card prose must route `retrieval_terms` explicitly: candidates use `proposed_retrieval_terms`, seeded cards use `SeedCardSpec.retrieval_terms`, and mutation patches use `ReplacementContent.retrieval_terms`。
+- clear/empty semantics are explicit. `retrieval_terms: []` replaces the term list with an empty list; `retrieval_terms: null` is accepted only when `clear_fields` contains `retrieval_terms` and canonicalizes to the same empty-list replacement。
 - normal projection and context packets may omit `retrieval_terms`; debug/audit views may expose them after privacy filtering。
 
 #### `confidence`
@@ -978,7 +982,7 @@ GraphRefs:
 Rules:
 
 - graph refs are index/expansion references。
-- `graph_refs` may be empty in Phase B. Empty refs mean structured/lexical retrieval only, not an invalid card。
+- `graph_refs` may be empty in Phase B. Empty refs mean structured filters plus summary-search backend retrieval only, not an invalid card。
 - when present, refs must resolve to canonical `graph_nodes` / `graph_edges`; unresolved expanding refs fail validation for committed cards。
 - graph is never the only proof; role-bearing evidence links remain required for durable cards。
 
@@ -1130,6 +1134,8 @@ Rules:
 - Callers may send ambiguous natural language. Usability is preferred at the raw ingress boundary; requiring rich hints would move extraction responsibility to the caller and create hallucination-prone pseudo-structure。
 - The trusted runtime/session envelope may attach caller identity, current task/session IDs, default scope, source run/session/turn IDs, and auth context, but those are not user-supplied hints and are not treated as extracted memory facts。
 - The LLM extractor may infer event kind, scope, actor, applicability, authority candidate, and candidate shape from `raw_text` plus trusted runtime context。All inferred fields are proposal material with confidence/provenance, not durable truth。
+- The extractor-proposed scope may narrow a proposal inside the trusted runtime scope, add applicability annotations, or request clarification。It must not broaden scope, switch namespace, change `user_id`, change `repo_ref`, or create `team` / `shared` scope。
+- When the trusted runtime/session envelope marks runtime scope as authoritative, any extracted scope mismatch becomes a proposal warning/audit drop reason and is not stored as the card scope。
 - `ingest_raw` must not create committed cards directly。It may create provenance and candidate/proposal records; committed memory still requires the normal proposal/approval/commit path or explicit public `seed_eval` fixture setup。
 - If extraction is ambiguous, the system should preserve the raw text as provenance and stop at low-confidence candidate/proposal, rejection, or clarification-needed state rather than inventing structured hints。
 
@@ -1255,6 +1261,7 @@ MemoryCandidate:
   proposed_kind: MemoryCardKind
   summary: string
   details: string | null
+  proposed_retrieval_terms: list[string]
   evidence_links: list[EvidenceLink]
   proposed_scope: Scope
   proposed_authority: Authority
@@ -1267,6 +1274,8 @@ MemoryCandidate:
 ```
 
 Candidate confidence uses the same `[0.0, 1.0]` range and 4-decimal canonical hash rounding as card and graph-edge confidence.
+
+`proposed_retrieval_terms` uses the same validation and de-duplication rules as committed `MemoryCard.retrieval_terms`. Candidate extraction, deterministic replay fixtures, model proposals, public adapter ingest, and migration must preserve it through proposal/approval/commit or record an audit-visible reason for dropping/changing it.
 
 ### Normal ingest and privileged eval seeding
 
@@ -1492,9 +1501,9 @@ Intent tags are retrieval/ranking/audit tags only. Negative example: `avoid_repe
 
 ### Step 2: seed retrieval
 
-Initial retrieval should be deterministic and inspectable。
+Initial retrieval should be deterministic or replayable, inspectable, and backend-injected.
 
-Phase B seed retrieval uses direct scan or a synchronously rebuilt simple lexical/BM25 index over committed cards:
+Phase B seed retrieval uses structured filters plus a `SummarySearchBackend` over committed typed-card summary surfaces. The first implementation may use direct scan or a synchronously rebuilt simple lexical/BM25 backend as a deterministic baseline, but lexical/BM25 is not the architectural commitment. Vector or hybrid summary search can replace it after memory eval shows better recall/precision, provided the backend is artifacted and replayable for gated evaluation:
 
 ```text
 structured filters:
@@ -1506,7 +1515,7 @@ structured filters:
   contradiction_state allowed set
   authority minimum
 
-lexical/BM25:
+summary search surfaces:
   summary
   details
   retrieval_terms
@@ -1516,15 +1525,265 @@ lexical/BM25:
   file/symbol refs
 ```
 
-Vector retrieval can be added later behind observable score components。
+The backend boundary is narrow:
+
+```yaml
+SummarySearchBackend:
+  input:
+    query: string
+    authorized_cards: list[MemoryCard]
+    surface_config: RetrievalSurfaceConfig
+    limit: int
+  output:
+    hits: list[SearchHit]
+
+SearchHit:
+  card_id: string
+  backend_score: CanonicalScore
+  score_components: map[string, CanonicalScore]
+  matched_fields: list[string]
+  backend_id: string
+  backend_artifact: map[string, string]
+```
+
+Supported backend families:
+
+- `direct_scan_lexical` / `bm25`: deterministic baseline and exact-anchor fallback。
+- `vector`: summary embedding search over authorized typed-card surfaces。
+- `hybrid`: vector summary search plus exact/lexical `retrieval_terms` anchors。
+- `replay`: deterministic replay of a captured backend artifact for hermetic eval。
+
+`SummarySearchBackend` owns only candidate scoring over already-authorized card surfaces. It does not own privacy, scope, support semantics, evidence-link promotion, forget/redaction policy, approval state, or final projection.
+
+Memory eval should be able to run the same fixtures and recall requests against different summary-search backends. Backend selection is runtime/eval configuration, not hard-coded product behavior:
+
+```text
+summary_search_backend=direct_scan_lexical
+summary_search_backend=bm25
+summary_search_backend=vector
+summary_search_backend=hybrid
+summary_search_backend=replay
+```
+
+Score composition remains backend-independent:
 
 ```text
 score = structured_match
-      + lexical_score
-      + optional_vector_score
+      + summary_backend_score
+      + optional_anchor_score
       + optional_reranker_score
       + authority/freshness/confidence modifiers
 ```
+
+### Short-term hybrid recall/search tooling boundary
+
+The next recall/tooling design slice is short-term memory recall, not long-term memory consolidation. It may read active session/reentry state and committed typed `MemoryCard` records through governed recall paths, but it does not introduce autonomous long-term writes, consolidation, or prompt injection.
+
+Chosen direction:
+
+```text
+natural-language question
+  -> memory_semantic_search over governed typed-card surfaces
+  -> memory_context_grep over candidate transformed search docs for exact verification
+  -> optional graph expansion from governed seeds / evidence packet after governance gates
+```
+
+This is not plain RAG, not pure GraphRAG, and not unbounded agentic grep. It is a bounded hybrid: deterministic/governed candidate generation over approved memory surfaces, plus optional agentic verification tools whose search space is candidate-limited by default and audit-visible.
+
+Semantic recall/search rules:
+
+- Phase B/D introduce internal candidate generation first: `memory_semantic_search_internal` is broad recall from Google-like natural-language text over governed typed-card surfaces. Adapter `retrieve(query)` may use this internal candidate generator before any LLM-visible tool exists.
+- Phase F may expose `memory_semantic_search` as a provider-visible LLM tool, default-off, after core retrieval and adapter artifacts are already stable.
+- `memory_semantic_search_internal` / `memory_semantic_search` use the injected `SummarySearchBackend`. The backend may be lexical/BM25, vector, hybrid, replay, reranking, or RAG-like candidate generation only over synthesized/typed `MemoryCard` surfaces.
+- summary search method is intentionally swappable. Lexical/BM25 may be the first deterministic baseline; vector or hybrid may become the preferred/default backend if memory eval shows better top-k recall, top-1 precision, scope safety, and support correctness.
+- Searchable card surfaces are `summary`, synthesized `details`, `retrieval_terms`, applicability refs, and graph refs/features when authorized and relevant. The exact included fields must be visible in score/debug artifacts.
+- `retrieval_terms` remain useful even when vector summary search is primary: they provide exact anchors for names, IDs, paths, commands, errors, company names, and relation/value phrases that embedding search can miss. Any lexical/BM25 or hybrid backend must be `retrieval_terms`-aware, but weights must come from a hash-covered retrieval surface config rather than benchmark-specific phrase boosts.
+- semantic search must not index or retrieve directly from raw transcript payloads, raw tool output, full diffs, raw reviewer comments, or unrestricted provenance payloads.
+- `raw_text` / `provenance_events` remain the source of truth for support, audit, privacy, forget, and re-extraction. They are not public search surfaces.
+- candidate generation must be authorization-prefiltered. Lexical/BM25/vector/semantic retrieval may score only cards that pass the first three recall visibility gates: privacy/sharing, caller `authorization_scope`, and coarse memory scope. Applicability and governance/staleness/contradiction still run later in the normal recall gate order before projection.
+- unauthorized cards must not contribute candidate IDs, score components, hit counts, usage-visible dropped IDs, timing/debug explanations, or vector/semantic nearest-neighbor artifacts.
+- if semantic retrieval uses vector embeddings, generated passages, BM25 fields, or reranker prompts, those derived artifacts are rebuildable indexes over the typed-card surface only and are never authoritative memory.
+
+Implementation ticket boundary for authorization-prefiltered retrieval:
+
+```yaml
+coarse_visibility_filter:
+  input:
+    - committed MemoryCard ids
+    - caller identity and authorization_scope
+    - requested Scope
+  gates:
+    - privacy/sharing
+    - caller authorization_scope
+    - coarse memory scope
+  output:
+    - visible_card_ids
+
+candidate_generation:
+  input:
+    - visible_card_ids
+    - query
+    - RetrievalSurfaceConfig
+    - SummarySearchBackendIdentity
+  rule: lexical/BM25/vector/semantic backends may score only visible_card_ids
+  vector_rule: authorized shard or authorized candidate-set first; never global top-k then drop unauthorized hits
+
+post_filter:
+  gates:
+    - applicability
+    - staleness
+    - contradiction
+    - invalidators
+    - budget
+  output:
+    - projected caller-visible results
+    - privacy-safe dropped_count_by_reason
+```
+
+This split is an implementation requirement, not just a conceptual ordering. Vector indexes may be physically global for storage efficiency only if the query path applies an authorization-filtered shard, bitmap, allowlist, or equivalent candidate-set before nearest-neighbor scoring and before any debug/timing/hit-count artifact is produced.
+
+Searchable surface identity:
+
+```yaml
+RetrievalSurfaceConfig:
+  included_fields:
+    - summary
+    - details
+    - retrieval_terms
+    - applicability.applies_to
+    - applicability.prerequisites
+    - graph_refs.node_ids
+    - graph_refs.edge_ids
+  field_weights: map[string, CanonicalScore]
+  tokenizer_id: string
+  normalizer_id: string
+  stopword_policy_id: string
+  surface_config_hash: string
+```
+
+`RetrievalSurfaceConfig` is part of retrieval/index artifact identity. It separates "which card surface was indexed" from ranking-weight changes, so a regression can distinguish extraction/surface drift from scoring changes. `surface_config_hash` must be recorded with lexical/BM25/vector/reranker artifacts, retrieve result metadata, and replay fixtures.
+
+Summary-search backend identity:
+
+```yaml
+SummarySearchBackendIdentity:
+  backend_kind: direct_scan_lexical | bm25 | vector | hybrid | replay
+  backend_version: string
+  surface_config_hash: string
+  backend_config_hash: string
+  embedding_provider: ollama | openai | local_file | none
+  embedding_model_id: string | null
+  replay_artifact_id: string | null
+```
+
+Every retrieve artifact records `SummarySearchBackendIdentity`. Backend identity lets memory eval compare lexical/BM25, vector, hybrid, and replay modes without changing the governance, support, projection, or scoring artifact contract.
+
+Optional vector/reranker identity:
+
+```yaml
+VectorIndexIdentity:
+  embedding_provider: ollama | openai | local_file
+  embedding_model_id: string
+  embedding_config_hash: string
+  index_snapshot_hash: string
+  corpus_surface_hash: string
+
+RerankerIdentity:
+  reranker_model_id: string
+  prompt_or_config_hash: string
+  replay_artifact_id: string | null
+  deterministic_mode: bool
+```
+
+Vector/reranker use is allowed only behind deterministic or replayable artifacts for P1-style scoring. A non-deterministic reranker may produce debug diagnostics or opt-in live smoke artifacts, but it must not be a direct hermetic CI gate for deterministic P1 scoring.
+
+Initial local vector backend choice:
+
+```yaml
+summary_search_backend: vector
+embedding_provider: ollama
+embedding_model_id: qwen3-embedding:0.6b
+```
+
+`ollama` + `qwen3-embedding:0.6b` is the preferred first local vector candidate for Mac-class development because it is small enough for local iteration and gives multilingual/code-retrieval coverage. It is not a permanent product lock. Memory eval may still choose `direct_scan_lexical`, `bm25`, `hybrid`, `replay`, or a different embedding model if top-k recall, top-1 precision, scope safety, support correctness, latency, or reproducibility is better. Query embeddings and indexed card embeddings must use the same `embedding_provider`, `embedding_model_id`, and `embedding_config_hash`; changing any of them invalidates/rebuilds the vector index.
+
+Exact verification rules:
+
+- `memory_context_grep` provides exact verification after semantic recall proposes likely cards or docs. Its default mode is candidate-limited: it scans only `MemorySearchContextDoc` documents linked to candidate cards.
+- global grep is allowed only by explicit request or failover policy, must be budgeted, must explain the fallback in audit, and still scans transformed search docs rather than raw payloads.
+- grep must not scan raw text directly. It scans a redacted/normalized transformed document derived from raw material, for example:
+
+```yaml
+MemorySearchContextDoc:
+  doc_id: string
+  card_id: string
+  source_provenance_refs: list[string]
+  normalized_text: string
+  line_index: list[LineIndexEntry]
+  source_spans: list[SourceSpanRef]
+  redaction_state: none | redacted | restricted
+  scope: Scope
+  privacy: PrivacyRules
+  content_hash: string
+  generated_at: datetime
+```
+
+`MemorySearchContextDoc` is derived, rebuildable, and governed. `normalized_text` is searchable only after redaction, scope filtering, and normalization; it is not a substitute for provenance. `source_spans`, support refs, line indexes, and `redaction_state` let exact matches be traced back to authorized evidence without exposing raw forgotten or restricted payloads. Forget/redaction of a source provenance event invalidates or regenerates every derived search-context doc that depends on it.
+
+Grep support semantics are strict:
+
+- a grep match is verification/localization evidence, not a support upgrade by itself.
+- a grep match may be shown as verification only when the matched doc is linked to the candidate card, the candidate card has active `current_support`, the source span maps to authorized provenance, and that provenance is not forgotten, redacted, privacy-blocked, or out-of-scope.
+- grep must not create new `support_experience_ids`, promote proof/debug provenance to current support, or rescue a card without active current-support evidence.
+- grep can only confirm or localize support already reachable through the candidate card's active `current_support` links after governance filtering.
+
+LLM-facing short-term tool interface shape:
+
+```yaml
+memory_semantic_search:
+  purpose: broad semantic recall over governed card surfaces
+  input:
+    query: string
+    scope: Scope
+    k: int
+    filters: object
+  output:
+    candidates: ranked MemoryCard summaries with card_id, why_recalled, score components, visible support refs, optional graph hints
+    usage: Usage
+
+memory_context_grep:
+  purpose: exact verification over candidate MemorySearchContextDoc documents
+  input:
+    query_or_pattern: string
+    candidate_card_ids: list[string]
+    candidate_doc_ids: list[string]
+    match_mode: literal | regex
+    global_scan: bool  # default false; explicit/failover only
+    max_matches: int
+  output:
+    matches: doc_id/card_id/line-range/redacted-snippet/source-span/support-ref records
+    dropped_count_by_reason: map[string, int]
+    usage: Usage
+
+memory_report_usage:
+  purpose: debug/eval-only usage report; not normal planning context
+  input:
+    scope: Scope | null
+    window: object | null
+  output:
+    UsageReport
+```
+
+`memory_graph_expand` is optional future surface. Early phases may hide graph expansion behind `memory_semantic_search` result fields and score components instead of exposing a separate LLM tool. If exposed later, it must inherit Phase D graph bounds, governance filtering, and privacy-safe dropped counts.
+
+Motivation from MemBench smoke:
+
+- observed smoke failure: deterministic lexical ranking put the correct support at rank 6 for "What is the name of my niece's company?"
+- the failure shows that budget-limited lexical ranking over card text can miss paraphrases and relationship bridges even when the correct support exists.
+- the design response is to improve typed-card surface synthesis, retrieval anchors, semantic candidate generation, and exact governed verification. It must not add a narrow boost for "niece", "company", or any benchmark-specific phrase.
+- evaluation must not stop at top-1 success. Relation-sensitive fixtures should include a positive support requiring niece + company + correct company name, plus distractors: niece but not company, company but unrelated to niece, same company name in a different user/scope, same name stale/superseded, and raw text match without active `current_support`.
+- required evaluation dimensions are top-k recall, top-1 precision, scope safety, and support correctness using active `current_support` only.
+- deterministic replay tests are the gating tests. Live `gpt-5.5` smoke is non-gating by default, runs only under `--allow-live-model-tests` or equivalent, and live failures open diagnostics without failing hermetic CI unless explicitly opted in.
 
 ### Step 3: bounded graph expansion
 
@@ -1534,11 +1793,12 @@ Current core request controls:
 
 ```text
 expand_graph: false by default
+summary_search_backend: default configured backend, e.g. direct_scan_lexical | bm25 | vector | hybrid | replay
 graph_max_depth: 1 maximum in Phase D
 graph_max_items: total node+edge expansion budget
 ```
 
-The default remains direct-scan/lexical retrieval for Phase C compatibility. Graph expansion is opt-in until graph fixtures, public adapter graph seeding, and derived index invalidation are complete.
+The default summary-search backend may remain direct-scan/lexical for Phase C compatibility, but it is a configuration default rather than a design lock-in. Graph expansion is opt-in until graph fixtures, public adapter graph seeding, and derived index invalidation are complete.
 
 Default initial limits:
 
@@ -1796,6 +2056,7 @@ SeedCardSpec:
   kind: reentry_snapshot | task_episode | semantic_fact | procedure | policy_or_preference
   summary: string
   details: string | null
+  retrieval_terms: list[string] | null
   scope: Scope
   applicability: Applicability
   current_support_experience_ids: list[string]
@@ -1860,7 +2121,8 @@ Rules:
 `SeedCardSpec` rules:
 
 - required fields are `kind`, `summary`, `scope`, `applicability`, non-empty `current_support_experience_ids`, `authority`, and `confidence`。
-- optional fields are `details`, `invalidators`, and `valence`。If omitted, they use the same defaults as a committed `MemoryCard` candidate path。
+- optional fields are `details`, `retrieval_terms`, `invalidators`, and `valence`。If omitted, they use the same defaults as a committed `MemoryCard` candidate path。
+- `retrieval_terms` is public fixture input when present and participates in public operation/prefix hashing. `null` / omitted means no explicit seed terms; any generated terms must be deterministic from public seed fields and audit-visible。
 - `current_support_experience_ids` must name public experiences already present in the fixture or created by earlier public ingest/setup operations; proof-only refs are not enough for P1-scored retrieval。
 - `SeedAuthoritySpec` is public input, not storage `Authority`。Its refs are public experience IDs / public approval refs because execution-generated `provenance_event.event_id` values do not exist yet。
 - seed execution converts `SeedAuthoritySpec` to stored `Authority`: `source` and `strength` copy directly, `public_source_experience_ids` / `public_approval_refs` are resolved to generated or existing authorized `provenance_event.event_id` values, and those event IDs populate `Authority.source_refs` on the committed card。
@@ -2080,7 +2342,7 @@ Usage:
   graph_nodes_expanded: int
   graph_edges_expanded: int
   projection_chars: int
-  index_mode: direct_scan | sync_lexical | graph_index | vector
+  index_mode: direct_scan | sync_lexical | vector | hybrid | replay | graph_index
   token_count: int | null
   cost_units: float | null
 ```
@@ -2089,7 +2351,7 @@ Rules:
 
 - all count fields are non-negative and count records after the visibility/privacy gate unless the field name explicitly says scanned。
 - `cards_scanned` counts candidate memory cards considered by seed retrieval before ranking; `cards_ranked` counts cards that survive governance and enter deterministic ranking; `cards_returned` counts ranked evidence items returned; `cards_dropped` equals the sum of internal drop records for this request, even when caller-visible dropped IDs are suppressed。
-- graph expansion counts are zero for `index_mode=direct_scan|sync_lexical` unless Phase D expansion ran。
+- graph expansion counts are zero for `index_mode=direct_scan|sync_lexical|vector|hybrid|replay` unless Phase D expansion ran。
 - `projection_chars` counts caller-visible projected text/chars, not hidden audit/provenance payload。
 - P1 token/cost fields may remain null, but the fixed latency/count/index fields are required for `retrieve` and `report_usage` artifacts。
 
@@ -2110,7 +2372,7 @@ Aggregate field rules:
 - `latency_ms` is the arithmetic mean over included requests unless `metadata.percentiles` is also returned。
 - `latency_source` is `wall_clock` if any included request used wall clock, else `replayed_artifact` if any used replay, else `deterministic_mock`; `metadata.latency_source_counts` records per-source counts。
 - `cards_scanned`, `cards_ranked`, `cards_returned`, `cards_dropped`, `graph_nodes_expanded`, `graph_edges_expanded`, and `projection_chars` are sums。
-- `index_mode` is `vector` if any request used vector, else `graph_index` if any request used graph index, else `sync_lexical` if any request used sync lexical, else `direct_scan`; `metadata.index_mode_counts` records per-mode counts。
+- `index_mode` is `graph_index` if any request used graph index expansion, else `hybrid` if any request used hybrid summary search, else `vector` if any request used vector summary search, else `replay` if any request used replayed summary-search artifacts, else `sync_lexical` if any request used sync lexical, else `direct_scan`; `metadata.index_mode_counts` records per-mode counts。
 - `token_count` is the sum only when every included request has non-null `token_count`; otherwise it is null and `metadata.missing_token_count_requests` records the missing count。
 - `cost_units` is the sum only when every included request has non-null `cost_units`; otherwise it is null and `metadata.missing_cost_units_requests` records the missing count。
 - unavailable fields must not be guessed. If a request lacks a required fixed field, conformance fails for P0/P1; for legacy debug aggregation, the field is excluded only when `metadata.legacy_missing_fields` records request IDs and field names。
@@ -2160,9 +2422,10 @@ Translation rules:
 
 ```yaml
 ReplacementContent:
-  clear_fields: list[details | lifecycle.expires_at | privacy.redaction_policy]
+  clear_fields: list[details | retrieval_terms | lifecycle.expires_at | privacy.redaction_policy]
   summary?: string
   details?: string | null
+  retrieval_terms?: list[string] | null
   applicability?: Applicability
   valence?: Valence
   invalidators?: list[Invalidator]
@@ -2183,17 +2446,19 @@ Absent optional fields are omitted, not serialized as dotted keys.
 Omitted fields mean unchanged.
 `clear_fields` defaults to an empty list when absent.
 Absent `clear_fields` and `clear_fields: []` canonicalize identically; non-empty entries are sorted lexicographically before hashing.
-Explicit null is rejected unless the exact field path appears in `clear_fields` and the field is one of the allowed clearable nullable paths.
+Explicit null is rejected unless the exact field path appears in `clear_fields` and the field is one of the allowed clearable paths.
 Stable JSON hashing uses sorted keys and the same confidence rounding rules as MemoryCard.
 `clear_fields` participates in canonical hashing and validation.
+`retrieval_terms` uses MemoryCard term validation and de-duplication before hashing. A changed term list is a semantic retrieval mutation and is audit-visible.
 ```
 
 Equivalent explanatory field paths:
 
 ```text
-  clear_fields: list[details | lifecycle.expires_at | privacy.redaction_policy]
+  clear_fields: list[details | retrieval_terms | lifecycle.expires_at | privacy.redaction_policy]
   summary?: string
   details?: string | null
+  retrieval_terms?: list[string] | null
   applicability?: Applicability
   valence?: Valence
   invalidators?: list[Invalidator]
@@ -2206,14 +2471,14 @@ Tri-state patch semantics:
 
 - omitted field: leave target card value unchanged。
 - explicit value: replace that allowed field after normal schema validation。
-- explicit null: clear only `details`, `lifecycle.expires_at`, or `privacy.redaction_policy`, and only when the field path is also listed in `clear_fields`。Null for `summary`, `applicability`, `valence`, `invalidators`, `confidence`, `authority`, `scope`, or evidence links is rejected。
+- explicit null: clear only `details`, `retrieval_terms`, `lifecycle.expires_at`, or `privacy.redaction_policy`, and only when the field path is also listed in `clear_fields`。For `retrieval_terms`, clear means replace with `[]` because the stored field is a list, not nullable。Null for `summary`, `applicability`, `valence`, `invalidators`, `confidence`, `authority`, `scope`, or evidence links is rejected。
 - empty `invalidators: []` means replace invalidators with an empty list if the actor/kind allows that patch; `invalidators: null` is rejected。
 
 Replacement content by mutation type:
 
 | Mutation type | Required replacement content | Auto-derived from target card | Provenance/authority requirements |
 | --- | --- | --- | --- |
-| `update` | at least one of `summary`, `details`, `applicability`, `valence`, `invalidators`, `confidence`, `lifecycle.expires_at`, `privacy.redaction_policy` | `kind`, `scope`, projection mode, existing lineage, and any unchanged content/facets | replacement provenance must cite `replacement_experience_id` or public mutation provenance as active `current_support`; authority stays unchanged unless public approve/commit supplies new authority。 |
+| `update` | at least one of `summary`, `details`, `retrieval_terms`, `applicability`, `valence`, `invalidators`, `confidence`, `lifecycle.expires_at`, `privacy.redaction_policy` | `kind`, `scope`, projection mode, existing lineage, and any unchanged content/facets | replacement provenance must cite `replacement_experience_id` or public mutation provenance as active `current_support`; authority stays unchanged unless public approve/commit supplies new authority。 |
 | `supersede` | replacement `summary` plus active support provenance; `details` recommended when summary alone is ambiguous | `kind`, `scope`, lifecycle, privacy, and applicability unless provided | new card/revision gets active `current_support` link from replacement provenance and `authority.source=scoring` for fixture path unless public authority provenance is provided。 |
 | `delete` | none; `replacement.content` must be null | not applicable | target lineage/audit only。 |
 | `forget` | none; `replacement.content` must be null | not applicable | privacy/security/user-driven authority refs required by mutation request。 |
@@ -2255,10 +2520,10 @@ Allowed patch fields by actor/kind:
 
 | Actor / kind | Allowed direct patch fields |
 | --- | --- |
-| `adapter`/`scoring` fixture update for any kind | `summary`, `details`, `applicability`, `valence`, `invalidators`, `confidence`, `lifecycle.expires_at`, `privacy.redaction_policy` when payload is public and hash-covered。 |
+| `adapter`/`scoring` fixture update for any kind | `summary`, `details`, `retrieval_terms`, `applicability`, `valence`, `invalidators`, `confidence`, `lifecycle.expires_at`, `privacy.redaction_policy` when payload is public and hash-covered。 |
 | `debug` for any kind | same as adapter/scoring, but commit still needs approval audit unless explicitly privileged。 |
-| `user` on `policy_or_preference` | `summary`, `details`, `applicability`, `lifecycle.expires_at`, `privacy.redaction_policy`; authority changes require new approval/source provenance。 |
-| `reviewer`/`maintainer` on `procedure` or `policy_or_preference` | `summary`, `details`, `applicability`, `valence`, `invalidators`, `confidence`; authority/scope changes require supersede/new commit。 |
+| `user` on `policy_or_preference` | `summary`, `details`, `retrieval_terms`, `applicability`, `lifecycle.expires_at`, `privacy.redaction_policy`; authority changes require new approval/source provenance。 |
+| `reviewer`/`maintainer` on `procedure` or `policy_or_preference` | `summary`, `details`, `retrieval_terms`, `applicability`, `valence`, `invalidators`, `confidence`; authority/scope changes require supersede/new commit。 |
 | `model_proposal` any kind | no direct committed patch; creates proposal only。 |
 
 ### Exposing scope/staleness/contradiction
@@ -2331,7 +2596,10 @@ Deliverables:
 - provenance capture。
 - candidate/proposal/approval/commit separation。
 - manual/debug/scoring approval path。
-- structured/direct-scan or synchronously rebuilt BM25 seed retrieval over committed card text/applicability refs。
+- `retrieval_terms` carried through `MemoryCandidate`, committed `MemoryCard`, `SeedCardSpec`, and `ReplacementContent` mutation paths。
+- structured filters plus injectable `SummarySearchBackend` seed retrieval over committed typed-card surfaces; direct-scan/lexical/BM25 is the deterministic baseline, while vector/hybrid/replay backends can be selected by eval/runtime config。
+- Phase B/D internal `memory_semantic_search_internal` candidate generation over typed-card surfaces for adapter/core retrieval use。
+- `RetrievalSurfaceConfig` and `SummarySearchBackendIdentity` artifact identity for included fields, field weights, tokenizer, normalizer, stopword policy, backend config, and surface hash。
 - governance filters for scope, staleness, contradiction, approval state。
 - update/delete/forget/supersede/tombstone semantics。
 - optional `graph_refs` validation: absent refs are allowed; present refs must be canonical, but executable expansion waits for Phase D。
@@ -2389,6 +2657,7 @@ Deliverables:
 - expansion budget and dropped reasons。
 - graph invalidation hooks。
 - graph-aware/optimized retrieval index rebuild/invalidation logic with rebuild verifier。
+- optional vector/reranker identity and replay artifacts if semantic candidate generation uses embeddings or reranking。
 
 Rules:
 
@@ -2397,27 +2666,41 @@ Rules:
 - expansion occurs after seed retrieval。
 - governance filtering still happens before projection。
 
-Current Phase D.1 implementation status, 2026-05-22:
+Normative Phase D requirements:
 
-- `MemoryRecallRequest.expand_graph` enables one-hop expansion in the typed-card core; default is off。
-- the typed-card eval adapter accepts adapter-visible `filters.expand_graph` / `filters.graph_max_*` controls, and the live runner exposes `--expand-graph` for normal-suite no-regression scoring。
-- raw extraction can emit explicit `graph_nodes` and `graph_edges` from raw text; proposed graph refs are carried through proposal/commit and can be evaluated without `seed_graph` setup。
-- raw extraction treats the caller-provided runtime scope as authoritative; LLM-emitted scope overrides that do not match the trusted runtime scope are ignored and audited as dropped scope overrides。
 - expansion seeds only from cards that passed normal recall governance and direct relevance filtering。
 - candidate cards found through graph expansion still pass privacy, authorization scope, memory scope, applicability, lifecycle, staleness, contradiction, invalidator, and visible-support gates before scoring。
 - expansion uses fresh canonical `graph_nodes` and durable `graph_edges`; unresolved or stale endpoints are ignored for expansion。
 - actor/lineage and negative governance edge types do not contribute scored retrieval support; only allowlisted retrieval edges such as `related`, `mentions`, `supports`, `proved_by`, `located_in`, and `fixes` expand。
 - unresolved or stale graph endpoints are counted by reason in caller-visible aggregate drop counts, while node/edge IDs remain internal-audit only。
 - graph-expanded cards receive an explicit deterministic `graph_modifier` score component, and usage records `index_mode=graph_index`, `graph_nodes_expanded`, and `graph_edges_expanded`。
-- graph-on live normal suite passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_suite_graph_on_20260522`, 9/9 passed); because current P0/P1 fixtures contain no graph seed material, all graph expansion counts were zero and this run is a no-regression check, not graph retrieval quality proof。
-- graph-generation live fixture passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_graph_generation_20260522_v3`): `raw_text -> LLM extractor graph_nodes -> proposal/commit -> graph-on recall` returned the graph-related support with `index_mode=graph_index` and `graph_nodes_expanded=1`。
-- graph-generation fixtures may set scorer-only `gold.expected_usage` gates, so a fixture can require `index_mode=graph_index` and minimum graph expansion counts without exposing those expectations to the adapter。
-- graph-generation live suite passed on 2026-05-23 with `gpt-5.5` (`run_id=manual_graph_edge_generation_20260523_scopefix`, 2/2 passed): both `graph_nodes` and `graph_edges` extraction paths satisfied scorer-only graph usage gates。
+- graph-generation fixtures may set scorer-only `gold.expected_usage` gates, so a fixture can require `index_mode=graph_index` and minimum graph expansion counts without exposing those expectations to the adapter。When graph fixtures are enabled as deterministic/replay tests, they must satisfy these usage gates。
 - graph negative fixtures cover raw graph-edge cross-scope non-leak, forgotten-support non-leak, stale endpoints, and uncanonicalized endpoints; scorer-only dropped-count gates validate caller-visible reasons without exposing blocked card/provenance IDs。
 - graph expansion treats `CurrentEvidenceSnapshot` file/symbol/command endpoint states as a freshness overlay: missing endpoints stop expansion as uncanonicalized, and changed/moved/unknown/hash-mismatched endpoints stop expansion as stale。
 - derived graph index verification rebuilds a canonical snapshot/hash from `memory_cards`, `graph_nodes`, and `graph_edges`; it excludes forgotten/deleted cards from active card refs, reports missing/stale graph refs as drift issues, and exposes a safe aggregate verifier summary in memory-eval retrieval artifacts with scorer-only expected verification gates。
 - `seed_graph` remains an explicit fixture/debug setup path for isolating recall expansion from extraction quality; it is not evidence that ingest generates graph material。
-- remaining Phase D work: broader graph-specific memory-eval fixtures, separate fanout/node/card/latency budgets, additional graph invalidation coverage, and deeper graph-aware rebuild drift fixtures。
+
+Current Phase D.1 implementation status, 2026-05-22:
+
+- `MemoryRecallRequest.expand_graph` enables one-hop expansion in the typed-card core; default is off。
+- the typed-card eval adapter accepts adapter-visible `filters.expand_graph` / `filters.graph_max_*` controls, and the live runner exposes `--expand-graph` for normal-suite no-regression scoring。
+- raw extraction can emit explicit `graph_nodes` and `graph_edges` from raw text; proposed graph refs are carried through proposal/commit and can be evaluated without `seed_graph` setup。
+- raw extraction treats the caller-provided runtime scope as authoritative; LLM-emitted scope may narrow, annotate, or request clarification, but it cannot broaden scope, switch namespace, change `user_id`, change `repo_ref`, or create `team` / `shared` scope。Mismatches are proposal warnings / dropped scope overrides, not stored card scope。
+
+Remaining Phase D work:
+
+- broader graph-specific memory-eval fixtures。
+- separate fanout/node/card/latency budgets。
+- additional graph invalidation coverage。
+- deeper graph-aware rebuild drift fixtures。
+
+Observed Phase D.1 validation artifacts, non-normative and allowed to become stale:
+
+- graph-on live normal suite passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_suite_graph_on_20260522`, 9/9 passed); because current P0/P1 fixtures contain no graph seed material, all graph expansion counts were zero and this run is a no-regression check, not graph retrieval quality proof。
+- graph-generation live fixture passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_graph_generation_20260522_v3`): `raw_text -> LLM extractor graph_nodes -> proposal/commit -> graph-on recall` returned the graph-related support with `index_mode=graph_index` and `graph_nodes_expanded=1`。
+- graph-generation live suite passed on 2026-05-23 with `gpt-5.5` (`run_id=manual_graph_edge_generation_20260523_scopefix`, 2/2 passed): both `graph_nodes` and `graph_edges` extraction paths satisfied scorer-only graph usage gates。
+- these dated live results are observed validation notes only。Live tests are non-gating unless an explicit opt-in such as `--allow-live-model-tests` is enabled。
+- if this section becomes stale or too long, move dated run IDs and pass counts to an external validation artifact and keep only a short artifact link/reference in this design。
 
 ### Phase E: MemoryContextBuilder / evidence packet
 
@@ -2445,6 +2728,10 @@ Goal: expose read-only recall/tool surface only after core and adapter evaluatio
 Deliverables:
 
 - thin `MemoryToolProvider(recall)` adapter。
+- short-term `memory_semantic_search` tool over governed typed-card surfaces。
+- short-term `memory_context_grep` tool over candidate `MemorySearchContextDoc` documents, candidate-limited by default。
+- `memory_report_usage` debug/eval-only tool surface。
+- optional future `memory_graph_expand` tool, or hidden graph expansion fields on semantic-search results in the early phase。
 - explicit enablement only。
 - provider-visible bounded recall result。
 - no write tool。
@@ -2455,6 +2742,10 @@ Rules:
 
 - `MemoryToolProvider` must not own storage, graph, extraction, approval, or prompt registry。
 - `ToolRegistry` must not import memory stores/backends/projection policies。
+- provider-visible semantic search must not index or search raw provenance payloads directly。
+- provider-visible grep must scan only governed `MemorySearchContextDoc` documents, not raw text。
+- `memory_report_usage` is for debug/eval and must not be injected as normal planning memory。
+- `memory_semantic_search` is the Phase F LLM-visible wrapper around already-evaluated core/adapter retrieval behavior; score-improvement work belongs first in Phase B/D internal retrieval and adapter artifacts。
 
 Hot-path regression definition:
 
@@ -2483,6 +2774,41 @@ Rules:
 
 - does not replace generic adapter-based evaluation。
 - no resident-advantage claim without memory-off/memory-on artifacts and stale handling。
+
+### Short-term hybrid recall/tooling design-only next slice
+
+Goal: close the design gap exposed by the MemBench rank-6 smoke failure before implementing new recall tools.
+
+This slice is design-only. It should produce a reviewed interface/design delta, not code, tests, migrations, or provider registration.
+
+Phase placement:
+
+- semantic candidate generation belongs to Phase B/D retrieval/index work, but only over committed typed-card surfaces and governed active short-term state.
+- `MemorySearchContextDoc` belongs beside Phase E evidence/provenance-lite projection because it is a transformed, redacted verification surface derived from provenance.
+- LLM-visible tools belong to Phase F and remain default-off.
+- graph expansion remains Phase D-governed; it may stay hidden behind semantic-search result metadata until a separate `memory_graph_expand` surface is justified.
+
+Design-only close criteria:
+
+- document the exact searchable `MemoryCard` fields for injectable summary-search backends and explicitly exclude raw provenance payloads from semantic search.
+- document `SummarySearchBackend`, `RetrievalSurfaceConfig`, backend identity, and vector/reranker replay identity so backend choice, retrieval-surface changes, weighting changes, and non-deterministic model behavior can be evaluated separately.
+- document `MemorySearchContextDoc` generation, source-span mapping, line indexing, redaction state, privacy/forget invalidation, and rebuild/hash behavior.
+- document strict grep support semantics: grep matches verify/localize active support but do not create new `support_experience_ids`.
+- document the LLM tool schemas for `memory_semantic_search`, `memory_context_grep`, and `memory_report_usage`, including budgets, candidate-limited grep defaults, global-scan failover rules, usage fields, and privacy-safe dropped counts.
+- decide whether graph expansion is hidden behind semantic-search result fields in the first tool phase or exposed later as `memory_graph_expand`.
+- add an eval follow-up target for the MemBench niece/company rank-6 failure that measures top-k recall, top-1 precision, scope safety, and active-current-support correctness against relation-sensitive positives/distractors, without phrase-specific boosts.
+- state that deterministic replay tests are gating, while live `gpt-5.5` smoke is opt-in/non-gating by default.
+- preserve the existing Phase D/E/F gates: no unbounded graph traversal, no raw transcript packet, no write tool, no default prompt injection, and no default hot-path behavior change.
+
+Recommended implementation order for this slice:
+
+1. route `retrieval_terms` through `MemoryCard`, `MemoryCandidate`, `SeedCardSpec`, and `ReplacementContent`.
+2. add deterministic replay extractor fixtures that generate `retrieval_terms`.
+3. add the `SummarySearchBackend` injection point and artifact identity, with direct-scan/lexical or BM25 as the first deterministic baseline backend.
+4. add budget-limited fixtures with top-k, top-1, scope-safety, support-correctness, and distractor gates, then compare lexical/BM25, vector, and hybrid backends when vector artifacts are available.
+5. add internal semantic candidate generation in the core retrieval path through the same backend interface.
+6. add `MemorySearchContextDoc` / grep as a verification layer.
+7. expose provider-visible tools in Phase F after core/adapter behavior is stable.
 
 ### Phase summary
 
@@ -2570,7 +2896,7 @@ MemoryToolProvider does not import prompt projection internals
 | `Applicability` / `ApplicabilityRef` schemas exist and validate canonical graph-node refs plus `task_family:`, `workflow:`, `scope:`, and `text:` fallback rules。 | schema validation test。 |
 | `Invalidator` schema exists with target node, baseline, observed-at, trigger-policy, and `manual_reason` fields。 | schema/golden serialization test, including manual invalidator requirements。 |
 | `CurrentEvidenceSnapshot` schema exists with file/symbol/command/verifier/task/authority evidence state fields, including verifier applicability/task/error target refs, and intentionally excludes scoring authority events。 | schema/golden serialization test。 |
-| `MemoryCandidate` schema has golden serialization/hash including evidence links, applicability, invalidators, confidence, proposed authority, and `proposed_by=adapter`。 | candidate golden serialization/hash test。 |
+| `MemoryCandidate` schema has golden serialization/hash including `proposed_retrieval_terms`, evidence links, applicability, invalidators, confidence, proposed authority, and `proposed_by=adapter`。 | candidate golden serialization/hash test。 |
 | stored card schema uses canonical `projection_mode: ProjectionMode`; retired `projection: ProjectionPolicy` is rejected or migrated before hashing。 | schema/golden hash naming test。 |
 | role-bearing `evidence_links` are required for committed durable cards。 | validation test。 |
 | ambiguous `state: MemoryState` is absent from stored card schema。 | schema regression test。 |
@@ -2590,6 +2916,8 @@ MemoryToolProvider does not import prompt projection internals
 | approval state transition machine is enforced。 | legal/forbidden transition tests, including terminal rejected/tombstoned states。 |
 | `candidate -> committed` bypass is restricted to `seed_eval`, explicit migration actor, or emergency restore new revision; debug/manual still records proposal -> approved -> committed, and migrated cards preserve `created_by=migration`。 | privileged bypass audit tests。 |
 | candidate/proposal not recallable; committed recallable。 | recallability unit tests。 |
+| `retrieval_terms` survive candidate/proposal/approval/commit and seed/mutation paths, changes are semantic retrieval mutations, and clear-to-empty behavior is explicit。 | write-path serialization/audit tests for `MemoryCandidate`, `SeedCardSpec`, `ReplacementContent`, and committed cards。 |
+| `retrieval_terms` inherit card scope/privacy, and derived indexes over them are invalidated/redacted on forget/delete/privacy block/redaction/scope change。 | retrieval-term privacy and index invalidation tests。 |
 | actor/authority matrix is enforced per kind/operation。 | approval permission tests。 |
 | active support/proof evidence links required for committed semantic/procedure/policy cards。 | validation tests。 |
 | update/delete/forget/supersede/tombstone semantics exist。 | mutation tests。 |
@@ -2612,12 +2940,18 @@ MemoryToolProvider does not import prompt projection internals
 | normal ingest cannot create committed cards directly。 | ingest governance test。 |
 | ambiguous `ingest_raw(raw_text)` creates provenance/candidate/proposal only and does not treat LLM-inferred structure as durable truth。 | raw ingest ambiguity/proposal tests。 |
 | raw-memory LLM extraction defaults to existing mew `codex` backend, `gpt-5.5`, and `auth.json`-style `load_model_auth`/`call_model_json` plumbing, while tests can inject deterministic extractor outputs。 | extractor model-binding/replay tests。 |
+| extractor-proposed scope cannot broaden, switch namespace, change `user_id`, change `repo_ref`, or create team/shared scope when runtime scope is authoritative; mismatches become proposal warnings, not stored scope。 | raw extraction scope-override tests。 |
+| `SummarySearchBackend` is injectable, and retrieve artifacts record `SummarySearchBackendIdentity` with backend kind/version/config hash, surface hash, and optional replay artifact。 | backend injection and artifact identity tests。 |
+| `RetrievalSurfaceConfig` exists and participates in retrieval/index artifacts with included fields, field weights, tokenizer, normalizer, stopword policy, and `surface_config_hash`。 | retrieval surface config hash/golden tests。 |
+| lexical/BM25 or hybrid retrieval is `retrieval_terms`-aware without phrase-specific benchmark boosts, while vector backends may be evaluated/replayed through the same interface。 | deterministic retrieval-anchor and backend-comparison tests。 |
+| internal `memory_semantic_search_internal` can be used by core/adapter retrieve over typed-card surfaces only, with deterministic/replayable artifacts。 | internal semantic candidate generation tests。 |
+| semantic/vector/BM25 candidate generation is authorization-prefiltered before scoring and does not leak unauthorized candidate IDs, scores, hit counts, dropped IDs, timing/debug explanations, or nearest-neighbor artifacts。 | retrieval prefilter and leakage tests。 |
 | public `seed_eval` records authority/source/result hash, cannot include gold/trap labels, and writes `memory_audit_log.operation=seed_eval`。 | eval seed leakage/audit tests。 |
 | seeded cards are audit-distinguishable from normal commits but ranking-equivalent; ranking code never reads seed-eval audit metadata。 | ranking/audit comparison and forbidden-input test。 |
 | `memory_audit_log` payloads stay bounded to IDs/hashes/counts/reasons/small metadata, enforce concrete truncation/hash limits, and never store raw transcripts/output/diffs/projected packets。 | audit payload boundary and overflow tests。 |
 | transient reentry recall uses the session-state gate and does not enter normal durable recall/support IDs。 | transient recall/promotion tests。 |
 | commit transaction is atomic across cards, conditional graph writes, index, and audit, or recoverably rolled back。 | partial-failure recovery test with and without graph writes。 |
-| Phase B cards may omit `graph_refs`; commit without graph refs is valid and remains structured/lexical-retrievable, while present invalid graph refs reject the commit。 | graph refs optionality/validation test。 |
+| Phase B cards may omit `graph_refs`; commit without graph refs is valid and remains retrievable through structured filters plus the configured summary-search backend, while present invalid graph refs reject the commit。 | graph refs optionality/validation test。 |
 
 ### Phase C close criteria: generic harness adapter
 
@@ -2647,8 +2981,9 @@ MemoryToolProvider does not import prompt projection internals
 | graph-generation fixtures can hard-gate scorer-only expected usage such as `index_mode=graph_index` and minimum graph expansion counts。 | `gold.expected_usage` scoring gate regression test。 |
 | graph negative fixtures can hard-gate caller-visible dropped reason counts without exposing blocked card/provenance IDs。 | `gold.expected_dropped_count_by_reason` scoring gate and graph negative fixture tests。 |
 | graph drift fixtures can hard-gate derived graph verifier status and aggregate issue counts without exposing node/card/provenance IDs。 | `gold.expected_derived_graph_index_verification` scoring gate and graph drift fixture tests。 |
-| raw extraction cannot move memory to an LLM-chosen scope when caller runtime scope is authoritative。 | scope override ignored/audited regression test。 |
-| live raw-memory extraction preserves retrieval anchors for subject/context/value discriminators, so paraphrased summaries do not lose the correct top-1 support in budget-limited retrieval。 | live `budget_limited_basic` smoke with `gpt-5.5` plus deterministic retrieval-anchor regression tests。 |
+| raw extraction cannot move memory to an LLM-chosen scope when caller runtime scope is authoritative; extracted scope may narrow/annotate/request clarification but cannot broaden, switch namespace, change `user_id`, change `repo_ref`, or create team/shared scope。 | scope override warning/drop regression test。 |
+| relation-sensitive retrieval fixtures cover niece + company + correct company name positives and distractors: niece-not-company, unrelated company, same company name different scope/user, stale/superseded same name, and raw text match without active current support。 | deterministic replay budget-limited fixtures measuring top-k recall, top-1 precision, scope safety, and active-current-support correctness。 |
+| live raw-memory extraction smoke is opt-in and non-gating by default; live `gpt-5.5` failures create diagnostics but do not fail hermetic CI unless `--allow-live-model-tests` or equivalent explicitly opts in。 | live-test gating/config tests plus deterministic retrieval-anchor regression tests。 |
 | adapter-visible payload does not leak gold/mode/trap labels。 | harness P0 leakage test。 |
 | caller-visible dropped IDs do not leak unauthorized card/provenance existence。 | cross-scope dropped metadata gate。 |
 
@@ -2662,6 +2997,8 @@ MemoryToolProvider does not import prompt projection internals
 | actor edges `approved_by`/`reviewed_by`/`vetoed_by`/`seed_eval_by`/`migrated_by` target actor nodes with matching `metadata.actor_kind` and do not become scored support IDs。 | actor edge schema/governance test。 |
 | graph edges use role-bearing evidence links and tombstone/drop expansion when edge evidence is forgotten/redacted。 | graph evidence redaction test。 |
 | retrieval index is derived, rebuildable, not authoritative, and Phase B simple index behavior is distinct from Phase D graph-aware index behavior。 | derived graph snapshot/hash verifier and index rebuild/equality/phasing tests。 |
+| vector indexes, when present, record embedding model/config, index snapshot hash, and corpus surface hash。 | vector replay identity tests。 |
+| rerankers, when present, record reranker model/config, replay artifact, and deterministic mode; non-deterministic rerankers are not direct P1 hermetic gates。 | reranker replay/non-gating tests。 |
 | expansion is bounded by depth/fanout/node/card/latency/char budgets。 | budget tests。 |
 | expansion happens after seed retrieval and after Phase C adapter gate。 | trace/gate test。 |
 | expansion does not bypass governance。 | stale/scope/contradiction graph tests。 |
@@ -2676,6 +3013,8 @@ MemoryToolProvider does not import prompt projection internals
 | packet contains bounded cards, dropped reasons, negative space, coverage gaps。 | builder tests。 |
 | stale/contradicted/out-of-scope memory is filtered before packet。 | governance packet tests。 |
 | packet does not contain raw transcript dumps。 | leak tests。 |
+| `MemorySearchContextDoc` is generated only from authorized provenance through redaction/normalization, preserves source spans/line indexes, and is invalidated on forget/redaction。 | search-context-doc generation and redaction cascade tests。 |
+| `MemorySearchContextDoc` grep matches are verification/localization evidence only, require candidate active current support and authorized source-span provenance, and never create new `support_experience_ids`。 | grep support-semantics tests。 |
 | packet is evidence, not next action。 | forbidden field tests。 |
 | optional adapter `build_context` can expose packet later。 | optional adapter test。 |
 
@@ -2684,6 +3023,9 @@ MemoryToolProvider does not import prompt projection internals
 | Criterion | Test |
 | --- | --- |
 | `MemoryToolProvider(recall)` is read-only and default off。 | provider snapshot tests。 |
+| Phase F `memory_semantic_search` wraps already-evaluated core/adapter semantic retrieval, searches only governed typed-card surfaces, and exposes score/debug fields showing which surfaces contributed。 | provider schema and forbidden-raw-payload tests。 |
+| `memory_context_grep` scans only governed `MemorySearchContextDoc` documents, is candidate-limited by default, and requires explicit/failover audit for global scans。 | grep-scope, redaction, and global-failover tests。 |
+| `memory_report_usage` is debug/eval-only and never appears as normal model planning context。 | provider/tool context snapshot tests。 |
 | recall appears only under explicit enablement。 | ToolRegistry snapshot tests。 |
 | provider result contains candidates/chains/dropped or packet projection only。 | schema tests。 |
 | no write tool is exposed。 | tool list tests。 |
@@ -2718,6 +3060,9 @@ provenance actor/producer enums include adapter/scoring/migration
 SeedAuthoritySpec converts public refs to storage Authority.source_refs
 SeedAuthoritySpec rejects unbacked non-scoring authority and any unbacked should/must
 MemoryCandidate proposed_by includes adapter
+MemoryCandidate proposed_retrieval_terms survives candidate/proposal/commit
+SeedCardSpec retrieval_terms are hash-covered public setup input
+retrieval_terms inherit card scope/privacy and derived indexes invalidate/redact on forget/delete/privacy block/redaction/scope change
 no model-controlled durable commit
 projection_mode is canonical; ProjectionPolicy wording rejected/migrated
 role-bearing evidence links required
@@ -2734,7 +3079,8 @@ top-level provenance_refs equals current_support refs
 P1 mutation target experiences resolve to one active targetable card
 replacement.content deterministic conversion or rejection
 replacement content canonical nested serialization
-replacement clear_fields/null semantics
+replacement clear_fields/null semantics including retrieval_terms clear-to-empty
+replacement retrieval_terms changes are semantic retrieval mutations and audit-visible
 public mutation schema translation and forbidden patch rejection
 invalidator stored baseline comparison
 CurrentEvidenceSnapshot drives command/task/authority/procedure invalidators
@@ -2748,6 +3094,7 @@ scope_allows containment table prevents repo/project/user/team/shared leaks
 lifecycle expiry without auto tombstone/supersede
 consolidation_state non-none rejected
 raw transcript not stored as durable card
+raw extraction cannot broaden/switch authoritative runtime scope, user_id, repo_ref, namespace, team scope, or shared scope
 retrieve is durable-memory side-effect free
 usage stats derived from audit or separate rebuildable aggregate
 fresh repo evidence overrides memory
@@ -2755,6 +3102,13 @@ current verifier/task/user evidence overrides stale memory
 user memory does not leak project facts
 failure shield does not become permanent unscoped ban
 deterministic ranking tie-breaks and score components
+RetrievalSurfaceConfig included_fields/field_weights/tokenizer/normalizer/stopword policy hash
+SummarySearchBackend injectable over typed card surfaces with backend identity artifacts
+retrieval_terms-aware lexical/BM25 or hybrid exact-anchor support over typed card surfaces
+semantic/vector/BM25 candidate generation authorization-prefiltered before scoring with no unauthorized debug/timing/nearest-neighbor leakage
+memory eval can compare lexical/BM25, vector, hybrid, and replay summary-search backends on the same fixtures
+relation-sensitive top-k/top-1/scope/support retrieval fixtures with niece/company distractors
+deterministic replay tests gate retrieval quality; live gpt-5.5 smoke is opt-in/non-gating by default
 score components/final_score canonicalize to 4 decimals before result_hash
 artifact-visible scores are CanonicalScore strings, not JSON numbers
 score canonicalizer rejects non-finite values and uses Decimal ROUND_HALF_UP
@@ -2770,6 +3124,8 @@ actor graph nodes and audit/lineage actor edges target actor_kind metadata
 graph node structured key percent-encoding/NFC canonicalization
 NodeIdV1 scope_key derivation and round-trip rejection for non-canonical forms
 graph edge role-bearing evidence links and redaction/tombstone cascade
+vector index identity includes embedding model/config, index snapshot hash, and corpus surface hash
+reranker identity includes model/config/replay artifact/deterministic mode and excludes non-deterministic rerankers from direct P1 gates
 graph node cross-type collision rejection
 reserved scope/text applicability prefixes
 reserved task_family/workflow applicability prefixes
@@ -2779,6 +3135,12 @@ unknown legacy scope quarantine
 normal ingest vs privileged eval seeding governance
 transient reentry session-state gate and promotion
 Phase B/Phase D retrieval index phasing
+semantic search indexes typed MemoryCard surfaces only, never raw provenance payloads
+internal memory_semantic_search_internal precedes Phase F LLM-visible memory_semantic_search
+MemorySearchContextDoc grep scans transformed/redacted docs only, with candidate-limited default and audited global failover
+MemorySearchContextDoc grep verifies/localizes active current support only and never creates support_experience_ids
+memory_report_usage remains debug/eval-only and is not normal planning context
+MemBench niece/company rank-6 follow-up uses general retrieval-surface/semantic behavior, not phrase-specific boosts
 Phase B graph_refs optional but validated when present
 commit without graph_refs performs no graph writes but remains index/audit atomic
 transactional partial-failure recovery
@@ -2835,7 +3197,7 @@ These decisions remain open and should not block Phase A/B unless the implementa
 | Question | Initial stance |
 | --- | --- |
 | exact storage backend | Start with simple file/SQLite-style boundary; keep schema portable。 |
-| embedding/BM25 choice | Start with structured filters + lexical/BM25; vector later with artifacted score components。 |
+| embedding/BM25 choice | Keep summary search backend-injected. Use `ollama` + `qwen3-embedding:0.6b` as the first local vector candidate, keep lexical/BM25 as deterministic baseline/fallback, and switch among vector/hybrid/lexical based on memory eval with backend identity and replay artifacts。 |
 | approval UX | Begin with debug/scoring/manual approval; user-visible UX later。 |
 | retention/garbage collection | Use lifecycle + tombstone/supersede first; destructive GC later with audit policy。 |
 | user-visible memory editing | Defer; design card/tombstone refs so editing can be added。 |

@@ -13,10 +13,13 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import hashlib
+import json
 import math
 import re
 import time
 from typing import Any
+import urllib.error
+import urllib.request
 
 from .memory_typed_cards import (
     ApprovalState,
@@ -160,6 +163,12 @@ _SEMANTIC_PATCH_FIELDS = {
     "confidence",
 }
 _LATENCY_SOURCE_PRECEDENCE = ("wall_clock", "replayed_artifact", "deterministic_mock")
+_SUMMARY_SEARCH_BACKENDS = {"direct_scan_lexical", "bm25", "vector", "hybrid", "replay"}
+_EMBEDDING_PROVIDERS = {"none", "ollama", "openai", "local_file"}
+_DEFAULT_SUMMARY_SEARCH_BACKEND = "direct_scan_lexical"
+_DEFAULT_EMBEDDING_PROVIDER = "none"
+_DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+_DEFAULT_OLLAMA_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
 _GRAPH_EXPANSION_MODIFIER = Decimal("0.2500")
 _GRAPH_EXPANSION_EDGE_TYPES = {
     GraphEdgeType.MENTIONS.value,
@@ -700,6 +709,11 @@ class MemoryRecallRequest:
     expand_graph: bool = False
     graph_max_depth: int = 1
     graph_max_items: int = 16
+    summary_search_backend: str = _DEFAULT_SUMMARY_SEARCH_BACKEND
+    embedding_provider: str = _DEFAULT_EMBEDDING_PROVIDER
+    embedding_model_id: str | None = None
+    embedding_base_url: str = _DEFAULT_OLLAMA_BASE_URL
+    embedding_timeout_s: int = 30
     request_id: str | None = None
 
     def __post_init__(self) -> None:
@@ -727,6 +741,25 @@ class MemoryRecallRequest:
         if graph_max_items < 0:
             raise ValueError("graph_max_items must be non-negative")
         object.__setattr__(self, "graph_max_items", graph_max_items)
+        backend = _clean_text(self.summary_search_backend) or _DEFAULT_SUMMARY_SEARCH_BACKEND
+        if backend not in _SUMMARY_SEARCH_BACKENDS:
+            raise ValueError("summary_search_backend is invalid")
+        object.__setattr__(self, "summary_search_backend", backend)
+        provider = _clean_text(self.embedding_provider) or _DEFAULT_EMBEDDING_PROVIDER
+        if backend in {"vector", "hybrid"} and provider == "none":
+            provider = "ollama"
+        if provider not in _EMBEDDING_PROVIDERS:
+            raise ValueError("embedding_provider is invalid")
+        object.__setattr__(self, "embedding_provider", provider)
+        model_id = _clean_text(self.embedding_model_id) or None
+        if backend in {"vector", "hybrid"} and provider == "ollama" and model_id is None:
+            model_id = _DEFAULT_OLLAMA_EMBEDDING_MODEL
+        object.__setattr__(self, "embedding_model_id", model_id)
+        object.__setattr__(self, "embedding_base_url", (_clean_text(self.embedding_base_url) or _DEFAULT_OLLAMA_BASE_URL).rstrip("/"))
+        timeout_s = int(self.embedding_timeout_s or 0)
+        if timeout_s <= 0:
+            raise ValueError("embedding_timeout_s must be positive")
+        object.__setattr__(self, "embedding_timeout_s", timeout_s)
         request_id = self.request_id or "req_" + stable_short_hash(self.to_request_payload(), length=16)
         object.__setattr__(self, "request_id", request_id)
 
@@ -745,7 +778,226 @@ class MemoryRecallRequest:
             "expand_graph": self.expand_graph,
             "graph_max_depth": self.graph_max_depth,
             "graph_max_items": self.graph_max_items,
+            "summary_search_backend": self.summary_search_backend,
+            "embedding_provider": self.embedding_provider,
+            "embedding_model_id": self.embedding_model_id,
+            "embedding_base_url": self.embedding_base_url,
+            "embedding_timeout_s": self.embedding_timeout_s,
         }
+
+
+@dataclass(frozen=True)
+class SummarySearchBackendIdentity:
+    backend_kind: str
+    backend_version: str = "v1"
+    surface_config_hash: str = ""
+    backend_config_hash: str = ""
+    embedding_provider: str = "none"
+    embedding_model_id: str | None = None
+    replay_artifact_id: str | None = None
+
+    def __post_init__(self) -> None:
+        backend_kind = _clean_text(self.backend_kind) or _DEFAULT_SUMMARY_SEARCH_BACKEND
+        if backend_kind not in _SUMMARY_SEARCH_BACKENDS:
+            raise ValueError("backend_kind is invalid")
+        object.__setattr__(self, "backend_kind", backend_kind)
+        object.__setattr__(self, "backend_version", _clean_text(self.backend_version) or "v1")
+        surface_config_hash = _clean_text(self.surface_config_hash) or _default_retrieval_surface_config_hash()
+        object.__setattr__(self, "surface_config_hash", surface_config_hash)
+        provider = _clean_text(self.embedding_provider) or "none"
+        if provider not in _EMBEDDING_PROVIDERS:
+            raise ValueError("embedding_provider is invalid")
+        object.__setattr__(self, "embedding_provider", provider)
+        object.__setattr__(self, "embedding_model_id", _clean_text(self.embedding_model_id) or None)
+        backend_config_hash = _clean_text(self.backend_config_hash) or stable_hash(
+            {
+                "backend_kind": backend_kind,
+                "backend_version": self.backend_version,
+                "surface_config_hash": surface_config_hash,
+                "embedding_provider": provider,
+                "embedding_model_id": self.embedding_model_id,
+            }
+        )
+        object.__setattr__(self, "backend_config_hash", backend_config_hash)
+        object.__setattr__(self, "replay_artifact_id", _clean_text(self.replay_artifact_id) or None)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "backend_kind": self.backend_kind,
+            "backend_version": self.backend_version,
+            "surface_config_hash": self.surface_config_hash,
+            "backend_config_hash": self.backend_config_hash,
+            "embedding_provider": self.embedding_provider,
+            "embedding_model_id": self.embedding_model_id,
+            "replay_artifact_id": self.replay_artifact_id,
+        }
+
+
+@dataclass(frozen=True)
+class SummarySearchHit:
+    card_id: str
+    backend_score: Decimal
+    score_components: Mapping[str, str | None] = field(default_factory=dict)
+    matched_fields: tuple[str, ...] = ()
+    backend_identity: SummarySearchBackendIdentity = field(
+        default_factory=lambda: SummarySearchBackendIdentity(backend_kind=_DEFAULT_SUMMARY_SEARCH_BACKEND)
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "card_id", _required_text(self.card_id, "search_hit.card_id"))
+        object.__setattr__(self, "backend_score", Decimal(canonical_score(self.backend_score)))
+        object.__setattr__(self, "score_components", dict(self.score_components))
+        object.__setattr__(self, "matched_fields", tuple(_required_text(item, "matched_fields") for item in self.matched_fields))
+
+
+class SummarySearchBackend:
+    """Candidate-scoring backend over authorization-prefiltered card surfaces."""
+
+    identity: SummarySearchBackendIdentity
+
+    def search(
+        self,
+        *,
+        query: str,
+        cards: Sequence[MemoryCard],
+        request: MemoryRecallRequest,
+        surface_config_hash: str,
+        limit: int,
+    ) -> tuple[SummarySearchHit, ...]:
+        raise NotImplementedError
+
+
+class DirectScanLexicalSummarySearchBackend(SummarySearchBackend):
+    def __init__(self, *, backend_kind: str = "direct_scan_lexical", surface_config_hash: str | None = None) -> None:
+        if backend_kind not in {"direct_scan_lexical", "bm25"}:
+            raise ValueError("direct lexical backend_kind must be direct_scan_lexical or bm25")
+        self.identity = SummarySearchBackendIdentity(
+            backend_kind=backend_kind,
+            surface_config_hash=surface_config_hash or _default_retrieval_surface_config_hash(),
+            embedding_provider="none",
+        )
+
+    def search(
+        self,
+        *,
+        query: str,
+        cards: Sequence[MemoryCard],
+        request: MemoryRecallRequest,
+        surface_config_hash: str,
+        limit: int,
+    ) -> tuple[SummarySearchHit, ...]:
+        query_tokens = _tokens(query)
+        hits: list[SummarySearchHit] = []
+        for card in sorted(cards, key=lambda item: item.card_id):
+            lexical = Decimal("0.0000")
+            matched_fields: tuple[str, ...] = ()
+            if query_tokens:
+                scoring_tokens = _meaningful_query_tokens(query_tokens) or query_tokens
+                field_tokens = _card_field_tokens(card)
+                matched_fields = tuple(sorted(field for field, tokens in field_tokens.items() if scoring_tokens & tokens))
+                all_tokens: set[str] = set()
+                for tokens in field_tokens.values():
+                    all_tokens.update(tokens)
+                overlap = len(scoring_tokens & all_tokens)
+                if not request.applicability_refs and overlap < _minimum_query_overlap(query_tokens):
+                    continue
+                lexical = Decimal(overlap) / Decimal(max(1, len(scoring_tokens)))
+            hits.append(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score=lexical,
+                    score_components={
+                        "lexical_score": canonical_score(lexical),
+                        "summary_backend_score": canonical_score(lexical),
+                        "vector_score": None,
+                    },
+                    matched_fields=matched_fields,
+                    backend_identity=replace(self.identity, surface_config_hash=surface_config_hash),
+                )
+            )
+        return tuple(hits[: max(0, limit)])
+
+
+class OllamaVectorSummarySearchBackend(SummarySearchBackend):
+    def __init__(
+        self,
+        *,
+        model_id: str = _DEFAULT_OLLAMA_EMBEDDING_MODEL,
+        base_url: str = _DEFAULT_OLLAMA_BASE_URL,
+        timeout_s: int = 30,
+        surface_config_hash: str | None = None,
+    ) -> None:
+        self.model_id = _required_text(model_id, "embedding_model_id")
+        self.base_url = (_clean_text(base_url) or _DEFAULT_OLLAMA_BASE_URL).rstrip("/")
+        self.timeout_s = int(timeout_s or 30)
+        self.identity = SummarySearchBackendIdentity(
+            backend_kind="vector",
+            surface_config_hash=surface_config_hash or _default_retrieval_surface_config_hash(),
+            embedding_provider="ollama",
+            embedding_model_id=self.model_id,
+            backend_config_hash=stable_hash(
+                {
+                    "backend_kind": "vector",
+                    "embedding_provider": "ollama",
+                    "embedding_model_id": self.model_id,
+                    "base_url": self.base_url,
+                    "timeout_s": self.timeout_s,
+                }
+            ),
+        )
+
+    def search(
+        self,
+        *,
+        query: str,
+        cards: Sequence[MemoryCard],
+        request: MemoryRecallRequest,
+        surface_config_hash: str,
+        limit: int,
+    ) -> tuple[SummarySearchHit, ...]:
+        if not cards:
+            return ()
+        query = _clean_text(query)
+        identity = replace(self.identity, surface_config_hash=surface_config_hash)
+        if not query:
+            return tuple(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score=Decimal("0"),
+                    score_components={"lexical_score": None, "summary_backend_score": "0.0000", "vector_score": "0.0000"},
+                    backend_identity=identity,
+                )
+                for card in sorted(cards, key=lambda item: item.card_id)[: max(0, limit)]
+            )
+        sorted_cards = sorted(cards, key=lambda item: item.card_id)
+        inputs = [query, *(_vector_surface_text(card) for card in sorted_cards)]
+        vectors = _ollama_embed(
+            model=self.model_id,
+            inputs=inputs,
+            base_url=self.base_url,
+            timeout_s=self.timeout_s,
+        )
+        if len(vectors) != len(inputs):
+            raise RuntimeError("ollama embedding response length mismatch")
+        query_vector = vectors[0]
+        hits = []
+        for card, vector in zip(sorted_cards, vectors[1:]):
+            score = _cosine_score(query_vector, vector)
+            hits.append(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score=score,
+                    score_components={
+                        "lexical_score": None,
+                        "summary_backend_score": canonical_score(score),
+                        "vector_score": canonical_score(score),
+                    },
+                    matched_fields=("summary",),
+                    backend_identity=identity,
+                )
+            )
+        hits.sort(key=lambda item: (-item.backend_score, item.card_id))
+        return tuple(hits[: max(0, limit)])
 
 
 @dataclass(frozen=True)
@@ -792,7 +1044,7 @@ class MemoryUsage:
         object.__setattr__(self, "latency_ms", latency)
         if self.latency_source not in {"wall_clock", "deterministic_mock", "replayed_artifact"}:
             raise ValueError("usage.latency_source is invalid")
-        if self.index_mode not in {"direct_scan", "sync_lexical", "graph_index", "vector"}:
+        if self.index_mode not in {"direct_scan", "sync_lexical", "graph_index", "vector", "hybrid", "replay"}:
             raise ValueError("usage.index_mode is invalid")
 
     def to_dict(self) -> dict[str, Any]:
@@ -957,10 +1209,12 @@ class TypedMemoryCore:
         *,
         extractor: RawExtractor | None = None,
         extractor_config: RawMemoryExtractorConfig | None = None,
+        summary_search_backend: SummarySearchBackend | None = None,
         clock: Callable[[], str] = utc_now_iso,
     ) -> None:
         self.extractor = extractor
         self.extractor_config = extractor_config or RawMemoryExtractorConfig()
+        self.summary_search_backend = summary_search_backend
         self.clock = clock
         self.provenance_events: dict[str, ProvenanceEvent] = {}
         self.raw_payloads: dict[str, str] = {}
@@ -1468,29 +1722,46 @@ class TypedMemoryCore:
         dropped: list[CallerVisibleDroppedRecord] = []
         internal_dropped: list[DroppedReason] = []
         dropped_counts: dict[str, int] = {}
-        scored_by_card: dict[str, tuple[dict[str, str | None], MemoryCard, Decimal, bool]] = {}
+        scored_by_card: dict[str, tuple[dict[str, str | None], MemoryCard, Decimal, bool, SummarySearchHit | None]] = {}
         graph_candidates: dict[str, MemoryCard] = {}
-        pending_no_relevant: list[MemoryCard] = []
+        visible_cards: list[MemoryCard] = []
         scanned = 0
         now = request.now or self.clock()
         for card in sorted(self.memory_cards.values(), key=lambda item: item.card_id):
             scanned += 1
-            reason = self._drop_reason(card, request, now=now)
+            reason = self._coarse_visibility_drop_reason(card, request)
+            if reason is not None:
+                _add_drop(reason, card, dropped, internal_dropped, dropped_counts)
+                continue
+            visible_cards.append(card)
+
+        surface_config_hash = _default_retrieval_surface_config_hash()
+        summary_backend = self._summary_search_backend(request, surface_config_hash=surface_config_hash)
+        search_hits = {
+            hit.card_id: hit
+            for hit in summary_backend.search(
+                query=request.query,
+                cards=tuple(visible_cards),
+                request=request,
+                surface_config_hash=surface_config_hash,
+                limit=len(visible_cards),
+            )
+        }
+        backend_identity = summary_backend.identity
+        for card in visible_cards:
+            reason = self._post_visibility_drop_reason(card, request, now=now)
             if reason is None:
                 reason = self._invalidator_drop_reason(card, request.current_evidence)
             if reason is not None:
                 _add_drop(reason, card, dropped, internal_dropped, dropped_counts)
                 continue
             graph_candidates[card.card_id] = card
-            if (
-                query_tokens
-                and _query_overlap_count(card, query_tokens) < _minimum_query_overlap(query_tokens)
-                and not request.applicability_refs
-            ):
-                pending_no_relevant.append(card)
+            hit = search_hits.get(card.card_id)
+            if hit is None and query_tokens and not request.applicability_refs:
+                _add_drop("no_relevant_memory", card, dropped, internal_dropped, dropped_counts)
                 continue
-            components, final_score, exact_scope = self._score_card(card, query_tokens, request)
-            scored_by_card[card.card_id] = (components, card, final_score, exact_scope)
+            components, final_score, exact_scope = self._score_card(card, query_tokens, request, summary_hit=hit)
+            scored_by_card[card.card_id] = (components, card, final_score, exact_scope, hit)
 
         expansion = self._expand_graph_candidates(
             seed_cards=tuple(item[1] for item in scored_by_card.values()),
@@ -1509,12 +1780,10 @@ class TypedMemoryCore:
                 card,
                 query_tokens,
                 request,
+                summary_hit=None,
                 graph_modifier=graph_modifier,
             )
-            scored_by_card[card.card_id] = (components, card, final_score, exact_scope)
-        for card in pending_no_relevant:
-            if card.card_id not in scored_by_card:
-                _add_drop("no_relevant_memory", card, dropped, internal_dropped, dropped_counts)
+            scored_by_card[card.card_id] = (components, card, final_score, exact_scope, None)
 
         scored = list(scored_by_card.values())
 
@@ -1530,8 +1799,8 @@ class TypedMemoryCore:
             )
         )
         ranked = []
-        for index, (components, card, _final_score, _exact_scope) in enumerate(scored[: request.limit], start=1):
-            ranked.append(self._ranked_evidence(index, card, components))
+        for index, (components, card, _final_score, _exact_scope, hit) in enumerate(scored[: request.limit], start=1):
+            ranked.append(self._ranked_evidence(index, card, components, summary_hit=hit, backend_identity=backend_identity))
         latency_ms = 0.0
         if request.latency_source == "wall_clock":
             latency_ms = round((time.perf_counter() - start) * 1000.0, 3)
@@ -1545,7 +1814,7 @@ class TypedMemoryCore:
             graph_nodes_expanded=expansion.nodes_expanded,
             graph_edges_expanded=expansion.edges_expanded,
             projection_chars=sum(len(item.metadata.get("summary", "")) for item in ranked),
-            index_mode="graph_index" if expansion.nodes_expanded or expansion.edges_expanded else "direct_scan",
+            index_mode="graph_index" if expansion.nodes_expanded or expansion.edges_expanded else _index_mode_for_backend(backend_identity.backend_kind),
         )
         abstained = not ranked
         if not self.memory_cards:
@@ -1567,6 +1836,7 @@ class TypedMemoryCore:
             "abstained_reason": abstained_reason,
             "dropped_count_by_reason": dropped_counts,
             "usage": usage.to_dict(),
+            "summary_search_backend": backend_identity.to_dict(),
             "request_id": request.request_id,
             "request_hash": request_hash,
         }
@@ -1579,7 +1849,7 @@ class TypedMemoryCore:
             card_ids=tuple(item.evidence_ref for item in ranked),
             dropped=tuple(internal_dropped),
             usage=usage.to_dict(),
-            metadata={"request_id": request.request_id, "index_mode": usage.index_mode},
+            metadata={"request_id": request.request_id, "index_mode": usage.index_mode, "summary_search_backend": backend_identity.to_dict()},
         )
         return MemoryRetrieveResult(
             ranked_evidence=tuple(ranked),
@@ -1636,7 +1906,7 @@ class TypedMemoryCore:
             else:
                 cost_sum += Decimal(str(usage["cost_units"]))
         index_mode = "direct_scan"
-        for candidate in ("vector", "graph_index", "sync_lexical", "direct_scan"):
+        for candidate in ("graph_index", "hybrid", "vector", "replay", "sync_lexical", "direct_scan"):
             if index_counts.get(candidate):
                 index_mode = candidate
                 break
@@ -2268,10 +2538,19 @@ class TypedMemoryCore:
                 raise ValueError("replacement provenance must cite the current mutation as source_mutation_id")
 
     def _drop_reason(self, card: MemoryCard, request: MemoryRecallRequest, *, now: str) -> str | None:
+        reason = self._coarse_visibility_drop_reason(card, request)
+        if reason is not None:
+            return reason
+        return self._post_visibility_drop_reason(card, request, now=now)
+
+    def _coarse_visibility_drop_reason(self, card: MemoryCard, request: MemoryRecallRequest) -> str | None:
         if not _privacy_allows(card, request.authorization_scope or request.scope, shared_policy_ids=()):
             return "privacy_block"
         if not _scope_allows(request.scope, card.scope, card_kind=card.kind):
             return "out_of_scope"
+        return None
+
+    def _post_visibility_drop_reason(self, card: MemoryCard, request: MemoryRecallRequest, *, now: str) -> str | None:
         if not _applicability_allows(card, request):
             return "out_of_scope"
         if card.approval_state != ApprovalState.COMMITTED.value:
@@ -2289,6 +2568,29 @@ class TypedMemoryCore:
         if not any(self._visible_support_link(link) for link in card.evidence_links if link.active):
             return "missing_evidence"
         return None
+
+    def _summary_search_backend(self, request: MemoryRecallRequest, *, surface_config_hash: str) -> SummarySearchBackend:
+        if self.summary_search_backend is not None:
+            return self.summary_search_backend
+        if request.summary_search_backend in {"direct_scan_lexical", "bm25"}:
+            return DirectScanLexicalSummarySearchBackend(
+                backend_kind=request.summary_search_backend,
+                surface_config_hash=surface_config_hash,
+            )
+        if request.summary_search_backend == "vector":
+            if request.embedding_provider != "ollama":
+                raise ValueError("only ollama vector summary search is implemented")
+            return OllamaVectorSummarySearchBackend(
+                model_id=request.embedding_model_id or _DEFAULT_OLLAMA_EMBEDDING_MODEL,
+                base_url=request.embedding_base_url,
+                timeout_s=request.embedding_timeout_s,
+                surface_config_hash=surface_config_hash,
+            )
+        if request.summary_search_backend == "hybrid":
+            # First implementation keeps hybrid pluggable but uses the deterministic
+            # anchor backend until vector+anchor fusion is wired behind replayable artifacts.
+            return DirectScanLexicalSummarySearchBackend(backend_kind="bm25", surface_config_hash=surface_config_hash)
+        raise ValueError("summary_search_backend is not implemented")
 
     def _invalidator_drop_reason(self, card: MemoryCard, current_evidence: CurrentEvidenceSnapshot | None) -> str | None:
         if not current_evidence:
@@ -2434,14 +2736,28 @@ class TypedMemoryCore:
         query_tokens: set[str],
         request: MemoryRecallRequest,
         *,
+        summary_hit: SummarySearchHit | None = None,
         graph_modifier: Decimal = Decimal("0"),
     ) -> tuple[dict[str, str | None], Decimal, bool]:
         exact_scope = request.scope.scope_key() == card.scope.scope_key()
         structured = Decimal("1.0000")
-        lexical = Decimal("0.0000")
-        if query_tokens:
+        backend_score = Decimal("0.0000")
+        if summary_hit is not None:
+            backend_score = Decimal(canonical_score(summary_hit.backend_score))
+        lexical: Decimal | None = None
+        vector_score: Decimal | None = None
+        if summary_hit is not None:
+            if (value := summary_hit.score_components.get("lexical_score")) is not None:
+                lexical = Decimal(value)
+            if (value := summary_hit.score_components.get("vector_score")) is not None:
+                vector_score = Decimal(value)
+        if lexical is None and query_tokens:
             card_tokens = _tokens(_card_search_text(card))
             lexical = Decimal(len(query_tokens & card_tokens)) / Decimal(max(1, len(query_tokens)))
+        if lexical is None:
+            lexical = Decimal("0.0000")
+        if summary_hit is None:
+            backend_score = lexical
         scope_modifier = Decimal("0.3000") if exact_scope else Decimal("0.1000")
         authority_modifier = _AUTHORITY_RANK[card.authority.strength] + _AUTHORITY_SOURCE_RANK[card.authority.source]
         freshness_modifier = Decimal("0.2000") if card.staleness_state == StalenessState.FRESH.value else Decimal("0.0000")
@@ -2449,7 +2765,7 @@ class TypedMemoryCore:
         confidence_modifier = Decimal(str(card.confidence)) / Decimal("10")
         final = (
             structured
-            + (lexical * Decimal("2.0000"))
+            + (backend_score * Decimal("2.0000"))
             + scope_modifier
             + authority_modifier
             + freshness_modifier
@@ -2459,8 +2775,9 @@ class TypedMemoryCore:
         )
         components = {
             "structured_match": canonical_score(structured),
+            "summary_backend_score": canonical_score(backend_score),
             "lexical_score": canonical_score(lexical),
-            "vector_score": None,
+            "vector_score": canonical_score(vector_score) if vector_score is not None else None,
             "reranker_score": None,
             "scope_modifier": canonical_score(scope_modifier),
             "authority_modifier": canonical_score(authority_modifier),
@@ -2473,7 +2790,15 @@ class TypedMemoryCore:
         }
         return components, Decimal(components["final_score"]), exact_scope
 
-    def _ranked_evidence(self, rank: int, card: MemoryCard, components: Mapping[str, str | None]) -> RankedMemoryEvidence:
+    def _ranked_evidence(
+        self,
+        rank: int,
+        card: MemoryCard,
+        components: Mapping[str, str | None],
+        *,
+        summary_hit: SummarySearchHit | None = None,
+        backend_identity: SummarySearchBackendIdentity | None = None,
+    ) -> RankedMemoryEvidence:
         support_ref_ids = tuple(
             sorted(
                 link.ref_id
@@ -2540,6 +2865,12 @@ class TypedMemoryCore:
                 "contradiction_state": card.contradiction_state,
                 "authority": card.authority.to_dict(),
                 "applicability": card.applicability.to_dict(),
+                "matched_fields": list(summary_hit.matched_fields) if summary_hit else [],
+                "summary_search_backend": (
+                    summary_hit.backend_identity.to_dict()
+                    if summary_hit is not None
+                    else (backend_identity.to_dict() if backend_identity is not None else None)
+                ),
                 "provenance_refs_by_role": {key: sorted(value) for key, value in refs_by_role.items()},
             },
         )
@@ -2741,6 +3072,32 @@ def _tokens(text: str) -> set[str]:
     return {match.group(0).casefold() for match in _TOKEN_RE.finditer(text or "")}
 
 
+def _default_retrieval_surface_config_hash() -> str:
+    return stable_hash(
+        {
+            "included_fields": [
+                "summary",
+                "details",
+                "retrieval_terms",
+                "applicability.applies_to",
+                "applicability.prerequisites",
+                "applicability.counterexamples",
+            ],
+            "field_weights": {
+                "summary": "1.0000",
+                "details": "0.6000",
+                "retrieval_terms": "1.4000",
+                "applicability.applies_to": "0.4000",
+                "applicability.prerequisites": "0.3000",
+                "applicability.counterexamples": "0.1000",
+            },
+            "tokenizer_id": "mew-token-v1",
+            "normalizer_id": "casefold-ascii-token-v1",
+            "stopword_policy_id": "query-relevance-stopwords-v1",
+        }
+    )
+
+
 def _meaningful_query_tokens(query_tokens: set[str]) -> set[str]:
     return {token for token in query_tokens if token not in _QUERY_RELEVANCE_STOPWORDS}
 
@@ -2810,16 +3167,78 @@ def _normalize_patch_retrieval_terms(values: Any) -> list[str]:
 
 
 def _card_search_text(card: MemoryCard) -> str:
+    return " ".join(_card_field_texts(card).values())
+
+
+def _card_field_texts(card: MemoryCard) -> dict[str, str]:
     applicability = card.applicability.to_dict()
-    parts = [
-        card.summary,
-        card.details or "",
-        " ".join(card.retrieval_terms),
-        " ".join(applicability.get("applies_to") or ()),
-        " ".join(applicability.get("prerequisites") or ()),
-        " ".join(applicability.get("counterexamples") or ()),
-    ]
-    return " ".join(parts)
+    return {
+        "summary": card.summary,
+        "details": card.details or "",
+        "retrieval_terms": " ".join(card.retrieval_terms),
+        "applicability.applies_to": " ".join(applicability.get("applies_to") or ()),
+        "applicability.prerequisites": " ".join(applicability.get("prerequisites") or ()),
+        "applicability.counterexamples": " ".join(applicability.get("counterexamples") or ()),
+    }
+
+
+def _card_field_tokens(card: MemoryCard) -> dict[str, set[str]]:
+    return {field: _tokens(text) for field, text in _card_field_texts(card).items()}
+
+
+def _vector_surface_text(card: MemoryCard) -> str:
+    fields = _card_field_texts(card)
+    return "\n".join(
+        part
+        for part in (
+            fields["summary"],
+            fields["details"],
+            fields["retrieval_terms"],
+            fields["applicability.applies_to"],
+            fields["applicability.prerequisites"],
+        )
+        if part
+    )
+
+
+def _index_mode_for_backend(backend_kind: str) -> str:
+    if backend_kind == "bm25":
+        return "sync_lexical"
+    if backend_kind in {"vector", "hybrid", "replay"}:
+        return backend_kind
+    return "direct_scan"
+
+
+def _ollama_embed(*, model: str, inputs: Sequence[str], base_url: str, timeout_s: int) -> list[list[float]]:
+    payload = json.dumps({"model": model, "input": list(inputs)}).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/embed",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"ollama embedding request failed: {exc}") from exc
+    embeddings = data.get("embeddings")
+    if not isinstance(embeddings, list):
+        raise RuntimeError("ollama embedding response missing embeddings")
+    return [[float(item) for item in vector] for vector in embeddings]
+
+
+def _cosine_score(left: Sequence[float], right: Sequence[float]) -> Decimal:
+    if not left or not right or len(left) != len(right):
+        return Decimal("0")
+    dot = sum(float(a) * float(b) for a, b in zip(left, right))
+    left_norm = math.sqrt(sum(float(a) * float(a) for a in left))
+    right_norm = math.sqrt(sum(float(b) * float(b) for b in right))
+    if left_norm <= 0 or right_norm <= 0:
+        return Decimal("0")
+    cosine = dot / (left_norm * right_norm)
+    cosine = max(0.0, min(1.0, cosine))
+    return Decimal(str(cosine))
 
 
 def _contains_forbidden_model_commit(payload: Mapping[str, Any]) -> bool:

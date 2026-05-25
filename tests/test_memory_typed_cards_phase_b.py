@@ -9,6 +9,9 @@ from mew.memory_typed_card_core import (
     MemoryMutation,
     MemoryRecallRequest,
     ModelRawMemoryExtractor,
+    SummarySearchBackend,
+    SummarySearchBackendIdentity,
+    SummarySearchHit,
     TypedMemoryCore,
     canonical_score,
     raw_memory_extraction_schema,
@@ -782,6 +785,94 @@ def test_retrieval_terms_preserve_discriminators_for_ranking_when_summary_is_gen
     assert result.ranked_evidence[0].support_experience_ids == ("exp_primary_badge",)
     assert "launch reviews" in result.ranked_evidence[0].metadata["retrieval_terms"]
     assert "cobalt" in result.ranked_evidence[0].metadata["retrieval_terms"]
+
+
+def test_summary_search_backend_can_be_injected_and_records_identity() -> None:
+    class FixedVectorBackend(SummarySearchBackend):
+        def __init__(self) -> None:
+            self.identity = SummarySearchBackendIdentity(
+                backend_kind="vector",
+                embedding_provider="ollama",
+                embedding_model_id="qwen3-embedding:0.6b",
+            )
+            self.seen_card_ids: list[str] = []
+
+        def search(self, *, query, cards, request, surface_config_hash, limit):
+            self.seen_card_ids = [card.card_id for card in cards]
+            return tuple(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score="0.9000" if "Vector target" in card.summary else "0.1000",
+                    score_components={
+                        "summary_backend_score": "0.9000" if "Vector target" in card.summary else "0.1000",
+                        "lexical_score": None,
+                        "vector_score": "0.9000" if "Vector target" in card.summary else "0.1000",
+                    },
+                    matched_fields=("summary",),
+                    backend_identity=self.identity,
+                )
+                for card in cards[:limit]
+            )
+
+    def extractor(request, provenance_event, scope):
+        return _candidate_payload("Vector target card." if "Vector target" in request.raw_text else "Plain baseline card.")
+
+    backend = FixedVectorBackend()
+    core = TypedMemoryCore(extractor=extractor, clock=_Clock())
+    core.summary_search_backend = backend
+    first_result = _ingest(core, raw_text="Plain baseline card.", source_experience_id="exp_plain")
+    assert first_result.proposal_card is not None
+    _approved, committed_first = core.approve_and_commit_memory(first_result.proposal_card.card_id, actor="debug")
+    second = _ingest(core, raw_text="Vector target card.", source_experience_id="exp_vector")
+    assert second.proposal_card is not None
+    _approved, committed_second = core.approve_and_commit_memory(second.proposal_card.card_id, actor="debug")
+
+    result = core.retrieve(MemoryRecallRequest(query="unrelated semantic question", scope=_scope(), summary_search_backend="vector"))
+
+    assert backend.seen_card_ids == sorted([committed_first.card.card_id, committed_second.card.card_id])
+    assert result.usage.index_mode == "vector"
+    assert result.ranked_evidence[0].evidence_ref == committed_second.card.card_id
+    assert result.ranked_evidence[0].score_components["vector_score"] == "0.9000"
+    assert result.ranked_evidence[0].metadata["summary_search_backend"]["embedding_provider"] == "ollama"
+    assert result.ranked_evidence[0].metadata["summary_search_backend"]["embedding_model_id"] == "qwen3-embedding:0.6b"
+
+
+def test_summary_search_backend_receives_only_coarse_authorized_cards() -> None:
+    class RecordingBackend(SummarySearchBackend):
+        def __init__(self) -> None:
+            self.identity = SummarySearchBackendIdentity(backend_kind="direct_scan_lexical")
+            self.seen_card_ids: list[str] = []
+
+        def search(self, *, query, cards, request, surface_config_hash, limit):
+            self.seen_card_ids = [card.card_id for card in cards]
+            return tuple(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score="0.5000",
+                    score_components={"summary_backend_score": "0.5000", "lexical_score": "0.5000", "vector_score": None},
+                    backend_identity=self.identity,
+                )
+                for card in cards[:limit]
+            )
+
+    backend = RecordingBackend()
+    core, visible = _committed_core("Visible authorized summary.", source_experience_id="exp_visible")
+    hidden_scope = _scope("other")
+    hidden = replace(
+        visible,
+        card_id="mem_hidden_other_scope",
+        summary="Hidden unauthorized summary.",
+        scope=hidden_scope,
+        privacy=PrivacyRules(allowed_scope_ids=(hidden_scope.scope_key(),)),
+    )
+    core.memory_cards[hidden.card_id] = hidden
+    core.summary_search_backend = backend
+
+    result = core.retrieve(MemoryRecallRequest(query="summary", scope=_scope(), limit=5))
+
+    assert backend.seen_card_ids == [visible.card_id]
+    assert [item.evidence_ref for item in result.ranked_evidence] == [visible.card_id]
+    assert result.dropped_count_by_reason["privacy_block"] == 1
 
 
 def test_raw_extractor_graph_nodes_become_proposal_graph_refs_for_expansion() -> None:

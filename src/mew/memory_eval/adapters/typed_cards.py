@@ -63,6 +63,11 @@ class TypedCardsMemoryEvalAdapter:
         call_json: ModelJsonCaller | None = None,
         call_structured_json: ModelStructuredJsonCaller | None = None,
         timeout: int = 120,
+        summary_search_backend: str = "direct_scan_lexical",
+        embedding_provider: str = "ollama",
+        embedding_model_id: str = "qwen3-embedding:0.6b",
+        embedding_base_url: str = "http://localhost:11434",
+        embedding_timeout_s: int = 30,
     ) -> None:
         if extractor_mode not in SUPPORTED_EXTRACTOR_MODES:
             raise ValueError(f"unsupported typed-card extractor_mode: {extractor_mode}")
@@ -73,6 +78,11 @@ class TypedCardsMemoryEvalAdapter:
         self.call_json = call_json
         self.call_structured_json = call_structured_json
         self.timeout = int(timeout or 120)
+        self.summary_search_backend = str(summary_search_backend or "direct_scan_lexical")
+        self.embedding_provider = str(embedding_provider or "ollama")
+        self.embedding_model_id = str(embedding_model_id or "qwen3-embedding:0.6b")
+        self.embedding_base_url = str(embedding_base_url or "http://localhost:11434")
+        self.embedding_timeout_s = int(embedding_timeout_s or 30)
         self.evaluation_time = "2026-05-21T00:00:00Z"
         self.core = self._new_core()
         self.experiences: dict[str, dict[str, Any]] = {}
@@ -89,6 +99,11 @@ class TypedCardsMemoryEvalAdapter:
         call_json: ModelJsonCaller | None = None,
         call_structured_json: ModelStructuredJsonCaller | None = None,
         timeout: int = 120,
+        summary_search_backend: str = "direct_scan_lexical",
+        embedding_provider: str = "ollama",
+        embedding_model_id: str = "qwen3-embedding:0.6b",
+        embedding_base_url: str = "http://localhost:11434",
+        embedding_timeout_s: int = 30,
     ) -> "TypedCardsMemoryEvalAdapter":
         return cls(
             extractor_mode=EXTRACTOR_MODE_LIVE_MODEL,
@@ -98,6 +113,11 @@ class TypedCardsMemoryEvalAdapter:
             call_json=call_json,
             call_structured_json=call_structured_json,
             timeout=timeout,
+            summary_search_backend=summary_search_backend,
+            embedding_provider=embedding_provider,
+            embedding_model_id=embedding_model_id,
+            embedding_base_url=embedding_base_url,
+            embedding_timeout_s=embedding_timeout_s,
         )
 
     def manifest(self) -> dict[str, Any]:
@@ -119,6 +139,13 @@ class TypedCardsMemoryEvalAdapter:
         manifest["setup_policy"] = SETUP_POLICY
         manifest["extractor"] = self._extractor_manifest()
         manifest["external_model_ids"] = list(manifest["extractor"]["external_model_ids"])
+        manifest["summary_search"] = {
+            "backend": self.summary_search_backend,
+            "embedding_provider": self.embedding_provider,
+            "embedding_model_id": self.embedding_model_id if self.summary_search_backend in {"vector", "hybrid"} else None,
+        }
+        if self.summary_search_backend in {"vector", "hybrid"}:
+            manifest["external_model_ids"].append(f"{self.embedding_provider}:{self.embedding_model_id}")
         manifest["capabilities"]["seed_eval"] = True
         manifest["capabilities"]["graph_expansion"] = True
         manifest["capabilities"]["seed_graph"] = True
@@ -169,6 +196,19 @@ class TypedCardsMemoryEvalAdapter:
                 expand_graph=_truthy(query.get("expand_graph")) or _truthy(filters.get("expand_graph")),
                 graph_max_depth=int(filters.get("graph_max_depth") or budget.get("graph_max_depth") or 1),
                 graph_max_items=int(filters.get("graph_max_items") or budget.get("graph_max_items") or 16),
+                summary_search_backend=_optional_str(filters.get("summary_search_backend"))
+                or _optional_str(query.get("summary_search_backend"))
+                or self.summary_search_backend,
+                embedding_provider=_optional_str(filters.get("embedding_provider"))
+                or _optional_str(query.get("embedding_provider"))
+                or self.embedding_provider,
+                embedding_model_id=_optional_str(filters.get("embedding_model_id"))
+                or _optional_str(query.get("embedding_model_id"))
+                or self.embedding_model_id,
+                embedding_base_url=_optional_str(filters.get("embedding_base_url"))
+                or _optional_str(query.get("embedding_base_url"))
+                or self.embedding_base_url,
+                embedding_timeout_s=int(filters.get("embedding_timeout_s") or query.get("embedding_timeout_s") or self.embedding_timeout_s),
                 request_id=_optional_str(query.get("request_id")),
             )
         )

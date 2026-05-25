@@ -26,6 +26,10 @@ DEFAULT_AUTH_JSON = Path.home() / ".codex" / "auth.json"
 DEFAULT_MODEL = "gpt-5.5"
 DEFAULT_BACKEND = "codex"
 DEFAULT_TIMEOUT = 120
+DEFAULT_SUMMARY_SEARCH_BACKEND = "direct_scan_lexical"
+DEFAULT_EMBEDDING_PROVIDER = "ollama"
+DEFAULT_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
+DEFAULT_EMBEDDING_BASE_URL = "http://localhost:11434"
 LIVE_FIXTURE_SUFFIX = "_typed_live_lifecycle"
 GRAPH_ON_FIXTURE_SUFFIX = "_graph_on"
 NORMAL_9_SUITE = "normal-9"
@@ -151,6 +155,11 @@ def run_live_typed_cards_fixture(
     expand_graph: bool = False,
     graph_max_depth: int = 1,
     graph_max_items: int = 16,
+    summary_search_backend: str = DEFAULT_SUMMARY_SEARCH_BACKEND,
+    embedding_provider: str = DEFAULT_EMBEDDING_PROVIDER,
+    embedding_model_id: str = DEFAULT_EMBEDDING_MODEL,
+    embedding_base_url: str = DEFAULT_EMBEDDING_BASE_URL,
+    embedding_timeout_s: int = 30,
 ) -> tuple[dict[str, Any], Path]:
     fixture_path = Path(fixture_path)
     run_id = run_id or default_run_id(fixture_path)
@@ -173,6 +182,11 @@ def run_live_typed_cards_fixture(
     adapter = TypedCardsMemoryEvalAdapter.live_model(
         extractor_config=extractor_config,
         timeout=timeout,
+        summary_search_backend=summary_search_backend,
+        embedding_provider=embedding_provider,
+        embedding_model_id=embedding_model_id,
+        embedding_base_url=embedding_base_url,
+        embedding_timeout_s=embedding_timeout_s,
     )
     artifact = run_fixture(
         fixture,
@@ -185,6 +199,10 @@ def run_live_typed_cards_fixture(
             "expand_graph": expand_graph,
             "graph_max_depth": graph_max_depth,
             "graph_max_items": graph_max_items,
+            "summary_search_backend": summary_search_backend,
+            "embedding_provider": embedding_provider,
+            "embedding_model_id": embedding_model_id if summary_search_backend in {"vector", "hybrid"} else None,
+            "embedding_base_url": embedding_base_url if summary_search_backend in {"vector", "hybrid"} else None,
         },
         run_id=run_id,
         created_at=created_at,
@@ -215,6 +233,11 @@ def run_live_typed_cards_suite(
     expand_graph: bool = False,
     graph_max_depth: int = 1,
     graph_max_items: int = 16,
+    summary_search_backend: str = DEFAULT_SUMMARY_SEARCH_BACKEND,
+    embedding_provider: str = DEFAULT_EMBEDDING_PROVIDER,
+    embedding_model_id: str = DEFAULT_EMBEDDING_MODEL,
+    embedding_base_url: str = DEFAULT_EMBEDDING_BASE_URL,
+    embedding_timeout_s: int = 30,
     run_fixture_fn: Any = None,
 ) -> tuple[dict[str, Any], Path]:
     suite = _normalize_suite_name(suite)
@@ -242,6 +265,11 @@ def run_live_typed_cards_suite(
             expand_graph=expand_graph,
             graph_max_depth=graph_max_depth,
             graph_max_items=graph_max_items,
+            summary_search_backend=summary_search_backend,
+            embedding_provider=embedding_provider,
+            embedding_model_id=embedding_model_id,
+            embedding_base_url=embedding_base_url,
+            embedding_timeout_s=embedding_timeout_s,
         )
         summary = summarize_artifact(artifact, artifact_path)
         summary["source_fixture"] = str(fixture)
@@ -258,6 +286,9 @@ def run_live_typed_cards_suite(
         model=model,
         backend=backend,
         expand_graph=expand_graph,
+        summary_search_backend=summary_search_backend,
+        embedding_provider=embedding_provider,
+        embedding_model_id=embedding_model_id if summary_search_backend in {"vector", "hybrid"} else None,
     )
     output_path = resolve_suite_output_path(output, output_dir=suite_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -287,6 +318,9 @@ def summarize_suite(
     model: str,
     backend: str,
     expand_graph: bool = False,
+    summary_search_backend: str = DEFAULT_SUMMARY_SEARCH_BACKEND,
+    embedding_provider: str = DEFAULT_EMBEDDING_PROVIDER,
+    embedding_model_id: str | None = None,
 ) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     for fixture in fixtures:
@@ -299,6 +333,9 @@ def summarize_suite(
         "backend": backend,
         "model": model,
         "expand_graph": bool(expand_graph),
+        "summary_search_backend": summary_search_backend,
+        "embedding_provider": embedding_provider if summary_search_backend in {"vector", "hybrid"} else None,
+        "embedding_model_id": embedding_model_id if summary_search_backend in {"vector", "hybrid"} else None,
         "fixture_count": len(fixtures),
         "failed_count": len(failed),
         "status_counts": status_counts,
@@ -326,6 +363,9 @@ def compact_suite_summary(summary: Mapping[str, Any], output_path: str | Path) -
         "backend": summary.get("backend"),
         "model": summary.get("model"),
         "expand_graph": bool(summary.get("expand_graph")),
+        "summary_search_backend": summary.get("summary_search_backend"),
+        "embedding_provider": summary.get("embedding_provider"),
+        "embedding_model_id": summary.get("embedding_model_id"),
         "fixture_count": summary.get("fixture_count"),
         "failed_count": summary.get("failed_count"),
         "status_counts": dict(summary.get("status_counts") or {}),
@@ -467,6 +507,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--graph-max-depth", type=int, default=1)
     parser.add_argument("--graph-max-items", type=int, default=16)
     parser.add_argument(
+        "--summary-search-backend",
+        choices=("direct_scan_lexical", "bm25", "vector", "hybrid", "replay"),
+        default=DEFAULT_SUMMARY_SEARCH_BACKEND,
+        help="Summary-search backend used by typed-card retrieve.",
+    )
+    parser.add_argument("--embedding-provider", default=DEFAULT_EMBEDDING_PROVIDER)
+    parser.add_argument("--embedding-model", default=DEFAULT_EMBEDDING_MODEL)
+    parser.add_argument("--embedding-base-url", default=DEFAULT_EMBEDDING_BASE_URL)
+    parser.add_argument("--embedding-timeout-s", type=int, default=30)
+    parser.add_argument(
         "--allow-failures",
         action="store_true",
         help="Always exit 0 after writing the artifact, even if scoring failed.",
@@ -495,6 +545,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             expand_graph=args.expand_graph,
             graph_max_depth=args.graph_max_depth,
             graph_max_items=args.graph_max_items,
+            summary_search_backend=args.summary_search_backend,
+            embedding_provider=args.embedding_provider,
+            embedding_model_id=args.embedding_model,
+            embedding_base_url=args.embedding_base_url,
+            embedding_timeout_s=args.embedding_timeout_s,
         )
         print(json.dumps(compact_suite_summary(summary, output_path), ensure_ascii=False, sort_keys=True))
         if args.print_artifact:
@@ -520,6 +575,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         expand_graph=args.expand_graph,
         graph_max_depth=args.graph_max_depth,
         graph_max_items=args.graph_max_items,
+        summary_search_backend=args.summary_search_backend,
+        embedding_provider=args.embedding_provider,
+        embedding_model_id=args.embedding_model,
+        embedding_base_url=args.embedding_base_url,
+        embedding_timeout_s=args.embedding_timeout_s,
     )
     print(json.dumps(summarize_artifact(artifact, output_path), ensure_ascii=False, sort_keys=True))
     if args.print_artifact:
