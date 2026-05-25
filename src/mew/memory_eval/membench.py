@@ -59,9 +59,16 @@ TYPED_CARDS_SUMMARY_SEARCH_BACKENDS = (
     "vector",
     "hybrid",
 )
+TYPED_CARDS_EXTRACTOR_MODES = ("deterministic_replay", "live_model")
 TYPED_CARDS_VECTOR_BACKENDS = {"vector", "hybrid"}
 DEFAULT_TYPED_CARDS_EMBEDDING_PROVIDER = "ollama"
 DEFAULT_TYPED_CARDS_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
+DEFAULT_TYPED_CARDS_LIVE_BACKEND = "codex"
+DEFAULT_TYPED_CARDS_LIVE_MODEL = "gpt-5.5"
+DEFAULT_TYPED_CARDS_LIVE_AUTH_JSON = Path.home() / ".codex" / "auth.json"
+DEFAULT_TYPED_CARDS_LIVE_CALL_INTERFACE = "call_model_structured_json"
+DEFAULT_TYPED_CARDS_LIVE_TIMEOUT = 120
+DEFAULT_TYPED_CARDS_LIVE_OUTPUT_DIR = Path("tmp/membench-live-model")
 PROFILE_SCHEMA_VERSION = "mew_membench_profile_run.v1"
 # Pinned Hugging Face dataset commit for `mteb/MemBench` used by the
 # MemBench profiles. This is a dataset revision, not a code release; pinning it
@@ -946,24 +953,58 @@ def build_typed_cards_ephemeral_fixtures_from_dry_run(
     ]
 
 
+def _validate_typed_cards_extractor_mode(value: str) -> str:
+    mode = str(value or "deterministic_replay").strip() or "deterministic_replay"
+    if mode not in TYPED_CARDS_EXTRACTOR_MODES:
+        raise MembenchConversionError(
+            "typed cards extractor mode must be one of "
+            + ", ".join(TYPED_CARDS_EXTRACTOR_MODES)
+        )
+    return mode
+
+
+def _empty_validation_result_summary() -> dict[str, Any]:
+    return {
+        "example_count": 0,
+        "status_counts": {},
+        "passed": None,
+        "hash_mismatch_count": 0,
+        "adapter_view_leakage_failure_count": 0,
+    }
+
+
 def validate_mteb_qrels_dry_run(
     dry_run_report: Mapping[str, Any],
     *,
     seed: int | None = None,
     run_broken_controls: bool = True,
     include_typed_cards: bool = False,
+    typed_cards_extractor_mode: str = "deterministic_replay",
+    allow_live_model_tests: bool = False,
     typed_cards_summary_search_backend: str = "direct_scan_lexical",
     typed_cards_embedding_provider: str = DEFAULT_TYPED_CARDS_EMBEDDING_PROVIDER,
     typed_cards_embedding_model: str = DEFAULT_TYPED_CARDS_EMBEDDING_MODEL,
+    typed_cards_live_backend: str = DEFAULT_TYPED_CARDS_LIVE_BACKEND,
+    typed_cards_live_model: str = DEFAULT_TYPED_CARDS_LIVE_MODEL,
+    typed_cards_live_auth_json: str | Path = DEFAULT_TYPED_CARDS_LIVE_AUTH_JSON,
+    typed_cards_live_call_interface: str = DEFAULT_TYPED_CARDS_LIVE_CALL_INTERFACE,
+    typed_cards_live_timeout: int = DEFAULT_TYPED_CARDS_LIVE_TIMEOUT,
+    typed_cards_live_output_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Validate dry-run selected previews with in-memory memory_eval fixtures."""
 
+    typed_cards_extractor_mode = _validate_typed_cards_extractor_mode(
+        typed_cards_extractor_mode
+    )
     validation_seed = _validation_seed(dry_run_report, explicit_seed=seed)
     previews = list(dry_run_report.get("fixture_previews") or [])
     fixtures = build_ephemeral_fixtures_from_dry_run(dry_run_report)
     reference_results = []
     negative_control_results = []
     typed_cards_results = []
+    typed_cards_run = False
+    typed_cards_not_run_reason = "not requested; pass --include-typed-cards"
+    typed_cards_artifact_output_dir: str | None = None
 
     for index, (preview, fixture) in enumerate(zip(previews, fixtures), start=1):
         fixture_ordinal = _preview_fixture_ordinal(preview, default=index)
@@ -1022,7 +1063,35 @@ def validate_mteb_qrels_dry_run(
                     )
                 )
 
-    if include_typed_cards:
+    if include_typed_cards and typed_cards_extractor_mode == "live_model":
+        if allow_live_model_tests:
+            live_output_dir = Path(
+                typed_cards_live_output_dir or DEFAULT_TYPED_CARDS_LIVE_OUTPUT_DIR
+            )
+            typed_cards_artifact_output_dir = str(live_output_dir)
+            typed_cards_run = True
+            typed_cards_not_run_reason = None
+            typed_cards_results = _typed_cards_live_validation_results(
+                previews=previews,
+                fixtures=fixtures,
+                validation_seed=validation_seed,
+                summary_search_backend=typed_cards_summary_search_backend,
+                embedding_provider=typed_cards_embedding_provider,
+                embedding_model_id=typed_cards_embedding_model,
+                backend=typed_cards_live_backend,
+                model=typed_cards_live_model,
+                auth_json=typed_cards_live_auth_json,
+                call_interface=typed_cards_live_call_interface,
+                timeout=typed_cards_live_timeout,
+                output_dir=live_output_dir,
+            )
+        else:
+            typed_cards_not_run_reason = (
+                "live model tests require --allow-live-model-tests"
+            )
+    elif include_typed_cards:
+        typed_cards_run = True
+        typed_cards_not_run_reason = None
         typed_cards_results = _typed_cards_validation_results(
             previews=previews,
             fixtures=fixtures,
@@ -1055,10 +1124,21 @@ def validate_mteb_qrels_dry_run(
             "results": reference_results,
         },
         "typed_cards_adapter": {
-            "run": bool(include_typed_cards),
+            "run": typed_cards_run,
+            "gating": typed_cards_extractor_mode != "live_model",
             "adapter_id": "mew_typed_cards_memory_eval",
-            "extractor_mode": "deterministic_replay",
-            "live_model_extraction": False,
+            "extractor_mode": typed_cards_extractor_mode,
+            "live_model_extraction": typed_cards_extractor_mode == "live_model",
+            "live_model_tests_allowed": bool(allow_live_model_tests),
+            "live_model_backend": typed_cards_live_backend
+            if typed_cards_extractor_mode == "live_model"
+            else None,
+            "live_model": typed_cards_live_model
+            if typed_cards_extractor_mode == "live_model"
+            else None,
+            "live_call_interface": typed_cards_live_call_interface
+            if typed_cards_extractor_mode == "live_model"
+            else None,
             "summary_search_backend": typed_cards_summary_search_backend,
             "embedding_provider": typed_cards_embedding_provider
             if typed_cards_summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
@@ -1066,20 +1146,13 @@ def validate_mteb_qrels_dry_run(
             "embedding_model_id": typed_cards_embedding_model
             if typed_cards_summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
             else None,
+            "artifact_output_dir": typed_cards_artifact_output_dir,
             "setup_policy": "public_seed_eval_lifecycle_after_each_ingest",
             "result_summary": _validation_result_summary(typed_cards_results)
-            if include_typed_cards
-            else {
-                "example_count": 0,
-                "status_counts": {},
-                "passed": None,
-                "hash_mismatch_count": 0,
-                "adapter_view_leakage_failure_count": 0,
-            },
+            if typed_cards_run
+            else _empty_validation_result_summary(),
             "results": typed_cards_results,
-            "not_run_reason": None
-            if include_typed_cards
-            else "not requested; pass --include-typed-cards",
+            "not_run_reason": typed_cards_not_run_reason,
         },
         "negative_controls": {
             "run": bool(run_broken_controls),
@@ -1104,10 +1177,21 @@ def run_profile(
     revision: str | None = None,
     clean: bool = False,
     loader: HfDatasetLoader | None = None,
+    typed_cards_extractor_mode: str = "deterministic_replay",
+    allow_live_model_tests: bool = False,
     typed_cards_summary_search_backend: str = "direct_scan_lexical",
     typed_cards_embedding_provider: str = DEFAULT_TYPED_CARDS_EMBEDDING_PROVIDER,
     typed_cards_embedding_model: str = DEFAULT_TYPED_CARDS_EMBEDDING_MODEL,
+    typed_cards_live_backend: str = DEFAULT_TYPED_CARDS_LIVE_BACKEND,
+    typed_cards_live_model: str = DEFAULT_TYPED_CARDS_LIVE_MODEL,
+    typed_cards_live_auth_json: str | Path = DEFAULT_TYPED_CARDS_LIVE_AUTH_JSON,
+    typed_cards_live_call_interface: str = DEFAULT_TYPED_CARDS_LIVE_CALL_INTERFACE,
+    typed_cards_live_timeout: int = DEFAULT_TYPED_CARDS_LIVE_TIMEOUT,
+    typed_cards_live_output_dir: str | Path | None = None,
 ) -> dict[str, Any]:
+    typed_cards_extractor_mode = _validate_typed_cards_extractor_mode(
+        typed_cards_extractor_mode
+    )
     if profile_name not in PROFILE_NAMES:
         raise MembenchConversionError(
             f"unknown MemBench profile {profile_name!r}; available profiles: "
@@ -1188,9 +1272,17 @@ def run_profile(
     validation = validate_mteb_qrels_dry_run(
         dry_run,
         include_typed_cards=bool(profile_config["include_typed_cards"]),
+        typed_cards_extractor_mode=typed_cards_extractor_mode,
+        allow_live_model_tests=allow_live_model_tests,
         typed_cards_summary_search_backend=typed_cards_summary_search_backend,
         typed_cards_embedding_provider=typed_cards_embedding_provider,
         typed_cards_embedding_model=typed_cards_embedding_model,
+        typed_cards_live_backend=typed_cards_live_backend,
+        typed_cards_live_model=typed_cards_live_model,
+        typed_cards_live_auth_json=typed_cards_live_auth_json,
+        typed_cards_live_call_interface=typed_cards_live_call_interface,
+        typed_cards_live_timeout=typed_cards_live_timeout,
+        typed_cards_live_output_dir=typed_cards_live_output_dir,
     )
     write_json_artifact(validation_path, validation)
     phases["run.validation"] = {
@@ -1214,6 +1306,15 @@ def run_profile(
             "include_typed_cards": profile_config["include_typed_cards"],
         },
         "typed_cards_adapter_config": {
+            "extractor_mode": typed_cards_extractor_mode,
+            "live_model_extraction": typed_cards_extractor_mode == "live_model",
+            "live_model_tests_allowed": bool(allow_live_model_tests),
+            "live_model_backend": typed_cards_live_backend
+            if typed_cards_extractor_mode == "live_model"
+            else None,
+            "live_model": typed_cards_live_model
+            if typed_cards_extractor_mode == "live_model"
+            else None,
             "summary_search_backend": typed_cards_summary_search_backend,
             "embedding_provider": typed_cards_embedding_provider
             if typed_cards_summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
@@ -1221,6 +1322,9 @@ def run_profile(
             "embedding_model_id": typed_cards_embedding_model
             if typed_cards_summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
             else None,
+            "artifact_output_dir": validation["typed_cards_adapter"].get(
+                "artifact_output_dir"
+            ),
         },
         "artifacts": {
             "source_dir": str(prepared.source_dir),
@@ -1284,6 +1388,55 @@ def write_json_artifact(path: str | Path, value: Mapping[str, Any]) -> None:
 
 
 def _add_typed_cards_backend_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--typed-cards-extractor-mode",
+        choices=TYPED_CARDS_EXTRACTOR_MODES,
+        default="deterministic_replay",
+        help=(
+            "Extractor mode for typed-card validation. live_model is opt-in "
+            "and also requires --allow-live-model-tests."
+        ),
+    )
+    parser.add_argument(
+        "--allow-live-model-tests",
+        action="store_true",
+        help=(
+            "Permit non-gating live model calls for typed-card validation. "
+            "Hermetic CI should omit this flag."
+        ),
+    )
+    parser.add_argument(
+        "--typed-cards-live-backend",
+        default=DEFAULT_TYPED_CARDS_LIVE_BACKEND,
+        help="Live typed-card extractor backend.",
+    )
+    parser.add_argument(
+        "--typed-cards-live-model",
+        default=DEFAULT_TYPED_CARDS_LIVE_MODEL,
+        help="Live typed-card extractor model.",
+    )
+    parser.add_argument(
+        "--typed-cards-live-auth-json",
+        default=str(DEFAULT_TYPED_CARDS_LIVE_AUTH_JSON),
+        help="Auth JSON path for live typed-card extractor calls.",
+    )
+    parser.add_argument(
+        "--typed-cards-live-call-interface",
+        choices=("call_model_structured_json", "call_model_json"),
+        default=DEFAULT_TYPED_CARDS_LIVE_CALL_INTERFACE,
+        help="Call interface for live typed-card extractor calls.",
+    )
+    parser.add_argument(
+        "--typed-cards-live-timeout",
+        type=int,
+        default=DEFAULT_TYPED_CARDS_LIVE_TIMEOUT,
+        help="Per-call timeout for live typed-card extractor calls.",
+    )
+    parser.add_argument(
+        "--typed-cards-live-output-dir",
+        default=None,
+        help="Directory for non-gating live typed-card artifact output.",
+    )
     parser.add_argument(
         "--typed-cards-summary-search-backend",
         choices=TYPED_CARDS_SUMMARY_SEARCH_BACKENDS,
@@ -1492,11 +1645,19 @@ def main(argv: list[str] | None = None) -> int:
             _load_json_object(args.dry_run_report),
             seed=args.seed,
             include_typed_cards=args.include_typed_cards,
+            typed_cards_extractor_mode=args.typed_cards_extractor_mode,
+            allow_live_model_tests=args.allow_live_model_tests,
             typed_cards_summary_search_backend=(
                 args.typed_cards_summary_search_backend
             ),
             typed_cards_embedding_provider=args.typed_cards_embedding_provider,
             typed_cards_embedding_model=args.typed_cards_embedding_model,
+            typed_cards_live_backend=args.typed_cards_live_backend,
+            typed_cards_live_model=args.typed_cards_live_model,
+            typed_cards_live_auth_json=args.typed_cards_live_auth_json,
+            typed_cards_live_call_interface=args.typed_cards_live_call_interface,
+            typed_cards_live_timeout=args.typed_cards_live_timeout,
+            typed_cards_live_output_dir=args.typed_cards_live_output_dir,
         )
         _write_or_print_json(report, args.output)
         return 0 if report["validation_status"] == "passed" else 1
@@ -1508,11 +1669,19 @@ def main(argv: list[str] | None = None) -> int:
                 work_dir=args.work_dir,
                 revision=args.revision,
                 clean=args.clean,
+                typed_cards_extractor_mode=args.typed_cards_extractor_mode,
+                allow_live_model_tests=args.allow_live_model_tests,
                 typed_cards_summary_search_backend=(
                     args.typed_cards_summary_search_backend
                 ),
                 typed_cards_embedding_provider=args.typed_cards_embedding_provider,
                 typed_cards_embedding_model=args.typed_cards_embedding_model,
+                typed_cards_live_backend=args.typed_cards_live_backend,
+                typed_cards_live_model=args.typed_cards_live_model,
+                typed_cards_live_auth_json=args.typed_cards_live_auth_json,
+                typed_cards_live_call_interface=args.typed_cards_live_call_interface,
+                typed_cards_live_timeout=args.typed_cards_live_timeout,
+                typed_cards_live_output_dir=args.typed_cards_live_output_dir,
             )
         except MembenchConversionError as exc:
             print(f"error: {exc}", file=sys.stderr)
@@ -1538,9 +1707,17 @@ def main(argv: list[str] | None = None) -> int:
         report,
         seed=args.seed,
         include_typed_cards=args.include_typed_cards,
+        typed_cards_extractor_mode=args.typed_cards_extractor_mode,
+        allow_live_model_tests=args.allow_live_model_tests,
         typed_cards_summary_search_backend=args.typed_cards_summary_search_backend,
         typed_cards_embedding_provider=args.typed_cards_embedding_provider,
         typed_cards_embedding_model=args.typed_cards_embedding_model,
+        typed_cards_live_backend=args.typed_cards_live_backend,
+        typed_cards_live_model=args.typed_cards_live_model,
+        typed_cards_live_auth_json=args.typed_cards_live_auth_json,
+        typed_cards_live_call_interface=args.typed_cards_live_call_interface,
+        typed_cards_live_timeout=args.typed_cards_live_timeout,
+        typed_cards_live_output_dir=args.typed_cards_live_output_dir,
     )
     _write_or_print_json(report, args.output)
     return 0 if report["validation_status"] == "passed" else 1
@@ -1789,6 +1966,145 @@ def _typed_cards_validation_results(
             if summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
             else None
         )
+        if typed_leakage:
+            summary["result_status"] = "failed"
+            summary["failure_types"] = sorted(
+                {*summary["failure_types"], "typed_cards_adapter_view_leakage"}
+            )
+            summary["failed_gate_ids"] = sorted(
+                {*summary["failed_gate_ids"], "no_label_leakage"}
+            )
+        results.append(summary)
+    return results
+
+
+def _typed_cards_live_validation_results(
+    *,
+    previews: list[Mapping[str, Any]],
+    fixtures: list[Mapping[str, Any]],
+    validation_seed: int,
+    summary_search_backend: str = "direct_scan_lexical",
+    embedding_provider: str = DEFAULT_TYPED_CARDS_EMBEDDING_PROVIDER,
+    embedding_model_id: str = DEFAULT_TYPED_CARDS_EMBEDDING_MODEL,
+    backend: str = DEFAULT_TYPED_CARDS_LIVE_BACKEND,
+    model: str = DEFAULT_TYPED_CARDS_LIVE_MODEL,
+    auth_json: str | Path = DEFAULT_TYPED_CARDS_LIVE_AUTH_JSON,
+    call_interface: str = DEFAULT_TYPED_CARDS_LIVE_CALL_INTERFACE,
+    timeout: int = DEFAULT_TYPED_CARDS_LIVE_TIMEOUT,
+    output_dir: str | Path = DEFAULT_TYPED_CARDS_LIVE_OUTPUT_DIR,
+) -> list[dict[str, Any]]:
+    try:
+        from .adapters.typed_cards import TypedCardsMemoryEvalAdapter
+    except Exception as exc:  # pragma: no cover - exercised only in broken installs.
+        return [
+            _typed_cards_unavailable_summary(
+                preview=preview,
+                fixture_ordinal=_preview_fixture_ordinal(preview, default=index),
+                error=exc,
+            )
+            for index, preview in enumerate(previews, start=1)
+        ]
+
+    target_dir = Path(output_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    auth_path = str(Path(auth_json).expanduser())
+    results = []
+    for index, (preview, fixture) in enumerate(zip(previews, fixtures), start=1):
+        fixture_ordinal = _preview_fixture_ordinal(preview, default=index)
+        typed_fixture = _with_typed_cards_lifecycle_setup(fixture)
+        artifact_path = target_dir / (
+            f"run_membench_live_typed_cards_{fixture_ordinal:06d}.json"
+        )
+        try:
+            source_views = split_fixture(
+                fixture, fixture_ordinal=fixture_ordinal, seed=validation_seed
+            )
+            source_leakage = find_membench_adapter_leakage(source_views.adapter_view)
+            typed_views = split_fixture(
+                typed_fixture, fixture_ordinal=fixture_ordinal, seed=validation_seed
+            )
+            typed_leakage = find_membench_adapter_leakage(typed_views.adapter_view)
+            artifact = run_fixture(
+                typed_fixture,
+                TypedCardsMemoryEvalAdapter.live_model(
+                    extractor_config={
+                        "backend": backend,
+                        "model": model,
+                        "auth_path": auth_path,
+                        "call_interface": call_interface,
+                    },
+                    timeout=timeout,
+                    summary_search_backend=summary_search_backend,
+                    embedding_provider=embedding_provider,
+                    embedding_model_id=embedding_model_id,
+                ),
+                seed=validation_seed,
+                fixture_ordinal=fixture_ordinal,
+                run_id=f"run_membench_live_typed_cards_{fixture_ordinal:06d}",
+                created_at=DEFAULT_VALIDATION_CREATED_AT,
+            )
+            write_json_artifact(artifact_path, artifact)
+        except Exception as exc:
+            summary = _typed_cards_error_summary(
+                preview=preview,
+                fixture_ordinal=fixture_ordinal,
+                error=exc,
+            )
+            summary["typed_cards_live_model_backend"] = backend
+            summary["typed_cards_live_model"] = model
+            summary["typed_cards_live_call_interface"] = call_interface
+            summary["typed_cards_live_artifact_path"] = None
+            results.append(summary)
+            continue
+
+        summary = _run_validation_summary(
+            artifact=artifact,
+            preview=preview,
+            fixture_ordinal=fixture_ordinal,
+        )
+        summary["source_hash_match"] = {
+            "fixture_public_hash_matches_preview": source_views.fixture_public_hash
+            == preview.get("fixture_public_hash"),
+            "fixture_gold_hash_matches_preview": source_views.fixture_gold_hash
+            == preview.get("fixture_gold_hash"),
+            "fixture_full_hash_matches_preview": source_views.fixture_full_hash
+            == preview.get("fixture_full_hash"),
+        }
+        summary["hash_match"] = dict(summary["source_hash_match"])
+        summary["source_adapter_view_leakage_failure_count"] = len(source_leakage)
+        summary["source_adapter_view_leakage_failures"] = source_leakage
+        summary["typed_cards_adapter_view_leakage_failure_count"] = len(typed_leakage)
+        summary["typed_cards_adapter_view_leakage_failures"] = typed_leakage
+        summary["adapter_view_leakage_failure_count"] = len(typed_leakage)
+        summary["adapter_view_leakage_failures"] = typed_leakage
+        summary["typed_cards_setup_mutation_count"] = len(
+            [
+                mutation
+                for mutation in typed_fixture.get("mutations") or []
+                if mutation.get("mutation_type") == "seed_eval"
+            ]
+        )
+        summary["typed_cards_fixture_hashes"] = {
+            "fixture_public_hash": typed_views.fixture_public_hash,
+            "fixture_gold_hash": typed_views.fixture_gold_hash,
+            "fixture_full_hash": typed_views.fixture_full_hash,
+        }
+        summary["typed_cards_summary_search_backend"] = summary_search_backend
+        summary["typed_cards_embedding_provider"] = (
+            embedding_provider
+            if summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
+            else None
+        )
+        summary["typed_cards_embedding_model_id"] = (
+            embedding_model_id
+            if summary_search_backend in TYPED_CARDS_VECTOR_BACKENDS
+            else None
+        )
+        summary["typed_cards_live_model_backend"] = backend
+        summary["typed_cards_live_model"] = model
+        summary["typed_cards_live_call_interface"] = call_interface
+        summary["typed_cards_live_artifact_path"] = str(artifact_path)
+        summary["typed_cards_live_gating"] = False
         if typed_leakage:
             summary["result_status"] = "failed"
             summary["failure_types"] = sorted(
@@ -2124,8 +2440,11 @@ def _validation_status(report: Mapping[str, Any]) -> str:
         return "failed"
     if not reference.get("passed"):
         return "failed"
-    if (report.get("typed_cards_adapter") or {}).get("run") and not typed_cards.get(
-        "passed"
+    typed_cards_adapter = report.get("typed_cards_adapter") or {}
+    if (
+        typed_cards_adapter.get("run")
+        and typed_cards_adapter.get("gating", True)
+        and not typed_cards.get("passed")
     ):
         return "failed"
     if (report.get("negative_controls") or {}).get("run") and not controls.get(

@@ -596,8 +596,14 @@ def test_mteb_profile_runs_setup_and_validation_with_fake_loader(
         "subset": "single_hop",
     }
     assert report["typed_cards_adapter_config"] == {
+        "artifact_output_dir": None,
         "embedding_model_id": None,
         "embedding_provider": None,
+        "extractor_mode": "deterministic_replay",
+        "live_model": None,
+        "live_model_backend": None,
+        "live_model_extraction": False,
+        "live_model_tests_allowed": False,
         "summary_search_backend": "direct_scan_lexical",
     }
     assert report["phases"]["setup.prepare"]["status"] == "passed"
@@ -1043,8 +1049,10 @@ def test_mteb_dry_run_validation_can_include_typed_cards_deterministic_replay(
 
     assert validation["validation_status"] == "passed"
     assert validation["typed_cards_adapter"]["run"] is True
+    assert validation["typed_cards_adapter"]["gating"] is True
     assert validation["typed_cards_adapter"]["extractor_mode"] == "deterministic_replay"
     assert validation["typed_cards_adapter"]["live_model_extraction"] is False
+    assert validation["typed_cards_adapter"]["live_model_tests_allowed"] is False
     assert (
         validation["typed_cards_adapter"]["summary_search_backend"]
         == "direct_scan_lexical"
@@ -1103,6 +1111,72 @@ def test_mteb_dry_run_validation_can_select_typed_cards_summary_backend(
     assert typed["typed_cards_embedding_model_id"] is None
 
 
+def test_mteb_dry_run_validation_skips_live_typed_cards_without_allow_flag(
+    tmp_path,
+):
+    report = _validation_ready_dry_run_report(tmp_path)
+
+    validation = validate_mteb_qrels_dry_run(
+        report,
+        include_typed_cards=True,
+        typed_cards_extractor_mode="live_model",
+    )
+
+    assert validation["validation_status"] == "passed"
+    adapter = validation["typed_cards_adapter"]
+    assert adapter["run"] is False
+    assert adapter["gating"] is False
+    assert adapter["extractor_mode"] == "live_model"
+    assert adapter["live_model_extraction"] is True
+    assert adapter["live_model_tests_allowed"] is False
+    assert adapter["live_model_backend"] == "codex"
+    assert adapter["live_model"] == "gpt-5.5"
+    assert adapter["live_call_interface"] == "call_model_structured_json"
+    assert adapter["artifact_output_dir"] is None
+    assert adapter["result_summary"]["passed"] is None
+    assert adapter["results"] == []
+    assert adapter["not_run_reason"] == (
+        "live model tests require --allow-live-model-tests"
+    )
+
+
+def test_mteb_dry_run_validation_can_run_live_typed_cards_when_allowed(
+    tmp_path, monkeypatch
+):
+    _patch_live_typed_cards_adapter_to_deterministic(monkeypatch)
+    report = _validation_ready_dry_run_report(tmp_path)
+    output_dir = tmp_path / "live-artifacts"
+
+    validation = validate_mteb_qrels_dry_run(
+        report,
+        include_typed_cards=True,
+        typed_cards_extractor_mode="live_model",
+        allow_live_model_tests=True,
+        typed_cards_live_output_dir=output_dir,
+    )
+
+    assert validation["validation_status"] == "passed"
+    adapter = validation["typed_cards_adapter"]
+    assert adapter["run"] is True
+    assert adapter["gating"] is False
+    assert adapter["extractor_mode"] == "live_model"
+    assert adapter["live_model_extraction"] is True
+    assert adapter["live_model_tests_allowed"] is True
+    assert adapter["live_model_backend"] == "codex"
+    assert adapter["live_model"] == "gpt-5.5"
+    assert adapter["live_call_interface"] == "call_model_structured_json"
+    assert adapter["artifact_output_dir"] == str(output_dir)
+    assert adapter["not_run_reason"] is None
+    assert adapter["result_summary"]["passed"] is True
+    typed = adapter["results"][0]
+    assert typed["result_status"] == "passed"
+    assert typed["typed_cards_live_model_backend"] == "codex"
+    assert typed["typed_cards_live_model"] == "gpt-5.5"
+    assert typed["typed_cards_live_call_interface"] == "call_model_structured_json"
+    assert typed["typed_cards_live_gating"] is False
+    assert Path(typed["typed_cards_live_artifact_path"]).exists()
+
+
 def test_mteb_validate_dry_run_report_cli_emits_stdout_json(tmp_path, capsys):
     report = _validation_ready_dry_run_report(tmp_path)
     report_path = tmp_path / "dry_run.json"
@@ -1145,6 +1219,43 @@ def test_mteb_validate_dry_run_report_cli_can_include_typed_cards(
     assert output["typed_cards_adapter"]["summary_search_backend"] == "bm25"
     assert output["typed_cards_adapter"]["result_summary"]["passed"] is True
     assert output["typed_cards_adapter"]["results"][0]["result_status"] == "passed"
+
+
+def test_mteb_validate_dry_run_report_cli_can_run_live_typed_cards_when_allowed(
+    tmp_path, monkeypatch, capsys
+):
+    _patch_live_typed_cards_adapter_to_deterministic(monkeypatch)
+    report = _validation_ready_dry_run_report(tmp_path)
+    report_path = tmp_path / "dry_run_typed_live.json"
+    output_dir = tmp_path / "live-cli"
+    report_path.write_text(json.dumps(report, sort_keys=True), encoding="utf-8")
+
+    assert (
+        membench_main(
+            [
+                "validate-dry-run-report",
+                str(report_path),
+                "--include-typed-cards",
+                "--typed-cards-extractor-mode",
+                "live_model",
+                "--allow-live-model-tests",
+                "--typed-cards-live-output-dir",
+                str(output_dir),
+            ]
+        )
+        == 0
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["validation_status"] == "passed"
+    adapter = output["typed_cards_adapter"]
+    assert adapter["run"] is True
+    assert adapter["gating"] is False
+    assert adapter["extractor_mode"] == "live_model"
+    assert adapter["live_model_tests_allowed"] is True
+    assert adapter["artifact_output_dir"] == str(output_dir)
+    assert adapter["result_summary"]["passed"] is True
+    assert Path(adapter["results"][0]["typed_cards_live_artifact_path"]).exists()
 
 
 def test_mteb_validate_dry_run_report_infers_non_default_seed(tmp_path, capsys):
@@ -1398,6 +1509,28 @@ def _fixture_tree_snapshot():
         path.relative_to(MEMORY_EVAL_FIXTURES)
         for path in MEMORY_EVAL_FIXTURES.rglob("*")
         if path.is_file()
+    )
+
+
+def _patch_live_typed_cards_adapter_to_deterministic(monkeypatch):
+    from mew.memory_eval.adapters import typed_cards as typed_cards_module
+
+    def fake_live_model(**kwargs):
+        return typed_cards_module.TypedCardsMemoryEvalAdapter(
+            extractor_mode="deterministic_replay",
+            summary_search_backend=kwargs.get(
+                "summary_search_backend", "direct_scan_lexical"
+            ),
+            embedding_provider=kwargs.get("embedding_provider", "ollama"),
+            embedding_model_id=kwargs.get(
+                "embedding_model_id", "qwen3-embedding:0.6b"
+            ),
+        )
+
+    monkeypatch.setattr(
+        typed_cards_module.TypedCardsMemoryEvalAdapter,
+        "live_model",
+        staticmethod(fake_live_model),
     )
 
 
