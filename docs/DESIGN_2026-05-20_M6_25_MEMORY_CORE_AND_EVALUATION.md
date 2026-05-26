@@ -619,6 +619,45 @@ earlier `questions[]` inside each row act as the experience that future
 subtasks depend on. The adapter therefore records both direct seeded recall and
 tool-harness save/recall modes separately.
 
+The first model-in-loop mode adds a bounded MemoryArena agent harness:
+
+```bash
+./mew memory-core memory-arena-agent-score \
+  --input path/to/memoryarena-export.jsonl \
+  --mode memory_on \
+  --save-source model \
+  --max-turns 3 \
+  --artifact proof-artifacts/memory/memoryarena-agent-memory-on.json \
+  --json
+```
+
+This is still outside `implement_v2`. It gives the model only the current
+`question`/`background`; previous sessions are hidden. The model can answer
+directly or call a small memory surface:
+
+- `memory_recall(query)`: retrieve compressed MemoryCards for this row scope;
+- `memory_inspect(entry_id)`: expand one recalled card when the summary is not
+  enough.
+
+After each answer, a separate compressor model turns the completed
+`question -> answer` session into a small MemoryCard schema:
+
+```json
+{
+  "title": "short label",
+  "summary": "minimal reusable fact",
+  "cues": ["short recall cue"],
+  "applicability": "when a future session should use this memory",
+  "confidence": 0.0
+}
+```
+
+The artifact marks `agent_loop_used=true`, `short_term_session_context_hidden=true`,
+and `embedding_required=false`. Embeddings are not required for v0. The default
+answer scorer is token-F1/normalized text; an embedding or LLM judge can be
+added later as a replaceable scorer if token matching becomes the limiting
+factor.
+
 Minimum rank metrics for both modes:
 
 - Recall@k;
