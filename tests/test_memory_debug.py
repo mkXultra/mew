@@ -10,7 +10,11 @@ from mew.memory_debug import (
     recall_artifact,
     score_fixture_artifact,
 )
-from mew.memory_arena import score_memory_arena_artifact, score_memory_arena_tool_artifact
+from mew.memory_arena import (
+    score_memory_arena_agent_artifact,
+    score_memory_arena_artifact,
+    score_memory_arena_tool_artifact,
+)
 
 
 FORBIDDEN_RECALL_FIELDS = {
@@ -428,3 +432,61 @@ def test_memory_arena_tool_score_uses_save_then_recall_surface(tmp_path):
     assert stale["aggregate"]["expected_rows"] == 0
     assert stale["aggregate"]["stale_as_fresh_count"] == 0
     assert stale["tool_call_counts"]["memory_save:saved"] == 3
+
+
+def test_memory_arena_agent_score_uses_recall_without_short_term_context(tmp_path):
+    export = tmp_path / "memoryarena.json"
+    export.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "agent-1",
+                    "category": "personal_preference",
+                    "questions": [
+                        "Remember that Mira prefers green tea.",
+                        "What drink should be prepared for Mira?",
+                    ],
+                    "answers": [
+                        "Mira prefers green tea.",
+                        "Prepare green tea for Mira.",
+                    ],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    agent_requests = []
+
+    def fake_agent(request):
+        agent_requests.append(dict(request))
+        if request["subtask_index"] == 0:
+            return {"action": "answer", "answer": "Mira prefers green tea."}
+        if not request["observations"]:
+            return {"action": "recall_memory", "query": "Mira drink preference"}
+        return {"action": "answer", "answer": "Prepare green tea for Mira."}
+
+    def fake_compressor(request):
+        return {
+            "title": "Mira drink preference",
+            "summary": request["answer"],
+            "cues": ["Mira", "drink", "green tea"],
+            "applicability": "Use when asked what drink Mira should receive.",
+            "confidence": 0.9,
+        }
+
+    artifact = score_memory_arena_agent_artifact(
+        input_path=str(export),
+        mode="memory_on",
+        agent_provider=fake_agent,
+        compressor_provider=fake_compressor,
+    )
+
+    assert artifact["operation"] == "memory_arena_agent_score"
+    assert artifact["runner_boundary"]["agent_loop_used"] is True
+    assert artifact["runner_boundary"]["short_term_session_context_hidden"] is True
+    assert artifact["runner_boundary"]["embedding_required"] is False
+    assert artifact["aggregate"]["answer_pass_rate"] == 1.0
+    assert artifact["tool_call_counts"]["memory_recall"] == 1
+    assert artifact["tool_call_counts"]["memory_save:saved"] == 2
+    assert all("answers" not in request for request in agent_requests)
+    assert all("questions" not in request for request in agent_requests)

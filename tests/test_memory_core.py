@@ -10,6 +10,7 @@ from mew.memory_core import (
     JsonFileMemoryStore,
     MemoryAdaptRecallRequest,
     MemoryApprovalRequest,
+    MemoryCompressionRequest,
     MemoryCandidateRequest,
     MemoryChainRequest,
     MemoryCommitRequest,
@@ -25,6 +26,7 @@ from mew.memory_core import (
     Revision,
     Staleness,
 )
+from mew.memory_compression import compress_memory_with_model, memory_compression_prompt
 
 
 FORBIDDEN_RECALL_FIELDS = {
@@ -323,6 +325,137 @@ def test_write_path_preserves_candidate_proposal_approval_commit_separation():
     assert committed.revision.supersedes_entry_ids == ("old-entry",)
     assert [ref.ref_id for ref in committed.source_refs] == ["candidate-source"]
     assert [ref.ref_id for ref in committed.proof_refs] == ["proposal-proof", "approval-proof"]
+
+
+def test_compress_memory_creates_small_candidate_without_raw_payload():
+    system = MemorySystem()
+    raw_text = "\n".join(
+        [
+            "The session inspected a large transcript and many routine reads.",
+            "Reviewer decision: use apply_patch for source edits and avoid shell heredocs.",
+            "The final proof passed after focused tests.",
+            "Extra details " + "noise " * 80,
+        ]
+    )
+
+    result = system.compress_memory(
+        MemoryCompressionRequest(
+            raw_text=raw_text,
+            memory_kind="reviewer_correction",
+            scope="repo:mew",
+            title_hint="Source edit convention",
+            applicability_hint="Use when planning source edits.",
+            source_refs=(_ref("compression-source", "raw_transcript"),),
+            created_at="2026-05-21T00:00:00Z",
+            confidence=0.7,
+            max_summary_chars=180,
+        )
+    )
+
+    assert result.action == "candidate"
+    assert result.candidate is not None
+    assert result.candidate.entry_shape.title == "Source edit convention"
+    assert result.candidate.entry_shape.memory_kind == "reviewer_correction"
+    assert len(result.summary) <= 180
+    assert "Reviewer decision" in result.summary
+    assert "proof passed" in result.summary
+    assert "noise noise noise noise noise noise" not in result.summary
+    assert result.salience_terms
+    assert result.trace.event == "compress_memory"
+    assert system.recall(MemoryRecallRequest(query="apply_patch heredocs")).candidates == ()
+
+
+def test_compress_memory_points_similar_information_to_existing_entry():
+    existing = _entry(
+        entry_id="edit-convention",
+        memory_kind="reviewer_correction",
+        title="Source edit convention",
+        summary="Reviewer decision: use apply_patch for source edits and avoid shell heredocs.",
+        applicability="Use when planning source edits.",
+    )
+    system = MemorySystem.from_entries([existing])
+
+    result = system.compress_memory(
+        MemoryCompressionRequest(
+            raw_text="Reviewer decision: use apply_patch for source edits and avoid shell heredocs.",
+            memory_kind="reviewer_correction",
+            scope="repo:mew",
+            source_refs=(_ref("similar-source", "raw_transcript"),),
+            created_at="2026-05-21T00:00:00Z",
+            merge_similarity_threshold=0.5,
+        )
+    )
+
+    assert result.action == "merge_existing"
+    assert result.merge_target_entry_id == "edit-convention"
+    assert result.candidate is None
+    assert result.dropped == {"similar_existing_memory": 1}
+    assert system.candidates == {}
+
+
+def test_llm_memory_compression_uses_model_card_before_candidate_creation():
+    system = MemorySystem()
+    calls = []
+
+    def fake_call_json(model_backend, model_auth, prompt, model, base_url, timeout):
+        calls.append(
+            {
+                "model_backend": model_backend,
+                "model_auth": model_auth,
+                "prompt": prompt,
+                "model": model,
+                "base_url": base_url,
+                "timeout": timeout,
+            }
+        )
+        return {
+            "title": "Patch edit discipline",
+            "summary": "Use apply_patch for source edits and avoid shell heredocs.",
+            "applicability": "Use when editing repository source files.",
+            "confidence": 0.88,
+        }
+
+    request = MemoryCompressionRequest(
+        raw_text="Huge raw transcript. Reviewer said source edits should use apply_patch, not shell heredocs.",
+        memory_kind="reviewer_correction",
+        scope="repo:mew",
+        source_refs=(_ref("llm-source", "raw_transcript"),),
+        created_at="2026-05-21T00:00:00Z",
+    )
+    result = compress_memory_with_model(
+        system,
+        request,
+        model_auth={"path": "auth.json", "access_token": "redacted"},
+        model_backend="codex",
+        model="gpt-5.5",
+        timeout=30,
+        call_json=fake_call_json,
+    )
+
+    assert calls
+    assert calls[0]["model_auth"]["path"] == "auth.json"
+    assert "raw_text" in calls[0]["prompt"]
+    assert result.action == "candidate"
+    assert result.candidate is not None
+    assert result.candidate.entry_shape.title == "Patch edit discipline"
+    assert result.candidate.entry_shape.summary == "Use apply_patch for source edits and avoid shell heredocs."
+    assert result.candidate.entry_shape.confidence == 0.88
+
+
+def test_memory_compression_prompt_has_no_hidden_raw_storage_policy():
+    request = MemoryCompressionRequest(
+        raw_text="raw transcript with a useful reviewer decision",
+        memory_kind="reviewer_correction",
+        scope="repo:mew",
+        source_refs=(_ref("prompt-source", "raw_transcript"),),
+        created_at="2026-05-21T00:00:00Z",
+    )
+
+    prompt = memory_compression_prompt(request)
+
+    assert "Do not copy raw transcript; compress it." in prompt
+    assert "provenance refs already point to raw data" in prompt
+    assert "reviewer_correction" in prompt
 
 
 def test_commit_memory_rejects_second_commit_for_same_approved_proposal():

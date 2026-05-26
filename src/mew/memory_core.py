@@ -34,6 +34,35 @@ RAW_PROVENANCE_KINDS = (
 STALENESS_STATES = ("fresh", "maybe_stale", "stale", "superseded")
 CONTRADICTION_STATES = ("none", "possible", "contradicted")
 LIFECYCLE_STATES = ("committed", "tombstoned")
+COMPRESSION_ACTIONS = ("candidate", "merge_existing", "drop")
+COMPRESSION_SALIENCE_TERMS = (
+    "approve",
+    "approved",
+    "bug",
+    "commit",
+    "decision",
+    "error",
+    "fail",
+    "failed",
+    "failure",
+    "fix",
+    "fixed",
+    "must",
+    "pass",
+    "passed",
+    "proof",
+    "reject",
+    "rejected",
+    "repair",
+    "review",
+    "revert",
+    "root cause",
+    "should",
+    "stale",
+    "success",
+    "test",
+    "verify",
+)
 
 
 def _as_tuple(value: Optional[Iterable[Any]]) -> Tuple[Any, ...]:
@@ -71,6 +100,60 @@ def _tokenize(value: str) -> Tuple[str, ...]:
     for char in value.casefold():
         cleaned.append(char if char.isalnum() or char in {"_", "-", "/"} else " ")
     return tuple(token for token in "".join(cleaned).split() if token)
+
+
+def _text_similarity(left: str, right: str) -> float:
+    left_terms = set(_tokenize(left))
+    right_terms = set(_tokenize(right))
+    if not left_terms or not right_terms:
+        return 0.0
+    return len(left_terms & right_terms) / max(1, len(left_terms | right_terms))
+
+
+def _split_sentences(text: str) -> Tuple[str, ...]:
+    normalized = _clean_text(text)
+    if not normalized:
+        return ()
+    sentences: List[str] = []
+    current: List[str] = []
+    for char in normalized:
+        current.append(char)
+        if char in {".", "!", "?", "\n"}:
+            sentence = "".join(current).strip()
+            if sentence:
+                sentences.append(sentence)
+            current = []
+    tail = "".join(current).strip()
+    if tail:
+        sentences.append(tail)
+    return tuple(sentences) or (normalized,)
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    cleaned = _clean_text(text)
+    if max_chars <= 0 or len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[: max(0, max_chars - 1)].rstrip() + "..."
+
+
+def _salience_terms(text: str) -> Tuple[str, ...]:
+    lowered = f" {_clean_text(text).casefold()} "
+    found = []
+    for term in COMPRESSION_SALIENCE_TERMS:
+        needle = f" {term.casefold()} "
+        if needle in lowered or term.casefold() in lowered:
+            found.append(term)
+    return tuple(found)
+
+
+def _compress_raw_text(text: str, max_chars: int) -> Tuple[str, Tuple[str, ...]]:
+    sentences = _split_sentences(text)
+    if not sentences:
+        return "", ()
+    salient = [sentence for sentence in sentences if _salience_terms(sentence)]
+    selected = salient[:4] if salient else list(sentences[:3])
+    summary = _truncate_text(" ".join(selected), max_chars)
+    return summary, _salience_terms(summary)
 
 
 def _matched_query_terms(entry: "MemoryEntry", query_terms: Iterable[str]) -> Tuple[str, ...]:
@@ -741,6 +824,105 @@ class MemoryCandidateResult:
 
 
 @dataclass(frozen=True)
+class MemoryCompressionRequest:
+    raw_text: str
+    memory_kind: str
+    scope: str
+    source_refs: Tuple[ProvenanceRef, ...]
+    created_at: str
+    title_hint: str = ""
+    applicability_hint: str = ""
+    validity: str = "valid"
+    confidence: float = 0.5
+    max_summary_chars: int = 600
+    merge_similarity_threshold: float = 0.72
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "raw_text", _require_text(self.raw_text, "raw_text"))
+        memory_kind = _require_text(self.memory_kind, "memory_kind").casefold().replace("-", "_")
+        if memory_kind in RAW_PROVENANCE_KINDS:
+            raise ValueError("raw provenance kinds cannot be memory compression targets")
+        if memory_kind not in MEMORY_KINDS:
+            raise ValueError(f"memory_kind must be one of: {', '.join(MEMORY_KINDS)}")
+        object.__setattr__(self, "memory_kind", memory_kind)
+        object.__setattr__(self, "scope", _require_text(self.scope, "scope"))
+        source_refs = tuple(
+            item if isinstance(item, ProvenanceRef) else ProvenanceRef.from_dict(item)
+            for item in self.source_refs
+        )
+        if not source_refs:
+            raise ValueError("memory compression requires source_refs")
+        object.__setattr__(self, "source_refs", source_refs)
+        object.__setattr__(self, "created_at", _require_text(self.created_at, "created_at"))
+        object.__setattr__(self, "title_hint", _clean_text(self.title_hint))
+        object.__setattr__(self, "applicability_hint", _clean_text(self.applicability_hint))
+        object.__setattr__(self, "validity", _clean_text(self.validity) or "valid")
+        object.__setattr__(self, "confidence", max(0.0, min(1.0, float(self.confidence))))
+        object.__setattr__(self, "max_summary_chars", max(80, int(self.max_summary_chars or 0)))
+        object.__setattr__(
+            self,
+            "merge_similarity_threshold",
+            max(0.0, min(1.0, float(self.merge_similarity_threshold))),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "raw_text_hash": _stable_json_hash({"raw_text": self.raw_text}),
+            "raw_text_chars": len(self.raw_text),
+            "memory_kind": self.memory_kind,
+            "scope": self.scope,
+            "source_refs": [item.to_dict() for item in self.source_refs],
+            "created_at": self.created_at,
+            "title_hint": self.title_hint,
+            "applicability_hint": self.applicability_hint,
+            "validity": self.validity,
+            "confidence": self.confidence,
+            "max_summary_chars": self.max_summary_chars,
+            "merge_similarity_threshold": self.merge_similarity_threshold,
+        }
+
+
+@dataclass(frozen=True)
+class MemoryCompressionResult:
+    action: str
+    summary: str
+    title: str
+    salience_terms: Tuple[str, ...]
+    novelty_score: float
+    merge_target_entry_id: str
+    candidate: Optional[MemoryCandidate]
+    dropped: Mapping[str, int]
+    trace_ref: str
+    trace: MemoryTrace
+
+    def __post_init__(self) -> None:
+        action = _require_text(self.action, "action")
+        if action not in COMPRESSION_ACTIONS:
+            raise ValueError(f"compression action must be one of: {', '.join(COMPRESSION_ACTIONS)}")
+        object.__setattr__(self, "action", action)
+        object.__setattr__(self, "summary", _clean_text(self.summary))
+        object.__setattr__(self, "title", _clean_text(self.title))
+        object.__setattr__(self, "salience_terms", tuple(_clean_text(item) for item in self.salience_terms if _clean_text(item)))
+        object.__setattr__(self, "novelty_score", max(0.0, min(1.0, float(self.novelty_score))))
+        object.__setattr__(self, "merge_target_entry_id", _clean_text(self.merge_target_entry_id))
+        object.__setattr__(self, "dropped", dict(self.dropped or {}))
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "action": self.action,
+            "summary": self.summary,
+            "title": self.title,
+            "salience_terms": list(self.salience_terms),
+            "novelty_score": self.novelty_score,
+            "merge_target_entry_id": self.merge_target_entry_id,
+            "candidate": self.candidate.to_dict() if self.candidate else None,
+            "dropped": dict(self.dropped),
+            "trace_ref": self.trace_ref,
+            "trace": self.trace.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
 class MemoryProposalRequest:
     candidate_id: str
     proof_refs: Tuple[ProvenanceRef, ...]
@@ -1217,6 +1399,88 @@ class MemorySystem:
     def from_entries(cls, entries: Sequence[MemoryEntry]) -> "MemorySystem":
         return cls(InMemoryMemoryStore(entries))
 
+    def compress_memory(self, request: MemoryCompressionRequest) -> MemoryCompressionResult:
+        """Turn raw provenance text into a compact candidate or merge hint.
+
+        This is the hippocampal-MVP write entrance: keep the compressed memory
+        data small, keep raw data in provenance refs, and avoid creating a new
+        durable item when a near-duplicate committed memory already exists.
+        """
+        started = time.perf_counter()
+        request_hash = _stable_json_hash(request.to_dict())
+        summary, salience_terms = _compress_raw_text(request.raw_text, request.max_summary_chars)
+        dropped: Dict[str, int] = {}
+        candidate: Optional[MemoryCandidate] = None
+        merge_target_entry_id = ""
+        action = "candidate"
+        title = self._compression_title(request, summary)
+        novelty_score = 1.0
+
+        if not summary:
+            action = "drop"
+            dropped["empty_compressed_summary"] = 1
+        else:
+            match, similarity = self._best_compression_match(
+                summary=summary,
+                memory_kind=request.memory_kind,
+                scope=request.scope,
+            )
+            novelty_score = round(1.0 - similarity, 6)
+            if match is not None and similarity >= request.merge_similarity_threshold:
+                action = "merge_existing"
+                merge_target_entry_id = match.entry_id
+                dropped["similar_existing_memory"] = 1
+            else:
+                candidate = self.write_candidate(
+                    MemoryCandidateRequest(
+                        memory_kind=request.memory_kind,
+                        scope=request.scope,
+                        title=title,
+                        summary=summary,
+                        applicability=self._compression_applicability(request, salience_terms),
+                        source_refs=request.source_refs,
+                        created_at=request.created_at,
+                        validity=request.validity,
+                        confidence=request.confidence,
+                        budgets={"max_summary_chars": request.max_summary_chars},
+                    )
+                ).candidate
+
+        result_payload = {
+            "action": action,
+            "summary": summary,
+            "title": title,
+            "salience_terms": list(salience_terms),
+            "novelty_score": novelty_score,
+            "merge_target_entry_id": merge_target_entry_id,
+            "candidate_id": candidate.candidate_id if candidate else "",
+            "dropped": dropped,
+        }
+        trace = self.trace(
+            event="compress_memory",
+            request_hash=request_hash,
+            result_hash=_stable_json_hash(result_payload),
+            timing_ms=(time.perf_counter() - started) * 1000.0,
+            budget_used=BudgetUse(
+                returned_results=1 if candidate or merge_target_entry_id else 0,
+                returned_chars=len(summary),
+                store_reads=sum(1 for _ in self.store.iter_entries()),
+            ),
+            dropped_reasons=dropped,
+        )
+        return MemoryCompressionResult(
+            action=action,
+            summary=summary,
+            title=title,
+            salience_terms=salience_terms,
+            novelty_score=novelty_score,
+            merge_target_entry_id=merge_target_entry_id,
+            candidate=candidate,
+            dropped=dropped,
+            trace_ref=trace.trace_ref,
+            trace=trace,
+        )
+
     def write_candidate(self, request: MemoryCandidateRequest) -> MemoryCandidateResult:
         started = time.perf_counter()
         request_hash = _stable_json_hash(request.to_dict())
@@ -1691,6 +1955,46 @@ class MemorySystem:
         if not request.include_stale and entry.staleness.state in {"stale", "superseded"}:
             return "stale_excluded"
         return ""
+
+    def _best_compression_match(
+        self,
+        *,
+        summary: str,
+        memory_kind: str,
+        scope: str,
+    ) -> Tuple[Optional[MemoryEntry], float]:
+        best_entry: Optional[MemoryEntry] = None
+        best_score = 0.0
+        for entry in self.store.iter_entries():
+            if not entry.is_recallable():
+                continue
+            if entry.memory_kind != memory_kind or entry.scope != scope:
+                continue
+            score = _text_similarity(summary, entry.search_text())
+            if score > best_score:
+                best_score = score
+                best_entry = entry
+        return best_entry, best_score
+
+    def _compression_title(self, request: MemoryCompressionRequest, summary: str) -> str:
+        if request.title_hint:
+            return _truncate_text(request.title_hint, 100)
+        first_sentence = _split_sentences(summary)[0] if summary else ""
+        if first_sentence:
+            return _truncate_text(first_sentence, 100)
+        return f"Compressed {request.memory_kind.replace('_', ' ')} memory"
+
+    def _compression_applicability(
+        self,
+        request: MemoryCompressionRequest,
+        salience_terms: Sequence[str],
+    ) -> str:
+        if request.applicability_hint:
+            return request.applicability_hint
+        if salience_terms:
+            cues = ", ".join(salience_terms[:5])
+            return f"Use in {request.scope} when these cues recur: {cues}."
+        return f"Use in {request.scope} when this compressed experience becomes relevant."
 
     def _score_entry(self, entry: MemoryEntry, query_terms: Iterable[str]) -> float:
         terms = set(query_terms)

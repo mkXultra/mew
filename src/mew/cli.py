@@ -2008,6 +2008,29 @@ def build_parser():
     memory_core_score.add_argument("--json", action="store_true", help="print machine-readable JSON")
     memory_core_score.set_defaults(func=cmd_memory_core)
 
+    memory_core_compress = memory_core_subparsers.add_parser(
+        "compress",
+        help="compress raw evidence into a MemoryCard candidate with an LLM",
+    )
+    memory_core_compress.add_argument("--raw-text", help="raw evidence text to compress")
+    memory_core_compress.add_argument("--raw-file", help="file containing raw evidence text to compress")
+    memory_core_compress.add_argument("--kind", required=True, help="memory kind for the candidate")
+    memory_core_compress.add_argument("--scope", required=True, help="memory scope, e.g. repo:mew")
+    memory_core_compress.add_argument("--title-hint", default="", help="optional title hint")
+    memory_core_compress.add_argument("--applicability-hint", default="", help="optional applicability hint")
+    memory_core_compress.add_argument("--source-ref-kind", default="raw_transcript", help="source provenance kind")
+    memory_core_compress.add_argument("--source-ref-id", default="", help="optional source provenance id")
+    memory_core_compress.add_argument("--source-uri", default="", help="optional source artifact URI/path")
+    memory_core_compress.add_argument("--max-summary-chars", type=int, default=600, help="maximum compressed summary chars")
+    memory_core_compress.add_argument("--auth", default="auth.json", help="model auth JSON path")
+    memory_core_compress.add_argument("--model-backend", default="codex", help="model backend for compression")
+    memory_core_compress.add_argument("--model", default="gpt-5.5", help="model for compression")
+    memory_core_compress.add_argument("--base-url", default="", help="optional model backend base URL")
+    memory_core_compress.add_argument("--timeout", type=int, default=120, help="model call timeout seconds")
+    memory_core_compress.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_compress.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_compress.set_defaults(func=cmd_memory_core)
+
     memory_core_arena = memory_core_subparsers.add_parser(
         "memory-arena-score",
         help="score direct MemorySystem recall on MemoryArena-style rows",
@@ -2039,6 +2062,50 @@ def build_parser():
     memory_core_arena_tools.add_argument("--artifact", help="write machine-readable JSON artifact")
     memory_core_arena_tools.add_argument("--json", action="store_true", help="print machine-readable JSON")
     memory_core_arena_tools.set_defaults(func=cmd_memory_core)
+
+    memory_core_arena_agent = memory_core_subparsers.add_parser(
+        "memory-arena-agent-score",
+        help="score a bounded MemoryArena agent loop with recall/inspect memory tools",
+    )
+    memory_core_arena_agent.add_argument("--input", help="local MemoryArena JSON or JSONL export")
+    memory_core_arena_agent.add_argument("--hf-config", help="optional Hugging Face MemoryArena config")
+    memory_core_arena_agent.add_argument(
+        "--hf-split",
+        default="test",
+        help="Hugging Face split when --hf-config is used",
+    )
+    memory_core_arena_agent.add_argument("--hf-revision", help="optional Hugging Face dataset revision")
+    memory_core_arena_agent.add_argument("--mode", required=True, choices=("memory_off", "memory_on", "stale"))
+    memory_core_arena_agent.add_argument("--limit-rows", type=int, default=0, help="maximum arena rows to score")
+    memory_core_arena_agent.add_argument("--limit", type=int, default=5, help="maximum recall results per query")
+    memory_core_arena_agent.add_argument("--include-stale", action="store_true", help="include stale entries in recall")
+    memory_core_arena_agent.add_argument("--max-turns", type=int, default=3, help="maximum agent turns per subtask")
+    memory_core_arena_agent.add_argument(
+        "--save-source",
+        choices=("model", "gold"),
+        default="model",
+        help="save compressed memory from the model answer or the gold answer",
+    )
+    memory_core_arena_agent.add_argument(
+        "--answer-score-mode",
+        choices=("token_f1", "normalized_contains"),
+        default="token_f1",
+        help="answer scoring strategy; embeddings are not required in v0",
+    )
+    memory_core_arena_agent.add_argument(
+        "--answer-threshold",
+        type=float,
+        default=0.5,
+        help="minimum answer score counted as passed",
+    )
+    memory_core_arena_agent.add_argument("--auth", default="auth.json", help="model auth JSON path")
+    memory_core_arena_agent.add_argument("--model-backend", default="codex", help="model backend for agent/compressor")
+    memory_core_arena_agent.add_argument("--model", default="gpt-5.5", help="model for agent/compressor")
+    memory_core_arena_agent.add_argument("--base-url", default="", help="optional model backend base URL")
+    memory_core_arena_agent.add_argument("--timeout", type=int, default=120, help="model call timeout seconds")
+    memory_core_arena_agent.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_arena_agent.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_arena_agent.set_defaults(func=cmd_memory_core)
 
     snapshot_parser = subparsers.add_parser("snapshot", help="refresh structured project snapshot memory")
     snapshot_parser.add_argument("--path", default=".", help="directory to inspect")
