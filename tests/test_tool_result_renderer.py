@@ -49,7 +49,7 @@ def test_codex_terminal_renderer_sanitizes_guidance_markers() -> None:
     rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
 
     assert rendered.renderer_id == CODEX_TERMINAL_RENDERER_ID
-    assert "exit_code: 1" in rendered.text
+    assert "Process exited with code 1" in rendered.text
     assert "suggested_next_action" not in rendered.text
     assert "required_next" not in rendered.text
     assert rendered.leak_ok is True
@@ -117,7 +117,13 @@ def test_codex_terminal_renderer_hides_debug_alias_for_completed_command() -> No
 
     rendered = render_tool_result_for_profile(result, profile_id=CODEX_HOT_PATH_PROFILE_ID)
 
-    assert rendered.text == "stdout:\nverifier ok"
+    assert rendered.text == (
+        "Chunk ID: call-1\n"
+        "Wall time: 0.0000 seconds\n"
+        "Process exited with code 0\n"
+        "Output:\n"
+        "verifier ok"
+    )
     assert "Tool result ref:" not in rendered.text
     assert "Finish evidence ref:" not in rendered.text
     assert "finish_evidence=" not in rendered.text

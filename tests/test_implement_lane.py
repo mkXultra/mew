@@ -11301,6 +11301,7 @@ def test_implement_v2_prompt_metrics_are_memory_light_by_default() -> None:
     by_id = {section["id"]: section for section in metrics["sections"]}
 
     assert metrics["contract_version"] == "prompt_sections_v1"
+    assert "implement_v2_agent_principles" in by_id
     assert "implement_v2_lane_base" in by_id
     assert "implement_v2_tool_contract" in by_id
     assert "implement_v2_coding_contract" in by_id
@@ -11311,6 +11312,7 @@ def test_implement_v2_prompt_metrics_are_memory_light_by_default() -> None:
     assert "implement_v2_lane_state" not in by_id
     assert "implement_v2_workframe" not in by_id
     assert "implement_v2_memory_summary" not in by_id
+    assert by_id["implement_v2_agent_principles"]["cache_hint"] == "cacheable_prefix"
     assert by_id["implement_v2_lane_base"]["cache_hint"] == "cacheable_prefix"
     assert by_id["implement_v2_coding_contract"]["cache_hint"] == "cacheable_prefix"
 
@@ -11333,7 +11335,11 @@ def test_codex_hot_path_prompt_metrics_hide_task_contract_section() -> None:
     by_id = {section["id"]: section for section in metrics["sections"]}
 
     assert "implement_v2_task_contract" not in by_id
+    assert "implement_v2_agent_principles" in by_id
     assert "implement_v2_environment_context" in by_id
+    agent_principles = next(
+        section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_agent_principles"
+    ).content
     coding_contract = next(
         section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_coding_contract"
     ).content
@@ -11343,6 +11349,9 @@ def test_codex_hot_path_prompt_metrics_hide_task_contract_section() -> None:
     environment_context = next(
         section for section in build_implement_v2_prompt_sections(lane_input) if section.id == "implement_v2_environment_context"
     )
+    assert "Read the codebase before making source changes." in agent_principles
+    assert "successful command exit alone as sufficient" in agent_principles
+    assert "visual, or artifact-quality requirements" in agent_principles
     assert "root cause rather than applying surface-level patches" in lane_base
     assert "changes should be minimal and focused on the task" in lane_base
     assert "surgical precision" in lane_base

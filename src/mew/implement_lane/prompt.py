@@ -28,6 +28,7 @@ FINISH_REPLAY_RECOVERY_SURFACE = "finish_replay_recovery"
 
 _HOT_PATH_SECTION_IDS = frozenset(
     {
+        "implement_v2_agent_principles",
         "implement_v2_lane_base",
         "implement_v2_tool_contract",
         "implement_v2_coding_contract",
@@ -64,14 +65,15 @@ def build_implement_v2_prompt_sections(
         )
         specs = snapshot.tool_specs
         prompt_contract_id = snapshot.prompt_contract_id
-    return list(
-        prompt_sections_for_tool_surface(
+    return [
+        _implement_v2_agent_principles_section(),
+        *prompt_sections_for_tool_surface(
             profile_id=profile_id,
             prompt_contract_id=prompt_contract_id,
             tool_specs=specs,
             task_contract_content=_stable_json(_model_visible_task_contract(lane_input.task_contract)),
-        )
-    )
+        ),
+    ]
 
 
 def implement_v2_prompt_section_metrics(lane_input: ImplementLaneInput) -> dict[str, object]:
@@ -180,6 +182,25 @@ def _model_visible_lane_config(lane_config: dict[str, object]) -> dict[str, obje
 
 def _model_visible_task_contract(task_contract: dict[str, object]) -> dict[str, object]:
     return _strip_task_contract_internal_fields(task_contract)
+
+
+def _implement_v2_agent_principles_section() -> PromptSection:
+    return PromptSection(
+        id="implement_v2_agent_principles",
+        version="v0",
+        title="Implement V2 Agent Principles",
+        content=(
+            "Read the codebase before making source changes. "
+            "Prefer existing project patterns, local helpers, and structured APIs over new abstractions. "
+            "Keep edits scoped to the requested behavior and surrounding code. "
+            "Carry the task through implementation and verification when feasible. "
+            "After changing code or generated artifacts, run the strongest task-relevant check available. "
+            "Do not treat smoke evidence, file existence, or successful command exit alone as sufficient "
+            "when the task has semantic behavior, visual, or artifact-quality requirements. "
+            "For generated visual or artifact outputs, verify meaningful content when feasible."
+        ),
+        profile="implement_v2",
+    )
 
 
 def _strip_task_contract_internal_fields(value: object) -> object:

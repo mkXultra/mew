@@ -15,7 +15,7 @@ from .types import ToolResultEnvelope
 
 RENDERER_SCHEMA_VERSION = 1
 MEW_LEGACY_RENDERER_ID = "mew_legacy_result_cards_v1"
-CODEX_TERMINAL_RENDERER_ID = "codex_terminal_text_v2"
+CODEX_TERMINAL_RENDERER_ID = "codex_terminal_text_v3"
 CODEX_APPLY_PATCH_RENDERER_ID = "codex_apply_patch_text_v1"
 CODEX_GENERIC_RENDERER_ID = "codex_generic_text_v1"
 DEFAULT_RENDER_LIMIT = 12_000
@@ -156,19 +156,64 @@ def _rendered(
 
 def _render_codex_terminal(result: ToolResultEnvelope, *, limit: int) -> str:
     payload = _payload(result)
-    command_id = str(payload.get("command_id") or "").strip()
+    command_id = str(payload.get("command_id") or payload.get("session_id") or "").strip()
+    header = _codex_terminal_header(result, payload, command_id=command_id)
+    output_limit = max(200, limit - len("\n".join(header)) - len("\nOutput:\n"))
     if _terminal_status(result, payload) in _NONTERMINAL_STATUSES:
-        visible_id = command_id or str(payload.get("session_id") or result.provider_call_id or "unknown")
-        return _clip(f"Process running with command_id {visible_id}", limit)
+        output = _codex_terminal_output_text(result, payload, limit=output_limit)
+        return _clip("\n".join([*header, "Output:", output]).rstrip(), limit)
 
-    output = _command_output_text(result, payload, limit=limit)
-    exit_code = _exit_code(result, payload)
-    if result.is_error or result.status in {"failed", "invalid", "interrupted"} or exit_code not in {"0", ""}:
-        lines = [f"exit_code: {exit_code}"]
-        if output:
-            lines.append(output)
-        return _clip("\n".join(lines).rstrip(), limit)
-    return _clip(output, limit)
+    output = _codex_terminal_output_text(result, payload, limit=output_limit)
+    return _clip("\n".join([*header, "Output:", output]).rstrip(), limit)
+
+
+def _codex_terminal_header(
+    result: ToolResultEnvelope,
+    payload: Mapping[str, object],
+    *,
+    command_id: str,
+) -> list[str]:
+    lines: list[str] = []
+    chunk_id = _first_text(payload, "chunk_id") or command_id or _short_chunk_id(result.provider_call_id)
+    if chunk_id:
+        lines.append(f"Chunk ID: {chunk_id}")
+    lines.append(f"Wall time: {_terminal_wall_time(payload):.4f} seconds")
+    if _terminal_status(result, payload) in _NONTERMINAL_STATUSES:
+        visible_id = command_id or _first_text(payload, "command_run_id") or result.provider_call_id or "unknown"
+        lines.append(f"Process running with session ID {visible_id}")
+    else:
+        lines.append(f"Process exited with code {_exit_code(result, payload)}")
+    token_count = _original_token_count(payload)
+    if token_count is not None:
+        lines.append(f"Original token count: {token_count}")
+    return lines
+
+
+def _terminal_wall_time(payload: Mapping[str, object]) -> float:
+    for key in ("wall_time_seconds", "duration_seconds", "elapsed_seconds"):
+        value = payload.get(key)
+        try:
+            return max(0.0, float(value))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _original_token_count(payload: Mapping[str, object]) -> int | None:
+    for key in ("original_token_count", "token_count"):
+        value = payload.get(key)
+        try:
+            count = int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        if count >= 0:
+            return count
+    return None
+
+
+def _short_chunk_id(value: object) -> str:
+    text = str(value or "").strip()
+    return text[:8] if text else ""
 
 
 def _render_codex_apply_patch(result: ToolResultEnvelope, *, limit: int) -> str:
@@ -273,6 +318,34 @@ def _exit_code(result: ToolResultEnvelope, payload: Mapping[str, object]) -> str
     if raw not in (None, ""):
         return str(raw)
     return "1" if result.is_error or result.status in {"failed", "invalid", "interrupted"} else "0"
+
+
+def _codex_terminal_output_text(
+    result: ToolResultEnvelope,
+    payload: Mapping[str, object],
+    *,
+    limit: int,
+) -> str:
+    stdout = str(payload.get("stdout") or "").strip()
+    stderr = str(payload.get("stderr") or "").strip()
+    stdout_tail = str(payload.get("stdout_tail") or "").strip()
+    stderr_tail = str(payload.get("stderr_tail") or "").strip()
+    stream_text = "\n".join(part for part in (stdout or stdout_tail, stderr or stderr_tail) if part).strip()
+    stream_tail = "\n".join(
+        part
+        for part in (stdout_tail, stderr_tail)
+        if part and part not in {stdout, stderr, stream_text}
+    ).strip()
+    if stream_text:
+        return _head_tail_output_text(stream_text, stream_tail, limit=limit)
+
+    ordered_keys = ("reason", "message", "error", "summary", "content", "text")
+    for key in ordered_keys:
+        value = payload.get(key)
+        text = str(value or "").strip() if value not in (None, "", [], {}) else ""
+        if text:
+            return _clip(_sanitize_visible_text(text), limit)
+    return _clip(str(payload.get("status") or result.status or ""), limit)
 
 
 def _command_output_text(result: ToolResultEnvelope, payload: Mapping[str, object], *, limit: int) -> str:

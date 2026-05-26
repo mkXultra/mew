@@ -863,8 +863,8 @@ def test_codex_hot_path_exec_command_routes_to_managed_exec(tmp_path: Path) -> N
     output = next(item for item in result.transcript.items if item.kind == "function_call_output")
     assert output.tool_name == "exec_command"
     assert output.status == "completed"
-    assert "Process exited with code 0" not in output.output_text_or_ref
-    assert "Output:" not in output.output_text_or_ref
+    assert "Process exited with code 0" in output.output_text_or_ref
+    assert "Output:" in output.output_text_or_ref
     assert "ok" in output.output_text_or_ref
     assert "run_command result" not in output.output_text_or_ref
     finish_output = next(item for item in result.transcript.items if item.kind == "finish_output")
@@ -876,7 +876,7 @@ def test_codex_hot_path_exec_command_routes_to_managed_exec(tmp_path: Path) -> N
         .read_text(encoding="utf-8")
         .splitlines()
     ]
-    assert render_rows[0]["renderer_id"] == "codex_terminal_text_v2"
+    assert render_rows[0]["renderer_id"] == "codex_terminal_text_v3"
     assert "tool_result_ref" in render_rows[0]["provider_visible_debug_omissions"]
     assert render_rows[0]["leak_ok"] is True
     routes = [
@@ -954,13 +954,13 @@ def test_codex_hot_path_write_stdin_empty_chars_polls_session(tmp_path: Path) ->
         for item in result.transcript.items
         if item.kind == "function_call_output" and item.tool_name == "exec_command"
     )
-    assert "Process running with command_id cmd_001" in first_output.output_text_or_ref
+    assert "Process running with session ID cmd_001" in first_output.output_text_or_ref
     assert _command_run_id("exec-1") not in first_output.output_text_or_ref
 
     output = result.transcript.items[-1]
     assert output.tool_name == "write_stdin"
     assert output.status == "completed"
-    assert "Process exited with code 0" not in output.output_text_or_ref
+    assert "Process exited with code 0" in output.output_text_or_ref
     assert "done" in output.output_text_or_ref
 
 
@@ -1026,7 +1026,7 @@ def test_codex_hot_path_write_stdin_non_empty_chars_fails_poll_only(tmp_path: Pa
     assert output.tool_name == "write_stdin"
     assert output.status == "invalid"
     assert "poll_only" in output.output_text_or_ref
-    assert "exit_code: 1" in output.output_text_or_ref
+    assert "Process exited with code 1" in output.output_text_or_ref
 
 
 @pytest.mark.parametrize(
@@ -1065,7 +1065,7 @@ def test_codex_hot_path_adapter_failures_use_terminal_renderer(
     output = next(item for item in result.transcript.items if item.kind == "function_call_output")
     assert output.tool_name == tool_name
     assert output.status in {"failed", "invalid"}
-    assert "exit_code: 1" in output.output_text_or_ref
+    assert "Process exited with code 1" in output.output_text_or_ref
     assert expected in output.output_text_or_ref
     assert "run_command result" not in output.output_text_or_ref
 
@@ -1096,7 +1096,7 @@ def test_codex_hot_path_exec_command_yielded_uses_terminal_session_shape(tmp_pat
     output = next(item for item in result.transcript.items if item.kind == "function_call_output")
     assert output.tool_name == "exec_command"
     assert output.status in {"yielded", "running", "completed", "failed", "interrupted"}
-    assert "Process running with command_id cmd_001" in output.output_text_or_ref
+    assert "Process running with session ID cmd_001" in output.output_text_or_ref
     assert "run_command result" not in output.output_text_or_ref
 
 
@@ -1209,7 +1209,7 @@ def test_codex_hot_path_synthetic_cancel_output_uses_profile_renderer(tmp_path: 
 
     output = next(item for item in result.transcript.items if item.call_id == "exec-after" and item.kind.endswith("_output"))
     assert output.metrics_ref
-    assert "exit_code: 1" in output.output_text_or_ref
+    assert "Process exited with code 1" in output.output_text_or_ref
     assert "cancelled because finish call finish-1" in output.output_text_or_ref
     assert "run_command result" not in output.output_text_or_ref
 
