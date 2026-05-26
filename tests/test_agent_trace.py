@@ -38,6 +38,24 @@ def test_normalize_codex_stdout_tool_calls_and_summary(tmp_path):
                     "status": "completed",
                 },
             },
+            {
+                "type": "item.started",
+                "item": {
+                    "id": "edit-1",
+                    "type": "file_change",
+                    "changes": [{"path": "/repo/src/app.py", "kind": "update"}],
+                    "status": "in_progress",
+                },
+            },
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "edit-1",
+                    "type": "file_change",
+                    "changes": [{"path": "/repo/src/app.py", "kind": "update"}],
+                    "status": "completed",
+                },
+            },
             {"item": {"type": "agent_message", "text": "done"}},
             {"msg": {"type": "token_count", "input_tokens": 10, "output_tokens": 2}},
         ],
@@ -52,11 +70,23 @@ def test_normalize_codex_stdout_tool_calls_and_summary(tmp_path):
 
     events, summary = normalize_harbor_agent_trace(agent="codex", task_dir=task_dir)
 
-    assert [event["kind"] for event in events] == ["session", "tool_call", "tool_call", "message", "usage"]
+    assert [event["kind"] for event in events] == [
+        "session",
+        "tool_call",
+        "tool_call",
+        "tool_call",
+        "tool_call",
+        "message",
+        "usage",
+    ]
     assert summary["agent"] == "codex"
-    assert summary["tool_call_count"] == 2
+    assert summary["tool_call_count"] == 4
     assert summary["command_event_count"] == 2
     assert summary["command_count"] == 1
+    assert summary["edit_event_count"] == 2
+    assert summary["edit_count"] == 1
+    assert summary["source_mutation_event_count"] == 1
+    assert summary["source_mutation_count"] == 1
     assert summary["verifier_event_count"] == 2
     assert summary["verifier_count"] == 1
     assert summary["message_count"] == 1

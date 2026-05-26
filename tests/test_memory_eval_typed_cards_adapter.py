@@ -20,6 +20,7 @@ GRAPH_CROSS_SCOPE_FIXTURE = P1_FIXTURES / "graph_cross_scope_no_leak_basic.json"
 GRAPH_FORGET_FIXTURE = P1_FIXTURES / "graph_forget_no_leak_basic.json"
 GRAPH_STALE_ENDPOINT_FIXTURE = P1_FIXTURES / "graph_stale_endpoint_no_leak_basic.json"
 GRAPH_UNCANONICALIZED_ENDPOINT_FIXTURE = P1_FIXTURES / "graph_uncanonicalized_endpoint_no_leak_basic.json"
+RELATION_NIECE_COMPANY_FIXTURE = P1_FIXTURES / "relation_sensitive_niece_company_basic.json"
 
 
 PHASE_C_PASS_FIXTURES = [
@@ -27,6 +28,7 @@ PHASE_C_PASS_FIXTURES = [
     P1_FIXTURES / "memory_off_no_prior_memory_basic.json",
     P1_FIXTURES / "memory_on_happy_path_basic.json",
     P1_FIXTURES / "retrieval_ranking_basic.json",
+    RELATION_NIECE_COMPANY_FIXTURE,
     P1_FIXTURES / "scope_isolation_basic.json",
     P1_FIXTURES / "stale_conflict_supersede_basic.json",
     P1_FIXTURES / "update_forget_basic.json",
@@ -670,6 +672,39 @@ def test_update_forget_fixture_uses_current_support_and_does_not_leak_forgotten_
     )
     assert "exp_removed_folder" not in str(request["retrieval"])
     assert returned[0]["source_mutation_ids"] == ["mut_update_folder"]
+
+
+def test_relation_sensitive_niece_company_fixture_asserts_top1_scope_and_support() -> None:
+    artifact = run_fixture(
+        _fixture_with_seed_lifecycle(RELATION_NIECE_COMPANY_FIXTURE),
+        TypedCardsMemoryEvalAdapter(),
+        run_id="run_fixed",
+        created_at="2026-05-21T00:00:00Z",
+    )
+    request = artifact["requests"][0]
+
+    assert request["result_status"] == "passed"
+    assert request["metrics"]["recall_at_k"] == 1.0
+    assert request["metrics"]["mrr_at_k"] == 1.0
+    assert request["metrics"]["precision_at_k"] == 1.0
+    assert request["metrics"]["cross_scope_leak_rate"] == 0
+    assert request["metrics"]["cross_scope_exposure_rate"] == 0
+    assert request["metrics"]["stale_as_fresh"] == 0
+
+    returned = request["retrieval"]["returned_evidence_order"]
+    assert len(returned) == 1
+    assert returned[0]["support_experience_ids"] == ["exp_niece_current_company"]
+    assert returned[0]["source_experience_ids"] == ["exp_niece_current_company"]
+    assert returned[0]["source_mutation_ids"] == ["mut_niece_company_current"]
+    assert {"niece", "Elena", "Northstar", "Robotics"}.issubset(
+        set(returned[0]["debug_metadata"]["retrieval_terms"])
+    )
+    assert "exp_niece_old_company" not in str(request["retrieval"])
+    assert "exp_other_scope_same_company" not in str(request["retrieval"])
+    assert "exp_raw_match_removed" not in str(request["retrieval"])
+    assert request["retrieval"]["dropped_count_by_reason"]["superseded"] >= 1
+    assert request["retrieval"]["dropped_count_by_reason"]["forgotten"] >= 1
+    assert request["retrieval"]["dropped_count_by_reason"]["privacy_block"] >= 1
 
 
 def test_scope_isolation_fixture_passes_without_cross_scope_support() -> None:

@@ -211,6 +211,36 @@ def normalize_codex_stdout(stdout_path: Path) -> list[dict[str, Any]]:
                     )
                 )
                 continue
+            if item.get("type") == "file_change":
+                changes = item.get("changes") if isinstance(item.get("changes"), list) else []
+                event = _tool_event(
+                    agent="codex",
+                    source_path=stdout_path,
+                    line_number=line_number,
+                    phase=phase,
+                    tool="file_change",
+                    tool_id=str(item.get("id", "")),
+                    summary=_codex_file_change_summary(changes),
+                    status=item.get("status") or "",
+                )
+                if changes:
+                    compact_changes = _compact_codex_file_changes(changes)
+                    event["arguments"] = {"changes": compact_changes}
+                    if phase == "completed":
+                        changed_paths = [change["path"] for change in compact_changes if change.get("path")]
+                        event["source_mutation"] = {
+                            "changed_count": len(changed_paths),
+                            "changed_paths": changed_paths,
+                            "mutation_refs": [
+                                f"{change.get('kind') or 'change'}:{change.get('path')}"
+                                for change in compact_changes
+                                if change.get("path")
+                            ],
+                        }
+                        event["source_mutation_effect_kinds"] = ["source_tree_mutation"]
+                        event["side_effect_kinds"] = ["source_tree_mutation"]
+                events.append(event)
+                continue
             if item.get("type") == "mcp_tool_call":
                 events.append(
                     _tool_event(
@@ -227,6 +257,26 @@ def normalize_codex_stdout(stdout_path: Path) -> list[dict[str, Any]]:
                 )
                 continue
     return events
+
+
+def _compact_codex_file_changes(changes: Sequence[Any]) -> list[dict[str, str]]:
+    compact: list[dict[str, str]] = []
+    for change in changes:
+        if not isinstance(change, dict):
+            continue
+        path = str(change.get("path") or "")
+        kind = str(change.get("kind") or "change")
+        if not path:
+            continue
+        compact.append({"path": path, "kind": kind})
+    return compact
+
+
+def _codex_file_change_summary(changes: Sequence[Any]) -> str:
+    compact = _compact_codex_file_changes(changes)
+    if not compact:
+        return "file_change"
+    return "; ".join(f"{change['kind']} {change['path']}" for change in compact)
 
 
 def normalize_claude_stdout(stdout_path: Path) -> list[dict[str, Any]]:
@@ -1255,7 +1305,7 @@ def summarize_trace(
     edit_events = [
         event
         for event in tool_events
-        if any(token in str(event.get("tool", "")).lower() for token in ("edit", "patch", "write"))
+        if _is_edit_event(event)
     ]
     verifier_events = [
         event
@@ -1342,6 +1392,11 @@ def _is_verifier_event(event: dict[str, Any]) -> bool:
     return False
 
 
+def _is_edit_event(event: dict[str, Any]) -> bool:
+    tool = str(event.get("tool", "")).casefold()
+    return tool == "file_change" or any(token in tool for token in ("edit", "patch", "write"))
+
+
 def _event_has_source_mutation(event: dict[str, Any]) -> bool:
     mutation = event.get("source_mutation")
     if isinstance(mutation, dict):
@@ -1409,7 +1464,7 @@ def _is_patch_event(event: dict[str, Any]) -> bool:
         return False
     tool = str(event.get("tool") or "").casefold()
     text = _event_text(event)
-    return any(token in tool for token in ("edit", "patch", "write")) or any(
+    return tool == "file_change" or any(token in tool for token in ("edit", "patch", "write")) or any(
         token in text for token in ("apply_patch", "edit_file", "write_file")
     )
 
