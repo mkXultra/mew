@@ -69,6 +69,19 @@ corpus before a future full profile:
 python -m mew.memory_eval.membench profile membench-sample1000-typed
 ```
 
+Additional profiles are registered for later M6.25 gates:
+
+```sh
+python -m mew.memory_eval.membench profile membench-full-qrels-oracle
+python -m mew.memory_eval.membench profile membench-sample5000-typed
+python -m mew.memory_eval.membench profile membench-full-typed
+```
+
+Use `membench-full-qrels-oracle` during pre-close converter/scorer validation,
+`membench-sample5000-typed` for larger memory-subsystem validation, and
+`membench-full-typed` only as optional long validation after runtime and
+artifact size are acceptable.
+
 Profiles perform local source preparation, source-manifest validation, sampled
 dry-run conversion, and TypedCards validation. They use the pinned Hugging Face
 `mteb/MemBench` dataset commit

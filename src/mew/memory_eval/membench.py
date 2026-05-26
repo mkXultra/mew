@@ -89,6 +89,27 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
         "max_corpus_docs": 1000,
         "include_typed_cards": True,
     },
+    "membench-full-qrels-oracle": {
+        "subset": "single_hop",
+        "max_queries": None,
+        "corpus_sample_policy": "full",
+        "max_corpus_docs": None,
+        "include_typed_cards": False,
+    },
+    "membench-sample5000-typed": {
+        "subset": "single_hop",
+        "max_queries": 50,
+        "corpus_sample_policy": "qrel_plus_prefix",
+        "max_corpus_docs": 5000,
+        "include_typed_cards": True,
+    },
+    "membench-full-typed": {
+        "subset": "single_hop",
+        "max_queries": None,
+        "corpus_sample_policy": "full",
+        "max_corpus_docs": None,
+        "include_typed_cards": True,
+    },
 }
 PROFILE_NAMES = tuple(PROFILE_CONFIGS)
 UNPINNED_REVISION_VALUES = {"", "latest", "main", "master", "unresolved"}
@@ -1249,12 +1270,14 @@ def run_profile(
         "source_audit_report_hash": source_gate["source_audit_report_hash"],
     }
 
+    max_queries = profile_config["max_queries"]
+    max_corpus_docs = profile_config["max_corpus_docs"]
     dry_run = convert_mteb_qrels_dry_run(
         prepared.source_dir,
         manifest_path=prepared.manifest_path,
-        max_queries=int(profile_config["max_queries"]),
+        max_queries=int(max_queries) if max_queries is not None else None,
         corpus_sample_policy=str(profile_config["corpus_sample_policy"]),
-        max_corpus_docs=int(profile_config["max_corpus_docs"]),
+        max_corpus_docs=int(max_corpus_docs) if max_corpus_docs is not None else None,
     )
     write_json_artifact(dry_run_path, dry_run)
     phases["setup.dry_run"] = {

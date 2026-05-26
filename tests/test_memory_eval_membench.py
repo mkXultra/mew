@@ -560,14 +560,28 @@ def test_prepare_hf_mteb_qrels_output_feeds_dry_run_and_validation(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("profile_name", "max_queries", "max_corpus_docs"),
+    (
+        "profile_name",
+        "max_queries",
+        "corpus_sample_policy",
+        "max_corpus_docs",
+        "include_typed_cards",
+    ),
     [
-        ("membench-smoke200-typed", 1, 200),
-        ("membench-sample1000-typed", 10, 1000),
+        ("membench-smoke200-typed", 1, "qrel_plus_prefix", 200, True),
+        ("membench-sample1000-typed", 10, "qrel_plus_prefix", 1000, True),
+        ("membench-full-qrels-oracle", None, "full", None, False),
+        ("membench-sample5000-typed", 50, "qrel_plus_prefix", 5000, True),
+        ("membench-full-typed", None, "full", None, True),
     ],
 )
 def test_mteb_profile_runs_setup_and_validation_with_fake_loader(
-    tmp_path, profile_name, max_queries, max_corpus_docs
+    tmp_path,
+    profile_name,
+    max_queries,
+    corpus_sample_policy,
+    max_corpus_docs,
+    include_typed_cards,
 ):
     fixture_tree_before = _fixture_tree_snapshot()
     calls = []
@@ -587,9 +601,9 @@ def test_mteb_profile_runs_setup_and_validation_with_fake_loader(
     assert report["schema_version"] == "mew_membench_profile_run.v1"
     assert report["profile"] == profile_name
     assert report["profile_config"] == {
-        "corpus_sample_policy": "qrel_plus_prefix",
+        "corpus_sample_policy": corpus_sample_policy,
         "dataset": "mteb/MemBench",
-        "include_typed_cards": True,
+        "include_typed_cards": include_typed_cards,
         "max_corpus_docs": max_corpus_docs,
         "max_queries": max_queries,
         "revision": MEMBENCH_HF_PROFILE_REVISION,

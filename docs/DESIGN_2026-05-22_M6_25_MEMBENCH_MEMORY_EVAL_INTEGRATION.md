@@ -820,6 +820,18 @@ Available initial profiles:
 | --- | --- | --- |
 | `membench-smoke200-typed` | Small wiring check. | `single_hop`, `max_queries=1`, `qrel_plus_prefix`, `max_corpus_docs=200`, TypedCards validation. |
 | `membench-sample1000-typed` | Intermediate local validation before a full profile. | `single_hop`, `max_queries=10`, `qrel_plus_prefix`, `max_corpus_docs=1000`, TypedCards validation. |
+| `membench-full-qrels-oracle` | Deferred full converter/scorer validation without memory subsystem quality scoring. | `single_hop`, all queries, full corpus, qrels-oracle validation only. |
+| `membench-sample5000-typed` | Deferred larger TypedCards validation before full typed runs. | `single_hop`, `max_queries=50`, `qrel_plus_prefix`, `max_corpus_docs=5000`, TypedCards validation. |
+| `membench-full-typed` | Deferred long validation for full TypedCards behavior. | `single_hop`, all queries, full corpus, TypedCards validation. |
+
+Recommended M6.25 execution gates:
+
+- Baseline memory-subsystem gate: run `membench-smoke200-typed` and
+  `membench-sample1000-typed`.
+- Pre-close validation: run `membench-full-qrels-oracle` and
+  `membench-sample5000-typed`.
+- Optional long validation: run `membench-full-typed` only after artifact size,
+  runtime, and local source cache readiness are acceptable.
 
 The wrapper writes local artifacts under `tmp/membench-profiles` by default. By
 default it pins Hugging Face
