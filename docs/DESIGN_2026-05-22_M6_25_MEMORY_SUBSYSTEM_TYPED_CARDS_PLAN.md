@@ -2789,7 +2789,7 @@ Current Phase D.1 implementation status, 2026-05-22:
 Remaining Phase D work:
 
 - broader graph-specific memory-eval fixtures。
-- separate fanout/node/card/latency budgets。
+- remaining graph budget coverage: fanout, latency, and char budgets。Node/edge/card budget controls exist as of 2026-05-28 through `graph_max_nodes`, `graph_max_edges`, and `graph_max_cards` with core/adapter usage-count tests。
 - additional graph invalidation coverage。
 - deeper graph-aware rebuild drift fixtures。
 
