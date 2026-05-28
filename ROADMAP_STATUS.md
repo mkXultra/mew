@@ -1,6 +1,6 @@
 # Mew Roadmap Status
 
-Last updated: 2026-05-21
+Last updated: 2026-05-27
 
 This file is the compact operational roadmap dashboard for context reentry.
 Detailed history is intentionally archived instead of kept here.
@@ -59,7 +59,7 @@ not mean every idea in every design note has shipped.
 | 6.23 Terminal-Bench Failure-Class Coverage | `done` | Close gate passed via `docs/M6_23_CLOSE_GATE_AUDIT_2026-04-28.md`. |
 | 6.23.2 Lane Isolation Substrate | `done` | Close gate passed via `docs/M6_23_2_PHASE6_M6_24_REENTRY_AB_GATE_PROOF_2026-05-05.md`; M6.24 resumes with explicit lane attribution. |
 | 6.24 Software/Coding Terminal-Bench Parity Campaign | `done` | Staged close passed via `docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`: 25/25 scoped tasks have evidence, 22/25 clean speed_1 passes, `make-mips-interpreter` proof_5 exceeded target, and remaining below-target rows are classified/deferred. |
-| 6.25 Codex-Plus Resident Advantage | `in_progress` | Active focus: preserve the M6.24 baseline while proving mew-native persistence, reentry, memory, diagnosis, repair reuse, and provider-cache ergonomics. |
+| 6.25 Codex-Plus Resident Advantage | `in_progress` | Active focus: preserve the M6.24 baseline while proving typed-card memory, eval-backed recall, reentry, diagnosis, repair reuse, and provider-cache ergonomics. |
 | 7. Senses: Inbound Signals | `pending` | Paused by user decision while Terminal-Bench compatibility/debugging is active. |
 | 8. Identity: Cross-Project Self | `not_started` | User-scope identity and cross-project memory remain future work. |
 | 9. Legibility: Human-Readable Companion | `not_started` | Human-readable companion state remains future work. |
@@ -109,6 +109,15 @@ Use `docs/REVIEW_2026-05-20_MEMORY_CONTEXT_BUILDER_LITERATURE.md` as the
 literature basis and `docs/DESIGN_2026-05-21_M6_25_MEMORY_CONTEXT_BUILDER.md`
 as the implementation authority.
 
+2026-05-27 memory-eval update: the active memory design authority is now
+`docs/DESIGN_2026-05-22_M6_25_MEMORY_SUBSYSTEM_TYPED_CARDS_PLAN.md`.
+Append memory-eval observations to `docs/M6_25_MEMORY_EVAL_LOG.md` whenever
+MemBench, live extractor smoke, backend comparison, graph-on recall, or
+provider-memory validation is run. The log currently records committed
+relation-sensitive niece/company coverage, deterministic MemBench backend
+artifacts, and opt-in live GPT-5.5 MemBench smoke artifacts. Treat `tmp/`
+artifacts as local evidence until summarized in that log.
+
 ## M6.24 Close Summary
 
 M6.24 is staged-closed via `docs/M6_24_STAGED_CLOSE_REPORT_2026-05-20.md`.
@@ -129,6 +138,8 @@ Detailed M6.24 history is archived in `docs/archive/ROADMAP_STATUS_detailed_2026
 ## M6.25 Reentry Guard
 
 Governing plan: `docs/M6_25_RESIDENT_ADVANTAGE_PLAN_2026-05-20.md`.
+Typed-card memory design: `docs/DESIGN_2026-05-22_M6_25_MEMORY_SUBSYSTEM_TYPED_CARDS_PLAN.md`.
+Memory eval log: `docs/M6_25_MEMORY_EVAL_LOG.md`.
 
 M6.25 proves Codex-plus resident advantage while preserving the M6.24 baseline. The active work is not another Terminal-Bench proof sweep.
 
@@ -148,15 +159,19 @@ Phase order:
 7. Provider cache transport behind default-off flags.
 8. Resident advantage report.
 
-Current next action: after the cleanup controller settles, continue M6.25 by
-implementing `MemoryContextBuilder` Phase A/B from
-`docs/DESIGN_2026-05-21_M6_25_MEMORY_CONTEXT_BUILDER.md`. Do not implement a
-MemoryArena model-in-loop agent or Harbor resident campaign runner yet. Do not
-treat
+Current next action: continue M6.25 typed-card memory work by appending a fresh
+deterministic MemBench/backend rerun to `docs/M6_25_MEMORY_EVAL_LOG.md`, then
+close the next memory slice from
+`docs/DESIGN_2026-05-22_M6_25_MEMORY_SUBSYSTEM_TYPED_CARDS_PLAN.md`.
+Prioritize remaining graph/index validation and the Phase E/F read-only
+provider schema only after the core/adapter eval path stays green. Do not
+implement a MemoryArena model-in-loop agent or Harbor resident campaign runner
+yet. Do not treat
 `docs/DESIGN_2026-05-20_M6_25_IMPLEMENT_V2_DURABLE_CODING_INTELLIGENCE.md` or
 the reverted `016e102` implementation as active implementation authority. Do
-not inject memory into ordinary `implement_v2` requests until the bounded
-experiment gate is explicit.
+not inject memory into ordinary `implement_v2` requests until the Phase F
+provider surface is explicit, default-off, and covered by provider snapshot and
+leak tests.
 
 ## Maintenance Rule
 

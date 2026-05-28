@@ -1477,6 +1477,10 @@ Target:
     second planner
   - `implement_v2_v3`: task/gap repair memory for strategy or lane selection
     after same-shape repair evidence exists
+- keep typed-card memory evaluation evidence in
+  `docs/M6_25_MEMORY_EVAL_LOG.md`; update it whenever MemBench, live
+  extractor smoke, backend comparison, graph-on recall, or provider-memory
+  validation is run
 - connect the provider-neutral prompt section registry to provider-specific
   cache transport only after M6.24 scoring repairs settle:
   - keep M6.24 section ids, hashes, stability, cache policy, and cache hints as
