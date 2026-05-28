@@ -196,6 +196,9 @@ class TypedCardsMemoryEvalAdapter:
                 expand_graph=_truthy(query.get("expand_graph")) or _truthy(filters.get("expand_graph")),
                 graph_max_depth=int(filters.get("graph_max_depth") or budget.get("graph_max_depth") or 1),
                 graph_max_items=int(filters.get("graph_max_items") or budget.get("graph_max_items") or 16),
+                graph_max_nodes=_optional_int(_first_present(filters.get("graph_max_nodes"), budget.get("graph_max_nodes"))),
+                graph_max_edges=_optional_int(_first_present(filters.get("graph_max_edges"), budget.get("graph_max_edges"))),
+                graph_max_cards=_optional_int(_first_present(filters.get("graph_max_cards"), budget.get("graph_max_cards"))),
                 summary_search_backend=_optional_str(filters.get("summary_search_backend"))
                 or _optional_str(query.get("summary_search_backend"))
                 or self.summary_search_backend,
@@ -841,6 +844,19 @@ def _optional_str(value: Any) -> str | None:
     return text or None
 
 
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -1098,6 +1114,7 @@ def _usage_to_harness(usage: Mapping[str, Any]) -> dict[str, Any]:
         "cards_dropped": usage.get("cards_dropped", 0),
         "graph_nodes_expanded": usage.get("graph_nodes_expanded", 0),
         "graph_edges_expanded": usage.get("graph_edges_expanded", 0),
+        "graph_cards_expanded": usage.get("graph_cards_expanded", 0),
         "projection_chars": usage.get("projection_chars", 0),
         "index_mode": usage.get("index_mode", "direct_scan"),
     }

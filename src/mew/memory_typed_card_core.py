@@ -712,6 +712,9 @@ class MemoryRecallRequest:
     expand_graph: bool = False
     graph_max_depth: int = 1
     graph_max_items: int = 16
+    graph_max_nodes: int | None = None
+    graph_max_edges: int | None = None
+    graph_max_cards: int | None = None
     summary_search_backend: str = _DEFAULT_SUMMARY_SEARCH_BACKEND
     embedding_provider: str = _DEFAULT_EMBEDDING_PROVIDER
     embedding_model_id: str | None = None
@@ -744,6 +747,9 @@ class MemoryRecallRequest:
         if graph_max_items < 0:
             raise ValueError("graph_max_items must be non-negative")
         object.__setattr__(self, "graph_max_items", graph_max_items)
+        object.__setattr__(self, "graph_max_nodes", _optional_non_negative_int(self.graph_max_nodes, "graph_max_nodes"))
+        object.__setattr__(self, "graph_max_edges", _optional_non_negative_int(self.graph_max_edges, "graph_max_edges"))
+        object.__setattr__(self, "graph_max_cards", _optional_non_negative_int(self.graph_max_cards, "graph_max_cards"))
         backend = _clean_text(self.summary_search_backend) or _DEFAULT_SUMMARY_SEARCH_BACKEND
         if backend not in _SUMMARY_SEARCH_BACKENDS:
             raise ValueError("summary_search_backend is invalid")
@@ -781,6 +787,9 @@ class MemoryRecallRequest:
             "expand_graph": self.expand_graph,
             "graph_max_depth": self.graph_max_depth,
             "graph_max_items": self.graph_max_items,
+            "graph_max_nodes": self.graph_max_nodes,
+            "graph_max_edges": self.graph_max_edges,
+            "graph_max_cards": self.graph_max_cards,
             "summary_search_backend": self.summary_search_backend,
             "embedding_provider": self.embedding_provider,
             "embedding_model_id": self.embedding_model_id,
@@ -1093,6 +1102,7 @@ class _GraphExpansionResult:
     card_modifiers: Mapping[str, Decimal]
     nodes_expanded: int
     edges_expanded: int
+    cards_expanded: int = 0
     dropped_counts: Mapping[str, int] = field(default_factory=dict)
     dropped: tuple[DroppedReason, ...] = ()
 
@@ -1107,6 +1117,7 @@ class MemoryUsage:
     cards_dropped: int
     graph_nodes_expanded: int = 0
     graph_edges_expanded: int = 0
+    graph_cards_expanded: int = 0
     projection_chars: int = 0
     index_mode: str = "direct_scan"
     token_count: int | None = None
@@ -1120,6 +1131,7 @@ class MemoryUsage:
             "cards_dropped",
             "graph_nodes_expanded",
             "graph_edges_expanded",
+            "graph_cards_expanded",
             "projection_chars",
         ):
             value = int(getattr(self, name))
@@ -1145,6 +1157,7 @@ class MemoryUsage:
             "cards_dropped": self.cards_dropped,
             "graph_nodes_expanded": self.graph_nodes_expanded,
             "graph_edges_expanded": self.graph_edges_expanded,
+            "graph_cards_expanded": self.graph_cards_expanded,
             "projection_chars": self.projection_chars,
             "index_mode": self.index_mode,
             "token_count": self.token_count,
@@ -1901,6 +1914,7 @@ class TypedMemoryCore:
             cards_dropped=sum(dropped_counts.values()),
             graph_nodes_expanded=expansion.nodes_expanded,
             graph_edges_expanded=expansion.edges_expanded,
+            graph_cards_expanded=expansion.cards_expanded,
             projection_chars=sum(len(item.metadata.get("summary", "")) for item in ranked),
             index_mode="graph_index" if expansion.nodes_expanded or expansion.edges_expanded else _index_mode_for_backend(backend_identity.backend_kind),
         )
@@ -1975,6 +1989,7 @@ class TypedMemoryCore:
             "cards_dropped": 0,
             "graph_nodes_expanded": 0,
             "graph_edges_expanded": 0,
+            "graph_cards_expanded": 0,
             "projection_chars": 0,
         }
         for event in retrieve_audits:
@@ -2701,7 +2716,16 @@ class TypedMemoryCore:
         existing_card_ids: set[str],
         request: MemoryRecallRequest,
     ) -> _GraphExpansionResult:
-        if not request.expand_graph or request.limit == 0 or request.graph_max_depth == 0 or request.graph_max_items == 0 or not seed_cards:
+        if (
+            not request.expand_graph
+            or request.limit == 0
+            or request.graph_max_depth == 0
+            or request.graph_max_items == 0
+            or request.graph_max_nodes == 0
+            or request.graph_max_edges == 0
+            or request.graph_max_cards == 0
+            or not seed_cards
+        ):
             return _GraphExpansionResult(card_modifiers={}, nodes_expanded=0, edges_expanded=0)
         dropped_counts: dict[str, int] = {}
         dropped: list[DroppedReason] = []
@@ -2727,6 +2751,10 @@ class TypedMemoryCore:
 
         for node_id in sorted(frontier):
             if len(expanded_nodes) + len(expanded_edges) >= total_budget:
+                _add_graph_drop("graph_item_budget_exhausted", node_id, dropped_counts, dropped)
+                break
+            if request.graph_max_nodes is not None and len(expanded_nodes) >= request.graph_max_nodes:
+                _add_graph_drop("graph_node_budget_exhausted", node_id, dropped_counts, dropped)
                 break
             node = self.graph_nodes.get(node_id)
             node_drop_reason = _graph_node_drop_reason(node, request.current_evidence)
@@ -2736,6 +2764,10 @@ class TypedMemoryCore:
             expanded_nodes.add(node_id)
             for edge in edges_by_node.get(node_id, ()):
                 if len(expanded_nodes) + len(expanded_edges) >= total_budget:
+                    _add_graph_drop("graph_item_budget_exhausted", edge.edge_id, dropped_counts, dropped)
+                    break
+                if request.graph_max_edges is not None and len(expanded_edges) >= request.graph_max_edges:
+                    _add_graph_drop("graph_edge_budget_exhausted", edge.edge_id, dropped_counts, dropped)
                     break
                 if edge.edge_id in expanded_edges or edge.edge_type not in _GRAPH_EXPANSION_EDGE_TYPES:
                     continue
@@ -2752,6 +2784,9 @@ class TypedMemoryCore:
                     expanded_edges.add(edge.edge_id)
                     if len(expanded_nodes) + len(expanded_edges) >= total_budget:
                         continue
+                    if request.graph_max_nodes is not None and len(expanded_nodes) >= request.graph_max_nodes:
+                        _add_graph_drop("graph_node_budget_exhausted", other_node_id, dropped_counts, dropped)
+                        continue
                     expanded_nodes.add(other_node_id)
                 else:
                     _add_graph_drop(other_node_drop_reason, other_node_id, dropped_counts, dropped)
@@ -2761,11 +2796,15 @@ class TypedMemoryCore:
             if card_id in existing_card_ids:
                 continue
             if set(card.graph_refs.node_ids) & expanded_nodes or set(card.graph_refs.edge_ids) & expanded_edges:
+                if request.graph_max_cards is not None and len(card_modifiers) >= request.graph_max_cards:
+                    _add_graph_drop("graph_card_budget_exhausted", card_id, dropped_counts, dropped)
+                    continue
                 card_modifiers[card_id] = _GRAPH_EXPANSION_MODIFIER
         return _GraphExpansionResult(
             card_modifiers=card_modifiers,
             nodes_expanded=len(expanded_nodes),
             edges_expanded=len(expanded_edges),
+            cards_expanded=len(card_modifiers),
             dropped_counts=dropped_counts,
             dropped=tuple(dropped),
         )
@@ -3148,6 +3187,15 @@ def _bounded_excerpt(text: str) -> str:
 
 def _clean_text(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _optional_non_negative_int(value: Any, field_name: str) -> int | None:
+    if value is None:
+        return None
+    integer = int(value)
+    if integer < 0:
+        raise ValueError(f"{field_name} must be non-negative")
+    return integer
 
 
 def _required_text(value: Any, field_name: str) -> str:

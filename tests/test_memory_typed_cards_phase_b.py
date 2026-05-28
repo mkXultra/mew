@@ -447,6 +447,101 @@ def test_graph_expansion_is_opt_in_one_hop_and_reports_usage() -> None:
     assert related_item.score_components["graph_modifier"] == "0.2500"
 
 
+def test_graph_expansion_respects_separate_node_edge_and_card_budgets() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    first_node = _node("test", "test:mew:tests/test_memory_typed_cards_phase_b.py")
+    second_node = _node("test", "test:mew:tests/test_memory_eval_typed_cards_adapter.py")
+    for node in (seed_node, first_node, second_node):
+        core.add_graph_node(node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph expansion seed uses theta anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_budget_seed",
+    )
+    first = _commit_with_graph_refs(
+        core,
+        summary="First graph budget related coverage.",
+        graph_refs=GraphRefs(node_ids=(first_node.node_id,)),
+        source_experience_id="exp_graph_budget_first",
+    )
+    second = _commit_with_graph_refs(
+        core,
+        summary="Second graph budget related coverage.",
+        graph_refs=GraphRefs(node_ids=(second_node.node_id,)),
+        source_experience_id="exp_graph_budget_second",
+    )
+    for related_node in (first_node, second_node):
+        core.add_graph_edge(
+            GraphEdge.build(
+                from_node_id=seed_node.node_id,
+                from_node_type="file",
+                to_node_id=related_node.node_id,
+                to_node_type="test",
+                edge_type="related",
+                scope=_scope(),
+                evidence_links=(EvidenceLink(ref_id=seed.evidence_links[0].ref_id, role="current_support"),),
+                created_at=CREATED,
+                updated_at=CREATED,
+            )
+        )
+
+    card_limited = core.retrieve(
+        MemoryRecallRequest(
+            query="theta anchor",
+            scope=_scope(),
+            expand_graph=True,
+            graph_max_items=8,
+            graph_max_cards=1,
+            limit=5,
+        )
+    )
+    card_limited_related = {
+        item.evidence_ref
+        for item in card_limited.ranked_evidence
+        if item.evidence_ref in {first.card_id, second.card_id}
+    }
+    assert len(card_limited_related) == 1
+    assert card_limited.usage.graph_cards_expanded == 1
+    assert card_limited.dropped_count_by_reason["graph_card_budget_exhausted"] == 1
+
+    node_limited = core.retrieve(
+        MemoryRecallRequest(
+            query="theta anchor",
+            scope=_scope(),
+            expand_graph=True,
+            graph_max_items=8,
+            graph_max_nodes=1,
+            limit=5,
+        )
+    )
+    assert [item.evidence_ref for item in node_limited.ranked_evidence] == [seed.card_id]
+    assert node_limited.usage.graph_nodes_expanded == 1
+    assert node_limited.usage.graph_cards_expanded == 0
+    assert node_limited.dropped_count_by_reason["graph_node_budget_exhausted"] >= 1
+
+    edge_limited = core.retrieve(
+        MemoryRecallRequest(
+            query="theta anchor",
+            scope=_scope(),
+            expand_graph=True,
+            graph_max_items=8,
+            graph_max_edges=1,
+            limit=5,
+        )
+    )
+    edge_limited_related = {
+        item.evidence_ref
+        for item in edge_limited.ranked_evidence
+        if item.evidence_ref in {first.card_id, second.card_id}
+    }
+    assert len(edge_limited_related) == 1
+    assert edge_limited.usage.graph_edges_expanded == 1
+    assert edge_limited.usage.graph_cards_expanded == 1
+    assert edge_limited.dropped_count_by_reason["graph_edge_budget_exhausted"] == 1
+
+
 def test_graph_expansion_does_not_bypass_privacy_scope_gates() -> None:
     core = TypedMemoryCore(clock=_Clock())
     seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
