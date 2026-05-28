@@ -89,3 +89,27 @@ Decision:
 - Append a fresh deterministic profile rerun under the current commit after the current docs/log changes are committed.
 - If lexical and BM25 remain tied, defer embedding work until a failing fixture or larger MemBench profile demonstrates a clear need.
 - If vector/hybrid is tested, prefer `ollama` + `qwen3-embedding:0.6b` first and record backend identity in this log.
+
+## 2026-05-28 - Fresh deterministic MemBench backend rerun
+
+Context:
+
+- Commit under test: `4ca0334`.
+- Commands:
+  - `uv run python -m mew.memory_eval.membench profile membench-sample1000-typed --clean --typed-cards-summary-search-backend direct_scan_lexical --work-dir tmp/membench-rerun-20260528-direct --output tmp/membench-rerun-20260528-direct/report.json`
+  - `uv run python -m mew.memory_eval.membench profile membench-sample1000-typed --clean --typed-cards-summary-search-backend bm25 --work-dir tmp/membench-rerun-20260528-bm25 --output tmp/membench-rerun-20260528-bm25/report.json`
+- Note: both commands emitted an unauthenticated Hugging Face Hub warning only; the profile completed.
+
+Results:
+
+| Artifact | Backend | Status | Typed-card results | Avg `recall_at_k` | Avg `mrr_at_k` | Avg `ndcg_at_k` | Avg `precision_at_k` | Avg `support_recall_at_k` | Scope/stale failures |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `tmp/membench-rerun-20260528-direct/report.json` | `direct_scan_lexical` | passed | 10/10 passed | 1.000 | 0.933 | 0.950 | 0.200 | 1.000 | none observed |
+| `tmp/membench-rerun-20260528-bm25/report.json` | `bm25` | passed | 10/10 passed | 1.000 | 0.933 | 0.950 | 0.200 | 1.000 | none observed |
+
+Decision:
+
+- The current deterministic MemBench sample1000 typed-card profile is green for both `direct_scan_lexical` and `bm25`.
+- BM25 still does not outperform direct lexical on this profile; keep the default summary-search backend unchanged for now.
+- Do not implement vector/embedding search solely to improve this profile. Keep vector/hybrid as an injectable backend to test when a larger profile or a failing relation/paraphrase fixture shows a need.
+- Next memory work should move to the remaining graph/index validation slice or the Phase E/F read-only provider schema, while keeping MemBench reruns appended here.
