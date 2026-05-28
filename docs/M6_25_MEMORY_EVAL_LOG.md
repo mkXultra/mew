@@ -113,3 +113,22 @@ Decision:
 - BM25 still does not outperform direct lexical on this profile; keep the default summary-search backend unchanged for now.
 - Do not implement vector/embedding search solely to improve this profile. Keep vector/hybrid as an injectable backend to test when a larger profile or a failing relation/paraphrase fixture shows a need.
 - Next memory work should move to the remaining graph/index validation slice or the Phase E/F read-only provider schema, while keeping MemBench reruns appended here.
+
+## 2026-05-28 - Graph Expansion Value-Add Fixture
+
+Context:
+
+- New fixture: `fixtures/memory_eval/p1/graph_value_add_relation_basic.json`.
+- Test command:
+  - `uv run pytest --no-testmon -q tests/test_memory_eval_typed_cards_adapter.py::test_graph_value_add_fixture_compares_graph_off_and_graph_on_recall`
+
+Result:
+
+- Graph-off baseline request passed with `index_mode=direct_scan`, zero graph expansion counts, and no `exp_graph_value_related` support returned.
+- Graph-on request passed with `index_mode=graph_index`, `graph_nodes_expanded >= 2`, `graph_edges_expanded >= 1`, and `graph_cards_expanded >= 1`.
+- The same query returned the graph-only related support `exp_graph_value_related` only when `expand_graph=true`.
+
+Decision:
+
+- Memory eval now covers graph expansion value-add, not only correctness/safety.
+- This fixture demonstrates that graph expansion can recover a related memory whose text does not directly match the query terms but shares a role-bearing graph edge with the seed memory.

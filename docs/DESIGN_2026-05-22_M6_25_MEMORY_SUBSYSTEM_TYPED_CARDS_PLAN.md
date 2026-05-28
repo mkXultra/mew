@@ -1895,6 +1895,12 @@ expand_graph: false by default
 summary_search_backend: default configured backend, e.g. direct_scan_lexical | bm25 | vector | hybrid | replay
 graph_max_depth: 1 maximum in Phase D
 graph_max_items: total node+edge expansion budget
+graph_max_nodes: optional total expanded-node budget
+graph_max_edges: optional total expanded-edge budget
+graph_max_cards: optional graph-expanded card budget
+graph_max_fanout: optional per-node edge fanout budget
+graph_max_latency_ms: optional graph-expansion elapsed-time budget
+max_projection_chars: optional returned evidence summary projection budget
 ```
 
 The default summary-search backend may remain direct-scan/lexical for Phase C compatibility, but it is a configuration default rather than a design lock-in. Graph expansion is opt-in until graph fixtures, public adapter graph seeding, and derived index invalidation are complete.
@@ -2783,18 +2789,26 @@ Current Phase D.1 implementation status, 2026-05-22:
 
 - `MemoryRecallRequest.expand_graph` enables one-hop expansion in the typed-card core; default is off。
 - the typed-card eval adapter accepts adapter-visible `filters.expand_graph` / `filters.graph_max_*` controls, and the live runner exposes `--expand-graph` for normal-suite no-regression scoring。
+- graph expansion supports explicit node, edge, card, and per-node fanout budget controls through `graph_max_nodes`, `graph_max_edges`, `graph_max_cards`, and `graph_max_fanout`。
+- graph expansion supports `graph_max_latency_ms`; when the budget is exhausted, traversal stops and caller-visible output receives aggregate `graph_latency_budget_exhausted` counts。
+- recall supports `max_projection_chars`, which drops otherwise ranked evidence when returning its projected summary would exceed the caller/eval character budget。
+- graph expansion rejects edges whose active support/proof provenance is missing, restricted, deleted, or otherwise not caller-safe; caller-visible output exposes only aggregate `missing_graph_edge_evidence` counts while internal audit may retain the edge ID。
+- duplicate deterministic graph-edge additions merge evidence links instead of overwriting support, so one forgotten support source does not invalidate the edge when another active current-support/proof source remains。
+- current-evidence graph invalidation has focused coverage for file hash changes, moved symbol endpoints, and changed command endpoints。
+- graph value-add evaluation includes a graph-off / graph-on fixture where the same query retrieves only seed support without expansion and retrieves an additional graph-only related support when expansion is enabled。
 - raw extraction can emit explicit `graph_nodes` and `graph_edges` from raw text; proposed graph refs are carried through proposal/commit and can be evaluated without `seed_graph` setup。
 - raw extraction treats the caller-provided runtime scope as authoritative; LLM-emitted scope may narrow, annotate, or request clarification, but it cannot broaden scope, switch namespace, change `user_id`, change `repo_ref`, or create `team` / `shared` scope。Mismatches are proposal warnings / dropped scope overrides, not stored card scope。
 
 Remaining Phase D work:
 
 - broader graph-specific memory-eval fixtures。
-- remaining graph budget coverage: fanout, latency, and char budgets。Node/edge/card budget controls exist as of 2026-05-28 through `graph_max_nodes`, `graph_max_edges`, and `graph_max_cards` with core/adapter usage-count tests。
-- additional graph invalidation coverage。
+- remaining graph budget coverage: broader fixture coverage。Node/edge/card/fanout/latency/projection-char budget controls exist as of 2026-05-28 through `graph_max_nodes`, `graph_max_edges`, `graph_max_cards`, `graph_max_fanout`, `graph_max_latency_ms`, and `max_projection_chars` with focused core/adapter coverage。
+- additional graph invalidation coverage, especially verifier/index drift checks for redacted graph-edge support and broader invalidation matrix fixtures。
 - deeper graph-aware rebuild drift fixtures。
 
 Observed Phase D.1 validation artifacts, non-normative and allowed to become stale:
 
+- graph value-add fixture passed on 2026-05-28 (`fixtures/memory_eval/p1/graph_value_add_relation_basic.json`): graph-off baseline returned seed support only, while graph-on returned the graph-only related support with `index_mode=graph_index` and positive graph expansion counts。
 - graph-on live normal suite passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_suite_graph_on_20260522`, 9/9 passed); because current P0/P1 fixtures contain no graph seed material, all graph expansion counts were zero and this run is a no-regression check, not graph retrieval quality proof。
 - graph-generation live fixture passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_graph_generation_20260522_v3`): `raw_text -> LLM extractor graph_nodes -> proposal/commit -> graph-on recall` returned the graph-related support with `index_mode=graph_index` and `graph_nodes_expanded=1`。
 - graph-generation live suite passed on 2026-05-23 with `gpt-5.5` (`run_id=manual_graph_edge_generation_20260523_scopefix`, 2/2 passed): both `graph_nodes` and `graph_edges` extraction paths satisfied scorer-only graph usage gates。

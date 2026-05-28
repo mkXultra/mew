@@ -36,6 +36,8 @@ from mew.memory_typed_cards import (
     PrivacyRules,
     ProvenanceProducer,
     RawMemoryIngestRequest,
+    RedactionState,
+    RetentionState,
     Scope,
     SymbolEvidenceState,
     TaskContractEvidence,
@@ -541,6 +543,58 @@ def test_graph_expansion_respects_separate_node_edge_and_card_budgets() -> None:
     assert edge_limited.usage.graph_cards_expanded == 1
     assert edge_limited.dropped_count_by_reason["graph_edge_budget_exhausted"] == 1
 
+    fanout_limited = core.retrieve(
+        MemoryRecallRequest(
+            query="theta anchor",
+            scope=_scope(),
+            expand_graph=True,
+            graph_max_items=8,
+            graph_max_fanout=1,
+            limit=5,
+        )
+    )
+    fanout_limited_related = {
+        item.evidence_ref
+        for item in fanout_limited.ranked_evidence
+        if item.evidence_ref in {first.card_id, second.card_id}
+    }
+    assert len(fanout_limited_related) == 1
+    assert fanout_limited.usage.graph_edges_expanded == 1
+    assert fanout_limited.usage.graph_cards_expanded == 1
+    assert fanout_limited.dropped_count_by_reason["graph_fanout_budget_exhausted"] == 1
+
+    char_limited = core.retrieve(
+        MemoryRecallRequest(
+            query="theta anchor",
+            scope=_scope(),
+            expand_graph=True,
+            graph_max_items=8,
+            max_projection_chars=len(seed.summary),
+            limit=5,
+        )
+    )
+    assert [item.evidence_ref for item in char_limited.ranked_evidence] == [seed.card_id]
+    assert char_limited.usage.graph_cards_expanded == 2
+    assert char_limited.usage.projection_chars == len(seed.summary)
+    assert char_limited.dropped_count_by_reason["projection_char_budget_exhausted"] == 2
+    assert core.report_usage().usage.graph_cards_expanded >= 2
+
+    latency_limited = core.retrieve(
+        MemoryRecallRequest(
+            query="theta anchor",
+            scope=_scope(),
+            expand_graph=True,
+            graph_max_items=8,
+            graph_max_latency_ms=0,
+            limit=5,
+        )
+    )
+    assert [item.evidence_ref for item in latency_limited.ranked_evidence] == [seed.card_id]
+    assert latency_limited.usage.graph_nodes_expanded == 0
+    assert latency_limited.usage.graph_edges_expanded == 0
+    assert latency_limited.usage.graph_cards_expanded == 0
+    assert latency_limited.dropped_count_by_reason["graph_latency_budget_exhausted"] >= 1
+
 
 def test_graph_expansion_does_not_bypass_privacy_scope_gates() -> None:
     core = TypedMemoryCore(clock=_Clock())
@@ -710,6 +764,174 @@ def test_graph_expansion_respects_current_evidence_file_hash_for_endpoint() -> N
     assert expanded.usage.graph_nodes_expanded == 1
     assert expanded.usage.graph_edges_expanded == 0
     assert expanded.dropped_count_by_reason["stale_graph_node"] == 1
+
+
+def test_graph_expansion_respects_current_evidence_symbol_moved_endpoint() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    symbol_node = _node("symbol", "symbol:mew:main:mew.memory_typed_card_core.TypedMemoryCore.retrieve")
+    core.add_graph_node(seed_node)
+    core.add_graph_node(symbol_node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph expansion seed uses kappa anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_symbol_seed",
+    )
+    related = _commit_with_graph_refs(
+        core,
+        summary="Moved symbol endpoint must not expand.",
+        graph_refs=GraphRefs(node_ids=(symbol_node.node_id,)),
+        source_experience_id="exp_graph_symbol_related",
+    )
+    core.add_graph_edge(
+        GraphEdge.build(
+            from_node_id=seed_node.node_id,
+            from_node_type="file",
+            to_node_id=symbol_node.node_id,
+            to_node_type="symbol",
+            edge_type="related",
+            scope=_scope(),
+            evidence_links=(EvidenceLink(ref_id=seed.evidence_links[0].ref_id, role="current_support"),),
+            created_at=CREATED,
+            updated_at=CREATED,
+        )
+    )
+
+    expanded = core.retrieve(
+        MemoryRecallRequest(
+            query="kappa anchor",
+            scope=_scope(),
+            expand_graph=True,
+            graph_max_items=4,
+            current_evidence=CurrentEvidenceSnapshot(
+                symbol_states=(
+                    SymbolEvidenceState(
+                        node_id=symbol_node.node_id,
+                        canonical_ref=symbol_node.canonical_ref,
+                        state="moved",
+                        moved_to="symbol:mew:main:mew.memory_typed_card_core.TypedMemoryCore.recall",
+                        observed_at="2026-05-23T00:00:00Z",
+                    ),
+                )
+            ),
+        )
+    )
+
+    assert [item.evidence_ref for item in expanded.ranked_evidence] == [seed.card_id]
+    assert all(item.evidence_ref != related.card_id for item in expanded.ranked_evidence)
+    assert expanded.usage.graph_nodes_expanded == 1
+    assert expanded.usage.graph_edges_expanded == 0
+    assert expanded.dropped_count_by_reason["stale_graph_node"] == 1
+
+
+def test_graph_expansion_respects_current_evidence_command_changed_endpoint() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    command_node = replace(_node("command", "uv run pytest tests/test_memory_typed_cards_phase_b.py"), content_hash="old_command_hash")
+    core.add_graph_node(seed_node)
+    core.add_graph_node(command_node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph expansion seed uses lambda anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_command_seed",
+    )
+    related = _commit_with_graph_refs(
+        core,
+        summary="Changed command endpoint must not expand.",
+        graph_refs=GraphRefs(node_ids=(command_node.node_id,)),
+        source_experience_id="exp_graph_command_related",
+    )
+    core.add_graph_edge(
+        GraphEdge.build(
+            from_node_id=seed_node.node_id,
+            from_node_type="file",
+            to_node_id=command_node.node_id,
+            to_node_type="command",
+            edge_type="related",
+            scope=_scope(),
+            evidence_links=(EvidenceLink(ref_id=seed.evidence_links[0].ref_id, role="current_support"),),
+            created_at=CREATED,
+            updated_at=CREATED,
+        )
+    )
+
+    expanded = core.retrieve(
+        MemoryRecallRequest(
+            query="lambda anchor",
+            scope=_scope(),
+            expand_graph=True,
+            graph_max_items=4,
+            current_evidence=CurrentEvidenceSnapshot(
+                command_states=(
+                    CommandEvidenceState(
+                        node_id=command_node.node_id,
+                        normalized_command_ref=command_node.canonical_ref,
+                        state="changed",
+                        command_hash="new_command_hash",
+                        observed_at="2026-05-23T00:00:00Z",
+                    ),
+                )
+            ),
+        )
+    )
+
+    assert [item.evidence_ref for item in expanded.ranked_evidence] == [seed.card_id]
+    assert all(item.evidence_ref != related.card_id for item in expanded.ranked_evidence)
+    assert expanded.usage.graph_nodes_expanded == 1
+    assert expanded.usage.graph_edges_expanded == 0
+    assert expanded.dropped_count_by_reason["stale_graph_node"] == 1
+
+
+def test_graph_expansion_drops_edges_with_redacted_support_provenance() -> None:
+    core = TypedMemoryCore(clock=_Clock())
+    seed_node = _node("file", "file:mew:main:src/mew/memory_typed_card_core.py")
+    related_node = _node("test", "test:mew:tests/test_memory_typed_cards_phase_b.py")
+    core.add_graph_node(seed_node)
+    core.add_graph_node(related_node)
+    seed = _commit_with_graph_refs(
+        core,
+        summary="Graph expansion seed uses iota anchor.",
+        graph_refs=GraphRefs(node_ids=(seed_node.node_id,)),
+        source_experience_id="exp_graph_redacted_seed",
+    )
+    related = _commit_with_graph_refs(
+        core,
+        summary="Redacted graph edge support must not expand.",
+        graph_refs=GraphRefs(node_ids=(related_node.node_id,)),
+        source_experience_id="exp_graph_redacted_related",
+    )
+    edge_support_ref = _replacement_ref(core, "Graph edge support that will be forgotten.", source_experience_id="exp_graph_edge_support")
+    edge = GraphEdge.build(
+        from_node_id=seed_node.node_id,
+        from_node_type="file",
+        to_node_id=related_node.node_id,
+        to_node_type="test",
+        edge_type="related",
+        scope=_scope(),
+        evidence_links=(EvidenceLink(ref_id=edge_support_ref, role="current_support"),),
+        created_at=CREATED,
+        updated_at=CREATED,
+    )
+    core.add_graph_edge(edge)
+    event = core.provenance_events[edge_support_ref]
+    core.provenance_events[edge_support_ref] = replace(
+        event,
+        provenance_excerpt=None,
+        payload_ref=None,
+        redaction_state=RedactionState.RESTRICTED.value,
+        retention_state=RetentionState.DELETED.value,
+    )
+
+    expanded = core.retrieve(MemoryRecallRequest(query="iota anchor", scope=_scope(), expand_graph=True, graph_max_items=4))
+
+    assert [item.evidence_ref for item in expanded.ranked_evidence] == [seed.card_id]
+    assert all(item.evidence_ref != related.card_id for item in expanded.ranked_evidence)
+    assert expanded.usage.graph_edges_expanded == 0
+    assert expanded.dropped_count_by_reason["missing_graph_edge_evidence"] == 1
+    assert all(item.evidence_ref != edge.edge_id for item in expanded.dropped)
+    assert any(item.reason == "missing_graph_edge_evidence" and item.ref_id == edge.edge_id for item in expanded.audit_event.dropped)
 
 
 def test_derived_graph_index_snapshot_is_rebuildable_and_excludes_forgotten_cards() -> None:

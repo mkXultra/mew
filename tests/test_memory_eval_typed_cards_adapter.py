@@ -16,6 +16,7 @@ P0_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p0"
 P1_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p1"
 GRAPH_FIXTURE = P1_FIXTURES / "graph_expansion_basic.json"
 GRAPH_EDGE_FIXTURE = P1_FIXTURES / "graph_edge_expansion_basic.json"
+GRAPH_VALUE_ADD_FIXTURE = P1_FIXTURES / "graph_value_add_relation_basic.json"
 GRAPH_CROSS_SCOPE_FIXTURE = P1_FIXTURES / "graph_cross_scope_no_leak_basic.json"
 GRAPH_FORGET_FIXTURE = P1_FIXTURES / "graph_forget_no_leak_basic.json"
 GRAPH_STALE_ENDPOINT_FIXTURE = P1_FIXTURES / "graph_stale_endpoint_no_leak_basic.json"
@@ -452,6 +453,26 @@ def test_adapter_retrieve_accepts_graph_on_query_controls() -> None:
             "budget": {"max_evidence_items": 5},
         }
     )
+    graph_char_limited = adapter.retrieve(
+        {
+            "request_id": "rq_graph_char_limited",
+            "scope_id": "tenant_a/user_a",
+            "query": {"text": "Apollo anchor"},
+            "k": 5,
+            "filters": {"expand_graph": True, "graph_max_items": 4},
+            "budget": {"max_evidence_items": 5, "max_chars": len(seed_card.summary)},
+        }
+    )
+    graph_latency_limited = adapter.retrieve(
+        {
+            "request_id": "rq_graph_latency_limited",
+            "scope_id": "tenant_a/user_a",
+            "query": {"text": "Apollo anchor"},
+            "k": 5,
+            "filters": {"expand_graph": True, "graph_max_items": 4, "graph_max_latency_ms": 0},
+            "budget": {"max_evidence_items": 5},
+        }
+    )
 
     assert [item["support_experience_ids"] for item in direct["ranked_evidence"]] == [["ex_seed"]]
     support_ids = [item["support_experience_ids"][0] for item in graph_on["ranked_evidence"]]
@@ -463,6 +484,13 @@ def test_adapter_retrieve_accepts_graph_on_query_controls() -> None:
     assert graph_on["derived_graph_index_verification"]["ok"] is True
     assert graph_on["derived_graph_index_verification"]["issue_count"] == 0
     assert graph_on["derived_graph_index_verification"]["snapshot_hash"]
+    assert [item["support_experience_ids"][0] for item in graph_char_limited["ranked_evidence"]] == ["ex_seed"]
+    assert graph_char_limited["usage"]["counts"]["projection_chars"] == len(seed_card.summary)
+    assert graph_char_limited["dropped_count_by_reason"]["projection_char_budget_exhausted"] == 1
+    assert [item["support_experience_ids"][0] for item in graph_latency_limited["ranked_evidence"]] == ["ex_seed"]
+    assert graph_latency_limited["usage"]["counts"]["graph_nodes_expanded"] == 0
+    assert graph_latency_limited["usage"]["counts"]["graph_edges_expanded"] == 0
+    assert graph_latency_limited["dropped_count_by_reason"]["graph_latency_budget_exhausted"] >= 1
 
 
 def test_seed_graph_mutation_is_explicit_fixture_setup_for_recall_only() -> None:
@@ -762,6 +790,43 @@ def test_graph_edge_expansion_fixture_passes_with_graph_usage_counts() -> None:
     assert request["metrics"]["expected_usage_satisfied"] == 1.0
     assert request["retrieval"]["derived_graph_index_verification"]["ok"] is True
     assert request["retrieval"]["derived_graph_index_verification"]["issue_count"] == 0
+
+
+def test_graph_value_add_fixture_compares_graph_off_and_graph_on_recall() -> None:
+    artifact = run_fixture(
+        json.loads(GRAPH_VALUE_ADD_FIXTURE.read_text(encoding="utf-8")),
+        TypedCardsMemoryEvalAdapter(),
+        run_id="run_graph_value_add",
+        created_at="2026-05-28T00:00:00Z",
+    )
+    by_request = {request["request_id"]: request for request in artifact["requests"]}
+    graph_off = by_request["req_graph_value_off"]
+    graph_on = by_request["req_graph_value_on"]
+
+    off_support_ids = {
+        support_id
+        for item in graph_off["retrieval"]["returned_evidence_order"]
+        for support_id in item["support_experience_ids"]
+    }
+    on_support_ids = {
+        support_id
+        for item in graph_on["retrieval"]["returned_evidence_order"]
+        for support_id in item["support_experience_ids"]
+    }
+
+    assert graph_off["result_status"] == "passed"
+    assert graph_on["result_status"] == "passed"
+    assert "exp_graph_value_seed" in off_support_ids
+    assert "exp_graph_value_related" not in off_support_ids
+    assert {"exp_graph_value_seed", "exp_graph_value_related"} <= on_support_ids
+    assert graph_off["usage"]["counts"]["index_mode"] == "direct_scan"
+    assert graph_off["usage"]["counts"]["graph_nodes_expanded"] == 0
+    assert graph_off["usage"]["counts"]["graph_edges_expanded"] == 0
+    assert graph_on["usage"]["counts"]["index_mode"] == "graph_index"
+    assert graph_on["usage"]["counts"]["graph_nodes_expanded"] >= 2
+    assert graph_on["usage"]["counts"]["graph_edges_expanded"] >= 1
+    assert graph_on["usage"]["counts"]["graph_cards_expanded"] >= 1
+    assert len(on_support_ids) > len(off_support_ids)
 
 
 @pytest.mark.parametrize(

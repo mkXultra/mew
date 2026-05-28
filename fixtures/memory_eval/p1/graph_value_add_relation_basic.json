@@ -1,0 +1,175 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "graph_value_add_relation_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "graph_value_add",
+  "phase": "P1",
+  "evaluation_time": "2026-05-28T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_graph_value_seed",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_value_101",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-12T09:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Orion anchor is attached to graph_edge(file:mew:main:src/mew/memory_typed_card_core.py,related,test:mew:tests/test_memory_typed_cards_phase_b.py)."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_graph_value_related",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_value_101",
+      "turn_id": "turn_002",
+      "event_time": "2026-01-12T09:05:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "The paired regression check is attached to graph_edge(file:mew:main:src/mew/memory_typed_card_core.py,related,test:mew:tests/test_memory_typed_cards_phase_b.py)."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_graph_value_distractor",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_value_101",
+      "turn_id": "turn_003",
+      "event_time": "2026-01-12T09:10:00Z",
+      "ingest_order": 3,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Orion anchor has an unrelated note about documentation cleanup without any graph edge."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "op_id": "mut_seed_graph_value_seed",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_value_seed",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph value-add fixture setup"
+    },
+    {
+      "op_id": "mut_seed_graph_value_related",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_value_related",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph value-add fixture setup"
+    },
+    {
+      "op_id": "mut_seed_graph_value_distractor",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_value_distractor",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph value-add fixture setup"
+    }
+  ],
+  "requests": [
+    {
+      "request_id": "req_graph_value_off",
+      "mode": "graph_value_add_baseline",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "What is connected to the Orion anchor?",
+        "intent": "graph_value_add_baseline"
+      },
+      "k": 3,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"],
+        "expand_graph": false
+      },
+      "budget": {
+        "max_evidence_items": 3,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_graph_value_seed"],
+        "must_not_return_evidence_ids": ["exp_graph_value_related"],
+        "stale_evidence_ids": [],
+        "expected_abstention": false,
+        "expected_usage": {
+          "index_mode": "direct_scan"
+        }
+      }
+    },
+    {
+      "request_id": "req_graph_value_on",
+      "mode": "graph_value_add",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "What is connected to the Orion anchor?",
+        "intent": "graph_value_add"
+      },
+      "k": 3,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"],
+        "expand_graph": true,
+        "graph_max_depth": 1,
+        "graph_max_items": 6,
+        "graph_max_fanout": 4
+      },
+      "budget": {
+        "max_evidence_items": 3,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "graph_expansion"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_graph_value_seed", "exp_graph_value_related"],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": [],
+        "expected_abstention": false,
+        "expected_usage": {
+          "index_mode": "graph_index",
+          "min_graph_nodes_expanded": 2,
+          "min_graph_edges_expanded": 1,
+          "min_graph_cards_expanded": 1
+        }
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_graph_value_seed", "ingest_order": 1},
+    {"type": "mutate", "op_id": "mut_seed_graph_value_seed", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_graph_value_related", "ingest_order": 2},
+    {"type": "mutate", "op_id": "mut_seed_graph_value_related", "ingest_order": 2},
+    {"type": "ingest", "experience_id": "exp_graph_value_distractor", "ingest_order": 3},
+    {"type": "mutate", "op_id": "mut_seed_graph_value_distractor", "ingest_order": 3},
+    {"type": "request", "request_id": "req_graph_value_off", "after_ingest_order": 3},
+    {"type": "request", "request_id": "req_graph_value_on", "after_ingest_order": 3}
+  ]
+}

@@ -199,6 +199,24 @@ class TypedCardsMemoryEvalAdapter:
                 graph_max_nodes=_optional_int(_first_present(filters.get("graph_max_nodes"), budget.get("graph_max_nodes"))),
                 graph_max_edges=_optional_int(_first_present(filters.get("graph_max_edges"), budget.get("graph_max_edges"))),
                 graph_max_cards=_optional_int(_first_present(filters.get("graph_max_cards"), budget.get("graph_max_cards"))),
+                graph_max_fanout=_optional_int(
+                    _first_present(filters.get("graph_max_fanout"), budget.get("graph_max_fanout"))
+                ),
+                graph_max_latency_ms=_optional_int(
+                    _first_present(
+                        filters.get("graph_max_latency_ms"),
+                        budget.get("graph_max_latency_ms"),
+                        budget.get("max_latency_ms"),
+                    )
+                ),
+                max_projection_chars=_optional_int(
+                    _first_present(
+                        filters.get("max_projection_chars"),
+                        budget.get("max_projection_chars"),
+                        filters.get("max_chars"),
+                        budget.get("max_chars"),
+                    )
+                ),
                 summary_search_backend=_optional_str(filters.get("summary_search_backend"))
                 or _optional_str(query.get("summary_search_backend"))
                 or self.summary_search_backend,

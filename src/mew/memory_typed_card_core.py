@@ -715,6 +715,9 @@ class MemoryRecallRequest:
     graph_max_nodes: int | None = None
     graph_max_edges: int | None = None
     graph_max_cards: int | None = None
+    graph_max_fanout: int | None = None
+    graph_max_latency_ms: int | None = None
+    max_projection_chars: int | None = None
     summary_search_backend: str = _DEFAULT_SUMMARY_SEARCH_BACKEND
     embedding_provider: str = _DEFAULT_EMBEDDING_PROVIDER
     embedding_model_id: str | None = None
@@ -750,6 +753,9 @@ class MemoryRecallRequest:
         object.__setattr__(self, "graph_max_nodes", _optional_non_negative_int(self.graph_max_nodes, "graph_max_nodes"))
         object.__setattr__(self, "graph_max_edges", _optional_non_negative_int(self.graph_max_edges, "graph_max_edges"))
         object.__setattr__(self, "graph_max_cards", _optional_non_negative_int(self.graph_max_cards, "graph_max_cards"))
+        object.__setattr__(self, "graph_max_fanout", _optional_non_negative_int(self.graph_max_fanout, "graph_max_fanout"))
+        object.__setattr__(self, "graph_max_latency_ms", _optional_non_negative_int(self.graph_max_latency_ms, "graph_max_latency_ms"))
+        object.__setattr__(self, "max_projection_chars", _optional_non_negative_int(self.max_projection_chars, "max_projection_chars"))
         backend = _clean_text(self.summary_search_backend) or _DEFAULT_SUMMARY_SEARCH_BACKEND
         if backend not in _SUMMARY_SEARCH_BACKENDS:
             raise ValueError("summary_search_backend is invalid")
@@ -790,6 +796,9 @@ class MemoryRecallRequest:
             "graph_max_nodes": self.graph_max_nodes,
             "graph_max_edges": self.graph_max_edges,
             "graph_max_cards": self.graph_max_cards,
+            "graph_max_fanout": self.graph_max_fanout,
+            "graph_max_latency_ms": self.graph_max_latency_ms,
+            "max_projection_chars": self.max_projection_chars,
             "summary_search_backend": self.summary_search_backend,
             "embedding_provider": self.embedding_provider,
             "embedding_model_id": self.embedding_model_id,
@@ -1312,11 +1321,13 @@ class TypedMemoryCore:
         extractor_config: RawMemoryExtractorConfig | None = None,
         summary_search_backend: SummarySearchBackend | None = None,
         clock: Callable[[], str] = utc_now_iso,
+        perf_clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self.extractor = extractor
         self.extractor_config = extractor_config or RawMemoryExtractorConfig()
         self.summary_search_backend = summary_search_backend
         self.clock = clock
+        self.perf_clock = perf_clock
         self.provenance_events: dict[str, ProvenanceEvent] = {}
         self.raw_payloads: dict[str, str] = {}
         self.candidates: dict[str, MemoryCandidate] = {}
@@ -1817,7 +1828,7 @@ class TypedMemoryCore:
             raise
 
     def retrieve(self, request: MemoryRecallRequest, *, actor: str = TraceActor.CORE.value) -> MemoryRetrieveResult:
-        start = time.perf_counter()
+        start = self.perf_clock()
         request_hash = stable_hash(request.to_request_payload())
         query_tokens = _tokens(request.query)
         dropped: list[CallerVisibleDroppedRecord] = []
@@ -1900,11 +1911,27 @@ class TypedMemoryCore:
             )
         )
         ranked = []
-        for index, (components, card, _final_score, _exact_scope, hit) in enumerate(scored[: request.limit], start=1):
-            ranked.append(self._ranked_evidence(index, card, components, summary_hit=hit, backend_identity=backend_identity))
+        projection_chars = 0
+        for components, card, _final_score, _exact_scope, hit in scored:
+            if len(ranked) >= request.limit:
+                break
+            card_projection_chars = len(card.summary)
+            if request.max_projection_chars is not None and projection_chars + card_projection_chars > request.max_projection_chars:
+                _add_drop("projection_char_budget_exhausted", card, dropped, internal_dropped, dropped_counts)
+                continue
+            ranked.append(
+                self._ranked_evidence(
+                    len(ranked) + 1,
+                    card,
+                    components,
+                    summary_hit=hit,
+                    backend_identity=backend_identity,
+                )
+            )
+            projection_chars += card_projection_chars
         latency_ms = 0.0
         if request.latency_source == "wall_clock":
-            latency_ms = round((time.perf_counter() - start) * 1000.0, 3)
+            latency_ms = round((self.perf_clock() - start) * 1000.0, 3)
         usage = MemoryUsage(
             latency_ms=latency_ms,
             latency_source=request.latency_source,
@@ -1915,7 +1942,7 @@ class TypedMemoryCore:
             graph_nodes_expanded=expansion.nodes_expanded,
             graph_edges_expanded=expansion.edges_expanded,
             graph_cards_expanded=expansion.cards_expanded,
-            projection_chars=sum(len(item.metadata.get("summary", "")) for item in ranked),
+            projection_chars=projection_chars,
             index_mode="graph_index" if expansion.nodes_expanded or expansion.edges_expanded else _index_mode_for_backend(backend_identity.backend_kind),
         )
         abstained = not ranked
@@ -2027,6 +2054,7 @@ class TypedMemoryCore:
             cards_dropped=totals["cards_dropped"],
             graph_nodes_expanded=totals["graph_nodes_expanded"],
             graph_edges_expanded=totals["graph_edges_expanded"],
+            graph_cards_expanded=totals["graph_cards_expanded"],
             projection_chars=totals["projection_chars"],
             index_mode=index_mode,
             token_count=None if token_missing else token_sum,
@@ -2209,7 +2237,20 @@ class TypedMemoryCore:
         self.graph_nodes[node.node_id] = node
 
     def add_graph_edge(self, edge: GraphEdge) -> None:
-        self.graph_edges[edge.edge_id] = edge
+        existing = self.graph_edges.get(edge.edge_id)
+        if existing is None:
+            self.graph_edges[edge.edge_id] = edge
+            return
+        staleness_state = edge.staleness_state
+        if existing.staleness_state != StalenessState.FRESH.value:
+            staleness_state = existing.staleness_state
+        self.graph_edges[edge.edge_id] = replace(
+            existing,
+            evidence_links=_dedupe_evidence_links((*existing.evidence_links, *edge.evidence_links)),
+            confidence=max(existing.confidence, edge.confidence),
+            staleness_state=staleness_state,
+            updated_at=max(existing.updated_at, edge.updated_at),
+        )
 
     def _candidate_from_extractor_payload(
         self,
@@ -2724,6 +2765,7 @@ class TypedMemoryCore:
             or request.graph_max_nodes == 0
             or request.graph_max_edges == 0
             or request.graph_max_cards == 0
+            or request.graph_max_fanout == 0
             or not seed_cards
         ):
             return _GraphExpansionResult(card_modifiers={}, nodes_expanded=0, edges_expanded=0)
@@ -2748,8 +2790,12 @@ class TypedMemoryCore:
         expanded_nodes: set[str] = set()
         expanded_edges: set[str] = set()
         total_budget = request.graph_max_items
+        latency_started_at = self.perf_clock() if request.graph_max_latency_ms is not None else None
 
         for node_id in sorted(frontier):
+            if self._graph_latency_budget_exhausted(request, latency_started_at):
+                _add_graph_drop("graph_latency_budget_exhausted", node_id, dropped_counts, dropped)
+                break
             if len(expanded_nodes) + len(expanded_edges) >= total_budget:
                 _add_graph_drop("graph_item_budget_exhausted", node_id, dropped_counts, dropped)
                 break
@@ -2762,7 +2808,11 @@ class TypedMemoryCore:
                 _add_graph_drop(node_drop_reason, node_id, dropped_counts, dropped)
                 continue
             expanded_nodes.add(node_id)
+            node_fanout = 0
             for edge in edges_by_node.get(node_id, ()):
+                if self._graph_latency_budget_exhausted(request, latency_started_at):
+                    _add_graph_drop("graph_latency_budget_exhausted", edge.edge_id, dropped_counts, dropped)
+                    break
                 if len(expanded_nodes) + len(expanded_edges) >= total_budget:
                     _add_graph_drop("graph_item_budget_exhausted", edge.edge_id, dropped_counts, dropped)
                     break
@@ -2771,8 +2821,13 @@ class TypedMemoryCore:
                     break
                 if edge.edge_id in expanded_edges or edge.edge_type not in _GRAPH_EXPANSION_EDGE_TYPES:
                     continue
-                if edge.staleness_state != StalenessState.FRESH.value:
-                    _add_graph_drop("stale_graph_edge", edge.edge_id, dropped_counts, dropped)
+                if request.graph_max_fanout is not None and node_fanout >= request.graph_max_fanout:
+                    _add_graph_drop("graph_fanout_budget_exhausted", edge.edge_id, dropped_counts, dropped)
+                    break
+                node_fanout += 1
+                edge_drop_reason = self._graph_edge_drop_reason(edge)
+                if edge_drop_reason is not None:
+                    _add_graph_drop(edge_drop_reason, edge.edge_id, dropped_counts, dropped)
                     continue
                 if edge.from_node_id not in self.graph_nodes or edge.to_node_id not in self.graph_nodes:
                     _add_graph_drop("uncanonicalized_graph_endpoint", edge.edge_id, dropped_counts, dropped)
@@ -2793,6 +2848,9 @@ class TypedMemoryCore:
 
         card_modifiers: dict[str, Decimal] = {}
         for card_id, card in sorted(candidate_cards.items()):
+            if self._graph_latency_budget_exhausted(request, latency_started_at):
+                _add_graph_drop("graph_latency_budget_exhausted", card_id, dropped_counts, dropped)
+                break
             if card_id in existing_card_ids:
                 continue
             if set(card.graph_refs.node_ids) & expanded_nodes or set(card.graph_refs.edge_ids) & expanded_edges:
@@ -2808,6 +2866,12 @@ class TypedMemoryCore:
             dropped_counts=dropped_counts,
             dropped=tuple(dropped),
         )
+
+    def _graph_latency_budget_exhausted(self, request: MemoryRecallRequest, started_at: float | None) -> bool:
+        if started_at is None or request.graph_max_latency_ms is None:
+            return False
+        elapsed_ms = (self.perf_clock() - started_at) * 1000.0
+        return elapsed_ms >= request.graph_max_latency_ms
 
     def _seed_graph_node_ids(
         self,
@@ -3016,6 +3080,21 @@ class TypedMemoryCore:
             return True
         return event.redaction_state != RedactionState.RESTRICTED.value and event.retention_state == RetentionState.ACTIVE.value
 
+    def _graph_edge_drop_reason(self, edge: GraphEdge) -> str | None:
+        if edge.staleness_state != StalenessState.FRESH.value:
+            return "stale_graph_edge"
+        if not any(self._visible_graph_edge_support_link(link) for link in edge.evidence_links):
+            return "missing_graph_edge_evidence"
+        return None
+
+    def _visible_graph_edge_support_link(self, link: EvidenceLink) -> bool:
+        if not link.active or link.role not in {EvidenceRole.CURRENT_SUPPORT.value, EvidenceRole.PROOF.value}:
+            return False
+        event = self.provenance_events.get(link.ref_id)
+        if event is None:
+            return False
+        return event.redaction_state != RedactionState.RESTRICTED.value and event.retention_state == RetentionState.ACTIVE.value
+
     def _validate_commit_card(self, card: MemoryCard, *, actor: str, operation: str) -> None:
         if card.approval_state != ApprovalState.COMMITTED.value:
             raise ValueError("commit validation requires approval_state=committed")
@@ -3187,6 +3266,18 @@ def _bounded_excerpt(text: str) -> str:
 
 def _clean_text(value: Any) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _dedupe_evidence_links(links: Sequence[EvidenceLink]) -> tuple[EvidenceLink, ...]:
+    seen: set[tuple[str, str, bool, str | None, str | None]] = set()
+    unique: list[EvidenceLink] = []
+    for link in links:
+        key = (link.ref_id, link.role, link.active, link.added_by_mutation_id, link.note)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(link)
+    return tuple(sorted(unique, key=lambda item: (item.ref_id, item.role, item.added_by_mutation_id or "", item.note or "", item.active)))
 
 
 def _optional_non_negative_int(value: Any, field_name: str) -> int | None:
