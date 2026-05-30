@@ -1,11 +1,11 @@
-"""Phase 0 synthetic analogy smoke loop for memory_eval.
+"""Synthetic analogy smoke loop and Phase 1 metric hardening for memory_eval.
 
 This module intentionally implements only the MVP-0 plumbing described in:
 
 - docs/IMPLEMENTATION_PLAN_2026-05-28_M6_25_SYNTHETIC_ANALOGY_MINIMAL_BENCH.md
 - docs/DESIGN_2026-05-27_M6_25_SYNTHETIC_ANALOGY_MINIMAL_BENCH.md
 
-It does not implement the Phase 1+ benchmark pack, richer metrics, or CLI
+It does not implement the deterministic benchmark pack, profile command, or CLI
 integration.
 """
 
@@ -38,9 +38,9 @@ DEFAULT_SOLVER_PROFILE = {
     "token_counter": "mvp_whitespace_v1",
 }
 KNOWN_LIMITATIONS = [
-    "Phase 0 smoke-only score; not benchmark-quality memory scoring.",
+    "Smoke fixture score; not benchmark-quality memory scoring.",
     "Single fixed solver stub only; no live model execution.",
-    "No Phase 1 metrics hardening, generator pack, or CLI profile wiring.",
+    "No deterministic generator pack or CLI profile wiring.",
     "No terminal bench, behavior_eval, or network dependency.",
 ]
 SCORER_ONLY_FIELDS = frozenset({"hidden_world", "gold_answer", "oracle_context", "family"})
@@ -223,9 +223,12 @@ def run_phase0_smoke(
                     )
                 )
 
+    condition_summaries = summarize_phase0_conditions(rows)
+    comparisons = compare_phase0_conditions(rows)
     report = {
         "benchmark_id": BENCHMARK_ID,
         "phase": "P0",
+        "metrics_phase": "P1_runner_metrics_hardening",
         "state_isolation": state_isolation,
         "budget_profile": dict(effective_budget),
         "solver_profile": dict(DEFAULT_SOLVER_PROFILE),
@@ -235,8 +238,8 @@ def run_phase0_smoke(
             "reuse_allowed_for_mvp1_benchmark": False,
             "reason": "Phase 0 uses a fixed solver stub and must not be reused as MVP-1 benchmark scoring.",
         },
-        "conditions": summarize_phase0_conditions(rows),
-        "comparisons": compare_phase0_conditions(rows),
+        "conditions": attach_phase1_comparisons_to_condition_summaries(condition_summaries, comparisons),
+        "comparisons": comparisons,
         "per_task_rows": rows,
         "known_limitations": list(KNOWN_LIMITATIONS),
     }
@@ -339,6 +342,9 @@ def summarize_phase0_conditions(rows: list[Mapping[str, Any]]) -> dict[str, dict
         if task_count == 0:
             conditions[condition] = {
                 "task_count": 0,
+                "per_task_success": 0.0,
+                "budget_pass": 0.0,
+                "task_pass": 0.0,
                 "accuracy": 0.0,
                 "pass_rate": 0.0,
                 "avg_memory_calls": 0.0,
@@ -353,6 +359,9 @@ def summarize_phase0_conditions(rows: list[Mapping[str, Any]]) -> dict[str, dict
 
         conditions[condition] = {
             "task_count": task_count,
+            "per_task_success": _avg(subset, "per_task_success"),
+            "budget_pass": _avg_bool(subset, "budget_pass"),
+            "task_pass": _avg(subset, "task_pass"),
             "accuracy": _avg(subset, "per_task_success"),
             "pass_rate": _avg(subset, "task_pass"),
             "avg_memory_calls": _avg(subset, "memory_calls_used"),
@@ -374,6 +383,20 @@ def compare_phase0_conditions(rows: list[Mapping[str, Any]]) -> dict[str, float]
         "memory_pass_lift": by_condition["memory_on"]["pass_rate"] - by_condition["memory_off"]["pass_rate"],
         "oracle_pass_gap": by_condition["oracle_context"]["pass_rate"] - by_condition["memory_on"]["pass_rate"],
     }
+
+
+def attach_phase1_comparisons_to_condition_summaries(
+    conditions: Mapping[str, Mapping[str, Any]],
+    comparisons: Mapping[str, float],
+) -> dict[str, dict[str, Any]]:
+    enriched: dict[str, dict[str, Any]] = {}
+    for condition, summary in conditions.items():
+        enriched[condition] = {
+            **dict(summary),
+            "memory_lift": float(comparisons.get("memory_lift", 0.0)),
+            "oracle_gap": float(comparisons.get("oracle_gap", 0.0)),
+        }
+    return enriched
 
 
 def _run_condition_rows(
@@ -633,6 +656,10 @@ def _avg_bool_inverse(rows: list[Mapping[str, Any]], key: str) -> float:
     return sum(1.0 for row in rows if not bool(row.get(key))) / len(rows)
 
 
+def _avg_bool(rows: list[Mapping[str, Any]], key: str) -> float:
+    return sum(1.0 for row in rows if bool(row.get(key))) / len(rows)
+
+
 def _walk_keys(value: Any, path: str = "$"):
     if isinstance(value, Mapping):
         for key, child in value.items():
@@ -658,6 +685,7 @@ __all__ = [
     "SyntheticAnalogyLeakageError",
     "SyntheticAnalogyViews",
     "assert_no_scorer_field_leakage",
+    "attach_phase1_comparisons_to_condition_summaries",
     "compare_phase0_conditions",
     "count_mvp_whitespace_tokens",
     "find_scorer_field_leakage",

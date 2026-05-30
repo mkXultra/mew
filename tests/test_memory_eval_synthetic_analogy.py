@@ -9,6 +9,7 @@ from mew.memory_eval.synthetic_analogy import (
     SyntheticAnalogyLeakageError,
     assert_no_scorer_field_leakage,
     count_mvp_whitespace_tokens,
+    normalize_answer,
     phase0_artifact_hash,
     run_phase0_smoke,
     score_exact_json_answer,
@@ -39,6 +40,26 @@ def _relation_lookup_fixture():
             }
         ],
     }
+
+
+class CountingDummyPassAdapter(DummyPassAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.reset_calls = 0
+        self.ingest_calls = 0
+        self.retrieve_calls = 0
+
+    def reset(self, run):
+        self.reset_calls += 1
+        return super().reset(run)
+
+    def ingest(self, items):
+        self.ingest_calls += 1
+        return super().ingest(items)
+
+    def retrieve(self, query):
+        self.retrieve_calls += 1
+        return super().retrieve(query)
 
 
 def test_split_synthetic_analogy_fixture_hides_scorer_fields_and_uses_opaque_ids():
@@ -102,9 +123,14 @@ def test_phase0_smoke_loop_emits_json_report_for_three_conditions(tmp_path, arti
     assert rows_by_condition["oracle_context"]["oracle_context_tokens_used"] == expected_support_tokens
 
     assert report["conditions"]["memory_off"]["task_count"] == 1
+    assert report["conditions"]["memory_on"]["per_task_success"] == 1.0
+    assert report["conditions"]["memory_on"]["budget_pass"] == 1.0
+    assert report["conditions"]["memory_on"]["task_pass"] == 1.0
     assert report["conditions"]["memory_on"]["avg_memory_calls"] == 1.0
     assert report["conditions"]["memory_on"]["avg_memory_artifact_tokens"] == float(expected_support_tokens)
     assert report["conditions"]["oracle_context"]["avg_oracle_context_tokens"] == float(expected_support_tokens)
+    assert report["conditions"]["memory_on"]["memory_lift"] == 1.0
+    assert report["conditions"]["memory_on"]["oracle_gap"] == 0.0
     assert report["comparisons"]["memory_lift"] == 1.0
     assert report["comparisons"]["oracle_gap"] == 0.0
 
@@ -140,6 +166,15 @@ def test_exact_json_scoring_rejects_invalid_or_non_single_token_answers():
     assert normalized["is_correct"] is True
 
 
+def test_normalize_answer_accepts_mapping_and_rejects_missing_or_empty_answers():
+    assert normalize_answer({"answer": "  WUG\t"}) == "wug"
+
+    with pytest.raises(ValueError, match="missing_answer"):
+        normalize_answer({"not_answer": "wug"})
+    with pytest.raises(ValueError, match="empty_answer"):
+        normalize_answer({"answer": "   "})
+
+
 def test_phase0_artifact_hash_ignores_non_payload_fields():
     artifact = {
         "artifact_id": "artifact_world_task_memory_on",
@@ -158,11 +193,109 @@ def test_phase0_artifact_hash_ignores_non_payload_fields():
         "per_task_success": 1,
         "budget_pass": True,
         "task_pass": 1,
+        "score": {"is_correct": False},
+        "answer": "wrong",
+        "timestamp": "2026-05-30T00:00:00Z",
         "run_id": "run_ignored",
         "artifact_hash": "sha256:ignored",
     }
 
     assert phase0_artifact_hash(with_extra_fields) == phase0_artifact_hash(artifact)
+
+
+def test_phase0_artifact_hash_is_canonical_but_preserves_array_order():
+    artifact = {
+        "artifact_provider": "harness_baseline_packet",
+        "memory_artifact_tokens_used": 5,
+        "world_id": "world_001",
+        "evidence_ids": ["ex_000001", "ex_000002"],
+        "artifact_text": "dax is nava-related to wug.\nzup is nava-related to mip.",
+        "condition": "memory_on",
+        "task_id": "task_001",
+        "artifact_id": "artifact_world_task_memory_on",
+        "memory_calls_used": 1,
+    }
+    same_payload_different_key_order = {
+        "memory_calls_used": 1,
+        "artifact_id": "artifact_world_task_memory_on",
+        "task_id": "task_001",
+        "condition": "memory_on",
+        "artifact_text": "dax is nava-related to wug.\nzup is nava-related to mip.",
+        "evidence_ids": ["ex_000001", "ex_000002"],
+        "world_id": "world_001",
+        "memory_artifact_tokens_used": 5,
+        "artifact_provider": "harness_baseline_packet",
+    }
+    reversed_evidence_order = {
+        **artifact,
+        "evidence_ids": ["ex_000002", "ex_000001"],
+    }
+
+    assert phase0_artifact_hash(artifact) == phase0_artifact_hash(same_payload_different_key_order)
+    assert phase0_artifact_hash(artifact) != phase0_artifact_hash(reversed_evidence_order)
+
+
+def test_budget_failure_preserves_accuracy_but_fails_task_pass_and_pass_rate():
+    report = run_phase0_smoke(
+        _relation_lookup_fixture(),
+        DummyPassAdapter(),
+        budget_profile={"max_memory_calls": 0},
+    )
+    rows_by_condition = {row["condition"]: row for row in report["per_task_rows"]}
+
+    assert rows_by_condition["memory_on"]["per_task_success"] == 1
+    assert rows_by_condition["memory_on"]["budget_pass"] is False
+    assert rows_by_condition["memory_on"]["task_pass"] == 0
+    assert report["conditions"]["memory_on"]["accuracy"] == 1.0
+    assert report["conditions"]["memory_on"]["pass_rate"] == 0.0
+    assert report["conditions"]["memory_on"]["budget_pass"] == 0.0
+    assert report["conditions"]["memory_on"]["budget_violation_rate"] == 1.0
+    assert report["conditions"]["memory_on"]["memory_lift"] == 1.0
+    assert report["conditions"]["memory_on"]["oracle_gap"] == 0.0
+
+
+@pytest.mark.parametrize("artifact_provider", ["harness_baseline_packet", "retrieve_packet"])
+def test_memory_call_accounting_excludes_reset_ingest_and_oracle_construction(artifact_provider):
+    adapter = CountingDummyPassAdapter()
+
+    report = run_phase0_smoke(
+        _relation_lookup_fixture(),
+        adapter,
+        artifact_provider=artifact_provider,
+    )
+    rows_by_condition = {row["condition"]: row for row in report["per_task_rows"]}
+
+    assert adapter.reset_calls == 3
+    assert adapter.ingest_calls == 1
+    assert adapter.retrieve_calls == 1
+    assert rows_by_condition["memory_off"]["memory_calls_used"] == 0
+    assert rows_by_condition["memory_on"]["memory_calls_used"] == 1
+    assert rows_by_condition["oracle_context"]["memory_calls_used"] == 0
+    assert report["conditions"]["memory_on"]["avg_memory_calls"] == 1.0
+
+
+def test_token_split_totals_are_condition_specific():
+    report = run_phase0_smoke(_relation_lookup_fixture(), DummyPassAdapter())
+    rows_by_condition = {row["condition"]: row for row in report["per_task_rows"]}
+    prompt_tokens = count_mvp_whitespace_tokens(
+        "In this local world, what is dax related to by nava?"
+    )
+    support_tokens = count_mvp_whitespace_tokens("dax is nava-related to wug.")
+
+    assert rows_by_condition["memory_off"]["task_prompt_tokens_used"] == prompt_tokens
+    assert rows_by_condition["memory_off"]["memory_artifact_tokens_used"] == 0
+    assert rows_by_condition["memory_off"]["oracle_context_tokens_used"] == 0
+    assert rows_by_condition["memory_off"]["total_context_tokens_used"] == prompt_tokens
+
+    assert rows_by_condition["memory_on"]["task_prompt_tokens_used"] == prompt_tokens
+    assert rows_by_condition["memory_on"]["memory_artifact_tokens_used"] == support_tokens
+    assert rows_by_condition["memory_on"]["oracle_context_tokens_used"] == 0
+    assert rows_by_condition["memory_on"]["total_context_tokens_used"] == prompt_tokens + support_tokens
+
+    assert rows_by_condition["oracle_context"]["task_prompt_tokens_used"] == prompt_tokens
+    assert rows_by_condition["oracle_context"]["memory_artifact_tokens_used"] == 0
+    assert rows_by_condition["oracle_context"]["oracle_context_tokens_used"] == support_tokens
+    assert rows_by_condition["oracle_context"]["total_context_tokens_used"] == prompt_tokens + support_tokens
 
 
 def test_string_oracle_context_normalizes_to_single_item_and_correct_token_count():
