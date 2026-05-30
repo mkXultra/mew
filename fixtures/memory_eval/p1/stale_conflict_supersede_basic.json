@@ -1,0 +1,100 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "stale_conflict_supersede_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "stale_conflict",
+  "phase": "P1",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_review_monday",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_130",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-14T09:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira picks Monday for review notes."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_review_tuesday",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_130",
+      "turn_id": "turn_002",
+      "event_time": "2026-01-15T09:00:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira picks Tuesday for review notes."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "op_id": "mut_review_day",
+      "mutation_type": "supersede",
+      "target_experience_id": "exp_review_monday",
+      "replacement_experience_id": "exp_review_tuesday",
+      "effective_time": "2026-01-15T09:01:00Z",
+      "reason": "newer review day"
+    }
+  ],
+  "requests": [
+    {
+      "request_id": "req_current_review_day",
+      "mode": "stale_conflict",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "Which day does Mira pick for review notes?",
+        "intent": "preference_lookup"
+      },
+      "k": 2,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"]
+      },
+      "budget": {
+        "max_evidence_items": 2,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "supersede"],
+      "on_unsupported": "not_applicable",
+      "gold": {
+        "relevant_evidence_ids": ["exp_review_tuesday"],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": ["exp_review_monday"],
+        "strict_stale": true,
+        "conflict_sets": [
+          {"stale_ids": ["exp_review_monday"], "fresh_ids": ["exp_review_tuesday"]}
+        ],
+        "expected_abstention": false
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_review_monday", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_review_tuesday", "ingest_order": 2},
+    {"type": "mutate", "op_id": "mut_review_day", "ingest_order": 3},
+    {"type": "request", "request_id": "req_current_review_day", "after_ingest_order": 3}
+  ]
+}

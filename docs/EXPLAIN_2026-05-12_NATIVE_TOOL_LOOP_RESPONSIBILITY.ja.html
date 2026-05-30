@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mew implement_v2 Native Tool Loop 責務境界レビュー</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --paper: #ffffff;
+      --ink: #18212f;
+      --muted: #596579;
+      --line: #d9dfeb;
+      --blue: #1f6feb;
+      --teal: #0f766e;
+      --amber: #a16207;
+      --red: #b42318;
+      --green: #166534;
+      --soft-blue: #eaf2ff;
+      --soft-teal: #e7f6f3;
+      --soft-amber: #fff5d6;
+      --soft-red: #fdecec;
+      --soft-green: #eaf7ec;
+      --code-bg: #0f172a;
+      --code-ink: #e2e8f0;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", "Noto Sans JP", "Segoe UI", sans-serif;
+      line-height: 1.68;
+      letter-spacing: 0;
+    }
+
+    .page {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+
+    header, section {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    header {
+      padding: 28px;
+      margin-bottom: 20px;
+    }
+
+    section {
+      padding: 24px;
+      margin: 18px 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+      line-height: 1.28;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p { margin: 0 0 12px; }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+      background: #eef2f7;
+      padding: 0.08rem 0.32rem;
+      border-radius: 5px;
+    }
+
+    ul { padding-left: 20px; }
+
+    li { margin: 6px 0; }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--teal);
+      font-weight: 700;
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+
+    .lead {
+      max-width: 960px;
+      color: var(--muted);
+      font-size: 16px;
+      margin-top: 14px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .tri-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fbfcff;
+    }
+
+    .panel h3 { margin-top: 0; }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--ink);
+      background: #eef2f7;
+      border: 1px solid var(--line);
+      margin-right: 6px;
+      white-space: nowrap;
+    }
+
+    .tag.blue { color: #174ea6; background: var(--soft-blue); border-color: #bcd4ff; }
+    .tag.teal { color: #0f5f59; background: var(--soft-teal); border-color: #b8e5df; }
+    .tag.amber { color: #854d0e; background: var(--soft-amber); border-color: #f6d678; }
+    .tag.red { color: var(--red); background: var(--soft-red); border-color: #f3b8b4; }
+    .tag.green { color: var(--green); background: var(--soft-green); border-color: #b9e4c0; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 4px;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #f0f4fa;
+      color: #283548;
+      font-weight: 700;
+    }
+
+    .diagram {
+      background: var(--code-bg);
+      color: var(--code-ink);
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+      font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      white-space: pre;
+      margin: 12px 0;
+    }
+
+    .note {
+      border-left: 4px solid var(--blue);
+      background: var(--soft-blue);
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+
+    .warn {
+      border-left: 4px solid var(--amber);
+      background: var(--soft-amber);
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+
+    .bad {
+      border-left: 4px solid var(--red);
+      background: var(--soft-red);
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+
+    .good {
+      border-left: 4px solid var(--green);
+      background: var(--soft-green);
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+
+    @media (max-width: 860px) {
+      .grid, .tri-grid { grid-template-columns: 1fr; }
+      .page { padding: 20px 12px 40px; }
+      header, section { padding: 18px; }
+      table { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <p class="eyebrow">M6.24 Review Artifact</p>
+      <h1>Native Tool Loop の現在構造と理想構造</h1>
+      <p class="lead">
+        目的は、<code>implement_v2</code> を Codex 風の provider-native tool/function calling loop として保ちながら、
+        mew 固有の replay、context 圧縮耐性、step analysis、acceptance safety をどこに置くべきかをレビュー可能にすること。
+      </p>
+      <p class="lead">
+        結論は、<strong>harness は protocol/safety runtime</strong>、<strong>WorkFrame は attention/projection layer</strong>、
+        <strong>CompletionResolver は完了判定</strong>として分けるのが一番筋が良い。
+      </p>
+    </header>
+
+    <section>
+      <h2>Executive Summary</h2>
+      <div class="grid">
+        <div class="panel">
+          <h3>現在の問題</h3>
+          <p>
+            native loop は provider-native transcript を使い始めているが、<code>finish_call</code> の扱いと
+            semantic completion の責務境界がまだ曖昧。さらに現在の harness は
+            <code>_native_final_verifier_closeout</code>、<code>structured_finish_gate</code>、
+            <code>native_loop_control</code> などの semantic-ish control も一部持っている。
+          </p>
+          <span class="tag amber">責務境界が曖昧</span>
+          <span class="tag red">finish が早い</span>
+        </div>
+        <div class="panel">
+          <h3>理想の方向</h3>
+          <p>
+            harness は tool call / output の正しさと安全境界だけを守る。WorkFrame は compact card として次 turn に注入し、
+            model の判断材料を整える。現在 harness / exec runtime に散っている完了判定は CompletionResolver に寄せる。
+          </p>
+          <span class="tag green">native loop 維持</span>
+          <span class="tag blue">WorkFrame 注入</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>現在の Native Tool Loop</h2>
+      <p>
+        現在の本線は <code>src/mew/commands.py</code> から
+        <code>run_live_native_implement_v2</code> を呼び、<code>native_tool_harness.py</code> が
+        provider-native response items を transcript に保存し、tool を実行する構造。
+      </p>
+      <div class="diagram">Current implement_v2 native loop
+
+commands.py
+  |
+  | selects implement_v2 native transcript runtime
+  v
+native_tool_harness.py
+  |
+  | _request_descriptor()
+  |   - task_contract
+  |   - persisted_lane_state
+  |   - prior native transcript items
+  |   - small native_loop_control only when thresholds fire
+  v
+OpenAI Responses / Codex Web API
+  |
+  | provider-native response items
+  v
+NativeTranscript
+  |
+  | function_call / custom_tool_call / finish_call
+  v
+tool router
+  |
+  | read_runtime / write_runtime / exec_runtime
+  v
+ToolResultEnvelope
+  |
+  | function_call_output / custom_tool_call_output / finish_output
+  v
+NativeTranscript artifacts
+  |
+  | response_transcript.json
+  | response_items.jsonl
+  | proof-manifest.json
+  v
+fastcheck / replay / step analysis</div>
+
+      <div class="warn">
+        現状の WorkFrame は native harness の主経路ではなく、主に projection、fastcheck、replay、旧 v2 runtime 周辺の概念として残っている。
+        一方で harness には <code>finish_call</code> acceptance、<code>_native_final_verifier_closeout</code>、
+        <code>native_loop_control</code> のような semantic control が入り込んでいる。つまり現在は
+        「WorkFrame は主経路に薄いが、harness は semantic に厚い」という歪んだ中間状態。
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>現在の要素</th>
+            <th>役割</th>
+            <th>問題になりやすい点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>native_tool_harness.py</code></td>
+            <td>provider-native transcript loop、tool routing、pairing、artifact writing、finish call handling</td>
+            <td><code>finish_call</code> 成功時に lane status を <code>completed</code> に寄せる de facto CompletionResolver になっている</td>
+          </tr>
+          <tr>
+            <td><code>_native_loop_control_state</code></td>
+            <td>first-write / verifier-repair などの制御カード</td>
+            <td><code>next_action_policy</code> を含むため、planner 的 policy が harness に混ざる drift risk がある</td>
+          </tr>
+          <tr>
+            <td><code>_native_final_verifier_closeout</code></td>
+            <td>finish 後の verifier closeout。status を <code>completed</code> / <code>blocked</code> に上書きし得る</td>
+            <td>CompletionResolver 的な意味判定が harness 内にあるため、移行時に責務を明示して移す必要がある</td>
+          </tr>
+          <tr>
+            <td><code>exec_runtime.py</code></td>
+            <td>managed command 実行、execution contract、artifact evidence、<code>structured_finish_gate</code></td>
+            <td>tool 実行 mechanics と semantic finish gate が混在している。後者は CompletionResolver へ移す候補</td>
+          </tr>
+          <tr>
+            <td><code>WorkFrame</code> 系</td>
+            <td>hot path collapse / projection / variant 実験</td>
+            <td>native loop の request に標準注入されていないので、判断材料が model に届きにくい</td>
+          </tr>
+          <tr>
+            <td><code>terminal_bench_replay.py</code></td>
+            <td>post-hoc replay、external verifier mismatch 抽出</td>
+            <td>外部 verifier mismatch は検出できるが、live loop の finish 前には戻せない</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>理想の Native Tool Loop</h2>
+      <p>
+        理想は、raw/native transcript を source of truth にしつつ、WorkFrame を「次 turn の注意カード」として注入する形。
+        WorkFrame は tool 実行や完了判定を握らず、model が次 action を決めるための compact projection だけを提供する。
+      </p>
+
+      <div class="diagram">Ideal implement_v2 native loop
+
+NativeTranscript source of truth
+  |
+  +--> ProviderAdapter / RequestBuilder
+  |      - build provider-safe input items
+  |      - lower tool schemas
+  |      - preserve native ResponseItem pairing rules
+  |
+  +--> Harness
+  |      - validate provider-native item pairing
+  |      - execute tools
+  |      - enforce permissions and allowed roots
+  |      - persist tool outputs and side effects
+  |
+  +--> HarnessWorkFrameProjection
+  |      - compact goal / latest actionable / evidence refs
+  |      - expected artifact and verifier obligations
+  |      - finish readiness risk
+  |      - step-shape metrics
+  |
+  +--> CompletionResolver
+  |      - accepts or blocks semantic completion
+  |      - uses finish claim, typed evidence, WorkFrame, replay hints
+  |      - produces lane_status independent from transcript pairing
+  |
+  v
+Next provider request
+  |
+  | input =
+  |   1. task contract
+  |   2. native transcript window
+  |   3. compact_sidecar_digest with bounded WorkFrame projection fields
+  |   4. tool schemas
+  v
+Model decides next tool call naturally</div>
+
+      <div class="good">
+        この構造なら、Codex 風の native tool loop を保ったまま、mew 固有の常駐性、replay、context 圧縮耐性、dogfood proof を追加できる。
+        provider-visible object は新設せず、既存 request surface の <code>compact_sidecar_digest</code> に bounded WorkFrame fields を入れる。
+      </div>
+    </section>
+
+    <section>
+      <h2>責務境界</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>コンポーネント</th>
+            <th>持つべき責務</th>
+            <th>持たせない責務</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>ProviderAdapter / RequestBuilder</strong></td>
+            <td>
+              provider-safe input items、tool schema lowering、native ResponseItem translation、
+              prompt/cache metadata、request descriptor assembly。
+            </td>
+            <td>
+              task 完了判定、次 action の決定、WorkFrame policy。WorkFrame は bounded projection だけを渡す。
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Harness</strong></td>
+            <td>
+              provider-native item の pairing、tool routing、permission、allowed roots、write approval、
+              shell availability、timeout、artifact/proof file 書き出し。現状は一部 semantic closeout も持つが、これは移行対象。
+            </td>
+            <td>
+              task 完了判定、外部 oracle 充足判定、次 action の決定、WorkFrame reducer、
+              <code>native_loop_control.next_action_policy</code> のような prescriptive policy。
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Tool Runtime</strong></td>
+            <td>
+              <code>read_file</code>、<code>search_text</code>、<code>write_file</code>、<code>apply_patch</code>、
+              <code>run_command</code> などの実行と構造化結果。現状は harness / <code>exec_runtime.py</code> に分散している。
+            </td>
+            <td>
+              model の計画、完了判定、provider transcript の構築。<code>structured_finish_gate</code> は CompletionResolver へ寄せる。
+            </td>
+          </tr>
+          <tr>
+            <td><strong>WorkFrame Projection</strong></td>
+            <td>
+              transcript/tool result を compact に要約し、goal、latest actionable、obligations、
+              evidence refs、finish readiness、step metrics を次 turn に渡す。
+              現在の <code>native_workframe_projection.py</code> を進化させる。
+            </td>
+            <td>
+              tool 実行、ファイル編集、provider API、hard policy。
+              現在の <code>required_next</code> は普通の repair 指示には使わず、必要な情報は <code>attention_hints</code> /
+              <code>tool_context</code> へ縮約する。互換・controller 必須状態では nullable limited field としてだけ残す。
+            </td>
+          </tr>
+          <tr>
+            <td><strong>CompletionResolver</strong></td>
+            <td>
+              <code>finish_call</code> の semantic completion を許可するかを判定する。
+              入力は finish claim、typed evidence、WorkFrame finish readiness、task/execution oracle obligations、
+              transcript 内の fresh verifier / closeout evidence。出力は <code>completed</code> / <code>blocked_continue</code> / <code>blocked_return</code>。
+            </td>
+            <td>
+              tool call pairing、tool execution、model prompt 全体の組み立て。fresh verifier が無ければ verifier を実行せず、blocker として返す。
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Replay / Fastcheck</strong></td>
+            <td>
+              native transcript と proof artifact を再計算し、step shape、mismatch、regression を検出する。
+            </td>
+            <td>
+              live turn 中の tool 実行や semantic policy の source of truth。
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Guard の置き場所</h2>
+      <div class="grid">
+        <div class="panel">
+          <h3>Harness に残す guard</h3>
+          <ul>
+            <li>call_id / output pairing</li>
+            <li>arguments JSON validation</li>
+            <li>unknown tool rejection</li>
+            <li>allowed read/write roots</li>
+            <li>write approval</li>
+            <li>shell permission</li>
+            <li>max_turns / timeout / transport failure</li>
+          </ul>
+        </div>
+        <div class="panel">
+          <h3>Harness から出す guard</h3>
+          <ul>
+            <li>この task が本当に完了したか</li>
+            <li>外部 verifier の oracle を満たしたか</li>
+            <li>source grounding が十分か</li>
+            <li>次に patch すべきか、probe すべきか</li>
+            <li>repeated failure の修復方針</li>
+            <li>task-specific artifact 判定</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="note">
+        <code>finish_call</code> は transcript 上では正しく pair されてよい。ただし lane status を <code>completed</code> にするかは
+        CompletionResolver が決める。これにより harness は protocol runtime として薄く保てる。
+      </div>
+    </section>
+
+    <section>
+      <h2>Finish State Machine</h2>
+      <p>
+        レビュー指摘で最も重要だったのは、<code>finish_call</code> の transcript protocol と lane completion が混ざっている点。
+        理想構造では、finish は以下の状態遷移として扱う。
+      </p>
+      <div class="diagram">finish_call state machine
+
+model emits finish_call
+  |
+  v
+harness validates arguments
+  |
+  v
+CompletionResolver evaluates semantic completion
+  |
+  +-- completed
+  |     lane_status = completed
+  |     paired finish_output contains allow result
+  |
+  +-- blocked_continue
+  |     lane_status remains active
+  |     paired finish_output contains block result + blockers
+  |     mirror resolver_decision to sidecar/artifact
+  |     next request receives raw transcript + WorkFrame blockers
+  |
+  +-- blocked_return
+        lane_status = blocked
+        return to supervisor/reentry with concrete blockers</div>
+      <p>
+        これにより、harness は provider-native pairing を守り、CompletionResolver は semantic state を決める。
+        verifier 実行そのものは harness / tool runtime closeout に残すか、<code>blocked_continue</code> の次 action として model に返す。
+        CompletionResolver は実行済みの <code>_native_final_verifier_closeout</code> / <code>structured_finish_gate</code> evidence を消費して判定する。
+        <code>resolver_decision</code> は native ResponseItem ではなく sidecar artifact。provider-visible には paired
+        <code>finish_output</code> の content と次 turn の <code>compact_sidecar_digest</code> で伝える。
+        現行の単一 <code>status="blocked"</code> は、closeout 後の停止なら <code>blocked_return</code>、
+        finish rejection から同一 lane 継続できるなら <code>blocked_continue</code> に分割する。
+      </p>
+    </section>
+
+    <section>
+      <h2>WorkFrame の責務</h2>
+      <p>
+        WorkFrame は planner ではなく、model の attention を整える projection。命令ではなく、判断材料を compact に提供する。
+        ただし現行 <code>workframe.py</code> は <code>required_next</code> と <code>forbidden_next</code> をすでに持つ。
+        そのため、この文書の「理想 WorkFrame」は現行 schema のそのまま維持ではなく、native loop 向けに縮約した target。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>現行フィールド</th>
+            <th>理想での扱い</th>
+            <th>レビュー観点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>goal</code></td>
+            <td>維持。タスク目的、成功条件、制約を短く渡す</td>
+            <td>task prompt とズレていないか</td>
+          </tr>
+          <tr>
+            <td><code>latest_actionable</code></td>
+            <td><code>latest_actionable</code> として維持。ただし action 強制にしない</td>
+            <td>model が raw transcript を辿らず最新問題を把握できるか</td>
+          </tr>
+          <tr>
+            <td><code>required_next</code></td>
+            <td>
+              現行は prescriptive。理想では普通の repair 指示から外し、必要な情報は <code>attention_hints</code> /
+              <code>tool_context</code> に縮約。finish-ready、verifier-closeout、blocked、明示的 <code>transition_contract</code> 互換だけ nullable limited field として許容。
+            </td>
+            <td>Codex 風の model autonomy を殺していないか</td>
+          </tr>
+          <tr>
+            <td><code>forbidden_next</code></td>
+            <td>safety / repetition guard として限定維持</td>
+            <td>policy 過多ではなく、失敗ループ防止に限定されているか</td>
+          </tr>
+          <tr>
+            <td><code>changed_sources</code></td>
+            <td>編集済み source と verifier freshness の補助情報として維持</td>
+            <td>raw transcript の代替ではなく index になっているか</td>
+          </tr>
+          <tr>
+            <td><code>verifier_state</code></td>
+            <td>fresh / stale / failed verifier の compact state として維持</td>
+            <td>古い failure を引きずっていないか</td>
+          </tr>
+          <tr>
+            <td><code>finish_readiness</code></td>
+            <td>allow/block ではなく risk、blockers、missing obligations を示す</td>
+            <td>外部 oracle と内部 verifier の差を見える化できるか</td>
+          </tr>
+          <tr>
+            <td><code>evidence_refs</code></td>
+            <td>参照可能な tool result / artifact / verifier refs として維持</td>
+            <td>finish claim が cite できる粒度か</td>
+          </tr>
+          <tr>
+            <td><code>metrics</code> / sidecar</td>
+            <td>WorkFrame card には最小限だけ載せ、詳細は sidecar に置く</td>
+            <td>calibration と replay に使えるか</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="bad">
+        避けたい形: WorkFrame が通常 repair で <code>required_next: edit vm.js line 123</code> のように action を強制すること。
+        これは model の判断能力を殺し、transition_contract が厚くなりすぎた問題に戻る。
+      </div>
+      <div class="good">
+        良い形: <code>finish_readiness.blockers = ["external_artifact_missing"]</code>、
+        <code>attention_hints = ["latest passing verifier checked frame.ppm, but task/external verifier expects /tmp/frame.bmp"]</code> のように
+        判断材料を提示すること。
+      </div>
+    </section>
+
+    <section>
+      <h2>今回の make-mips-interpreter 失敗に当てると</h2>
+      <p>
+        直近の native 10min diagnostic では、mew は <code>frame.ppm</code> を生成して自己検証し、
+        外部 verifier が期待する <code>/tmp/frame.bmp</code> を作らずに finish した。
+      </p>
+
+      <div class="diagram">Observed failure
+
+Model:
+  node vm.js -> frame.ppm exists -> finish
+
+External verifier:
+  expects /tmp/frame.bmp
+  FileNotFoundError: /tmp/frame.bmp
+
+Current gap:
+  harness paired finish correctly,
+  current closeout / finish gates did not know or enforce this external oracle obligation early enough.
+
+Ideal handling:
+  harness records finish_call and finish_output
+  WorkFrame projects:
+    finish_readiness = risky
+    missing_obligations = ["external_artifact:/tmp/frame.bmp"]
+    latest verifier checked frame.ppm instead of verifier-visible artifact
+  CompletionResolver blocks lane completion
+  next turn receives compact card and can repair artifact target</div>
+
+      <p>
+        これは harness に <code>/tmp/frame.bmp</code> 固有 guard を入れる話ではない。WorkFrame と CompletionResolver が、
+        task contract、execution contract / oracle bundle、typed evidence、fresh verifier evidence を入力にして、
+        「finish evidence が external oracle と一致していない」ことを model-visible かつ replay-visible にする話。
+      </p>
+    </section>
+
+    <section>
+      <h2>移行案</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Phase</th>
+            <th>作業</th>
+            <th>Close 条件</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>harness の責務文書化と static gate。現在の semantic-ish controls を棚卸しする。</td>
+            <td><code>finish_call</code> status、<code>_native_final_verifier_closeout</code>、<code>structured_finish_gate</code>、<code>native_loop_control</code> の移行先が明記される</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>
+              <code>native_workframe_projection.py</code> を compact WorkFrame projection へ進化。
+              普通の repair 用 <code>required_next</code> は <code>attention_hints</code> / <code>tool_context</code> に縮約。
+              <code>native_sidecar_projection</code> の todo digest も <code>required_next_kind</code> 依存から同じ表現へ揃える。
+            </td>
+            <td>
+              保存済み artifact で deterministic に同じ projection が出る。provider-visible には
+              <code>compact_sidecar_digest</code> 経由で入り、raw transcript を置き換えない。
+              <code>transition_contract</code> 互換だけ limited <code>required_next</code> を許容する。
+            </td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>
+              request descriptor の <code>compact_sidecar_digest</code> に bounded WorkFrame fields を注入。
+              <code>persisted_lane_state</code> は provider-visible には広げず、必要な最小要約だけ digest に折り込む。
+            </td>
+            <td>provider request に raw transcript + compact sidecar digest が両方入る</td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td><code>CompletionResolver</code> を harness 外へ分離。finish transcript と lane status を分ける。</td>
+            <td>
+              入力: finish claim、typed evidence、WorkFrame finish_readiness、oracle obligations。
+              fresh verifier / closeout evidence は transcript 内の最新 verifier tool output から読む。resolver 自身は tool を実行しない。
+              出力: <code>completed</code> / <code>blocked_continue</code> / <code>blocked_return</code>。
+              missing obligation では finish は pair されても lane は completed にならない。
+            </td>
+          </tr>
+          <tr>
+            <td>5</td>
+            <td>10min step-shape で <code>raw only</code> と <code>WorkFrame injected</code> を比較。</td>
+            <td>first-write、verifier alignment、finish mismatch が改善または悪化理由が観測できる</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>レビューで決めたいこと</h2>
+      <div class="tri-grid">
+        <div class="panel">
+          <h3>1. Finish の扱い</h3>
+          <p>
+            <code>finish_call</code> は transcript 上では accepted とし、lane status は CompletionResolver が決める形にするか。
+          </p>
+        </div>
+        <div class="panel">
+          <h3>2. WorkFrame の強さ</h3>
+          <p>
+            現在の <code>workframe.required_next</code> は普通の repair 指示から外し、
+            <strong><code>attention_hints</code> / <code>tool_context</code> に縮約する</strong>方針でよいか。
+            limited 互換フィールドは finish-ready / closeout / blocked / <code>transition_contract</code> のみにする。
+          </p>
+        </div>
+        <div class="panel">
+          <h3>3. 比較実験</h3>
+          <p>
+            <code>minimal</code>、<code>transcript_first</code>、<code>transcript_tool_nav</code>、
+            <code>transition_contract</code> を同じ 10min step-shape で比較するか。
+            request surface は <code>raw_only</code> と <code>compact_sidecar_digest</code> を variant とは別軸で扱う。
+          </p>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Variant</th>
+            <th>比較上の意味</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>minimal</code></td>
+            <td>WorkFrame 情報を最小化し、native transcript に寄せる baseline。</td>
+          </tr>
+          <tr>
+            <td><code>transcript_first</code></td>
+            <td>raw transcript を優先し、WorkFrame は goal / verifier / latest actionable の薄い補助にする。</td>
+          </tr>
+          <tr>
+            <td><code>transcript_tool_nav</code></td>
+            <td>tool result navigation を補助し、model が必要な evidence に戻りやすくする。</td>
+          </tr>
+          <tr>
+            <td><code>transition_contract</code></td>
+            <td>旧 full WorkFrame / required_next 系の強い contract baseline。改善対象として比較する。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>参照する実装と設計</h2>
+      <p>
+        レビュー時は、HTML の責務境界と下記ファイルの実装が一致しているかを見る。
+        特に <code>finish_call</code> を transcript protocol と lane completion のどちらとして扱っているかが焦点。
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>ファイル</th>
+            <th>見る観点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>src/mew/implement_lane/native_tool_harness.py</code></td>
+            <td>harness が protocol / safety runtime に留まり、semantic completion を握りすぎていないか</td>
+          </tr>
+          <tr>
+            <td><code>src/mew/implement_lane/native_transcript.py</code></td>
+            <td>provider-native transcript が source of truth として pair / replay 可能か</td>
+          </tr>
+          <tr>
+            <td><code>src/mew/implement_lane/native_workframe_projection.py</code></td>
+            <td>WorkFrame が raw transcript の代替ではなく compact projection として成立しているか</td>
+          </tr>
+          <tr>
+            <td><code>src/mew/implement_lane/workframe.py</code></td>
+            <td>WorkFrame のフィールドが planner 化せず、attention / evidence / finish risk に収まっているか</td>
+          </tr>
+          <tr>
+            <td><code>src/mew/implement_lane/execution_evidence.py</code></td>
+            <td>typed evidence が CompletionResolver に渡せる粒度で保持されているか</td>
+          </tr>
+          <tr>
+            <td><code>docs/DESIGN_2026-05-11_M6_24_IMPLEMENT_V2_NATIVE_TRANSCRIPT_REBUILD.md</code></td>
+            <td>native transcript rebuild の設計意図から drift していないか</td>
+          </tr>
+          <tr>
+            <td><code>docs/DESIGN_2026-05-11_M6_24_TOOL_HARNESS_WORKFRAME_VARIANTS.md</code></td>
+            <td>WorkFrame variant と harness 境界の最新方針に合っているか</td>
+          </tr>
+          <tr>
+            <td><code>docs/REVIEW_2026-05-11_IMPLEMENT_V2_NATIVE_LOOP_DRIFT_PREVENTION.md</code></td>
+            <td>native loop drift 防止の観点から、provider-native transcript が主経路に保たれているか</td>
+          </tr>
+          <tr>
+            <td><code>docs/DESIGN_2026-05-10_M6_24_IMPLEMENT_V2_WORKFRAME_REDESIGN.md</code></td>
+            <td>historical reference。旧 WorkFrame の強すぎる required-next 系責務を、今回の projection 境界へ縮約できているか</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Recommended Decision</h2>
+      <p>
+        現時点では、WorkFrame を harness に埋め込まず、<strong><code>compact_sidecar_digest</code> 内の bounded WorkFrame projection</strong>
+        として注入するのがよい。
+        harness は protocol/safety だけを守り、semantic completion は CompletionResolver へ分離する。
+      </p>
+      <div class="diagram">Recommended boundary
+
+Harness:
+  provider-native transcript runtime
+  tool routing
+  permission/safety
+  proof artifacts
+
+Tool Runtime:
+  execute read/write/exec tools
+  emit typed evidence and side effects
+  run deterministic closeout when explicitly requested
+
+WorkFrame:
+  compact projection
+  attention hints
+  evidence refs
+  finish risk
+
+CompletionResolver:
+  semantic completion decision
+  typed evidence and external oracle alignment
+  lane_status = completed | blocked_continue | blocked_return
+
+Model:
+  reads raw transcript + WorkFrame
+  decides next native tool call</div>
+
+      <div class="note">
+        この decision の実装上の意味は、「harness に semantic guard をさらに足す」ではない。
+        既に harness / exec runtime にある semantic-ish controls を CompletionResolver へ移し、
+        WorkFrame は resolver と model のための bounded projection にすること。
+        <code>blocked_continue</code> は lane を active に保ち、paired <code>finish_output</code> と sidecar の blockers を次 turn に渡す。
+        <code>native_loop_control.first_write_due</code> / <code>verifier_repair_due</code> は bounded signals として
+        WorkFrame の <code>attention_hints</code> に折り込み、prescriptive <code>next_action_policy</code> と命令文は落とす。
+      </div>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,0 +1,190 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "graph_redacted_edge_support_no_leak_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "graph_negative",
+  "phase": "P1",
+  "evaluation_time": "2026-05-28T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_graph_redacted_edge_anchor",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_redacted_edge_501",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-14T10:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Vega anchor is attached to file:mew:main:src/mew/memory_typed_card_core.py."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_graph_redacted_edge_related",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_redacted_edge_501",
+      "turn_id": "turn_002",
+      "event_time": "2026-01-14T10:05:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "The hidden traversal target lives at test:mew:tests/test_memory_typed_cards_phase_b.py under the Orion marker."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_graph_redacted_edge_support",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_redacted_edge_501",
+      "turn_id": "turn_003",
+      "event_time": "2026-01-14T10:10:00Z",
+      "ingest_order": 3,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Fixture edge evidence says the Vega file node is related to the phase-b test node."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "op_id": "mut_seed_redacted_edge_anchor",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_redacted_edge_anchor",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph redacted edge support fixture setup"
+    },
+    {
+      "op_id": "mut_seed_redacted_edge_related",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_redacted_edge_related",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph redacted edge support fixture setup"
+    },
+    {
+      "op_id": "mut_seed_redacted_edge_support",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_redacted_edge_support",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph redacted edge support fixture setup"
+    },
+    {
+      "op_id": "mut_seed_redacted_edge_graph",
+      "mutation_type": "seed_graph",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph redacted edge support fixture setup",
+      "graph": {
+        "links": [
+          {
+            "from_experience_id": "exp_graph_redacted_edge_anchor",
+            "to_experience_id": "exp_graph_redacted_edge_related",
+            "support_experience_id": "exp_graph_redacted_edge_support",
+            "edge_type": "related",
+            "from_node": {
+              "node_type": "file",
+              "canonical_ref": "file:mew:main:src/mew/memory_typed_card_core.py"
+            },
+            "to_node": {
+              "node_type": "test",
+              "canonical_ref": "test:mew:tests/test_memory_typed_cards_phase_b.py"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op_id": "mut_forget_redacted_edge_support",
+      "mutation_type": "forget",
+      "target_experience_id": "exp_graph_redacted_edge_support",
+      "effective_time": "2026-01-14T10:11:00Z",
+      "reason": "remove graph edge support provenance"
+    }
+  ],
+  "requests": [
+    {
+      "request_id": "req_graph_redacted_edge_support_no_leak",
+      "mode": "graph_negative",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "What is connected to the Vega anchor?",
+        "intent": "graph_related_lookup"
+      },
+      "k": 2,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"],
+        "expand_graph": true,
+        "graph_max_depth": 1,
+        "graph_max_items": 4
+      },
+      "budget": {
+        "max_evidence_items": 2,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "graph_expansion", "seed_graph", "forget", "derived_graph_index_verification"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_graph_redacted_edge_anchor"],
+        "must_not_return_evidence_ids": [
+          "exp_graph_redacted_edge_related",
+          "exp_graph_redacted_edge_support"
+        ],
+        "stale_evidence_ids": [
+          "exp_graph_redacted_edge_related",
+          "exp_graph_redacted_edge_support"
+        ],
+        "strict_stale": true,
+        "expected_abstention": false,
+        "expected_usage": {
+          "index_mode": "graph_index",
+          "min_graph_nodes_expanded": 1,
+          "max_graph_edges_expanded": 0
+        },
+        "expected_dropped_count_by_reason": {
+          "missing_graph_edge_evidence": 1
+        },
+        "expected_derived_graph_index_verification": {
+          "ok": false,
+          "min_issue_count": 1,
+          "issue_count_by_type": {
+            "graph_edge_support_evidence_unavailable": 1
+          }
+        }
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_graph_redacted_edge_anchor", "ingest_order": 1},
+    {"type": "mutate", "op_id": "mut_seed_redacted_edge_anchor", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_graph_redacted_edge_related", "ingest_order": 2},
+    {"type": "mutate", "op_id": "mut_seed_redacted_edge_related", "ingest_order": 2},
+    {"type": "ingest", "experience_id": "exp_graph_redacted_edge_support", "ingest_order": 3},
+    {"type": "mutate", "op_id": "mut_seed_redacted_edge_support", "ingest_order": 3},
+    {"type": "mutate", "op_id": "mut_seed_redacted_edge_graph", "ingest_order": 4},
+    {"type": "mutate", "op_id": "mut_forget_redacted_edge_support", "ingest_order": 5},
+    {"type": "request", "request_id": "req_graph_redacted_edge_support_no_leak", "after_ingest_order": 5}
+  ]
+}

@@ -1,0 +1,1103 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from mew.implement_lane.hot_path_step_diff import (
+    analyze_hot_path_step_diff,
+    format_hot_path_step_diff_markdown,
+    write_hot_path_step_diff_report,
+)
+
+
+def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+
+def _codex_tool_events(
+    *,
+    agent: str = "codex",
+    tool: str,
+    tool_id: str,
+    summary: str,
+    arguments: dict[str, object],
+    step_id: int,
+    elapsed_ms: int,
+    status: str = "completed",
+    exit_code: int | None = None,
+) -> list[dict[str, object]]:
+    started = {
+        "schema_version": 1,
+        "agent": agent,
+        "kind": "tool_call",
+        "phase": "started",
+        "tool": tool,
+        "id": tool_id,
+        "summary": summary,
+        "arguments": arguments,
+        "step_id": step_id,
+        "elapsed_ms": elapsed_ms,
+        "source": "agent_trace.jsonl",
+        "line_number": step_id,
+    }
+    completed = {
+        **started,
+        "phase": "completed",
+        "status": status,
+        "elapsed_ms": elapsed_ms + 100,
+        "duration_ms": 100,
+    }
+    if exit_code is not None:
+        completed["exit_code"] = exit_code
+    return [started, completed]
+
+
+def _write_codex_reference(root: Path, *, agent: str = "codex") -> Path:
+    trace_dir = root / "normalized-trace"
+    rows: list[dict[str, object]] = []
+    rows.extend(
+        _codex_tool_events(
+            tool="read_file",
+            agent=agent,
+            tool_id="read-1",
+            summary="src/main.c",
+            arguments={"path": "src/main.c"},
+            step_id=1,
+            elapsed_ms=1000,
+        )
+    )
+    rows.extend(
+        _codex_tool_events(
+            tool="apply_patch",
+            agent=agent,
+            tool_id="patch-1",
+            summary="*** Begin Patch",
+            arguments={"patch": "*** Begin Patch\n*** Update File: src/main.c\n@@\n-old\n+new\n*** End Patch"},
+            step_id=2,
+            elapsed_ms=2000,
+        )
+    )
+    rows.extend(
+        _codex_tool_events(
+            tool="exec_command",
+            agent=agent,
+            tool_id="verify-1",
+            summary="pytest -q",
+            arguments={"cmd": "pytest -q"},
+            step_id=3,
+            elapsed_ms=3000,
+            exit_code=0,
+        )
+    )
+    _write_jsonl(trace_dir / "agent_trace.jsonl", rows)
+    (trace_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "agent": agent,
+                "tool_call_count": 6,
+                "tool_call_started_count": 3,
+                "first_edit_seconds": 2.0,
+                "first_verifier_seconds": 3.0,
+                "total_seconds": 3.1,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _write_codex_reference_with_command_steps(root: Path, commands: list[str]) -> Path:
+    trace_dir = root / "normalized-trace"
+    rows: list[dict[str, object]] = []
+    for index, command in enumerate(commands, 1):
+        rows.extend(
+            _codex_tool_events(
+                tool="exec_command",
+                tool_id=f"cmd-{index}",
+                summary=command,
+                arguments={"cmd": command},
+                step_id=index,
+                elapsed_ms=index * 1000,
+                exit_code=0,
+            )
+        )
+    rows.extend(
+        _codex_tool_events(
+            tool="apply_patch",
+            tool_id="patch-1",
+            summary="*** Begin Patch",
+            arguments={"patch": "*** Begin Patch\n*** Update File: src/main.c\n@@\n-old\n+new\n*** End Patch"},
+            step_id=len(commands) + 1,
+            elapsed_ms=(len(commands) + 1) * 1000,
+        )
+    )
+    _write_jsonl(trace_dir / "agent_trace.jsonl", rows)
+    (trace_dir / "summary.json").write_text(
+        json.dumps({"schema_version": 1, "agent": "codex", "tool_call_count": len(rows)}),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _write_codex_reference_with_commands(root: Path, commands: list[str]) -> Path:
+    trace_dir = root / "normalized-trace"
+    rows: list[dict[str, object]] = []
+    for index, command in enumerate(commands, 1):
+        rows.extend(
+            _codex_tool_events(
+                tool="exec_command",
+                tool_id=f"cmd-{index}",
+                summary=command,
+                arguments={"cmd": command},
+                step_id=index,
+                elapsed_ms=index * 1000,
+                exit_code=0,
+            )
+        )
+    _write_jsonl(trace_dir / "agent_trace.jsonl", rows)
+    (trace_dir / "summary.json").write_text(
+        json.dumps({"schema_version": 1, "agent": "codex", "tool_call_count": len(rows)}),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _write_codex_reference_with_tool_steps(root: Path, steps: list[dict[str, object]]) -> Path:
+    trace_dir = root / "normalized-trace"
+    rows: list[dict[str, object]] = []
+    for index, step in enumerate(steps, 1):
+        events = _codex_tool_events(
+            tool=str(step["tool"]),
+            tool_id=f"step-{index}",
+            summary=str(step.get("summary") or step.get("command") or step["tool"]),
+            arguments=dict(step.get("arguments") or {}),
+            step_id=index,
+            elapsed_ms=index * 1000,
+            exit_code=step.get("exit_code") if isinstance(step.get("exit_code"), int) else None,
+        )
+        if isinstance(step.get("source_mutation"), dict):
+            events[-1]["source_mutation"] = dict(step["source_mutation"])  # type: ignore[index]
+            events[-1]["side_effect_kinds"] = ["file_write"]
+            events[-1]["source_mutation_effect_kinds"] = ["file_write"]
+        rows.extend(events)
+    _write_jsonl(trace_dir / "agent_trace.jsonl", rows)
+    (trace_dir / "summary.json").write_text(
+        json.dumps({"schema_version": 1, "agent": "codex", "tool_call_count": len(rows)}),
+        encoding="utf-8",
+    )
+    return root
+
+
+def _native_call(sequence: int, turn: int, call_id: str, tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
+    return {
+        "sequence": sequence,
+        "kind": "function_call",
+        "turn_id": f"turn-{turn}",
+        "call_id": call_id,
+        "tool_name": tool_name,
+        "arguments_json_text": json.dumps(arguments),
+        "output_index": sequence,
+    }
+
+
+def _native_output(sequence: int, turn: int, call_id: str, tool_name: str, output: str, *, exit_code: int = 0) -> dict[str, object]:
+    return {
+        "sequence": sequence,
+        "kind": "function_call_output",
+        "turn_id": f"turn-{turn}",
+        "call_id": call_id,
+        "tool_name": tool_name,
+        "status": "completed",
+        "output_text_or_ref": f"{output}; exit_code={exit_code}",
+        "output_index": sequence,
+    }
+
+
+def _write_mew_artifact(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    calls = [
+        _native_call(1, 1, "scan-1", "exec_command", {"cmd": "rg TODO src"}),
+        _native_call(3, 2, "scan-2", "exec_command", {"cmd": "rg FIXME src"}),
+        _native_call(5, 3, "read-1", "read_file", {"path": "src/main.c"}),
+        _native_call(7, 4, "patch-1", "apply_patch", {"patch": "*** Begin Patch\n*** End Patch", "apply": True}),
+        _native_call(9, 5, "verify-1", "run_tests", {"command": "pytest -q"}),
+    ]
+    outputs = [
+        _native_output(2, 1, "scan-1", "exec_command", "one TODO"),
+        _native_output(4, 2, "scan-2", "exec_command", "one FIXME"),
+        _native_output(6, 3, "read-1", "read_file", "old"),
+        _native_output(8, 4, "patch-1", "apply_patch", "patched"),
+        _native_output(10, 5, "verify-1", "run_tests", "passed"),
+    ]
+    items = [item for pair in zip(calls, outputs) for item in pair]
+    (root / "response_transcript.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+    (root / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "metrics": {
+                    "tool_latency": [
+                        {"call_id": "scan-1", "started_ms": 1000, "finished_ms": 100},
+                        {"call_id": "scan-2", "started_ms": 2000, "finished_ms": 100},
+                        {"call_id": "read-1", "started_ms": 3000, "finished_ms": 100},
+                        {"call_id": "patch-1", "started_ms": 4000, "finished_ms": 100},
+                        {"call_id": "verify-1", "started_ms": 5000, "finished_ms": 100},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "transcript_metrics.json").write_text(
+        json.dumps({"call_count": 5, "output_count": 5, "pairing_valid": True, "provider_native_tool_loop": True}),
+        encoding="utf-8",
+    )
+    (root / "native-provider-requests.json").write_text(
+        json.dumps({"status": "completed", "request_count": 5, "native_transport_kind": "provider_native"}),
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_hot_path_step_diff_compares_reference_and_mew_native_artifact(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    codex_summary = report["summary"]["codex"]
+    mew_summary = report["summary"]["mew"]
+    assert codex_summary["probe_count_before_first_mutation"] == 1
+    assert mew_summary["probe_count_before_first_mutation"] == 3
+    assert codex_summary["first_mutation_turn"] == 2
+    assert mew_summary["first_mutation_turn"] == 4
+    assert [step["intent"] for step in report["normalized_codex_steps"]] == [
+        "source_read",
+        "mutation",
+        "runtime_verifier",
+    ]
+    assert [step["intent"] for step in report["normalized_mew_steps"]] == [
+        "source_scan",
+        "source_scan",
+        "source_read",
+        "mutation",
+        "runtime_verifier",
+    ]
+    mew_repeats = report["repeated_probe_family_diagnostics"]["mew"]["before_first_mutation"]
+    assert mew_repeats[0]["family"] == "text_search"
+    assert report["possible_first_patch_opportunity_diagnostics"][0]["kind"] == (
+        "reference_first_mutation_probe_budget_exceeded"
+    )
+    assert report["summary"]["mew"]["artifact_summary"]["native_provider_requests"]["request_count"] == 5
+    assert report["h0_readiness_diagnostics"]["agents"]["mew"]["first_patch_readiness_step_index"] == 3
+    assert report["h0_readiness_diagnostics"]["agents"]["codex"]["readiness_to_mutation_steps"] == 0
+    assert report["pairwise_comparisons"][0]["comparison_id"] == "codex_vs_mew"
+
+
+def test_hot_path_step_diff_classifies_done_candidate_and_internal_gate_sidecars(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+    _write_jsonl(
+        mew_root / "done_candidates.jsonl",
+        [
+            {
+                "done_candidate_id": "done-candidate:turn-6:abc",
+                "turn_id": "turn-6",
+                "assistant_text_preview": "Done after verifier passed.",
+                "reason": "assistant_message_without_tool_call",
+            }
+        ],
+    )
+    _write_jsonl(
+        mew_root / "native_finish_gate_decisions.jsonl",
+        [
+            {
+                "decision_id": "native-finish-gate:turn-6:abc",
+                "done_candidate_id": "done-candidate:turn-6:abc",
+                "turn_id": "turn-6",
+                "result": "allow",
+                "lane_status": "completed",
+                "reason": "trusted final verifier closeout exited 0",
+            }
+        ],
+    )
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    intents = [step["intent"] for step in report["normalized_mew_steps"]]
+    assert intents[-2:] == ["done_candidate", "internal_gate"]
+    assert report["summary"]["mew"]["done_candidate_turn_count"] == 1
+    assert report["summary"]["mew"]["internal_gate_turn_count"] == 1
+    assert report["summary"]["mew"]["completed_after_internal_gate_count"] == 1
+    assert report["summary"]["mew"]["artifact_summary"]["done_candidates"]["row_count"] == 1
+    assert report["summary"]["mew"]["artifact_summary"]["internal_finish_gate"]["row_count"] == 1
+    assert report["summary"]["mew"]["tool_call_started_count"] == 5
+    assert report["summary"]["mew"]["tool_step_count"] == 5
+    assert report["summary"]["mew"]["sidecar_step_count"] == 2
+    assert report["agents"]["mew"]["metrics"]["tool_result_pairing"]["paired"] == 5
+
+
+def test_hot_path_step_diff_keeps_sidecars_from_becoming_primary_trace(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = tmp_path / "mew"
+    _write_jsonl(
+        mew_root / "done_candidates.jsonl",
+        [
+            {
+                "done_candidate_id": "done-candidate:turn-6:abc",
+                "turn_id": "turn-6",
+                "assistant_text_preview": "Done after verifier passed.",
+            }
+        ],
+    )
+    _write_jsonl(
+        mew_root / "native_finish_gate_decisions.jsonl",
+        [
+            {
+                "decision_id": "native-finish-gate:turn-6:abc",
+                "turn_id": "turn-6",
+                "result": "allow",
+                "lane_status": "completed",
+            }
+        ],
+    )
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["inputs"]["mew"]["status"] == "missing"
+    assert report["normalized_mew_steps"] == []
+    assert report["summary"]["mew"]["tool_step_count"] == 0
+    assert report["summary"]["mew"]["sidecar_step_count"] == 0
+    assert report["summary"]["mew"]["artifact_summary"]["done_candidates"]["row_count"] == 1
+    assert report["summary"]["mew"]["artifact_summary"]["internal_finish_gate"]["row_count"] == 1
+    assert any("no mew response transcript" in warning for warning in report["warnings"])
+
+
+def test_hot_path_step_diff_keeps_sidecars_for_message_only_core_trace(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = tmp_path / "mew"
+    mew_root.mkdir(parents=True, exist_ok=True)
+    (mew_root / "response_transcript.json").write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "sequence": 1,
+                        "kind": "message",
+                        "turn_id": "turn-6",
+                        "output_text_or_ref": "Done.",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        mew_root / "done_candidates.jsonl",
+        [
+            {
+                "done_candidate_id": "done-candidate:turn-6:abc",
+                "turn_id": "turn-6",
+                "assistant_text_preview": "Done.",
+            }
+        ],
+    )
+    _write_jsonl(
+        mew_root / "native_finish_gate_decisions.jsonl",
+        [
+            {
+                "decision_id": "native-finish-gate:turn-6:abc",
+                "turn_id": "turn-6",
+                "result": "allow",
+                "lane_status": "completed",
+            }
+        ],
+    )
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["inputs"]["mew"]["status"] == "loaded"
+    assert [step["intent"] for step in report["normalized_mew_steps"]] == ["done_candidate", "internal_gate"]
+    assert report["summary"]["mew"]["tool_step_count"] == 0
+    assert report["summary"]["mew"]["sidecar_step_count"] == 2
+    assert report["summary"]["mew"]["done_candidate_turn_count"] == 1
+    assert report["summary"]["mew"]["completed_after_internal_gate_count"] == 1
+
+
+def test_hot_path_step_diff_sorts_and_classifies_ng_resume_sidecars(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+    _write_jsonl(
+        mew_root / "ng_resume_signals.jsonl",
+        [
+            {
+                "decision_id": "ng-resume:turn-3:abc",
+                "turn_id": "turn-3",
+                "concise_reason": "finish blocked",
+                "repair_focus": "rerun verifier",
+            }
+        ],
+    )
+    _write_jsonl(
+        mew_root / "native_finish_gate_decisions.jsonl",
+        [
+            {
+                "decision_id": "native-finish-gate:turn-9:def",
+                "turn_id": "turn-9",
+                "result": "block",
+                "lane_status": "blocked_return",
+                "reason": "verifier failed",
+            },
+            {
+                "decision_id": "native-finish-gate:turn-6:abc",
+                "turn_id": "turn-6",
+                "result": "allow",
+                "lane_status": "completed",
+                "reason": "trusted verifier passed",
+            },
+        ],
+    )
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    sidecar_steps = [step for step in report["normalized_mew_steps"] if step["intent"] in {"internal_gate", "blocked_return", "ng_resume"}]
+    assert [(step["turn"], step["intent"]) for step in sidecar_steps] == [
+        (3, "ng_resume"),
+        (6, "internal_gate"),
+        (9, "blocked_return"),
+    ]
+    intents = [step["intent"] for step in report["normalized_mew_steps"]]
+    assert intents.index("ng_resume") < intents.index("mutation")
+    assert report["summary"]["mew"]["internal_gate_turn_count"] == 1
+    assert report["summary"]["mew"]["ng_resume_turn_count"] == 1
+    assert report["summary"]["mew"]["blocked_return_turn_count"] == 1
+    assert report["summary"]["mew"]["sidecar_step_count"] == 3
+    assert report["summary"]["mew"]["artifact_summary"]["ng_resume_signals"]["row_count"] == 1
+
+
+def test_hot_path_step_diff_writes_json_and_markdown(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+    out_json = tmp_path / "out" / "step-diff.json"
+    out_md = tmp_path / "out" / "step-diff.md"
+
+    report = write_hot_path_step_diff_report(
+        codex_reference_root=codex_root,
+        mew_artifact_root=mew_root,
+        out_json=out_json,
+        out_md=out_md,
+    )
+    markdown = format_hot_path_step_diff_markdown(report)
+
+    assert out_json.exists()
+    assert out_md.exists()
+    assert json.loads(out_json.read_text(encoding="utf-8"))["report_kind"] == "m6_24_hot_path_observability"
+    assert "Normalized Codex Steps" in out_md.read_text(encoding="utf-8")
+    assert "Normalized mew Steps" in markdown
+
+
+def test_hot_path_step_diff_classifies_added_source_direct_compile_as_standalone_candidate(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "x86_64-linux-gnu-gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "x86_64-linux-gnu-gcc -O2 -o /app/target src/generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+    markdown = format_hot_path_step_diff_markdown(report)
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["direct_artifact_builds"][0]["source_path"] == "src/generated_runner.c"
+    assert provenance["direct_artifact_builds"][0]["output_path"] == "/app/target"
+    assert "`src/generated_runner.c` -> `/app/target`" in markdown
+
+
+def test_hot_path_step_diff_classifies_existing_source_update_as_source_connected(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Update File: src/main.c",
+                            "@@",
+                            "-return 1;",
+                            "+return 0;",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {"tool": "exec_command", "arguments": {"cmd": "make target"}, "command": "make target"},
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "source_connected"
+    assert provenance["updated_existing_paths"] == ["src/main.c"]
+
+
+def test_hot_path_step_diff_classifies_write_file_direct_compile_as_standalone_candidate(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "write_file",
+                "arguments": {"path": "src/generated_runner.c", "content": "int main(void) { return 0; }\n"},
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "gcc -O2 -o /app/target src/generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["added_source_paths"] == ["src/generated_runner.c"]
+
+
+def test_hot_path_step_diff_classifies_mutation_changed_path_direct_compile_as_standalone_candidate(
+    tmp_path: Path,
+) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "summary": "Success. Updated files:\nA src/generated_runner.c\nDiffstat: +1/-0",
+                "source_mutation": {
+                    "changed_count": 1,
+                    "changed_paths": ["src/generated_runner.c"],
+                    "effect_kinds": ["file_write"],
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target generated_runner.c"},
+                "command": "gcc -O2 -o /app/target generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["ambiguous_source_paths"] == ["src/generated_runner.c"]
+    assert provenance["direct_artifact_builds"][0]["source_path"] == "src/generated_runner.c"
+
+
+def test_hot_path_step_diff_prefers_direct_build_over_existing_source_update(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Update File: src/main.c",
+                            "@@",
+                            "-return 1;",
+                            "+return 0;",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "gcc -O2 -o /app/target src/generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["updated_existing_paths"] == ["src/main.c"]
+
+
+def test_hot_path_step_diff_classifies_real_build_config_updates_as_connected(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Update File: cmake/toolchain.cmake",
+                            "@@",
+                            "-set(OPT 0)",
+                            "+set(OPT 1)",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            }
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "source_connected"
+
+
+def test_hot_path_step_diff_does_not_treat_build_output_paths_as_build_config(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** Update File: build/output.log",
+                            "@@",
+                            "-old",
+                            "+new",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "gcc -O2 -o /app/target src/generated_runner.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "standalone_replacement_candidate"
+    assert provenance["updated_existing_paths"] == []
+
+
+def test_hot_path_step_diff_classifies_insufficient_provenance_as_unknown(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {"tool": "exec_command", "arguments": {"cmd": "pytest -q"}, "command": "pytest -q"},
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "unknown"
+
+
+def test_hot_path_step_diff_classifies_added_support_header_included_by_existing_source_as_connected(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: include/support_mode.h",
+                            "+#define SUPPORT_MODE 1",
+                            "*** Update File: src/main.c",
+                            "@@",
+                            "+#include \"support_mode.h\"",
+                            "+int mode = SUPPORT_MODE;",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {"tool": "exec_command", "arguments": {"cmd": "make target"}, "command": "make target"},
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "source_connected"
+    assert any(item["kind"] == "updated_existing_file_references_added_file" for item in provenance["evidence"])
+
+
+def test_hot_path_step_diff_does_not_use_bare_stem_as_integration_reference(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: include/utils.h",
+                            "+#define UTILS 1",
+                            "*** Update File: src/main.c",
+                            "@@",
+                            "+int my_utils_mode = 1;",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            }
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    provenance = report["summary"]["codex"]["source_integration_provenance"]
+
+    assert provenance["classification"] == "source_connected"
+    assert not any(item["kind"] == "updated_existing_file_references_added_file" for item in provenance["evidence"])
+
+
+def test_hot_path_step_diff_ignores_compiler_words_in_echo_or_script_text(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "echo gcc -O2 -o /app/target src/generated_runner.c"},
+                "command": "echo gcc -O2 -o /app/target src/generated_runner.c",
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "python - <<'PY'\nprint('gcc -o /app/target src/generated_runner.c')\nPY"},
+                "command": "python - <<'PY'\nprint('gcc -o /app/target src/generated_runner.c')\nPY",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "unknown"
+
+
+def test_hot_path_step_diff_ignores_compiler_text_inside_heredoc_script_write(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: src/generated_runner.c",
+                            "+int main(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {
+                    "cmd": "\n".join(
+                        [
+                            "cat > build-generated.sh <<'SH'",
+                            "gcc -O2 -o /app/target src/generated_runner.c",
+                            "SH",
+                        ]
+                    )
+                },
+                "command": "\n".join(
+                    [
+                        "cat > build-generated.sh <<'SH'",
+                        "gcc -O2 -o /app/target src/generated_runner.c",
+                        "SH",
+                    ]
+                ),
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "unknown"
+
+
+def test_hot_path_step_diff_does_not_match_added_source_by_colliding_basename_path(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_tool_steps(
+        tmp_path / "codex",
+        [
+            {
+                "tool": "apply_patch",
+                "arguments": {
+                    "patch": "\n".join(
+                        [
+                            "*** Begin Patch",
+                            "*** Add File: lib/main.c",
+                            "+int replacement(void) { return 0; }",
+                            "*** End Patch",
+                        ]
+                    )
+                },
+            },
+            {
+                "tool": "exec_command",
+                "arguments": {"cmd": "gcc -O2 -o /app/target src/main.c"},
+                "command": "gcc -O2 -o /app/target src/main.c",
+            },
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["summary"]["codex"]["source_integration_provenance_classification"] == "unknown"
+
+
+def test_hot_path_step_diff_can_compare_claude_code_reference(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    claude_root = _write_codex_reference(tmp_path / "claude-code", agent="claude")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(
+        codex_reference_root=codex_root,
+        claude_code_reference_root=claude_root,
+        mew_artifact_root=mew_root,
+    )
+
+    assert report["inputs"]["claude_code"]["status"] == "loaded"
+    assert report["summary"]["claude_code"]["first_mutation_step_index"] == 2
+    assert "normalized_claude_code_steps" in report
+    assert [item["comparison_id"] for item in report["pairwise_comparisons"]] == [
+        "codex_vs_mew",
+        "claude_code_vs_mew",
+    ]
+    assert report["h0_readiness_diagnostics"]["agents"]["claude_code"]["diagnostic_only"] is True
+
+
+def test_hot_path_step_diff_marks_missing_reference_not_comparable(tmp_path: Path) -> None:
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=tmp_path / "missing-codex", mew_artifact_root=mew_root)
+
+    assert report["inputs"]["codex"]["status"] == "missing"
+    assert report["pairwise_comparisons"][0]["comparable"] is False
+    assert report["pairwise_comparisons"][0]["metric_deltas"]["probe_count_before_mutation"]["comparable"] is False
+    assert report["pairwise_comparisons"][0]["metric_deltas"]["probe_count_before_mutation"]["delta"] is None
+
+
+def test_hot_path_step_diff_classifies_pure_dependency_checks(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_commands(
+        tmp_path / "codex",
+        [
+            "node --version; which gcc || true; command -v make",
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["normalized_codex_steps"][0]["intent"] == "dependency_probe"
+
+
+def test_hot_path_step_diff_reports_pairing_gaps(tmp_path: Path) -> None:
+    codex_root = tmp_path / "codex"
+    trace_dir = codex_root / "normalized-trace"
+    rows = [
+        {
+            "schema_version": 1,
+            "agent": "codex",
+            "kind": "tool_call",
+            "phase": "started",
+            "tool": "exec_command",
+            "id": "missing-result",
+            "summary": "rg TODO",
+            "arguments": {"cmd": "rg TODO"},
+        },
+        {
+            "schema_version": 1,
+            "agent": "codex",
+            "kind": "tool_call",
+            "phase": "completed",
+            "tool": "exec_command",
+            "id": "missing-call",
+            "summary": "rg FIXME",
+            "arguments": {"cmd": "rg FIXME"},
+        },
+    ]
+    _write_jsonl(trace_dir / "agent_trace.jsonl", rows)
+    (trace_dir / "summary.json").write_text(json.dumps({"schema_version": 1, "agent": "codex"}), encoding="utf-8")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    pairing = report["agents"]["codex"]["metrics"]["tool_result_pairing"]
+    assert pairing["missing_result"] == 1
+    assert pairing["missing_call"] == 1
+    assert pairing["paired"] == 0
+
+
+def test_hot_path_step_diff_accepts_normalized_json_trace(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference(tmp_path / "codex")
+    trace_dir = codex_root / "normalized-trace"
+    rows = [json.loads(line) for line in (trace_dir / "agent_trace.jsonl").read_text(encoding="utf-8").splitlines()]
+    (trace_dir / "agent_trace.jsonl").unlink()
+    (trace_dir / "agent_trace.json").write_text(json.dumps({"events": rows}), encoding="utf-8")
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["sources"]["codex"]["events"].endswith("agent_trace.json")
+    assert report["summary"]["codex"]["first_mutation_turn"] == 2
+
+
+def test_hot_path_step_diff_does_not_treat_readonly_greater_than_text_as_mutation(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_commands(
+        tmp_path / "codex",
+        [
+            "llvm-objdump -d ./program | rg 'branch > target'",
+            "node <<'NODE'\nconst shifted = value >>> 1;\n// comment mentions comparison > src/main.c\nNODE",
+            "rg 'state > next' src >/dev/null",
+            "python -c \"print('literal > src/main.c')\"",
+            "rg apply_patch src",
+            "apply_patch <<'PATCH'\n*** Begin Patch\n*** Update File: src/main.c\n@@\n-old\n+new\n*** End Patch\nPATCH",
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    codex_steps = report["normalized_codex_steps"]
+    assert [step["intent"] for step in codex_steps[:5]] == [
+        "disassembly_probe",
+        "runtime_verifier",
+        "source_scan",
+        "runtime_verifier",
+        "source_scan",
+    ]
+    assert codex_steps[5]["intent"] == "binary_probe"
+    assert all(step["intent"] != "mutation" for step in codex_steps)
+    assert report["summary"]["codex"]["first_mutation_step_index"] is None
+
+
+def test_hot_path_step_diff_does_not_infer_source_redirection_mutation_without_evidence(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_commands(
+        tmp_path / "codex",
+        [
+            "printf 'print(42)\\n' > src/generated.py",
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    first_step = report["normalized_codex_steps"][0]
+    assert first_step["intent"] == "other_probe"
+    assert "command_write_pattern" not in first_step["classification_basis"]
+
+
+def test_hot_path_step_diff_keeps_read_only_shell_operators_out_of_mutations(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_command_steps(
+        tmp_path / "codex",
+        [
+            "llvm-objdump -d /app/program | rg 'slt|bgtz|a > b|>' >/dev/null",
+            "node -e \"const fs = require('fs'); const b = fs.readFileSync('/app/program'); console.log(b[0] >>> 2)\"",
+            "python -c \"print(3 > 2)\" > /dev/null",
+        ],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+    codex_steps = report["normalized_codex_steps"]
+
+    assert [step["intent"] for step in codex_steps[:3]] == [
+        "disassembly_probe",
+        "binary_probe",
+        "runtime_verifier",
+    ]
+    assert all(step["intent"] != "mutation" for step in codex_steps[:3])
+    assert report["summary"]["codex"]["first_mutation_step_index"] == 4
+
+
+def test_hot_path_step_diff_keeps_heredoc_redirection_non_mutating_without_side_effect_evidence(tmp_path: Path) -> None:
+    codex_root = _write_codex_reference_with_command_steps(
+        tmp_path / "codex",
+        ["cat <<'EOF' > src/generated.c\nint main(void) { return 0; }\nEOF"],
+    )
+    mew_root = _write_mew_artifact(tmp_path / "mew")
+
+    report = analyze_hot_path_step_diff(codex_reference_root=codex_root, mew_artifact_root=mew_root)
+
+    assert report["normalized_codex_steps"][0]["intent"] == "source_read"
+    assert report["summary"]["codex"]["first_mutation_step_index"] == 2

@@ -1,0 +1,86 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "broken_forbidden_retrieval",
+  "fixture_version": "1.0.0",
+  "fixture_family": "broken_adapter_expected_failures",
+  "phase": "P0",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_ok",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_020",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-12T09:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira stores invoices in folder Orion."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_blocked",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_020",
+      "turn_id": "turn_002",
+      "event_time": "2026-01-12T09:05:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira shared a retired billing note."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [],
+  "requests": [
+    {
+      "request_id": "req_forbid_primary",
+      "mode": "denylist_check",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "Where does Mira store invoices?",
+        "intent": "preference_lookup"
+      },
+      "k": 2,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"]
+      },
+      "budget": {
+        "max_evidence_items": 2,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_ok"],
+        "must_not_return_evidence_ids": ["exp_blocked"],
+        "stale_evidence_ids": [],
+        "expected_abstention": false
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_ok", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_blocked", "ingest_order": 2},
+    {"type": "request", "request_id": "req_forbid_primary", "after_ingest_order": 2}
+  ]
+}

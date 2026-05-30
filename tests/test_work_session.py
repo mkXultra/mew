@@ -104,6 +104,20 @@ def add_coding_task(state):
 
 
 class WorkSessionTests(unittest.TestCase):
+    def test_work_session_runtime_command_preserves_verify_command_source(self):
+        session = {
+            "default_options": {
+                "allow_verify": True,
+                "verify_command": "node vm.js",
+                "verify_command_source": "auto_detected",
+            }
+        }
+
+        rendered = work_session_module.work_session_runtime_command(session, 7)
+
+        self.assertIn("--verify-command 'node vm.js'", rendered)
+        self.assertIn("--verify-command-source auto_detected", rendered)
+
     PATCH_DRAFT_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "work_loop" / "patch_draft"
 
     def _load_patch_draft_fixture_scenario(self, name):
@@ -1169,6 +1183,36 @@ class WorkSessionTests(unittest.TestCase):
         self.assertEqual(blocker.get("path"), "src/mew/work_session.py")
         self.assertEqual(blocker.get("line_start"), 5)
         self.assertEqual(blocker.get("line_end"), 10)
+
+    def test_normalize_active_work_todo_preserves_first_write_readiness(self):
+        todo = _normalize_active_work_todo(
+            {
+                "id": "todo-1-1",
+                "status": "drafting",
+                "source": {
+                    "plan_item": "Draft one edit",
+                    "target_paths": ["src/mew/work_session.py"],
+                },
+                "first_write_readiness": {
+                    "status": "due",
+                    "first_write_due": True,
+                    "probe_threshold": 3,
+                    "probes_seen_without_write": 3,
+                    "probe_count_before_first_write": 3,
+                    "first_write_attempt_turn": 2,
+                    "target_paths": ["src/mew/work_session.py"],
+                    "required_next_action": "make one scoped source mutation",
+                    "probe_provider_call_ids": ["probe-1", "probe-2", "probe-3"],
+                },
+            }
+        )
+        readiness = todo.get("first_write_readiness") or {}
+
+        self.assertTrue(readiness.get("first_write_due"))
+        self.assertEqual(readiness.get("probe_count_before_first_write"), 3)
+        self.assertEqual(readiness.get("first_write_attempt_turn"), 2)
+        self.assertEqual(readiness.get("target_paths"), ["src/mew/work_session.py"])
+        self.assertEqual(readiness.get("probe_provider_call_ids"), ["probe-1", "probe-2", "probe-3"])
 
     def test_active_work_todo_lane_normalizes_tiny_default_and_preserves_explicit_strings(self):
         base_todo = {
@@ -9883,6 +9927,117 @@ class WorkSessionTests(unittest.TestCase):
         finally:
             frame_path.unlink(missing_ok=True)
 
+    def test_work_oneshot_debug_cleanup_removes_safe_tmp_glob_when_deferred(self):
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="mew-debug-cleanup-") as tmp:
+            root = Path(tmp)
+            frame_a = root / "frame.bmp"
+            frame_b = root / "frame_000000.bmp"
+            keep = root / "keep.txt"
+            frame_a.write_bytes(b"stale-a")
+            frame_b.write_bytes(b"stale-b")
+            keep.write_text("keep", encoding="utf-8")
+            args = SimpleNamespace(defer_verify=True, debug_cleanup=[f"{root}/frame*.bmp"])
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["debug_cleanup_specs"][0]["status"], "matched")
+            self.assertEqual(cleanup["debug_cleanup_specs"][0]["match_count"], 2)
+            self.assertEqual(
+                sorted(item["artifact"] for item in cleanup["artifacts"]),
+                sorted([str(frame_a), str(frame_b)]),
+            )
+            self.assertTrue(all(item["source"] == "debug_cleanup" for item in cleanup["artifacts"]))
+            self.assertFalse(frame_a.exists())
+            self.assertFalse(frame_b.exists())
+            self.assertTrue(keep.exists())
+
+    def test_work_oneshot_debug_cleanup_rejects_unsafe_specs(self):
+        args = SimpleNamespace(
+            defer_verify=True,
+            debug_cleanup=[
+                "/tmp",
+                "/tmp/",
+                "/tmp//mew-frame.bmp",
+                "/var/tmp/mew-frame.bmp",
+                "/tmp/../tmp/mew-frame.bmp",
+                "/tmp/**/frame.bmp",
+            ],
+        )
+
+        cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+        self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+        self.assertEqual(cleanup["artifacts"], [])
+        self.assertEqual({item["status"] for item in cleanup["debug_cleanup_specs"]}, {"rejected"})
+        reasons = " ".join(item["reason"] for item in cleanup["debug_cleanup_specs"])
+        self.assertIn("refuses the /tmp directory itself", reasons)
+        self.assertIn("malformed /tmp// paths", reasons)
+        self.assertIn("only accepts /tmp/ paths", reasons)
+        self.assertIn("parent path segments", reasons)
+        self.assertIn("recursive glob", reasons)
+
+    def test_work_oneshot_debug_cleanup_rejects_directory_match_and_symlink_escape(self):
+        outside_root = Path.cwd().resolve()
+        if str(outside_root).startswith("/tmp/"):
+            self.skipTest("repository cwd is under /tmp; cannot build a stable symlink-escape target")
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="mew-debug-cleanup-") as tmp, tempfile.TemporaryDirectory(
+            dir=outside_root,
+            prefix=".mew-debug-cleanup-outside-",
+        ) as outside_tmp:
+            root = Path(tmp)
+            inner_dir = root / "frame-dir.bmp"
+            inner_dir.mkdir()
+            outside = Path(outside_tmp) / "outside.txt"
+            outside.write_text("outside", encoding="utf-8")
+            escaped_link = root / "frame-escaped.bmp"
+            try:
+                escaped_link.symlink_to(outside)
+            except OSError as exc:
+                self.skipTest(f"symlink creation unavailable: {exc}")
+            try:
+                args = SimpleNamespace(defer_verify=True, debug_cleanup=[f"{root}/frame-dir*", f"{root}/frame-escaped*"])
+
+                cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+                self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+                self.assertEqual(cleanup["artifacts"], [])
+                reasons = " ".join(item["reason"] for item in cleanup["debug_cleanup_specs"])
+                self.assertIn("refuses directory match", reasons)
+                self.assertIn("escaped /tmp", reasons)
+                self.assertTrue(inner_dir.exists())
+                self.assertTrue(escaped_link.exists())
+                self.assertTrue(outside.exists())
+            finally:
+                escaped_link.unlink(missing_ok=True)
+
+    def test_work_oneshot_debug_cleanup_rejects_empty_match(self):
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="mew-debug-cleanup-") as tmp:
+            args = SimpleNamespace(defer_verify=True, debug_cleanup=[f"{tmp}/missing*.bmp"])
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"], [])
+            self.assertEqual(cleanup["debug_cleanup_specs"][0]["status"], "rejected")
+            self.assertIn("no files matched", cleanup["debug_cleanup_specs"][0]["reason"])
+
+    def test_work_oneshot_debug_cleanup_skips_without_defer_verify(self):
+        with tempfile.NamedTemporaryFile(dir="/tmp", delete=False, prefix="mew-debug-cleanup-", suffix=".bmp") as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+        try:
+            args = SimpleNamespace(defer_verify=False, debug_cleanup=[str(frame_path)])
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(args, {})
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"], [])
+            self.assertEqual(cleanup["debug_cleanup_specs"][0]["status"], "skipped")
+            self.assertTrue(frame_path.exists())
+        finally:
+            frame_path.unlink(missing_ok=True)
+
     def test_work_oneshot_cleanup_deferred_runtime_artifacts_uses_report_steps(self):
         with tempfile.NamedTemporaryFile(dir="/tmp", delete=False, prefix="mew-frame-", suffix=".bmp") as frame:
             frame.write(b"stale")
@@ -9982,6 +10137,253 @@ class WorkSessionTests(unittest.TestCase):
             self.assertFalse(frame_path.exists())
         finally:
             frame_path.unlink(missing_ok=True)
+
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_uses_implement_v2_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.NamedTemporaryFile(
+            dir="/tmp",
+            delete=False,
+            prefix="mew-frame-",
+            suffix=".bmp",
+        ) as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+            artifacts = Path(tmp) / "artifacts"
+            v2_dir = artifacts / "implement_v2"
+            v2_dir.mkdir(parents=True)
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "final-external-frame-proof",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "command": f"node /app/vm.js && test -s {frame_path}",
+                                        "cwd": "/app",
+                                        "exit_code": 0,
+                                        "stdout": f"I_InitGraphics\nBMP_OK {frame_path}\n",
+                                        "execution_contract_normalized": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "verification",
+                                            "purpose": "verification",
+                                        },
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": str(frame_path),
+                                                "path": str(frame_path),
+                                                "kind": "file",
+                                                "status": "passed",
+                                                "pre_run_stat": {"exists": False, "path": str(frame_path)},
+                                                "post_run_stat": {"exists": True, "path": str(frame_path)},
+                                                "checks": [{"type": "exists", "passed": True}],
+                                            }
+                                        ],
+                                        "verifier_evidence": {"verdict": "pass"},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(defer_verify=True, oneshot_artifacts=str(artifacts))
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(
+                args,
+                {},
+                task={
+                    "title": "runtime frame verifier",
+                    "description": f"Running vm.js writes {frame_path} during a fresh verifier run.",
+                },
+                work_report={"steps": []},
+            )
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"][0]["artifact"], str(frame_path))
+            self.assertEqual(cleanup["artifacts"][0]["source_tool_call_id"], "final-external-frame-proof")
+            self.assertEqual(cleanup["artifacts"][0]["status"], "removed")
+            self.assertFalse(frame_path.exists())
+
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_uses_raw_final_verifier_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.NamedTemporaryFile(
+            dir="/tmp",
+            delete=False,
+            prefix="mew-frame-",
+            suffix=".bmp",
+        ) as frame:
+            frame.write(b"stale")
+            frame_path = Path(frame.name)
+            artifacts = Path(tmp) / "artifacts"
+            v2_dir = artifacts / "implement_v2"
+            v2_dir.mkdir(parents=True)
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "prior-internal-frame-proof",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "command": f"node vm.js && test -s {frame_path}",
+                                        "cwd": "/app",
+                                        "exit_code": 0,
+                                        "stdout": f"first frame saved {frame_path}\n",
+                                        "execution_contract": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "final-verifier",
+                                            "expected_artifacts": [{"path": str(frame_path), "kind": "file"}],
+                                        },
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": str(frame_path),
+                                                "path": str(frame_path),
+                                                "kind": "file",
+                                                "status": "passed",
+                                                "pre_run_stat": {"exists": False, "path": str(frame_path)},
+                                                "post_run_stat": {"exists": True, "path": str(frame_path)},
+                                                "checks": [{"type": "exists", "passed": True}],
+                                            }
+                                        ],
+                                        "verifier_evidence": {"verdict": "pass"},
+                                    }
+                                ],
+                            },
+                            {
+                                "provider_call_id": "final-grounded-vm-verifier",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "command": f"rm -f {frame_path} && node vm.js",
+                                        "cwd": "/app",
+                                        "exit_code": 0,
+                                        "stdout": f"first frame saved {frame_path}\n",
+                                        "execution_contract": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "final-verifier",
+                                            "purpose": "fresh runtime verifier",
+                                            "expected_artifacts": [{"path": str(frame_path), "kind": "file"}],
+                                        },
+                                        "execution_contract_normalized": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "command",
+                                            "purpose": "generic_command",
+                                            "expected_artifacts": [{"path": str(frame_path), "kind": "file"}],
+                                        },
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": str(frame_path),
+                                                "path": str(frame_path),
+                                                "kind": "file",
+                                                "status": "passed",
+                                                "pre_run_stat": {"exists": True, "path": str(frame_path)},
+                                                "post_run_stat": {"exists": True, "path": str(frame_path)},
+                                                "checks": [{"type": "exists", "passed": True}],
+                                            }
+                                        ],
+                                        "verifier_evidence": {"verdict": "pass"},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(defer_verify=True, oneshot_artifacts=str(artifacts))
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(
+                args,
+                {},
+                task={
+                    "title": "runtime frame verifier",
+                    "description": f"Running vm.js writes {frame_path} during a fresh verifier run.",
+                },
+                work_report={"steps": []},
+            )
+
+            self.assertEqual(cleanup["kind"], "deferred_verify_runtime_artifact_cleanup")
+            self.assertEqual(cleanup["artifacts"][0]["artifact"], str(frame_path))
+            self.assertEqual(cleanup["artifacts"][0]["source_tool_call_id"], "final-grounded-vm-verifier")
+            self.assertEqual(cleanup["artifacts"][0]["status"], "removed")
+            self.assertFalse(frame_path.exists())
+
+    def test_work_oneshot_cleanup_deferred_runtime_artifacts_keeps_legitimate_tmp_deliverable(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.NamedTemporaryFile(
+            dir="/tmp",
+            delete=False,
+            prefix="mew-result-",
+            suffix=".bin",
+        ) as deliverable:
+            deliverable.write(b"result")
+            deliverable_path = Path(deliverable.name)
+            artifacts = Path(tmp) / "artifacts"
+            v2_dir = artifacts / "implement_v2"
+            v2_dir.mkdir(parents=True)
+            (v2_dir / "proof-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tool_results": [
+                            {
+                                "provider_call_id": "deliverable-proof",
+                                "tool_name": "run_command",
+                                "status": "completed",
+                                "content": [
+                                    {
+                                        "command": f"run renderer && python build_result.py --out {deliverable_path}",
+                                        "cwd": "/app",
+                                        "exit_code": 0,
+                                        "stdout": f"renderer saved {deliverable_path}\n",
+                                        "execution_contract_normalized": {
+                                            "acceptance_kind": "external_verifier",
+                                            "proof_role": "verifier",
+                                            "stage": "verification",
+                                            "purpose": "verification",
+                                        },
+                                        "artifact_evidence": [
+                                            {
+                                                "artifact_id": str(deliverable_path),
+                                                "path": str(deliverable_path),
+                                                "kind": "file",
+                                                "status": "passed",
+                                                "pre_run_stat": {"exists": False, "path": str(deliverable_path)},
+                                                "post_run_stat": {"exists": True, "path": str(deliverable_path)},
+                                                "checks": [{"type": "exists", "passed": True}],
+                                            }
+                                        ],
+                                        "verifier_evidence": {"verdict": "pass"},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = SimpleNamespace(defer_verify=True, oneshot_artifacts=str(artifacts))
+
+            cleanup = commands._work_oneshot_cleanup_deferred_runtime_artifacts(
+                args,
+                {},
+                task={
+                    "title": "run renderer and save result",
+                    "description": f"Run the renderer and save the required output to {deliverable_path}",
+                },
+                work_report={"steps": []},
+            )
+
+            self.assertEqual(cleanup, {})
+            self.assertTrue(deliverable_path.exists())
+        deliverable_path.unlink(missing_ok=True)
 
     def test_work_session_resume_surfaces_final_verifier_state_transfer_gap(self):
         from mew.work_session import build_work_session_resume, format_work_session_resume
@@ -10722,6 +11124,806 @@ class WorkSessionTests(unittest.TestCase):
                 with redirect_stderr(StringIO()) as stderr:
                     self.assertEqual(main(["work", "--oneshot", "--max-steps", "0"]), 1)
                 self.assertIn("--oneshot requires --instruction", stderr.getvalue())
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_routes_to_v2_runtime_not_v1_loop(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.plan_work_model_turn") as v1_plan:
+                        with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                            with redirect_stdout(StringIO()) as stdout:
+                                self.assertEqual(
+                                    main(
+                                        [
+                                            "work",
+                                            "--oneshot",
+                                            "--instruction",
+                                            "Modify this workspace. The output should change.",
+                                            "--cwd",
+                                            str(workspace),
+                                            "--auth",
+                                            "auth.json",
+                                            "--allow-read",
+                                            ".",
+                                            "--allow-write",
+                                            ".",
+                                            "--allow-shell",
+                                            "--approval-mode",
+                                            "accept-edits",
+                                            "--work-guidance",
+                                            json.dumps(
+                                                {
+                                                    "selected_lane": "implement_v2",
+                                                    "active_work_todo": {},
+                                                    "task_contract_compiler": True,
+                                                    "lane_config": {
+                                                        "task_contract_compiler_model": "gpt-test",
+                                                        "legacy_task_contract": True,
+                                                    },
+                                                }
+                                            ),
+                                            "--max-steps",
+                                            "2",
+                                            "--json",
+                                        ]
+                                    ),
+                                    0,
+                                )
+
+                v1_plan.assert_not_called()
+                v2_run.assert_called_once()
+                lane_input = v2_run.call_args.args[0]
+                self.assertEqual(lane_input.lane, "implement_v2")
+                self.assertEqual(lane_input.lane_config["mode"], "full")
+                self.assertEqual(lane_input.lane_config["tool_surface_profile_id"], "codex_hot_path")
+                self.assertTrue(lane_input.lane_config["tool_surface_profile_default"])
+                self.assertEqual(
+                    lane_input.lane_config["tool_surface_profile_selection_source"],
+                    "default",
+                )
+                self.assertTrue(lane_input.lane_config["finish_verifier_planner_enabled"])
+                self.assertEqual(
+                    lane_input.lane_config["finish_verifier_planner_selection_source"],
+                    "default_enabled",
+                )
+                self.assertEqual(lane_input.task_contract["acceptance_constraints"], ["The output should change."])
+                self.assertNotIn("legacy_acceptance_constraints", lane_input.task_contract)
+                self.assertNotIn("task_contract_compiler", lane_input.task_contract)
+                self.assertNotIn("compiled_task_contract", lane_input.task_contract)
+                self.assertNotIn("task_contract_compiler_enabled", lane_input.lane_config)
+                self.assertNotIn("task_contract_compiler_status", lane_input.lane_config)
+                self.assertTrue(lane_input.lane_config["auto_approve_writes"])
+                self.assertEqual(lane_input.lane_config["allowed_write_roots"], [str(workspace.resolve())])
+                self.assertEqual(
+                    lane_input.persisted_lane_state["active_work_todo"]["id"],
+                    f"oneshot-{lane_input.task_id}-implement",
+                )
+                self.assertEqual(lane_input.persisted_lane_state["active_work_todo"]["lane"], "implement_v2")
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_exit_code"], 0)
+                work_report = payload["work_report"]
+                self.assertEqual(work_report["selected_lane"], "implement_v2")
+                self.assertEqual(work_report["contract_compiler"]["status"], "retired")
+                self.assertFalse(work_report["contract_compiler"]["raw_compiled_contract_stored"])
+                self.assertEqual(work_report["stop_reason"], "finish")
+                self.assertEqual(work_report["steps"][0]["action"]["type"], "implement_lane")
+                self.assertEqual(work_report["implement_lane_result"]["lane"], "implement_v2")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_preserves_timeout_metrics_after_failed_result(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="failed",
+                    lane="implement_v2",
+                    user_visible_summary="model turn failed: request timed out",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+
+                def fake_v2_run(*args, **kwargs):
+                    return v2_result
+
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", side_effect=fake_v2_run):
+                        with redirect_stdout(StringIO()) as stdout:
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        "selected_lane=implement_v2",
+                                        "--model",
+                                        "gpt-5.5",
+                                        "--model-timeout",
+                                        "123",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["work_exit_code"], 1)
+                state = load_state()
+                metrics = state["work_sessions"][0]["model_turns"][0]["model_metrics"]
+                self.assertEqual(metrics["provider"], "provider-native")
+                self.assertEqual(metrics["runtime_id"], "implement_v2_native_transcript_loop")
+                self.assertIs(metrics["provider_native_tool_loop"], True)
+                self.assertIs(metrics["model_json_main_path_detected"], False)
+                self.assertEqual(metrics["selected_lane"], "implement_v2")
+                self.assertEqual(metrics["model_backend"], "codex")
+                self.assertEqual(metrics["model"], "gpt-5.5")
+                self.assertEqual(metrics["tool_surface_profile_id"], "codex_hot_path")
+                self.assertIs(metrics["tool_surface_profile_default"], True)
+                self.assertEqual(metrics["tool_surface_profile_selection_source"], "default")
+                self.assertIs(metrics["finish_verifier_planner_enabled"], True)
+                self.assertEqual(
+                    metrics["finish_verifier_planner_selection_source"],
+                    "default_enabled",
+                )
+                self.assertEqual(metrics["model_timeout_seconds"], 123.0)
+                self.assertEqual(metrics["timeout_guard"], "work_loop_process_guard")
+                self.assertEqual(metrics["status"], "failed")
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_reduces_native_model_timeout_to_fit_wall_budget(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="failed",
+                    lane="implement_v2",
+                    user_visible_summary="model turn failed: request timed out",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        "selected_lane=implement_v2",
+                                        "--model",
+                                        "gpt-5.5",
+                                        "--model-timeout",
+                                        "600",
+                                        "--max-wall-seconds",
+                                        "600",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                1,
+                            )
+
+                self.assertEqual(v2_run.call_args.kwargs["timeout"], 570.0)
+                state = load_state()
+                metrics = state["work_sessions"][0]["model_turns"][0]["model_metrics"]
+                self.assertEqual(metrics["requested_model_timeout_seconds"], 600.0)
+                self.assertEqual(metrics["model_timeout_seconds"], 570.0)
+                self.assertEqual(metrics["native_timeout_reserve_seconds"], 30.0)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_can_enable_integration_observation_detail(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            artifact_dir = Path(tmp) / "artifacts"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = "selected_lane=implement_v2 write_integration_observation_detail=true"
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--artifacts",
+                                        str(artifact_dir),
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertTrue(lane_input.lane_config["write_integration_observation_detail"])
+                self.assertEqual(lane_input.lane_config["artifact_dir"], str(artifact_dir.resolve(strict=False)))
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_accepts_json_integration_observation_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = json.dumps(
+                    {
+                        "selected_lane": "implement_v2",
+                        "lane_config": {"write_integration_observation_detail": True},
+                    }
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertTrue(lane_input.lane_config["write_integration_observation_detail"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_accepts_finish_verifier_planner_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = (
+                    "selected_lane=implement_v2 "
+                    "finish_verifier_planner=true "
+                    "finish_verifier_planner_model=gpt-5.5"
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertTrue(lane_input.lane_config["finish_verifier_planner_enabled"])
+                self.assertEqual(
+                    lane_input.lane_config["finish_verifier_planner_selection_source"],
+                    "explicit_enabled_alias",
+                )
+                self.assertNotIn("experimental_finish_verifier_planner", lane_input.lane_config)
+                self.assertNotIn("finish_verifier_planner", lane_input.lane_config)
+                self.assertEqual(lane_input.lane_config["finish_verifier_planner_model"], "gpt-5.5")
+                self.assertNotIn("experimental_finish_verifier_planner", lane_input.task_contract["guidance"])
+                self.assertNotIn("finish_verifier_planner", lane_input.task_contract["guidance"])
+                self.assertNotIn("finish_verifier_planner_model", lane_input.task_contract["guidance"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_accepts_json_finish_verifier_planner_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = json.dumps(
+                    {
+                        "selected_lane": "implement_v2",
+                        "lane_config": {
+                            "finish_verifier_planner": True,
+                            "finish_verifier_planner_model": "gpt-5.5",
+                        },
+                    }
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertTrue(lane_input.lane_config["finish_verifier_planner_enabled"])
+                self.assertEqual(
+                    lane_input.lane_config["finish_verifier_planner_selection_source"],
+                    "explicit_enabled_alias",
+                )
+                self.assertNotIn("experimental_finish_verifier_planner", lane_input.lane_config)
+                self.assertNotIn("finish_verifier_planner", lane_input.lane_config)
+                self.assertEqual(lane_input.lane_config["finish_verifier_planner_model"], "gpt-5.5")
+                task_guidance = json.loads(lane_input.task_contract["guidance"])
+                self.assertNotIn("lane_config", task_guidance)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_records_finish_verifier_planner_opt_out(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        "selected_lane=implement_v2 finish_verifier_planner=false",
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertFalse(lane_input.lane_config["finish_verifier_planner_enabled"])
+                self.assertEqual(
+                    lane_input.lane_config["finish_verifier_planner_selection_source"],
+                    "explicit_disabled_legacy_alias",
+                )
+                self.assertNotIn("finish_verifier_planner", lane_input.lane_config)
+                self.assertNotIn("experimental_finish_verifier_planner", lane_input.lane_config)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_accepts_tool_surface_profile_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = "selected_lane=implement_v2 tool_surface_profile_id=codex_hot_path"
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertEqual(lane_input.lane_config["tool_surface_profile_id"], "codex_hot_path")
+                self.assertNotIn("tool_surface_profile_id", lane_input.task_contract["guidance"])
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_accepts_json_tool_surface_options(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                guidance = json.dumps(
+                    {
+                        "selected_lane": "implement_v2",
+                        "lane_config": {
+                            "tool_surface_profile_id": "codex_hot_path",
+                            "tool_surface_profile_options": {"enable_list_dir": True},
+                        },
+                    }
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertEqual(lane_input.lane_config["tool_surface_profile_id"], "codex_hot_path")
+                self.assertEqual(lane_input.lane_config["tool_surface_profile_options"], {"enable_list_dir": True})
+                task_guidance = json.loads(lane_input.task_contract["guidance"])
+                self.assertNotIn("lane_config", task_guidance)
+            finally:
+                os.chdir(old_cwd)
+
+    def test_work_oneshot_selected_implement_v2_accepts_json_repair_history_guidance(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                v2_result = ImplementLaneResult(
+                    status="completed",
+                    lane="implement_v2",
+                    user_visible_summary="v2 completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "implement_v2_native_transcript_loop",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                repair_history = {
+                    "task": "make-mips-interpreter",
+                    "do_not_repeat": ["broad rediscovery after the latest PC loop"],
+                    "next_probe": "inspect the latest runtime trace and artifact path",
+                }
+                guidance = json.dumps(
+                    {
+                        "selected_lane": "implement_v2",
+                        "lane_repair_history": repair_history,
+                    }
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.run_live_native_implement_v2", return_value=v2_result) as v2_run:
+                        with redirect_stdout(StringIO()):
+                            self.assertEqual(
+                                main(
+                                    [
+                                        "work",
+                                        "--oneshot",
+                                        "--instruction",
+                                        "Modify this workspace.",
+                                        "--cwd",
+                                        str(workspace),
+                                        "--auth",
+                                        "auth.json",
+                                        "--allow-read",
+                                        ".",
+                                        "--allow-write",
+                                        ".",
+                                        "--allow-shell",
+                                        "--approval-mode",
+                                        "accept-edits",
+                                        "--work-guidance",
+                                        guidance,
+                                        "--max-steps",
+                                        "2",
+                                        "--json",
+                                    ]
+                                ),
+                                0,
+                            )
+
+                lane_input = v2_run.call_args.args[0]
+                self.assertEqual(lane_input.persisted_lane_state["lane_repair_history"], repair_history)
+                self.assertNotIn("lane_repair_history", lane_input.task_contract["guidance"])
+                self.assertEqual(json.loads(lane_input.task_contract["guidance"]), {"selected_lane": "implement_v2"})
             finally:
                 os.chdir(old_cwd)
 
@@ -13176,6 +14378,96 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
             },
         )
 
+        self.assertTrue(ceiling["blocked"])
+        self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
+        self.assertEqual(
+            ceiling["reason"],
+            "long-command effective timeout cannot satisfy yield_after < effective_timeout_seconds",
+        )
+
+    def test_final_verifier_can_spend_final_proof_reserve(self):
+        parameters = {
+            "command": "python -m pytest -q /tmp/project/tests",
+            "cwd": "/tmp/project",
+            "timeout": 180,
+            "execution_contract": {
+                "schema_version": 2,
+                "purpose": "verification",
+                "stage": "verification",
+                "proof_role": "verifier",
+                "acceptance_kind": "candidate_final_proof",
+                "risk_class": "read_only",
+                "continuation_policy": {
+                    "mode": "managed",
+                    "resume_policy": "same_resume_identity",
+                    "terminal_required_for_acceptance": True,
+                    "yield_after_seconds": 60,
+                    "final_proof_reserve_seconds": 60,
+                },
+                "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+                "declared_target_refs": [
+                    {"kind": "source_tree", "path": "/tmp/project", "ref": "source-tree:primary"}
+                ],
+            },
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_tests", parameters, task={}, session={})
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_tests",
+            parameters,
+            max_wall_seconds=66,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertTrue(policy["applies"])
+        self.assertEqual(policy["stage"], "verification")
+        self.assertEqual(policy["reserve_seconds"], 0.0)
+        self.assertTrue(policy["final_verifier_spends_final_proof_reserve"])
+        self.assertFalse(ceiling["blocked"])
+        self.assertEqual(ceiling["long_command_budget"]["stage"], "verification")
+        self.assertGreaterEqual(parameters["timeout"], policy["minimum_timeout_seconds"])
+
+    def test_final_verifier_still_blocks_when_remaining_budget_cannot_satisfy_yield(self):
+        parameters = {
+            "command": "python -m pytest -q /tmp/project/tests",
+            "cwd": "/tmp/project",
+            "timeout": 180,
+            "execution_contract": {
+                "schema_version": 2,
+                "purpose": "verification",
+                "stage": "verification",
+                "proof_role": "verifier",
+                "acceptance_kind": "external_verifier",
+                "risk_class": "read_only",
+                "continuation_policy": {
+                    "mode": "managed",
+                    "resume_policy": "same_resume_identity",
+                    "terminal_required_for_acceptance": True,
+                    "yield_after_seconds": 60,
+                    "final_proof_reserve_seconds": 60,
+                },
+                "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+                "declared_target_refs": [
+                    {"kind": "source_tree", "path": "/tmp/project", "ref": "source-tree:primary"}
+                ],
+            },
+        }
+
+        policy = commands.work_tool_long_command_budget_policy("run_tests", parameters, task={}, session={})
+        ceiling = commands.apply_work_tool_wall_timeout_ceiling(
+            "run_tests",
+            parameters,
+            max_wall_seconds=commands.WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS + 60.0,
+            run_started_at=time.monotonic(),
+            recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+            long_command_budget_policy=policy,
+        )
+
+        self.assertTrue(policy["applies"])
+        self.assertEqual(policy["reserve_seconds"], 0.0)
+        self.assertTrue(policy["final_verifier_spends_final_proof_reserve"])
         self.assertTrue(ceiling["blocked"])
         self.assertEqual(ceiling["stop_reason"], "long_command_budget_blocked")
         self.assertEqual(
@@ -30221,7 +31513,8 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
 
         self.assertLess(time.monotonic() - started, 0.2)
 
-    def test_work_loop_model_calls_fall_back_after_child_crash(self):
+    def test_work_loop_model_calls_fail_closed_after_child_crash(self):
+        from mew.errors import ModelBackendError
         from mew.work_loop import call_model_json_with_retries
 
         class FakeRecvConn:
@@ -30264,18 +31557,18 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
                     "mew.work_loop._call_model_json_without_guard",
                     return_value={"summary": "fallback ok", "action": {"type": "finish"}},
                 ) as call_model:
-                    result = call_model_json_with_retries(
-                        "codex",
-                        {"path": "auth.json"},
-                        "prompt",
-                        "gpt-5.4",
-                        "https://example.invalid",
-                        45,
-                        log_prefix="work_think codex session=1",
-                    )
+                    with self.assertRaisesRegex(ModelBackendError, "request timed out"):
+                        call_model_json_with_retries(
+                            "codex",
+                            {"path": "auth.json"},
+                            "prompt",
+                            "gpt-5.4",
+                            "https://example.invalid",
+                            45,
+                            log_prefix="work_think codex session=1",
+                        )
 
-        self.assertEqual(result["summary"], "fallback ok")
-        self.assertEqual(call_model.call_count, 1)
+        self.assertEqual(call_model.call_count, 0)
 
     def test_work_loop_model_calls_use_spawn_timeout_guard_on_macos(self):
         from mew.work_loop import call_model_json_with_retries
@@ -30329,6 +31622,140 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertEqual(result["summary"], "child ok")
         self.assertEqual(get_context.call_args_list[0].args, ("spawn",))
         self.assertEqual(get_context.call_args_list[-1].args, ("spawn",))
+
+    def test_work_loop_model_calls_poll_guard_in_short_slices(self):
+        from mew.work_loop import WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS, call_model_json_with_retries
+
+        class FakeRecvConn:
+            def __init__(self):
+                self.poll_timeouts = []
+
+            def poll(self, timeout):
+                self.poll_timeouts.append(timeout)
+                return True
+
+            def recv(self):
+                return {"status": "ok", "result": {"summary": "child ok", "action": {"type": "finish"}}}
+
+            def close(self):
+                return None
+
+        class FakeSendConn:
+            def close(self):
+                return None
+
+        class FakeProcess:
+            def start(self):
+                return None
+
+            def is_alive(self):
+                return False
+
+            def join(self, timeout=None):
+                return None
+
+            def terminate(self):
+                return None
+
+        class FakeContext:
+            def __init__(self):
+                self.recv_conn = FakeRecvConn()
+
+            def Pipe(self, duplex=False):
+                return self.recv_conn, FakeSendConn()
+
+            def Process(self, target=None, args=(), daemon=False):
+                return FakeProcess()
+
+        context = FakeContext()
+        with patch("mew.work_loop._work_model_timeout_guard_available", return_value=True):
+            with patch("mew.work_loop.multiprocessing.get_context", return_value=context):
+                result = call_model_json_with_retries(
+                    "codex",
+                    {"path": "auth.json"},
+                    "prompt",
+                    "gpt-5.4",
+                    "https://example.invalid",
+                    45,
+                    log_prefix="work_think codex session=1",
+                )
+
+        self.assertEqual(result["summary"], "child ok")
+        self.assertTrue(context.recv_conn.poll_timeouts)
+        self.assertLessEqual(max(context.recv_conn.poll_timeouts), WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS)
+
+    def test_work_loop_model_calls_terminate_after_sliced_poll_timeout(self):
+        from mew.errors import ModelBackendError
+        from mew.work_loop import WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS, call_model_json_with_retries
+
+        class FakeRecvConn:
+            def __init__(self):
+                self.poll_timeouts = []
+
+            def poll(self, timeout):
+                self.poll_timeouts.append(timeout)
+                time.sleep(timeout)
+                return False
+
+            def recv(self):
+                raise AssertionError("recv should not be called after timeout")
+
+            def close(self):
+                return None
+
+        class FakeSendConn:
+            def close(self):
+                return None
+
+        class FakeProcess:
+            def __init__(self):
+                self.alive = True
+                self.terminated = False
+
+            def start(self):
+                return None
+
+            def is_alive(self):
+                return self.alive
+
+            def join(self, timeout=None):
+                return None
+
+            def terminate(self):
+                self.terminated = True
+                self.alive = False
+
+            def kill(self):
+                self.alive = False
+
+        class FakeContext:
+            def __init__(self):
+                self.recv_conn = FakeRecvConn()
+                self.process = FakeProcess()
+
+            def Pipe(self, duplex=False):
+                return self.recv_conn, FakeSendConn()
+
+            def Process(self, target=None, args=(), daemon=False):
+                return self.process
+
+        context = FakeContext()
+        with patch("mew.work_loop._work_model_timeout_guard_available", return_value=True):
+            with patch("mew.work_loop.multiprocessing.get_context", return_value=context):
+                with self.assertRaisesRegex(ModelBackendError, "request timed out"):
+                    call_model_json_with_retries(
+                        "codex",
+                        {"path": "auth.json"},
+                        "prompt",
+                        "gpt-5.4",
+                        "https://example.invalid",
+                        0.002,
+                        log_prefix="work_think codex session=1",
+                    )
+
+        self.assertTrue(context.process.terminated)
+        self.assertTrue(context.recv_conn.poll_timeouts)
+        self.assertLessEqual(max(context.recv_conn.poll_timeouts), WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS)
 
     def test_compact_model_turns_for_prompt_collapses_redundant_planning_churn(self):
         from mew.work_session import compact_model_turns_for_prompt
@@ -42399,7 +43826,10 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertIn("inspect those artifact/output properties or run a small command that asserts them", prompt)
         self.assertIn("remember the exact unverified acceptance gap", prompt)
         self.assertIn("artifact existence, nonzero pixels, valid headers", prompt)
-        self.assertIn("expected dimensions/resolution, reference similarity", prompt)
+        self.assertIn(
+            "task-provided expected dimensions/resolution, task-provided reference similarity/SSIM",
+            prompt,
+        )
         self.assertIn("For external dependency/source acquisition tasks", prompt)
         self.assertIn("authoritative source channel", prompt)
         self.assertIn("Place or repeat saved source readbacks after noisy build/install output", prompt)
@@ -45634,6 +47064,127 @@ curl -L https://example.invalid/make-4.4.tar.gz -o /tmp/make.tar.gz
         self.assertEqual(session["notes"][-1]["source"], "finish_gate")
         self.assertIn("deterministic done gate", session["notes"][-1]["text"])
         self.assertIn("Work session finish blocked", task["notes"])
+
+    def test_work_finish_reopens_finish_false_positive_frontier_for_runtime_component_import_only(self):
+        from mew.commands import apply_work_control_action
+
+        description = "The loadable runtime component should work in its original runtime context."
+        state = {}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "command_evidence": [
+                {
+                    "id": 13,
+                    "tool": "run_command",
+                    "terminal_success": True,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "command": "python -c 'import native_module; print(native_module.__file__)'",
+                    "output_tail": "/tmp/native_module.so\n",
+                }
+            ],
+        }
+        task = {"id": 15, "description": description, "status": "ready", "notes": ""}
+        action = {
+            "type": "finish",
+            "reason": "implemented and verified",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Runtime component works.",
+                    "status": "verified",
+                    "evidence": "Command evidence #13 imported the runtime component and printed its path.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": 13}],
+                }
+            ],
+        }
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            result = apply_work_control_action(state, session, task, action)
+
+        close_session.assert_not_called()
+        self.assertFalse(result["task_done"])
+        self.assertEqual(result["finish_blockers"][0]["code"], "runtime_component_behavior_evidence")
+        frontier = session["active_compatibility_frontier"]
+        self.assertEqual(frontier["status"], "open")
+        self.assertEqual(frontier["failure_signature"]["kind"], "finish_false_positive")
+        self.assertEqual(frontier["failure_signature"]["runtime_component_kind"], "unknown")
+        self.assertEqual(frontier["evidence_refs"][0]["kind"], "command_evidence")
+        self.assertEqual(frontier["evidence_refs"][0]["id"], 13)
+        self.assertEqual(frontier["closure_state"]["state"], "cheap_verify_needed")
+        self.assertEqual(frontier["closure_state"]["guard_mode"], "block_finish")
+        self.assertIn("finish", frontier["closure_state"]["blocked_action_kinds"])
+        self.assertNotIn("/tmp/native_module.so", json.dumps(frontier))
+
+    def test_work_finish_reuses_finish_false_positive_frontier_for_same_family_different_evidence_ids(self):
+        from mew.commands import apply_work_control_action
+
+        description = "The loadable runtime component should work in its original runtime context."
+        state = {}
+        session = {
+            "id": 9,
+            "status": "active",
+            "goal": description,
+            "command_evidence": [
+                {
+                    "id": 13,
+                    "tool": "run_command",
+                    "terminal_success": True,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "command": "python -c 'import runtime_component; print(runtime_component.__file__)'",
+                    "output_tail": "/tmp/runtime_component.so\n",
+                },
+                {
+                    "id": 14,
+                    "tool": "run_command",
+                    "terminal_success": True,
+                    "status": "completed",
+                    "exit_code": 0,
+                    "command": "python -c 'import runtime_component; print(runtime_component.__file__)'",
+                    "output_tail": "/tmp/runtime_component_second.so\n",
+                },
+            ],
+        }
+        task = {"id": 15, "description": description, "status": "ready", "notes": ""}
+
+        def finish_action(evidence_id):
+            return {
+                "type": "finish",
+                "reason": "implemented and verified",
+                "task_done": True,
+                "acceptance_checks": [
+                    {
+                        "constraint": "Runtime component works.",
+                        "status": "verified",
+                        "evidence": f"Command evidence #{evidence_id} imported the runtime component and printed its path.",
+                        "evidence_refs": [{"kind": "command_evidence", "id": evidence_id}],
+                    }
+                ],
+            }
+
+        with patch("mew.commands.build_work_session_resume", return_value={}), patch(
+            "mew.commands.close_work_session"
+        ) as close_session:
+            first = apply_work_control_action(state, session, task, finish_action(13))
+            first_frontier = session["active_compatibility_frontier"]
+            first_id = first_frontier["id"]
+            first_fingerprint = first_frontier["failure_signature"]["fingerprint"]
+            second = apply_work_control_action(state, session, task, finish_action(14))
+
+        close_session.assert_not_called()
+        self.assertFalse(first["task_done"])
+        self.assertFalse(second["task_done"])
+        frontier = session["active_compatibility_frontier"]
+        self.assertEqual(frontier["id"], first_id)
+        self.assertEqual(frontier["failure_signature"]["fingerprint"], first_fingerprint)
+        self.assertEqual(frontier["family_transition"]["from_previous"], "same")
+        self.assertEqual({ref["id"] for ref in frontier["evidence_refs"]}, {13, 14})
+        self.assertEqual(len(frontier["verifier_history"]), 2)
+        self.assertNotIn("/tmp/runtime_component", json.dumps(frontier))
 
     def test_work_finish_blocks_model_inference_handoff_without_task_done_when_equivalence_unknown(self):
         from mew.commands import apply_work_control_action

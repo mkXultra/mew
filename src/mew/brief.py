@@ -1038,6 +1038,8 @@ def _work_session_default_option_parts(session):
         parts.append("--allow-verify")
     if options.get("verify_command"):
         parts.extend(["--verify-command", options["verify_command"]])
+        if options.get("verify_command_source"):
+            parts.extend(["--verify-command-source", options["verify_command_source"]])
     if options.get("act_mode"):
         parts.extend(["--act-mode", options["act_mode"]])
     if options.get("compact_live") and "--compact-live" not in parts:

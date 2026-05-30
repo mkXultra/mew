@@ -27,6 +27,7 @@ now repository-test-tail repair frontier exhaustion, not broad Cython setup.
 Authoritative inputs:
 
 - `docs/M6_24_DECISION_LEDGER.md`
+- `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`
 - `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`
 - `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`
 - `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`
@@ -43,16 +44,51 @@ Authoritative inputs:
 - `docs/REVIEW_2026-05-02_CODEX_CLI_LONG_BUILD_CONTINUATION_PATTERNS.md`
 - `docs/REVIEW_2026-05-02_CLAUDE_CODE_LONG_BUILD_CONTINUATION_PATTERNS.md`
 
-Do not resume broad scoped Terminal-Bench measurement until this controller or
-the decision ledger records why measurement is higher value than repairing the
-selected gap class. The current-head recheck has already answered the immediate
-"architecture changed, remeasure first" question for `build-cython-ext`.
+Do not resume broad historical/v1 Terminal-Bench measurement. The active
+measurement lane is now `implement_v2`. Continue the scoped v2 rebaseline one
+task at a time, and pause it immediately if the latest task exposes a miss,
+harness problem, missing replay surface, or structural lane gap.
 
 Current selected gap class:
-`verified_sibling_repair_frontier_not_exhausted`.
+`implement_v2_scoped_rebaseline_active`.
 
 Current selected next action:
-`M6.24 -> current-head build-cython-ext artifact -> replay/dogfood/emulator pass -> generic repository-test-tail frontier repair -> focused UT/replay/dogfood/emulator -> exactly one build-cython-ext speed_1`.
+`M6.24 -> implement_v2 scoped rebaseline -> run next pending scoped task speed_1 with selected_lane=implement_v2 -> if miss or structural lane gap, reproduce through replay/dogfood/emulator and repair before measuring unrelated tasks`.
+
+Implement-v2 rebaseline decision on 2026-05-06 JST: after the post-closeout
+`build-cython-ext` v2 `speed_1` pass, the controller does not immediately spend
+`proof_5`. Instead it remeasures the 25 scoped software/coding tasks with
+`selected_lane=implement_v2` and records clean speed_1 evidence, gap classes,
+and repair routes in `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`.
+`build-cython-ext` and `prove-plus-comm` currently count as clean v2 `speed_1`
+passes; their `proof_5` close proof is deferred until the controller selects
+them as close candidates.
+
+Current live proof history on 2026-05-06 JST: the selected gap moved past the
+active compatibility frontier loops. The earlier same-shape run
+`mew-m6-24-acf-generated-build-repair-build-cython-ext-1attempt-20260505-1909`
+still scored `0/1`, but the failure shape is narrower: mew reached source
+acquisition, patching, reinstall, and final smoke, then proposed the smallest
+remaining final verifier (`run_tests`, `stage=verification`,
+`proof_role=verifier`) with only `64.658s` wall remaining and a `60s` reserve.
+Policy correctly blocked the historical action with `long_command_budget_blocked`
+because the effective timeout was only `4.658s`, below the `61s` minimum. The
+local repair is now validated: typed final verifier/proof actions may spend the
+final-proof reserve, non-final managed build/repair actions still preserve it,
+and a boundary regression still blocks when the remaining wall budget cannot
+satisfy `yield_after < effective_timeout`. This led to the later
+`selected_lane=implement_v2` same-shape speed/debug proof recorded below.
+
+Post-repair proof update on 2026-05-06 JST: that selected same-shape proof was
+spent. The job
+`proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout`
+scored reward `1.0` with runner errors `0`, total runtime `4m52s`,
+`mew_exit_code=0`, `stop_reason=finish`, `selected_lane=implement_v2`,
+`runtime_id=implement_v2_model_json_tool_loop`, and external verifier
+`11 passed in 3.46s`. Exact replay and exact dogfood on the passing artifact
+both pass. The speed_1 gate is no longer pending; the next controller action is
+to continue the `implement_v2` scoped rebaseline unless the user explicitly
+selects same-shape close proof first.
 
 Current pre-speed status:
 
@@ -65,12 +101,53 @@ Current pre-speed status:
 - emulator: pass on the same artifact via
   `m6_24-repository-test-tail-emulator`. It detects main smoke pass,
   repository-test wrapper failure, and wall-timeout frontier exhaustion.
+- latest emulator: pass on
+  `mew-m6-24-acf-generated-build-repair-build-cython-ext-1attempt-20260505-1909`
+  via `m6_24-final-verifier-budget-emulator`. The previous
+  `repository-test-tail-emulator` intentionally fails on this newer shape
+  because the active frontier has been exhausted and the blocker has moved to
+  final verifier wall-budget/reserve planning.
+- final-verifier budget repair: validated on current head with focused
+  final-verifier work-session tests, focused dogfood tests, exact artifact
+  replay, exact artifact terminal-bench dogfood, exact artifact
+  `m6_24-final-verifier-budget-emulator`, scoped ruff, and the related full
+  work-session/dogfood/terminal-bench replay suite.
+- lightweight live canary: `prove-plus-comm` one-attempt run passed with
+  reward `1.0`, runner errors `0`, runtime `2m32s`, `work_exit_code=0`, and
+  verifier `4/4` passing when run with the task's correct `/workspace` cwd.
+  A prior `/app` cwd attempt is harness misconfiguration evidence only, not a
+  mew product miss.
+- true `implement_v2` live canary: `prove-plus-comm` one-attempt run
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-implement-v2-prove-plus-comm-1attempt-20260506-0204`
+  passed with reward `1.0`, runner errors `0`, runtime `2m05s`,
+  `work_exit_code=0`, `selected_lane=implement_v2`,
+  `runtime_id=implement_v2_model_json_tool_loop`, `lane_status=completed`,
+  and replay-valid v2 proof artifacts. This proves the explicit v2 lane can
+  execute independently of the v1 THINK/ACT planner; it does not yet prove
+  provider-specific native tool-call transport.
+- first true-v2 `build-cython-ext` attempt:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0215`
+  is harness-invalid only. Docker failed before `mew` started because the
+  command used cwd `/workspace`, which does not exist for this task. The task
+  instruction and previous valid `build-cython-ext` artifact use `/app`; later
+  v2 runs used `command_cwd=/app` and `mew work --cwd /app`.
+- post-closeout true-v2 `build-cython-ext` proof:
+  `proof-artifacts/terminal-bench/harbor-smoke/mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0312-closeout`
+  passed with reward `1.0`, runner errors `0`, runtime `4m52s`,
+  `work_exit_code=0`, `stop_reason=finish`, and verifier `11/11` passing.
+  Replay/dogfood classify this as `record implement_v2 pass and continue
+  M6.24 scoped parity`; a replay-next-action bug for completed v2 transcripts
+  was fixed so historical failed tool results no longer force debug mode after
+  an externally passing run.
 
 Active authoritative design:
 `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
 
 Active scoped rebaseline:
 `docs/M6_24_SOFTWARE_CODING_REBASELINE_2026-05-03.md`.
+
+Active implement-v2 rebaseline:
+`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`.
 
 Active repair dossier:
 `docs/M6_24_DOSSIER_BUILD_CYTHON_EXT_2026-05-03.md`.
@@ -588,3 +665,55 @@ check pass. codex-ultra review session
 `resume_budget_exhausted` policy test was added and passed. The next action is
 the pre-speed operation on current head, then exactly one same-shape
 `compile-compcert` speed_1.
+
+Update 2026-05-06 JST: after the M6.23.2 true-v2 gate, the scoped M6.24 task is
+`build-cython-ext` through `selected_lane=implement_v2`. The `/app` true-v2
+run `mew-m6-24-true-v2-build-cython-ext-speed1-20260506-10min-appcwd` scored
+`0.0` in `4m43s` with no runner errors. The gap is not another broad
+measurement request. It is a repair-now v2 loop gap:
+
+1. Repair `v2_tool_surface_mismatch` first: accept `cmd`, `argv`, compound
+   shell commands for `run_command`, and common `edit_file` aliases while
+   preserving `run_tests` as the stricter argv/no-shell verifier tool.
+2. Then repair `compiled_source_frontier_missing`: NumPy/runtime compatibility
+   failures in compiled Python extension tasks must search and patch sibling
+   `*.py`, `*.pyx`, and `*.pxd` surfaces before finish.
+3. Only after focused UT plus replay/dogfood/emulator checks pass should another
+   same-shape v2 speed run be spent.
+
+Repair status: step 1 is implemented; v2 artifact replay/dogfood support is
+also implemented because true-v2 runs store evidence under
+`implement_v2/history.json` and `implement_v2/proof-manifest.json`, not v1
+`work_report.steps` tool calls. Step 2 has static prompt/frontier guidance and
+should be checked with a cheap v2 canary or emulator before spending another
+live `build-cython-ext` speed run.
+
+Pre-speed assertion update: use both replay and dogfood with
+`next_action_contains=compiled/native source frontier` on the latest true-v2
+miss before another live speed item. The dogfood CLI supports this as
+`--terminal-bench-assert-next-action-contains`.
+
+Update 2026-05-06 JST: the next true-v2 `/app` same-shape speed/debug run
+`mew-m6-24-true-v2-build-cython-ext-speed1-20260506-0245-appcwd` scored `0.0`
+in `8m52s` with runner errors `0`, but the gap moved. v2 now observes the
+compiled source frontier and starts a broad final compatibility repair; the
+latest failure is that `max_turns` closed the live JSON attempt while a managed
+final rebuild/install/smoke command was still running. Replay/dogfood classify
+the exact artifact with `next_action_contains=active command closeout`.
+
+Repair status: implement_v2 now closeouts active managed commands on normal
+attempt close using the remaining wall budget, projects completed terminal
+evidence into the proof manifest, and still cancels active commands on
+exceptions. Closeout is capped by both the command's own remaining timeout and
+the work-session wall budget; explicit `command_closeout_seconds` is only an
+additional upper bound. codex-ultra re-review approved this repair. Before any
+new live `build-cython-ext` proof, run focused UT, exact replay, exact dogfood,
+and any available cheap emulator/canary on current head. Then spend exactly one
+same-shape v2 proof and classify it as clean pass, moved narrower gap, or
+regression.
+
+Proof result update: the same-shape v2 proof after that repair passed. Do not
+run another `build-cython-ext` speed_1 for the same shape. The next valid work
+is the `implement_v2` scoped rebaseline: run pending scoped tasks one at a time
+with explicit lane attribution, and repair immediately if a task exposes a
+miss, harness defect, missing replay/dogfood surface, or structural lane gap.

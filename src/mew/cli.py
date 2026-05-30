@@ -41,10 +41,12 @@ from .commands import (
     cmd_focus,
     cmd_guidance_init,
     cmd_guidance_show,
+    cmd_implement_v2_tool_lab,
     cmd_journal,
     cmd_listen,
     cmd_log,
     cmd_memory,
+    cmd_memory_core,
     cmd_message,
     cmd_metrics,
     cmd_mood,
@@ -87,9 +89,11 @@ from .commands import (
     cmd_tool_git,
     cmd_tool_edit,
     cmd_tool_glob,
+    cmd_tool_invoke,
     cmd_tool_list,
     cmd_tool_read,
     cmd_tool_search,
+    cmd_tool_specs,
     cmd_tool_status,
     cmd_tool_test,
     cmd_tool_write,
@@ -933,6 +937,23 @@ def build_parser():
         help="for terminal-bench replay dogfood, require saved external verifier reward",
     )
     dogfood_parser.add_argument(
+        "--terminal-bench-assert-next-action-contains",
+        help="for terminal-bench replay dogfood, require recomputed next_action to contain this text",
+    )
+    dogfood_parser.add_argument(
+        "--terminal-bench-assert-structured-failure-class",
+        help="for terminal-bench replay dogfood, require latest structured execution failure class",
+    )
+    dogfood_parser.add_argument(
+        "--terminal-bench-assert-structured-replay-mismatch-count",
+        type=int,
+        help="for terminal-bench replay dogfood, require structured replay mismatch count",
+    )
+    dogfood_parser.add_argument(
+        "--terminal-bench-assert-source-output-contract-path",
+        help="for terminal-bench replay dogfood, require implement_v2 source_output_contract.path",
+    )
+    dogfood_parser.add_argument(
         "--m2-task-shape",
         choices=M2_COMPARATIVE_TASK_SHAPES,
         help="for m2-comparative, set task_shape.selected for this paired run",
@@ -1091,6 +1112,19 @@ def build_parser():
         type=float,
         help="require saved external verifier reward to equal this value",
     )
+    terminal_bench_replay.add_argument(
+        "--assert-structured-failure-class",
+        help="require latest replay-recomputed implement_v2 structured failure class",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-structured-replay-mismatch-count",
+        type=int,
+        help="require stored-vs-recomputed structured failure classification mismatch count",
+    )
+    terminal_bench_replay.add_argument(
+        "--assert-source-output-contract-path",
+        help="require implement_v2 source_output_contract.path to equal this value",
+    )
     terminal_bench_replay.add_argument("--json", action="store_true", help="print structured JSON")
     terminal_bench_replay.set_defaults(func=cmd_replay)
 
@@ -1188,6 +1222,7 @@ def build_parser():
     do_parser.add_argument("--allow-write", action="append", default=[], help="write root; defaults to .")
     do_parser.add_argument("--read-only", action="store_true", help="do not grant write roots")
     do_parser.add_argument("--verify-command", help="verification command; auto-detected for common projects")
+    do_parser.add_argument("--verify-command-source", help=argparse.SUPPRESS)
     do_parser.add_argument("--no-verify", action="store_true", help="do not grant run_tests verification")
     do_parser.add_argument("--verify-timeout", type=int, default=300)
     do_parser.set_defaults(func=cmd_do)
@@ -1220,6 +1255,7 @@ def build_parser():
     code_parser.add_argument("--allow-write", action="append", default=[], help="write root cached for /continue; defaults to . unless --read-only")
     code_parser.add_argument("--read-only", action="store_true", help="do not cache write roots for /continue")
     code_parser.add_argument("--verify-command", help="verification command cached for /continue; auto-detected for common projects")
+    code_parser.add_argument("--verify-command-source", help=argparse.SUPPRESS)
     code_parser.add_argument("--no-verify", action="store_true", help="do not cache run_tests verification")
     code_parser.add_argument("--verify-timeout", type=int, default=300)
     code_parser.add_argument("--compact-live", action="store_true", help="cache compact live output for /continue")
@@ -1322,6 +1358,15 @@ def build_parser():
     work_parser.add_argument("--title", default="One-shot mew work task", help="task title for --oneshot")
     work_parser.add_argument("--report", help="write a JSON report for --oneshot")
     work_parser.add_argument("--artifacts", help="artifact directory recorded in the --oneshot report")
+    work_parser.add_argument(
+        "--debug-cleanup",
+        action="append",
+        default=[],
+        help=(
+            "for --oneshot --defer-verify diagnostics, unlink files matching a safe /tmp glob "
+            "before handing off to an external verifier; repeatable"
+        ),
+    )
     work_parser.add_argument("--stop-session", action="store_true", help="request the active native work loop to stop at the next boundary")
     work_parser.add_argument("--stop-reason", help="reason recorded with --stop-session")
     work_parser.add_argument(
@@ -1419,6 +1464,7 @@ def build_parser():
     work_parser.add_argument("--replace-all", action="store_true", help="replace all edit_file matches")
     work_parser.add_argument("--apply", action="store_true", help="apply write_file/edit_file/edit_file_hunks instead of dry-run")
     work_parser.add_argument("--verify-command", help="verification command required for applied writes; persisted on the work session")
+    work_parser.add_argument("--verify-command-source", help=argparse.SUPPRESS)
     work_parser.add_argument("--verify-cwd", default=".", help="verification command cwd")
     work_parser.add_argument("--verify-timeout", type=float, default=300.0, help="verification timeout")
     work_parser.add_argument("--cwd", default=".", help="cwd for native work tools; persisted on the work session")
@@ -1478,6 +1524,16 @@ def build_parser():
     tool_status_parser.add_argument("--cwd", default=".")
     tool_status_parser.add_argument("--json", action="store_true", help="print structured JSON")
     tool_status_parser.set_defaults(func=cmd_tool_status)
+
+    tool_specs_parser = tool_subparsers.add_parser("specs", help="list provider-neutral shared tool specs")
+    tool_specs_parser.add_argument(
+        "--mode",
+        default="full",
+        choices=("read_only", "plan", "exec", "write", "full", "implement", "implementation"),
+        help="tool visibility mode",
+    )
+    tool_specs_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    tool_specs_parser.set_defaults(func=cmd_tool_specs)
 
     tool_list_parser = tool_subparsers.add_parser("list", help="list a directory under an allowed root")
     tool_list_parser.add_argument("path", nargs="?", default=".")
@@ -1553,6 +1609,109 @@ def build_parser():
             git_action_parser.add_argument("--limit", type=int, default=20, help="log entries for git log")
         git_action_parser.add_argument("--json", action="store_true", help="print structured JSON")
         git_action_parser.set_defaults(func=cmd_tool_git, git_action=git_action)
+
+    tool_invoke_parser = tool_subparsers.add_parser(
+        "invoke",
+        help="invoke the shared model-facing tool kernel from the CLI",
+    )
+    tool_invoke_parser.add_argument("tool_name", help="provider-neutral tool name, e.g. read_file or run_command")
+    tool_invoke_parser.add_argument(
+        "--arguments",
+        default="{}",
+        help="JSON object passed as tool arguments",
+    )
+    tool_invoke_parser.add_argument("--arguments-file", help="read JSON tool arguments from a file")
+    tool_invoke_parser.add_argument("--workspace", default=".", help="workspace root for relative paths")
+    tool_invoke_parser.add_argument(
+        "--mode",
+        default="full",
+        choices=("read_only", "plan", "exec", "write", "full", "implement", "implementation"),
+        help="tool visibility mode",
+    )
+    tool_invoke_parser.add_argument("--allow-read", action="append", default=[], help="allowed read root")
+    tool_invoke_parser.add_argument("--allow-write", action="append", default=[], help="allowed write root")
+    tool_invoke_parser.add_argument("--source-root", action="append", default=[], help="source mutation root")
+    tool_invoke_parser.add_argument("--allow-shell", action="store_true", help="enable run_command")
+    tool_invoke_parser.add_argument("--allow-verify", action="store_true", help="enable run_tests")
+    tool_invoke_parser.add_argument("--approve", action="store_true", help="approve this one write apply call")
+    tool_invoke_parser.add_argument(
+        "--allow-governance-writes",
+        action="store_true",
+        help="allow writes to roadmap/skill/governance paths",
+    )
+    tool_invoke_parser.add_argument("--json", action="store_true", help="print ToolResultEnvelope JSON")
+    tool_invoke_parser.set_defaults(func=cmd_tool_invoke)
+
+    implement_v2_parser = subparsers.add_parser(
+        "implement-v2",
+        help="implement_v2 lane diagnostics",
+    )
+    implement_v2_subparsers = implement_v2_parser.add_subparsers(dest="implement_v2_command")
+    implement_v2_tool_lab_parser = implement_v2_subparsers.add_parser(
+        "tool-lab",
+        help="analyze implement_v2 tool-loop artifacts without an LLM call",
+    )
+    implement_v2_tool_lab_source = implement_v2_tool_lab_parser.add_mutually_exclusive_group(required=True)
+    implement_v2_tool_lab_source.add_argument(
+        "--artifact",
+        help="implement_v2 proof-manifest.json or an artifact directory containing it",
+    )
+    implement_v2_tool_lab_source.add_argument(
+        "--command",
+        dest="command_text",
+        help="execute one deterministic run_command through the v2 exec substrate",
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--workspace",
+        default="",
+        help="workspace root; defaults to current directory in command mode and is optional for artifact analysis",
+    )
+    implement_v2_tool_lab_parser.add_argument("--cwd", default=".", help="command cwd for command mode")
+    implement_v2_tool_lab_parser.add_argument(
+        "--allow-read",
+        action="append",
+        default=[],
+        help="allowed read root for command mode; defaults to workspace",
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--allow-write",
+        action="append",
+        default=[],
+        help=(
+            "allowed shell write root for command mode; defaults to workspace and rejects "
+            "absolute path literals outside these roots"
+        ),
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--source-root",
+        action="append",
+        default=[],
+        help="source mutation tracking/trust root; command mode defaults to workspace",
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--target-path",
+        action="append",
+        default=[],
+        help="active work target path used to recompute first-write readiness",
+    )
+    implement_v2_tool_lab_parser.add_argument("--timeout", type=float, help="command timeout for command mode")
+    implement_v2_tool_lab_parser.add_argument(
+        "--command-intent",
+        default="probe",
+        help="command intent for command mode; default probe",
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--probe-threshold",
+        type=int,
+        help="first-write probe threshold when recomputing readiness",
+    )
+    implement_v2_tool_lab_parser.add_argument(
+        "--requires-deep-runtime-coverage",
+        action="store_true",
+        help="use deep-runtime coverage readiness instead of probe count",
+    )
+    implement_v2_tool_lab_parser.add_argument("--json", action="store_true", help="print structured JSON")
+    implement_v2_tool_lab_parser.set_defaults(func=cmd_implement_v2_tool_lab)
 
     self_improve_parser = subparsers.add_parser(
         "self-improve",
@@ -1800,6 +1959,153 @@ def build_parser():
     memory_parser.add_argument("--keep-recent", type=int, default=5, help="recent events to keep when compacting")
     memory_parser.add_argument("--dry-run", action="store_true", help="print compact note without changing state")
     memory_parser.set_defaults(func=cmd_memory)
+
+    memory_core_parser = subparsers.add_parser(
+        "memory-core",
+        help="debug and score the M6.25 MemorySystem core directly",
+    )
+    memory_core_subparsers = memory_core_parser.add_subparsers(dest="memory_core_action")
+    memory_core_parser.set_defaults(func=cmd_memory_core)
+
+    memory_core_recall = memory_core_subparsers.add_parser("recall", help="run direct MemorySystem recall")
+    memory_core_recall.add_argument("--store", required=True, help="JSON memory store with an entries array")
+    memory_core_recall.add_argument("--query", required=True, help="recall query text")
+    memory_core_recall.add_argument("--scope", default="", help="optional memory scope filter")
+    memory_core_recall.add_argument("--kind", action="append", default=[], help="memory kind filter; repeatable")
+    memory_core_recall.add_argument("--limit", type=int, default=5, help="maximum recall results")
+    memory_core_recall.add_argument("--include-stale", action="store_true", help="include stale and superseded entries")
+    memory_core_recall.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_recall.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_recall.set_defaults(func=cmd_memory_core)
+
+    memory_core_chain = memory_core_subparsers.add_parser("chain", help="run bounded direct chain expansion")
+    memory_core_chain.add_argument("--store", required=True, help="JSON memory store with an entries array")
+    memory_core_chain.add_argument("--entry", action="append", required=True, help="start entry id; repeatable")
+    memory_core_chain.add_argument("--max-depth", type=int, default=1, help="maximum chain depth")
+    memory_core_chain.add_argument("--max-fanout", type=int, default=5, help="maximum outgoing edges per node")
+    memory_core_chain.add_argument("--max-nodes", type=int, default=20, help="maximum chain nodes")
+    memory_core_chain.add_argument("--max-chars", type=int, default=4000, help="maximum returned node characters")
+    memory_core_chain.add_argument("--edge-kind", action="append", default=[], help="edge kind filter; repeatable")
+    memory_core_chain.add_argument("--include-stale", action="store_true", help="include stale and superseded entries")
+    memory_core_chain.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_chain.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_chain.set_defaults(func=cmd_memory_core)
+
+    memory_core_inspect = memory_core_subparsers.add_parser("inspect", help="inspect one durable memory entry")
+    memory_core_inspect.add_argument("--store", required=True, help="JSON memory store with an entries array")
+    memory_core_inspect.add_argument("--entry", required=True, help="entry id to inspect")
+    memory_core_inspect.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_inspect.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_inspect.set_defaults(func=cmd_memory_core)
+
+    memory_core_score = memory_core_subparsers.add_parser(
+        "score",
+        help="score a local memory fixture without running a model",
+    )
+    memory_core_score.add_argument("--fixture", required=True, help="local JSON memory fixture")
+    memory_core_score.add_argument("--mode", required=True, choices=("memory_off", "memory_on", "stale"))
+    memory_core_score.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_score.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_score.set_defaults(func=cmd_memory_core)
+
+    memory_core_compress = memory_core_subparsers.add_parser(
+        "compress",
+        help="compress raw evidence into a MemoryCard candidate with an LLM",
+    )
+    memory_core_compress.add_argument("--raw-text", help="raw evidence text to compress")
+    memory_core_compress.add_argument("--raw-file", help="file containing raw evidence text to compress")
+    memory_core_compress.add_argument("--kind", required=True, help="memory kind for the candidate")
+    memory_core_compress.add_argument("--scope", required=True, help="memory scope, e.g. repo:mew")
+    memory_core_compress.add_argument("--title-hint", default="", help="optional title hint")
+    memory_core_compress.add_argument("--applicability-hint", default="", help="optional applicability hint")
+    memory_core_compress.add_argument("--source-ref-kind", default="raw_transcript", help="source provenance kind")
+    memory_core_compress.add_argument("--source-ref-id", default="", help="optional source provenance id")
+    memory_core_compress.add_argument("--source-uri", default="", help="optional source artifact URI/path")
+    memory_core_compress.add_argument("--max-summary-chars", type=int, default=600, help="maximum compressed summary chars")
+    memory_core_compress.add_argument("--auth", default="auth.json", help="model auth JSON path")
+    memory_core_compress.add_argument("--model-backend", default="codex", help="model backend for compression")
+    memory_core_compress.add_argument("--model", default="gpt-5.5", help="model for compression")
+    memory_core_compress.add_argument("--base-url", default="", help="optional model backend base URL")
+    memory_core_compress.add_argument("--timeout", type=int, default=120, help="model call timeout seconds")
+    memory_core_compress.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_compress.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_compress.set_defaults(func=cmd_memory_core)
+
+    memory_core_arena = memory_core_subparsers.add_parser(
+        "memory-arena-score",
+        help="score direct MemorySystem recall on MemoryArena-style rows",
+    )
+    memory_core_arena.add_argument("--input", help="local MemoryArena JSON or JSONL export")
+    memory_core_arena.add_argument("--hf-config", help="optional Hugging Face MemoryArena config")
+    memory_core_arena.add_argument("--hf-split", default="test", help="Hugging Face split when --hf-config is used")
+    memory_core_arena.add_argument("--hf-revision", help="optional Hugging Face dataset revision")
+    memory_core_arena.add_argument("--mode", required=True, choices=("memory_off", "memory_on", "stale"))
+    memory_core_arena.add_argument("--limit-rows", type=int, default=0, help="maximum arena rows to score")
+    memory_core_arena.add_argument("--limit", type=int, default=5, help="maximum recall results per query")
+    memory_core_arena.add_argument("--include-stale", action="store_true", help="include stale entries in recall")
+    memory_core_arena.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_arena.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_arena.set_defaults(func=cmd_memory_core)
+
+    memory_core_arena_tools = memory_core_subparsers.add_parser(
+        "memory-arena-tool-score",
+        help="score MemoryArena-style save/recall through a native memory tool harness",
+    )
+    memory_core_arena_tools.add_argument("--input", help="local MemoryArena JSON or JSONL export")
+    memory_core_arena_tools.add_argument("--hf-config", help="optional Hugging Face MemoryArena config")
+    memory_core_arena_tools.add_argument("--hf-split", default="test", help="Hugging Face split when --hf-config is used")
+    memory_core_arena_tools.add_argument("--hf-revision", help="optional Hugging Face dataset revision")
+    memory_core_arena_tools.add_argument("--mode", required=True, choices=("memory_off", "memory_on", "stale"))
+    memory_core_arena_tools.add_argument("--limit-rows", type=int, default=0, help="maximum arena rows to score")
+    memory_core_arena_tools.add_argument("--limit", type=int, default=5, help="maximum recall results per query")
+    memory_core_arena_tools.add_argument("--include-stale", action="store_true", help="include stale entries in recall")
+    memory_core_arena_tools.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_arena_tools.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_arena_tools.set_defaults(func=cmd_memory_core)
+
+    memory_core_arena_agent = memory_core_subparsers.add_parser(
+        "memory-arena-agent-score",
+        help="score a bounded MemoryArena agent loop with recall/inspect memory tools",
+    )
+    memory_core_arena_agent.add_argument("--input", help="local MemoryArena JSON or JSONL export")
+    memory_core_arena_agent.add_argument("--hf-config", help="optional Hugging Face MemoryArena config")
+    memory_core_arena_agent.add_argument(
+        "--hf-split",
+        default="test",
+        help="Hugging Face split when --hf-config is used",
+    )
+    memory_core_arena_agent.add_argument("--hf-revision", help="optional Hugging Face dataset revision")
+    memory_core_arena_agent.add_argument("--mode", required=True, choices=("memory_off", "memory_on", "stale"))
+    memory_core_arena_agent.add_argument("--limit-rows", type=int, default=0, help="maximum arena rows to score")
+    memory_core_arena_agent.add_argument("--limit", type=int, default=5, help="maximum recall results per query")
+    memory_core_arena_agent.add_argument("--include-stale", action="store_true", help="include stale entries in recall")
+    memory_core_arena_agent.add_argument("--max-turns", type=int, default=3, help="maximum agent turns per subtask")
+    memory_core_arena_agent.add_argument(
+        "--save-source",
+        choices=("model", "gold"),
+        default="model",
+        help="save compressed memory from the model answer or the gold answer",
+    )
+    memory_core_arena_agent.add_argument(
+        "--answer-score-mode",
+        choices=("token_f1", "normalized_contains"),
+        default="token_f1",
+        help="answer scoring strategy; embeddings are not required in v0",
+    )
+    memory_core_arena_agent.add_argument(
+        "--answer-threshold",
+        type=float,
+        default=0.5,
+        help="minimum answer score counted as passed",
+    )
+    memory_core_arena_agent.add_argument("--auth", default="auth.json", help="model auth JSON path")
+    memory_core_arena_agent.add_argument("--model-backend", default="codex", help="model backend for agent/compressor")
+    memory_core_arena_agent.add_argument("--model", default="gpt-5.5", help="model for agent/compressor")
+    memory_core_arena_agent.add_argument("--base-url", default="", help="optional model backend base URL")
+    memory_core_arena_agent.add_argument("--timeout", type=int, default=120, help="model call timeout seconds")
+    memory_core_arena_agent.add_argument("--artifact", help="write machine-readable JSON artifact")
+    memory_core_arena_agent.add_argument("--json", action="store_true", help="print machine-readable JSON")
+    memory_core_arena_agent.set_defaults(func=cmd_memory_core)
 
     snapshot_parser = subparsers.add_parser("snapshot", help="refresh structured project snapshot memory")
     snapshot_parser.add_argument("--path", default=".", help="directory to inspect")

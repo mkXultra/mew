@@ -6,6 +6,7 @@ from mew.errors import ModelBackendError, MewError
 from mew.model_backends import (
     call_model_text,
     call_model_json,
+    call_model_structured_json,
     load_model_auth,
     model_backend_default_base_url,
     model_backend_default_model,
@@ -107,6 +108,48 @@ class ModelBackendTests(unittest.TestCase):
             10,
             on_text_delta=callback,
         )
+
+    def test_call_model_structured_json_delegates_to_codex_structured_call(self):
+        expected = {"decision": "reject"}
+        schema = {"type": "object"}
+        with patch("mew.model_backends.call_codex_structured_json", return_value=expected) as call:
+            result = call_model_structured_json(
+                "codex",
+                {"access_token": "x"},
+                "prompt",
+                "model",
+                "url",
+                10,
+                schema_name="raw_memory_extraction",
+                json_schema=schema,
+                strict=True,
+            )
+
+        self.assertEqual(result, expected)
+        call.assert_called_once_with(
+            {"access_token": "x"},
+            "prompt",
+            "model",
+            "url",
+            10,
+            schema_name="raw_memory_extraction",
+            json_schema=schema,
+            strict=True,
+            on_text_delta=None,
+        )
+
+    def test_call_model_structured_json_rejects_unsupported_backend(self):
+        with self.assertRaises(ModelBackendError):
+            call_model_structured_json(
+                "claude",
+                {"api_key": "x"},
+                "prompt",
+                "model",
+                "url",
+                10,
+                schema_name="raw_memory_extraction",
+                json_schema={"type": "object"},
+            )
 
     def test_load_model_auth_delegates_to_claude_auth_loader(self):
         with patch("mew.model_backends.load_anthropic_auth", return_value={"path": "key.txt"}) as loader:

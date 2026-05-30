@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M6.25 メモリサブシステム: raw から recall まで</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --surface: #ffffff;
+      --surface-soft: #eef4f8;
+      --ink: #1d2430;
+      --muted: #5b6575;
+      --line: #cad3df;
+      --blue: #1f6fb2;
+      --green: #2b7a57;
+      --amber: #946200;
+      --red: #b24a3d;
+      --violet: #6556a8;
+      --shadow: 0 8px 28px rgba(29, 36, 48, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+        "Yu Gothic", "Meiryo", sans-serif;
+      line-height: 1.65;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 48px;
+    }
+
+    header {
+      padding: 28px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      line-height: 1.25;
+    }
+
+    h1 {
+      font-size: clamp(1.65rem, 3vw, 2.35rem);
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: clamp(1.3rem, 2.4vw, 1.8rem);
+      margin-bottom: 14px;
+    }
+
+    h3 {
+      font-size: 1.02rem;
+      margin-bottom: 8px;
+    }
+
+    p {
+      margin: 8px 0 0;
+    }
+
+    code {
+      padding: 0.08em 0.3em;
+      border-radius: 4px;
+      background: #edf1f5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.93em;
+    }
+
+    .lead {
+      max-width: 860px;
+      color: var(--muted);
+      font-size: 1.03rem;
+    }
+
+    .nav {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 38px;
+      padding: 6px 12px;
+      color: #0f4574;
+      background: #e7f1fa;
+      border: 1px solid #b9d5ec;
+      border-radius: 999px;
+      text-decoration: none;
+      font-weight: 650;
+    }
+
+    section {
+      margin-top: 24px;
+      padding: 24px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .section-intro {
+      max-width: 920px;
+      color: var(--muted);
+    }
+
+    .phase-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 16px 0 4px;
+    }
+
+    .phase {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #f4f7fa;
+      color: #344053;
+      font-size: 0.86rem;
+      font-weight: 700;
+    }
+
+    .phase.b { border-color: #a8cde7; background: #e9f4fb; color: #164f7d; }
+    .phase.c { border-color: #b4d8c8; background: #ecf7f1; color: #1e5f43; }
+    .phase.d { border-color: #d7c7f1; background: #f2eefb; color: #504292; }
+    .phase.e { border-color: #e2cf9a; background: #fbf5e4; color: #745100; }
+
+    .flow {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .card {
+      position: relative;
+      padding: 16px;
+      background: #fbfcfe;
+      border: 1px solid var(--line);
+      border-left: 6px solid var(--blue);
+      border-radius: 8px;
+    }
+
+    .card.green { border-left-color: var(--green); }
+    .card.amber { border-left-color: var(--amber); }
+    .card.red { border-left-color: var(--red); }
+    .card.violet { border-left-color: var(--violet); }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .mini {
+      min-height: 100%;
+      padding: 10px;
+      background: var(--surface);
+      border: 1px solid #d8e0e9;
+      border-radius: 8px;
+    }
+
+    .mini strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #293448;
+    }
+
+    .arrow {
+      display: grid;
+      place-items: center;
+      height: 26px;
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .callout {
+      padding: 14px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .callout.normal {
+      border-color: #9bcab6;
+      background: #eef8f3;
+    }
+
+    .callout.eval {
+      border-color: #e0c274;
+      background: #fff8e6;
+    }
+
+    table {
+      width: 100%;
+      margin-top: 12px;
+      border-collapse: collapse;
+      font-size: 0.94rem;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      padding: 9px 10px;
+      border-bottom: 1px solid #e2e7ee;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #eef2f6;
+      color: #344053;
+      font-weight: 750;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    ul {
+      margin: 8px 0 0;
+      padding-left: 1.15rem;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+
+    .compact-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 16px;
+    }
+
+    .note {
+      margin-top: 14px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #f3f6f9;
+      border: 1px dashed #b9c4d0;
+      color: #485365;
+    }
+
+    footer {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto 28px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 860px) {
+      main {
+        width: min(100% - 20px, 1180px);
+        padding-top: 16px;
+      }
+
+      header,
+      section {
+        padding: 18px;
+      }
+
+      .card-grid,
+      .split,
+      .compact-list {
+        grid-template-columns: 1fr;
+      }
+
+      table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>M6.25 メモリサブシステムの流れ</h1>
+      <p class="lead">
+        このページは、設計書から「raw data から MemoryCard へ変換する流れ」と
+        「RecallRequest から検索結果へ返す流れ」だけを抜き出した説明です。
+        実装者が各段階で何を読み、何を書き、何を検証し、何を次へ渡すかを確認できるように整理しています。
+      </p>
+      <nav class="nav" aria-label="ページ内ナビゲーション">
+        <a href="#raw-to-memory">1. raw data → memory 変換</a>
+        <a href="#recall-flow">2. recall → retrieval 検索</a>
+      </nav>
+      <div class="phase-row" aria-label="フェーズ凡例">
+        <span class="phase b">Phase B: Typed card / seed retrieval</span>
+        <span class="phase c">Phase C: 評価ハーネス契約</span>
+        <span class="phase d">Phase D: graph 展開 / 最適化 index</span>
+        <span class="phase e">Phase E: context packet 投影</span>
+      </div>
+    </header>
+
+    <section id="raw-to-memory" aria-labelledby="raw-title">
+      <h2 id="raw-title">1. raw data → MemoryCard 変換フロー</h2>
+      <p class="section-intro">
+        raw transcript、tool log、verifier output、reviewer comment、diff は、そのまま durable memory にはなりません。
+        まず証拠として provenance に保存され、抽出・型付け・検証・承認を通過したものだけが committed MemoryCard になります。
+      </p>
+
+      <div class="split">
+        <div class="callout normal">
+          <strong>通常パス</strong>
+          <code>ingest_experience</code> は provenance と candidate/proposal を作るだけです。
+          committed card へ進むには、proposal、approval、commit の監査可能な状態遷移が必要です。
+        </div>
+        <div class="callout eval">
+          <strong>特権的 eval seed パス</strong>
+          <code>seed_eval</code> は Phase C の fixture setup 専用です。
+          gold label、trap family、期待回答、hidden scorer view を入れてはいけません。
+          seed された card は audit 上は識別可能ですが、ranking は <code>seed_eval</code> metadata を読んではいけません。
+        </div>
+      </div>
+
+      <div class="flow" aria-label="raw から committed memory までの段階">
+        <article class="card">
+          <h3>1. raw 入力を受け取る</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> transcript、tool log、command output、verifier output、reviewer comment、diff、file hash。</div>
+            <div class="mini"><strong>書く</strong> まだ durable memory は書かない。入力単位を capture 対象として整形する。</div>
+            <div class="mini"><strong>検証</strong> raw transcript を summary/details へ直接コピーしない。大きな payload は audit に入れない。</div>
+            <div class="mini"><strong>出す</strong> provenance capture 用の source record。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card green">
+          <h3>2. provenance event を捕捉する</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> source run/turn、fixture experience id、actor/producer、payload hash、短い excerpt。</div>
+            <div class="mini"><strong>書く</strong> <code>provenance_events</code>。必要なら <code>source_experience_id</code> を保存する。</div>
+            <div class="mini"><strong>検証</strong> redaction policy、excerpt サイズ、producer enum、privacy boundary。</div>
+            <div class="mini"><strong>出す</strong> <code>ProvenanceReceipt</code> と provenance event id。後続の evidence link が参照する。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card">
+          <h3>3. candidate を抽出する</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> provenance event、raw excerpt、既存 card、extractor rule。</div>
+            <div class="mini"><strong>書く</strong> <code>MemoryCandidate</code>。この時点では recall 対象ではない。</div>
+            <div class="mini"><strong>検証</strong> raw を丸写ししない。summary は短く、details は合成された説明にする。</div>
+            <div class="mini"><strong>出す</strong> 候補 claim、候補 evidence link、初期 confidence。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card">
+          <h3>4. type と facet を割り当てる</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> candidate、scope、applicability、authority、invalidator、lifecycle hint。</div>
+            <div class="mini"><strong>書く</strong> kind、scope、applicability、evidence role、invalidator baseline、projection mode。</div>
+            <div class="mini"><strong>検証</strong> semantic fact、procedure、failure shield、policy/preference、task episode のどれかへ過度に広げず型付けする。</div>
+            <div class="mini"><strong>出す</strong> proposal 可能な typed candidate。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card amber">
+          <h3>5. deduplication と contradiction/staleness/invalidator check</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> 既存 committed/superseded card、current evidence、card scope、applicability ref。</div>
+            <div class="mini"><strong>書く</strong> merge/split decision、contradiction state、staleness state、drop/downgrade reason。</div>
+            <div class="mini"><strong>検証</strong> 異なる scope の claim を混ぜない。stored baseline と現在の file/symbol/command/verifier/task/authority evidence を比較する。</div>
+            <div class="mini"><strong>出す</strong> proposal、rejected candidate、または supersede/tombstone が必要な mutation intent。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card violet">
+          <h3>6. approval gate を通過する</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> proposal、evidence links、authority source、actor、operation type。</div>
+            <div class="mini"><strong>書く</strong> approval audit event。通常は <code>candidate → proposal → approved → committed</code>。</div>
+            <div class="mini"><strong>検証</strong> policy/preference は user/reviewer/maintainer authority が必要。debug/manual でも通常は proposal/approved を記録する。</div>
+            <div class="mini"><strong>出す</strong> approved proposal、または terminal rejected。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card green">
+          <h3>7. commit、supersede、tombstone を実行する</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> approved proposal、target card、mutation op、schema version、authority。</div>
+            <div class="mini"><strong>書く</strong> <code>memory_cards</code> の committed revision。必要なら旧 card を superseded/tombstoned にする。</div>
+            <div class="mini"><strong>検証</strong> rejected/tombstoned/superseded から committed へ戻さない。restore は新 revision を作る。</div>
+            <div class="mini"><strong>出す</strong> commit result、card id、revision lineage、result hash。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card">
+          <h3>8. graph、index、audit を更新する</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> committed card、graph refs、graph-derived material、index mode、request hash。</div>
+            <div class="mini"><strong>書く</strong> graph refs がある場合だけ <code>graph_nodes</code>/<code>graph_edges</code>。Phase B では simple lexical/direct scan index。audit は常に書く。</div>
+            <div class="mini"><strong>検証</strong> graph endpoint は canonical node に解決できなければ reject。graph refs がない Phase B commit は graph 書き込み no-op。</div>
+            <div class="mini"><strong>出す</strong> retrieval 可能な committed card、derived index refresh、audit event。</div>
+          </div>
+        </article>
+      </div>
+
+      <table aria-label="状態遷移の要点">
+        <thead>
+          <tr>
+            <th>状態遷移</th>
+            <th>意味</th>
+            <th>通常の制約</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>candidate → proposal → approved → committed</code></td>
+            <td>通常の durable memory 化。</td>
+            <td>各段階を audit に残し、authority と evidence role を保存する。</td>
+          </tr>
+          <tr>
+            <td><code>candidate/proposal/approved → rejected</code></td>
+            <td>不採用。</td>
+            <td>terminal。後から committed へ戻さない。</td>
+          </tr>
+          <tr>
+            <td><code>committed → superseded/tombstoned</code></td>
+            <td>新 revision、または監査履歴として非 active 化。</td>
+            <td>通常 recall から外す。rollback 目的でも履歴は消さない。</td>
+          </tr>
+          <tr>
+            <td><code>forget</code></td>
+            <td>privacy/security/user-driven removal。</td>
+            <td>payload、support id、caller-visible provenance を redaction cascade で露出しない。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        Phase C の eval setup では、公開 fixture operation と prefix hash に含まれる <code>seed_eval</code> 入力だけが seed できます。
+        実行後に作られる receipt、audit id、provenance id、card id は入力 hash には含めず、artifact に保存します。
+      </div>
+    </section>
+
+    <section id="recall-flow" aria-labelledby="recall-title">
+      <h2 id="recall-title">2. RecallRequest → memory retrieval フロー</h2>
+      <p class="section-intro">
+        recall は、committed MemoryCard を単に全文検索する処理ではありません。
+        現在の repo/verifier/task/authority evidence を使って古い記憶を落とし、privacy と scope を先に守り、
+        ranking と audit 可能な RetrieveResult を返します。Phase E の context packet 投影は、この検索結果とは別段階です。
+      </p>
+
+      <div class="flow" aria-label="RecallRequest から RetrieveResult までの段階">
+        <article class="card">
+          <h3>1. RecallRequest を組み立てる</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> query、caller、authorization scope、memory scope、intent tags、limits。</div>
+            <div class="mini"><strong>書く</strong> request id/hash。intent tag は retrieval/ranking/audit 用で、planner action ではない。</div>
+            <div class="mini"><strong>検証</strong> scope と privacy を later filter へ渡せる形に正規化する。</div>
+            <div class="mini"><strong>出す</strong> retrieval plan の入力。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card green">
+          <h3>2. current evidence snapshot を添付する</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> repo/branch/commit、file state、symbol state、command state、verifier result、task contract、authority event。</div>
+            <div class="mini"><strong>書く</strong> recall request 内の <code>current_evidence</code>。これは durable memory ではない。</div>
+            <div class="mini"><strong>検証</strong> observed_at、hash、state、target scope、provenance ref が invalidator と比較可能か。</div>
+            <div class="mini"><strong>出す</strong> freshness、staleness、contradiction 判定の現在値。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card">
+          <h3>3. seed retrieval を実行する <span class="phase b">Phase B</span></h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> committed card、scope/kind/lifecycle/state/authority filter、query text。</div>
+            <div class="mini"><strong>書く</strong> candidate result set。Phase B では direct scan または同期 rebuild された simple lexical/BM25-like index。</div>
+            <div class="mini"><strong>検証</strong> approval_state は committed。tombstoned/deleted/forgotten は通常 retrieval に入れない。</div>
+            <div class="mini"><strong>出す</strong> graph 展開前の seed cards。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card violet">
+          <h3>4. 必要なら graph expansion を行う <span class="phase d">Phase D</span></h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> seed card の graph refs、canonical graph_nodes、graph_edges。</div>
+            <div class="mini"><strong>書く</strong> expansion frontier と usage count。derived graph index は rebuild 可能で非 authoritative。</div>
+            <div class="mini"><strong>検証</strong> max depth、fanout、node/card/char/latency budget。redacted evidence の edge は展開しない。</div>
+            <div class="mini"><strong>出す</strong> 追加候補 card と graph proximity signal。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card amber">
+          <h3>5. governance filtering を固定順で適用する</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> card privacy、caller authorization、scope_key、applicability、staleness、contradiction、invalidator。</div>
+            <div class="mini"><strong>書く</strong> dropped record、dropped_count_by_reason、内部 audit。caller-visible ID は許可されたものだけ。</div>
+            <div class="mini"><strong>検証</strong> sharing=team/shared でも allowed_scope_ids を bypass しない。fresh evidence は古い memory を override できる。</div>
+            <div class="mini"><strong>出す</strong> ranking へ渡せる governance-passed cards。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card">
+          <h3>6. deterministic ranking と CanonicalScore を作る</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> structured match、lexical score、scope modifier、authority/freshness/proximity、projection cost。</div>
+            <div class="mini"><strong>書く</strong> <code>score_components</code> と <code>score</code>/<code>final_score</code>。artifact では <code>CanonicalScore</code> 文字列。</div>
+            <div class="mini"><strong>検証</strong> NaN/Infinity を reject。Decimal + ROUND_HALF_UP で小数 4 桁、例 <code>0.1250</code>。</div>
+            <div class="mini"><strong>出す</strong> rank 付き evidence。tie-break も deterministic。</div>
+          </div>
+        </article>
+
+        <div class="arrow">↓</div>
+
+        <article class="card green">
+          <h3>7. RetrieveResult と usage を返す</h3>
+          <div class="card-grid">
+            <div class="mini"><strong>読む</strong> ranked cards、active current_support links、authorized provenance、drop reasons、usage counters。</div>
+            <div class="mini"><strong>書く</strong> result hash、ranked_evidence、abstained reason、dropped_count_by_reason、usage artifact。</div>
+            <div class="mini"><strong>検証</strong> support_experience_ids は current_support role だけ。proof/reviewer/lineage refs は metadata の role map へ分ける。</div>
+            <div class="mini"><strong>出す</strong> adapter/scoring が読める検索結果。Phase E の prompt 投影とは区別する。</div>
+          </div>
+        </article>
+      </div>
+
+      <table aria-label="visibility gate の順序">
+        <thead>
+          <tr>
+            <th>順序</th>
+            <th>gate</th>
+            <th>見るもの</th>
+            <th>落とす例</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>privacy/sharing</td>
+            <td><code>PrivacyRules.sharing</code>、<code>allowed_scope_ids</code>、redaction state。</td>
+            <td><code>privacy_block</code>、forgotten、redacted。</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>caller authorization scope</td>
+            <td>caller が許可された canonical scope key。</td>
+            <td><code>out_of_scope</code>、unauthorized scope。</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>memory scope match</td>
+            <td>task、branch、repo、project、user、team/shared の containment。</td>
+            <td>別 repo の project fact、別 task の task-only memory。</td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td>applicability match</td>
+            <td><code>applies_to</code>、<code>does_not_apply_to</code>、prerequisite、counterexample。</td>
+            <td><code>missing_evidence</code>、counterexample match。</td>
+          </tr>
+          <tr>
+            <td>5</td>
+            <td>staleness / contradiction</td>
+            <td>invalidator baseline と current evidence の hash/value/observed_at。</td>
+            <td><code>stale</code>、<code>contradicted</code>、<code>invalidator_triggered</code>。</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="split">
+        <div>
+          <h3>ranking の tie-break</h3>
+          <table aria-label="ranking tie-break">
+            <thead>
+              <tr>
+                <th>優先順</th>
+                <th>条件</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>1</td><td>高い <code>final_score</code>。</td></tr>
+              <tr><td>2</td><td>広い scope より exact scope match。</td></tr>
+              <tr><td>3</td><td>高い authority strength。</td></tr>
+              <tr><td>4</td><td>新しい <code>last_verified_at</code>。</td></tr>
+              <tr><td>5</td><td>短い summary / 低い projection cost。</td></tr>
+              <tr><td>6</td><td>辞書順で小さい <code>card_id</code>。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h3>RetrieveResult の主要フィールド</h3>
+          <table aria-label="RetrieveResult フィールド">
+            <thead>
+              <tr>
+                <th>フィールド</th>
+                <th>意味</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>ranked_evidence</code></td><td>rank、card id、score、score_components、scope、state、metadata。</td></tr>
+              <tr><td><code>support_experience_ids</code></td><td>active current_support から得た公開 support id の集合。P1 scoring は集合として扱う。</td></tr>
+              <tr><td><code>provenance_refs</code></td><td>caller に見せてよい current_support refs だけ。その他 role は metadata に分ける。</td></tr>
+              <tr><td><code>dropped_count_by_reason</code></td><td>drop reason 別の件数。非公開 card の存在を漏らさない。</td></tr>
+              <tr><td><code>usage</code></td><td>latency、cards scanned/ranked/returned/dropped、graph 展開数、projection chars、index mode。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="note">
+        Phase E では <code>MemoryContextBuilder</code> が retrieve result から model-visible context packet を作ります。
+        検索 artifact、audit log、full provenance payload はそのまま prompt に入れません。
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    出典: <code>docs/DESIGN_2026-05-22_M6_25_MEMORY_SUBSYSTEM_TYPED_CARDS_PLAN.md</code> の該当フローを要約。
+  </footer>
+</body>
+</html>

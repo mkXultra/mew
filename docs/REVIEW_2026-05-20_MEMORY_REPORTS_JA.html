@@ -1,0 +1,1118 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>M6.25 Memory 調査資料 統合レビュー (2026-05-20)</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f4ef;
+      --paper: #fffefa;
+      --ink: #1d2528;
+      --muted: #5e6a70;
+      --line: #d8d2c8;
+      --accent: #226b6f;
+      --accent-strong: #164f53;
+      --accent-soft: rgba(34, 107, 111, 0.08);
+      --warning: #8a4b14;
+      --danger: #9a3630;
+      --good: #2f6a3a;
+      --code-bg: #f0eee7;
+      --nav-bg: #ece7dc;
+      --shadow: 0 12px 32px rgba(37, 45, 48, 0.10);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans",
+        "Yu Gothic", "YuGothic", "Noto Sans JP", "Segoe UI", sans-serif;
+      line-height: 1.75;
+    }
+
+    a {
+      color: var(--accent-strong);
+      text-decoration-thickness: 0.08em;
+      text-underline-offset: 0.18em;
+    }
+
+    a:hover { color: #0d3f42; }
+
+    .page {
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      overflow: auto;
+      padding: 28px 22px;
+      background: var(--nav-bg);
+      border-right: 1px solid var(--line);
+    }
+
+    .sidebar h2 {
+      margin: 0 0 12px;
+      font-size: 0.95rem;
+      letter-spacing: 0;
+    }
+
+    .sidebar .meta {
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.6;
+    }
+
+    .sidebar nav {
+      display: grid;
+      gap: 4px;
+    }
+
+    .sidebar nav a {
+      display: block;
+      padding: 7px 9px;
+      border-radius: 6px;
+      color: #344246;
+      text-decoration: none;
+      font-size: 0.9rem;
+      line-height: 1.35;
+    }
+
+    .sidebar nav a:hover {
+      background: rgba(34, 107, 111, 0.12);
+      color: var(--accent-strong);
+    }
+
+    main {
+      width: min(100%, 1180px);
+      padding: 48px clamp(22px, 5vw, 68px) 72px;
+    }
+
+    header {
+      margin-bottom: 36px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent-strong);
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 920px;
+      font-size: clamp(1.95rem, 3.6vw, 3.2rem);
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    .summary {
+      max-width: 900px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 1.04rem;
+    }
+
+    section {
+      margin: 42px 0;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: clamp(1.35rem, 2.2vw, 2rem);
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 28px 0 10px;
+      font-size: 1.14rem;
+      line-height: 1.4;
+      letter-spacing: 0;
+    }
+
+    h4 {
+      margin: 22px 0 8px;
+      font-size: 0.98rem;
+      letter-spacing: 0;
+    }
+
+    p {
+      max-width: 920px;
+      margin: 12px 0;
+    }
+
+    ul, ol {
+      max-width: 960px;
+      margin: 12px 0;
+      padding-left: 1.4rem;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", "Courier New", monospace;
+    }
+
+    code {
+      padding: 0.1em 0.28em;
+      border-radius: 4px;
+      background: var(--code-bg);
+      font-size: 0.92em;
+    }
+
+    pre {
+      max-width: 1040px;
+      overflow-x: auto;
+      margin: 16px 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--code-bg);
+      line-height: 1.55;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+      font-size: 0.9rem;
+    }
+
+    .callout {
+      max-width: 1040px;
+      margin: 18px 0;
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-left: 6px solid var(--accent);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .callout h3 { margin-top: 0; }
+
+    .callout.warning { border-left-color: var(--warning); }
+    .callout.danger { border-left-color: var(--danger); }
+    .callout.good { border-left-color: var(--good); }
+
+    table {
+      width: 100%;
+      max-width: 1080px;
+      margin: 14px 0 22px;
+      border-collapse: collapse;
+      font-size: 0.93rem;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th, td {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+      line-height: 1.55;
+    }
+
+    th {
+      background: var(--nav-bg);
+      font-weight: 700;
+      font-size: 0.9rem;
+      letter-spacing: 0;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    td code { font-size: 0.85em; }
+
+    .doc-card-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      max-width: 1080px;
+      margin: 22px 0;
+    }
+
+    .doc-card {
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--accent);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .doc-card.alt {
+      border-top-color: var(--warning);
+    }
+
+    .doc-card h3 {
+      margin: 0 0 6px;
+      font-size: 1.05rem;
+    }
+
+    .doc-card .doc-id {
+      display: inline-block;
+      margin-bottom: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .doc-card.alt .doc-id {
+      background: rgba(138, 75, 20, 0.10);
+      color: var(--warning);
+    }
+
+    .doc-card .doc-path {
+      margin: 4px 0 10px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      word-break: break-all;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 1.8rem;
+      margin: 0 0 8px;
+      padding: 0 0.6rem;
+      border: 1px solid rgba(34, 107, 111, 0.25);
+      border-radius: 999px;
+      color: var(--accent-strong);
+      background: var(--accent-soft);
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+
+    .tag.alt {
+      border-color: rgba(138, 75, 20, 0.30);
+      background: rgba(138, 75, 20, 0.10);
+      color: var(--warning);
+    }
+
+    .do-dont {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      max-width: 1080px;
+      margin: 18px 0;
+    }
+
+    .do-dont .panel {
+      padding: 18px 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+
+    .panel h3 { margin-top: 0; }
+
+    .panel.do { border-left: 6px solid var(--good); }
+    .panel.dont { border-left: 6px solid var(--danger); }
+
+    .stage-diagram {
+      max-width: 1080px;
+      margin: 18px 0;
+      padding: 22px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 10px;
+    }
+
+    .stage-row {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr);
+      gap: 16px;
+      align-items: stretch;
+    }
+
+    .stage-label {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      font-weight: 700;
+      font-size: 0.85rem;
+      letter-spacing: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      line-height: 1.3;
+    }
+
+    .stage-body {
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--bg);
+      font-size: 0.92rem;
+    }
+
+    .stage-body code {
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+
+    .stage-arrow {
+      grid-column: 1 / -1;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.95rem;
+      padding: 2px 0;
+    }
+
+    .legend {
+      max-width: 1080px;
+      margin: 6px 0 12px;
+      padding: 10px 14px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .kind-table th:first-child,
+    .kind-table td:first-child {
+      white-space: nowrap;
+      font-weight: 700;
+      color: var(--accent-strong);
+    }
+
+    footer {
+      max-width: 1080px;
+      margin-top: 58px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 980px) {
+      .doc-card-grid,
+      .do-dont {
+        grid-template-columns: 1fr;
+      }
+      .stage-row {
+        grid-template-columns: 90px minmax(0, 1fr);
+      }
+    }
+
+    @media (max-width: 860px) {
+      .page { display: block; }
+      .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .sidebar nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      main { padding-top: 34px; }
+    }
+
+    @media (max-width: 540px) {
+      .sidebar nav { grid-template-columns: 1fr; }
+      main { padding-inline: 18px; }
+      .callout, .panel, .doc-card, .stage-diagram { padding: 16px; }
+      .stage-row { grid-template-columns: 1fr; }
+      .stage-label { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <aside class="sidebar" aria-label="目次">
+      <h2>Memory 調査統合レビュー</h2>
+      <p class="meta">
+        日付: 2026-05-20<br>
+        元文書:<br>
+        REVIEW_2026-05-20_M6_25_MEMORY_SUBSYSTEM_LITERATURE.md<br>
+        REVIEW_2026-05-20_AGENT_MEMORY_TRENDS.md
+      </p>
+      <nav>
+        <a href="#exec">1. Executive summary</a>
+        <a href="#docs">2. 2本の資料の関係</a>
+        <a href="#design">3. mew に入れるべき memory 設計の結論</a>
+        <a href="#do-dont">4. やること / まだやらない</a>
+        <a href="#bench">5. ベンチマークの位置づけ</a>
+        <a href="#kinds">6. Memory 種類の整理</a>
+        <a href="#flow">7. recall / write / injection / scoring の流れ</a>
+        <a href="#sources">8. 主要参照</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header>
+        <p class="eyebrow">M6.25 / memory subsystem / 統合レビュー</p>
+        <h1>2026 Agent Memory 調査資料の統合レビュー</h1>
+        <p class="summary">
+          M6.25 メモリサブシステム設計の前提となる 2 本の調査資料を、非実装者でも読みやすい形に整理した
+          日本語レビュー。元 Markdown は変更せず、両資料の役割の違い、ベンチマークの位置づけ、
+          mew に入れるべき memory 設計の結論、recall / write / injection / scoring の流れを統合して示す。
+        </p>
+      </header>
+
+      <section id="exec">
+        <h2>1. Executive summary</h2>
+
+        <div class="callout good">
+          <h3>結論を 4 行で</h3>
+          <ul>
+            <li>2026 の主流は「巨大 context」でも「会話履歴を vector DB に入れる」でもなく、<strong>typed memory + lifecycle (write-manage-read) + provenance + bounded retrieval + downstream task 評価</strong>。</li>
+            <li>mew の最初の判断は <em>raw transcript は memory ではない</em>、<em>recall は native tool として始める</em>、<em>常時 prompt injection は v0/v1 では避ける</em>。</li>
+            <li>書き込みは「毎ターン自動 append」ではなく <strong>candidate queue + kind 別 approval gate</strong>。memory は evidence であって next-action authority ではない。</li>
+            <li>評価は LoCoMo / LongMemEval だけでは不足。MemoryArena / LongMemEval-V2 / AMA-Bench / STATE-Bench で「memory が後続行動に効いたか」を見る。ただし mew の <em>合否判定</em>は Harbor-style coding fixtures が担う。</li>
+          </ul>
+        </div>
+
+        <p>2 本の調査資料は、同じ 2026 年メモリ研究の地図を別の角度から描いている。
+        本文書では先に両者の役割と差分を示し、次に mew への落とし込み (memory 種類、書き込み・読み出しの流れ、評価指標) を整理する。</p>
+
+        <p>実装上の目標形は次のとおり。</p>
+        <pre><code>small, typed, approved, cited, scoped, stale-aware memory</code></pre>
+        <p>逆に避けるべき形は次のとおり。</p>
+        <pre><code>large, self-written, prompt-injected, universal memory</code></pre>
+      </section>
+
+      <section id="docs">
+        <h2>2. 2 本の資料の関係</h2>
+
+        <p>同じ 2026-05-20 付の 2 本だが、目的層が異なる。<strong>72103</strong> は mew 設計への落とし込みまで含む広めの調査、<strong>72630</strong> は mew 固有設計を切り離した 2026 時点の流行調査である。</p>
+
+        <div class="doc-card-grid">
+          <article class="doc-card">
+            <span class="doc-id">72103 / mew 設計指向</span>
+            <h3>M6.25 Memory Subsystem Literature</h3>
+            <p class="doc-path">docs/REVIEW_2026-05-20_M6_25_MEMORY_SUBSYSTEM_LITERATURE.md</p>
+            <p><strong>立ち位置:</strong> design input。<code>DESIGN_2026-05-20_M6_25_MEMORY_SYSTEM_TOOL_PROVIDER.md</code> や ROADMAP の M6.9 / M6.25 と紐付き、<em>mew がどう作るべきか</em> を文献から導出する。</p>
+            <p><strong>強み:</strong> Practical Memory Classification、Write/Recall path、Approval gate、Staleness、V0/V1/V2 スコープなど、設計に直接落ちる節を持つ。</p>
+            <p><strong>注意:</strong> 実装の意思決定文書ではなく、「設計入力」として読む。実装変更を直接承認するものではない。</p>
+          </article>
+
+          <article class="doc-card alt">
+            <span class="doc-id">72630 / トレンド整理</span>
+            <h3>Agent Memory / Long-Term Memory Subsystem トレンド調査</h3>
+            <p class="doc-path">docs/REVIEW_2026-05-20_AGENT_MEMORY_TRENDS.md</p>
+            <p><strong>立ち位置:</strong> 2026 年時点の agent memory 系の <em>流行マップ</em>。mew の設計判断は意図的に切り離し、論文 / benchmark / system / survey の俯瞰に絞る。</p>
+            <p><strong>強み:</strong> パターン早見表 (10 種)、2023-2026 の論文/system/benchmark 表、Hype vs 実用の切り分け、MemoryArena の位置づけ、指標カテゴリ表。</p>
+            <p><strong>注意:</strong> mew 用の実装案・コード変更は範囲外と明記されている。流行のあてはめではなく <em>状況把握</em>として読む。</p>
+          </article>
+        </div>
+
+        <h3>差分の早見表</h3>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 18%">観点</th>
+              <th>72103 (mew 設計指向)</th>
+              <th>72630 (トレンド)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>主目的</td>
+              <td>M6.25 設計のための文献入力</td>
+              <td>2026 の agent memory 流行マップ</td>
+            </tr>
+            <tr>
+              <td>主軸</td>
+              <td>Write / Recall / Gate / Stale / V0-V2 scope</td>
+              <td>パターン分類 / Hype vs 実用 / 評価指標</td>
+            </tr>
+            <tr>
+              <td>mew への踏み込み</td>
+              <td>あり (taxonomy / pipeline / 範囲)</td>
+              <td>軽い含意のみ (procedural / failure / convention 推し)</td>
+            </tr>
+            <tr>
+              <td>benchmark の扱い</td>
+              <td>Mew relevance 付きの利用ガイド</td>
+              <td>世代別マップ + 能力ヒートマップ</td>
+            </tr>
+            <tr>
+              <td>典型ユーザー</td>
+              <td>M6.25 設計レビュアー / 実装者</td>
+              <td>memory 系を一望したい意思決定者</td>
+            </tr>
+            <tr>
+              <td>カバー論文</td>
+              <td>27 件 (taxonomy + system + benchmark)</td>
+              <td>38 件 (survey + system + benchmark を厚めに)</td>
+            </tr>
+            <tr>
+              <td>注意点</td>
+              <td>実装承認ではない (design input only)</td>
+              <td>mew 設計には直接踏み込まない (research note)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>関係図</h3>
+        <pre><code>          2026 agent memory 研究地図
+          (survey / system / benchmark / safety)
+                       │
+                       ▼
+     ┌─────────────────────────────────────────────┐
+     │   72630 トレンド調査 (state of the field)   │
+     │   - 10 パターン分類                          │
+     │   - hype vs 実用 切り分け                    │
+     │   - benchmark 世代マップ                     │
+     │   - 評価指標カテゴリ                         │
+     └────────────────────┬────────────────────────┘
+                          │ 同じ参照を共有
+                          ▼
+     ┌─────────────────────────────────────────────┐
+     │   72103 M6.25 設計指向レビュー              │
+     │   - mew 向け memory 分類                     │
+     │   - write/recall pipeline                    │
+     │   - approval gate / stale 戦略               │
+     │   - V0/V1/V2 スコープ                        │
+     └────────────────────┬────────────────────────┘
+                          │
+                          ▼
+                  M6.25 設計判断
+       (DESIGN_2026-05-20_M6_25_MEMORY_SYSTEM_TOOL_PROVIDER)</code></pre>
+        <p class="legend">2 本は競合せず、72630 が外側 (流行の地形)、72103 が内側 (mew の輪郭) を描く構造。M6.25 設計レビューでは 72103 を基準にし、72630 は背景チェックに使う。</p>
+      </section>
+
+      <section id="design">
+        <h2>3. mew に入れるべき memory 設計の結論</h2>
+
+        <p>72103 の Executive Finding と 72630 の「実用寄り」整理は同じ方向を指す。M6.25 の設計判断としては以下を採用する。</p>
+
+        <div class="callout">
+          <h3>採用すべき形</h3>
+          <ul>
+            <li><strong>Raw transcript は provenance であって memory ではない。</strong> append-only / content-addressed で保存し、durable memory として直接 recall させない。</li>
+            <li><strong><code>MemorySystem.recall()</code> は native tool として始める。</strong> v0/v1 では prompt injection (常時注入) を避ける。injection は <code>PromptSectionRegistry</code> 経由の将来課題。</li>
+            <li><strong>Durable memory は typed entry。</strong> <code>kind / scope / source_refs / proof_refs / validity_state / invalidators / supersedes / contradicts</code> を持つ。</li>
+            <li><strong>Graph memory は主ストアではなく、bounded traversal の retrieval seed 拡張に限る。</strong> edge は <code>derived_from / supersedes / contradicts / same_task_shape / failure_cluster / file_symbol / reviewer_correction / preference_scope</code> 等で型付け。</li>
+            <li><strong>Write は automatic append ではなく candidate queue + kind 別 approval。</strong> revise は「approved candidate を消費する」操作のみで、モデルが直接編集する API は出さない。</li>
+            <li><strong>評価は Harbor-style coding fixtures を主にし、MemoryArena / LongMemEval-V2 / AMA-Bench / STATE-Bench を補助に使う。</strong> LoCoMo / LongMemEval は sanity check 止まり。</li>
+            <li><strong>memory は evidence であって next-action authority ではない。</strong> system policy / tool access / task contract / verifier 出力 / fresh repo evidence を上書きしてはならない。</li>
+          </ul>
+        </div>
+
+        <h3>推奨されるアーキテクチャ境界</h3>
+        <pre><code>Native provenance (transcript / tool / verifier)
+   └── 直接 recall 不可
+
+Candidate extraction
+   ├─ event-triggered (session close / verifier / reviewer / 失敗反復)
+   └─ typed candidate + source/proof refs
+
+Approval / write gates (kind 別)
+   └─ scope / contradiction / freshness / privacy / utility
+
+Durable MemoryStore
+   └─ typed entries + revision lineage + invalidators
+
+Indexes
+   └─ exact / path / symbol / tag (+ optional vector / typed graph)
+
+MemorySystem
+   ├─ recall  : read-only evidence retrieval
+   ├─ revise  : approved candidate 消費のみ
+   ├─ project : 将来用の bounded prompt projection
+   └─ trace   : observability / scoring
+
+MemoryToolProvider           PromptSectionRegistry
+  ├─ provider 側 schema       └─ injection は将来分離
+  └─ MemorySystem に委譲          (ToolRegistry とは別)</code></pre>
+        <p>このうち <strong>MemoryToolProvider が policy を持たない</strong>、<strong>ToolRegistry は callable schema だけ</strong>、<strong>injection は別 registry</strong>、という分離が肝。<code>DESIGN_2026-05-20_M6_25_MEMORY_SYSTEM_TOOL_PROVIDER.md</code> の方向と一致する。</p>
+      </section>
+
+      <section id="do-dont">
+        <h2>4. やるべきこと / まだやらないこと</h2>
+
+        <p>V0 → V1 → V2 を 72103 から圧縮した上で、72630 の hype 警告を重ねた。</p>
+
+        <h3>段階スコープ</h3>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 14%">段階</th>
+              <th style="width: 28%">目的</th>
+              <th>含めるもの</th>
+              <th>含めないもの</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>V0</td>
+              <td>memory 境界と trace skeleton を作る (動作は無くてよい)</td>
+              <td>
+                <code>MemorySystem</code> 注入インタフェース、明示的に enable した場合のみ read-only <code>recall</code>、<code>EmptyMemorySystem</code>、stable 入出力 schema と schema hash、trace event、provenance と durable memory の分離。
+              </td>
+              <td>
+                prompt injection、モデル可視の write、graph traversal。
+              </td>
+            </tr>
+            <tr>
+              <td>V1</td>
+              <td>bounded recall が役立つことを autonomous write 無しで実証</td>
+              <td>
+                project-scope の承認済み durable entry、手動 / レビュアー承認の seed、kind は <code>episodic_task</code> / <code>project_fact</code> / <code>failure_shield</code> / <code>reviewer_correction</code>、exact/path/symbol/tag 検索、stale/superseded フィルタ、Harbor fixtures での memory on/off 比較。
+              </td>
+              <td>
+                automatic durable write、prompt section projection、self-evolving retrieval、unbounded graph recall。
+              </td>
+            </tr>
+            <tr>
+              <td>V2</td>
+              <td>反復作業を承認付き durable advantage に変える</td>
+              <td>
+                event-triggered candidate extraction、kind 別 approval gate、typed graph edges、seed 後の bounded chain recall、procedural repair memory (強い proof 要件)、file hash / verifier command / task contract / reviewer veto に紐づく stale、scoring dashboard (write precision / stale recall / memory-attributable wins / 反復失敗ブロック数)。
+              </td>
+              <td>
+                高信頼 preference / convention の <em>小さな</em> prompt projection は late-V2 のオプションに留め、まだ既定にはしない。offline consolidation も late-V2 オプション。
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>禁則 (まだやらない)</h3>
+        <div class="do-dont">
+          <div class="panel do">
+            <h3>やる</h3>
+            <ul>
+              <li>Raw provenance を append-only / content-addressed で保管。</li>
+              <li><code>recall</code> を read-only native tool で先に提供。</li>
+              <li>kind 別 approval gate と revision lineage (<code>superseded_by</code> / <code>contradicted_by</code> / <code>stale_due_to</code>) を持つ。</li>
+              <li>graph traversal は depth/fanout/token budget 付き、drop reason を残す。</li>
+              <li>Harbor fixtures で memory on/off 比較を取る。</li>
+              <li>scoring dashboard を JSONL でも良いから出す。</li>
+            </ul>
+          </div>
+          <div class="panel dont">
+            <h3>まだやらない</h3>
+            <ul>
+              <li>毎ターン自動の durable write。</li>
+              <li>raw transcript / 古い tool 出力 / 古いモデル文の prompt 直挿入。</li>
+              <li>memory に next-action 決定権を持たせること。</li>
+              <li><code>ToolRegistry</code> に memory storage / graph policy / prompt projection を持たせること。</li>
+              <li>user / project / task / procedural を 1 つの global vector store にまとめること。</li>
+              <li>project 情報を user-scope memory 経由で他プロジェクトに漏らすこと。</li>
+              <li>失敗 / 思弁的 trajectory からの procedural memory 昇格 (verifier/reviewer proof 無し)。</li>
+              <li>limit 無しの graph 展開、drop telemetry 無しの memory 拡張。</li>
+              <li>v1/v2 の observability / regression gate より先に EvolveMem 的 self-evolution を有効化すること。</li>
+              <li>LoCoMo / LongMemEval のみで M6.25 を採否判定すること。</li>
+              <li>native recall trace で usefulness を確認する前に prompt projection を入れること。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="bench">
+        <h2>5. ベンチマークの位置づけ</h2>
+
+        <p>72630 が世代マップ、72103 が mew relevance 付きの利用ガイドを与えている。両者を統合すると、ベンチマークは「会話 recall」「能力分解」「agentic action」「production reliability」「safety」の 5 層で見るのが妥当。</p>
+
+        <h3>世代と狙い</h3>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 14%">世代</th>
+              <th style="width: 26%">代表</th>
+              <th>中心の問い</th>
+              <th>mew での使い方</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>会話 recall</td>
+              <td>LoCoMo, LongMemEval</td>
+              <td>長期会話の事実・時間・更新を答えられるか</td>
+              <td>retrieval / indexing の sanity check のみ。採否判定には使わない。</td>
+            </tr>
+            <tr>
+              <td>長大 context 耐性</td>
+              <td>BEAM</td>
+              <td>10M token 級でも壊れないか</td>
+              <td>スケールストレス用。優先度は低い。</td>
+            </tr>
+            <tr>
+              <td>能力分解</td>
+              <td>MemoryAgentBench, StructMemEval, MemBench</td>
+              <td>retrieval / TTL / forgetting / 構造化を能力単位で測れるか</td>
+              <td>generic memory lifecycle と graph/structured 判断の補助。</td>
+            </tr>
+            <tr>
+              <td>agentic action</td>
+              <td><strong>MemoryArena</strong>, AMA-Bench, LongMemEval-V2</td>
+              <td>memory が後続行動・workflow・experience に効くか</td>
+              <td>mew に最も近い generic 評価。非コーディング領域での比較に使う。</td>
+            </tr>
+            <tr>
+              <td>production reliability</td>
+              <td>STATE-Bench</td>
+              <td>memory が enterprise タスクの成功率 / 信頼性 / UX を上げるか</td>
+              <td>peer-reviewed ではないので参考扱い。観測のみ。</td>
+            </tr>
+            <tr>
+              <td>safety / drift</td>
+              <td>MemEvoBench, EvoMemBench, Evo-Memory</td>
+              <td>misevolution / poisoning / stale drift</td>
+              <td>self-evolving 系を導入する前に必ず参照。今は監視対象。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>MemoryArena と LongMemEval-V2 の位置づけ</h3>
+        <div class="callout">
+          <h3>MemoryArena (arXiv:2602.16313)</h3>
+          <p>interdependent な multi-session タスクで、前 session で得た memory を <em>次の行動</em>に使えるかを評価する 2026 型 benchmark。LoCoMo / LongMemEval で高得点でも、agentic setting では弱いことを示している点が重要。<br>
+          mew にとっては <em>generic 評価の橋渡し</em>。「recall できる」と「memory が次の tool choice / repair / verification を改善する」の差を見るのに使う。<br>
+          ただし memory governance / 編集 / 所有権 / 削除 / privacy は主対象でない点に注意。</p>
+        </div>
+
+        <div class="callout">
+          <h3>LongMemEval-V2 (arXiv:2605.12493)</h3>
+          <p>web 環境の workflow / gotchas / premise awareness を覚える「経験豊富な同僚」型の評価。<br>
+          mew の <em>resident coding advantage</em> の比喩に近いが、コーディング fixture そのものではないため、Harbor を代替するものではない。</p>
+        </div>
+
+        <div class="callout warning">
+          <h3>Harbor との役割分担</h3>
+          <ul>
+            <li>LoCoMo / MemBench / MemoryAgentBench → generic memory 系の <em>sanity check</em></li>
+            <li>MemoryArena / LongMemEval-V2 / AMA-Bench / STATE-Bench → 非コーディング領域での <em>memory 効用比較</em></li>
+            <li><strong>Harbor-style coding fixtures → M6.25 の合否判定</strong></li>
+          </ul>
+          <p>mew の product claim は coding resident advantage。最終判断は Harbor 側でしか出せない。</p>
+        </div>
+
+        <h3>mew で測るべき指標</h3>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 22%">層</th>
+              <th>指標</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>generic memory quality</td>
+              <td>Recall@k / MRR、evidence hit rate、stale recall rate、contradiction rate、abstention accuracy、token / latency / API call overhead、write precision、write recall、invalidation latency</td>
+            </tr>
+            <tr>
+              <td>mew downstream</td>
+              <td>同形タスク再実行での改善幅、memory on/off の verifier pass rate、first useful action latency、time to first edit、failure-shield による反復失敗ブロック数、reviewer rescue edits、pass@1 / pass^N、memory-attributable win rate、novel-task canary regression、prompt size / memory projection size、recall tool 呼び出し数と useful-recall ratio</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="kinds">
+        <h2>6. Memory 種類の整理</h2>
+
+        <p>72103 が示す mew 向け taxonomy を中心に、72630 のパターン分類を補助情報として並べる。各 kind は <em>書き込みゲート</em>、<em>古さ意味</em>、<em>recall budget</em> が異なるため、汎用 working/episodic/semantic/procedural を直に晒すよりこの 8 区分が実装に近い。</p>
+
+        <table class="kind-table">
+          <thead>
+            <tr>
+              <th style="width: 18%">Kind</th>
+              <th>目的</th>
+              <th>初期ストア</th>
+              <th>書き込みゲート</th>
+              <th>Recall 経路</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>provenance</td>
+              <td>監査・リプレイ・抽出元 (memory ではない)</td>
+              <td>append-only な transcript / tool / verifier ログ</td>
+              <td>memory としてのゲート無し。provenance 記録のみ。</td>
+              <td>memory として recall 不可。candidate 抽出と監査参照のみ。</td>
+            </tr>
+            <tr>
+              <td>working / reentry</td>
+              <td>今のタスク状態と再入</td>
+              <td>WorkFrame / lane state / active todo</td>
+              <td>reducer 主導の状態遷移のみ</td>
+              <td>prompt section として供給。durable recall ではない。</td>
+            </tr>
+            <tr>
+              <td>episodic</td>
+              <td>前タスク / 前セッションで何が起きたか</td>
+              <td>短い episode card + proof refs</td>
+              <td>outcome + verifier / reviewer evidence</td>
+              <td>task shape / file / failure class で <code>recall</code></td>
+            </tr>
+            <tr>
+              <td>semantic</td>
+              <td>プロジェクトの安定的事実・規約</td>
+              <td>typed fact + source refs + scope</td>
+              <td>contradiction + freshness + approval</td>
+              <td>path / symbol / convention / クエリで <code>recall</code></td>
+            </tr>
+            <tr>
+              <td>procedural</td>
+              <td>再利用可能な修復手順 / runbook / skill</td>
+              <td>versioned procedure (trigger / action / proof)</td>
+              <td>強い approval。可能なら検証成功実績。</td>
+              <td>trigger と現在 evidence で <code>recall</code></td>
+            </tr>
+            <tr>
+              <td>failure-shield</td>
+              <td>同じ失敗を繰り返さない</td>
+              <td>失敗試行の要約 + evidence</td>
+              <td>failure 分類 + reviewer approval</td>
+              <td><code>do_not_repeat</code> evidence としてのみ供給</td>
+            </tr>
+            <tr>
+              <td>preference</td>
+              <td>ユーザー嗜好</td>
+              <td>user-scope の独立ストア</td>
+              <td>明示的ユーザー承認 or 手動編集</td>
+              <td>narrow scope projection。<em>project 越境禁止</em>。</td>
+            </tr>
+            <tr>
+              <td>graph / symbol</td>
+              <td>memory とコードの関係索引</td>
+              <td>typed edge + symbol/file key</td>
+              <td>承認済み entry または決定的 / 静的解析からのみ</td>
+              <td>seed retrieval の後段に bounded 展開</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>2026 流行パターンとの対応 (72630 早見表との対応)</h3>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 30%">72630 のパターン</th>
+              <th>mew の kind との対応</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Retrieval-augmented persistent memory</td>
+              <td>semantic / episodic / failure-shield の primary recall 経路</td>
+            </tr>
+            <tr>
+              <td>Typed cognitive memory</td>
+              <td>kind 区分そのもの。ただし UI には出さず内部実装に留める。</td>
+            </tr>
+            <tr>
+              <td>Memory lifecycle / operations</td>
+              <td>write / revise / approval / stale / supersede の lifecycle</td>
+            </tr>
+            <tr>
+              <td>Hierarchical / context OS / 圧縮</td>
+              <td>provenance と working/reentry の分離、late-V2 の offline consolidation</td>
+            </tr>
+            <tr>
+              <td>Graph / temporal / causal memory</td>
+              <td>graph / symbol kind の bounded 拡張</td>
+            </tr>
+            <tr>
+              <td>Reflective / experiential / procedural</td>
+              <td>procedural / failure-shield / reviewer correction</td>
+            </tr>
+            <tr>
+              <td>Learned memory manager</td>
+              <td>採用しない (V2 までは learned policy を入れない)</td>
+            </tr>
+            <tr>
+              <td>Self-evolving memory</td>
+              <td>監視対象。observability / regression gate より先には入れない。</td>
+            </tr>
+            <tr>
+              <td>Multimodal / screen memory</td>
+              <td>当面範囲外。資料として参照のみ。</td>
+            </tr>
+            <tr>
+              <td>Safety / governance</td>
+              <td>scope / contradiction / freshness / privacy gate と stale 戦略</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="flow">
+        <h2>7. recall / write / injection / scoring の流れ</h2>
+
+        <p>各経路を別レーンで描く。<strong>raw</strong> から <strong>durable</strong> への昇格、<strong>recall</strong> から <strong>action</strong> への往復、<strong>injection</strong> と <strong>scoring</strong> の分離を明示する。</p>
+
+        <h3>パイプライン全景 (ASCII)</h3>
+        <pre><code>┌──────────────────────────────────────────────────────────────────────┐
+│ 1. Provenance lane (memory ではない)                                 │
+│                                                                      │
+│   provider req/resp ──┐                                              │
+│   tool result        ─┼─▶ append-only / content-addressed artifact   │
+│   verifier outcome   ─┘     (recall 不可。candidate 抽出と監査用)     │
+└──────────────────────────────────────────────────────────────────────┘
+                          │
+                          ▼ event trigger
+┌──────────────────────────────────────────────────────────────────────┐
+│ 2. Write lane (candidate → approval → durable)                       │
+│                                                                      │
+│   event (session close / verifier / reviewer / 失敗反復 / explicit)   │
+│      └▶ candidate extractor ─▶ candidate queue                        │
+│              │  (kind / scope / source_refs / proof_refs / trigger)   │
+│              ▼                                                        │
+│         approval gate (kind 別)                                       │
+│              ├─ scope check                                           │
+│              ├─ contradiction check                                   │
+│              ├─ freshness check                                       │
+│              ├─ privacy check                                         │
+│              ├─ utility score                                         │
+│              └─ reviewer / user / policy approval                     │
+│              │                                                        │
+│              ▼                                                        │
+│       Durable MemoryStore (typed entry + revision lineage)            │
+│              │                                                        │
+│              ▼                                                        │
+│       Indexes: exact / path / symbol / tag (+ vector / graph)         │
+└──────────────────────────────────────────────────────────────────────┘
+                          │
+                          ▼ (read-only)
+┌──────────────────────────────────────────────────────────────────────┐
+│ 3. Recall lane (model から native tool として)                       │
+│                                                                      │
+│   model ─tool call─▶ MemorySystem.recall(query, scope, kinds, ...)    │
+│                          │                                            │
+│                          ▼                                            │
+│           request validation → scope filter → kind filter             │
+│                          ▼                                            │
+│           exact / path / symbol / tag search                          │
+│                          ▼                                            │
+│           (optional) vector retrieval                                 │
+│                          ▼                                            │
+│           (optional) bounded graph expansion (typed edge)             │
+│                          ▼                                            │
+│           contradiction / staleness filter → rerank                   │
+│                          ▼                                            │
+│           bounded projection (evidence refs + dropped metadata)       │
+│                          ▼                                            │
+│   model に <strong>evidence</strong> を返す (instruction ではない)     │
+└──────────────────────────────────────────────────────────────────────┘
+                          │
+                          ▼ (将来分離)
+┌──────────────────────────────────────────────────────────────────────┐
+│ 4. Injection lane (V0/V1 では使わない、late-V2 の選択肢)             │
+│                                                                      │
+│   高信頼 preference / 活性 convention のみ                            │
+│      └▶ PromptSectionRegistry → bounded prompt projection             │
+│      ※ ToolRegistry / MemoryToolProvider とは別ルート                 │
+│      ※ raw transcript / 古い model 文は決して直挿入しない             │
+└──────────────────────────────────────────────────────────────────────┘
+                          │
+                          ▼ 並列に発火
+┌──────────────────────────────────────────────────────────────────────┐
+│ 5. Scoring lane (trace 駆動)                                          │
+│                                                                      │
+│   trace events ─▶ JSONL / dashboard                                   │
+│       ├─ generic: Recall@k, MRR, stale rate, contradiction rate,      │
+│       │           abstention, write precision, invalidation latency   │
+│       └─ mew downstream: verifier pass (on/off), pass^N,              │
+│                          failure-shield block 数, reviewer rescue,    │
+│                          memory-attributable win rate,                │
+│                          novel-task canary regression                 │
+└──────────────────────────────────────────────────────────────────────┘</code></pre>
+
+        <h3>段階表現 (HTML)</h3>
+        <div class="stage-diagram" role="group" aria-label="memory pipeline stages">
+          <div class="stage-row">
+            <div class="stage-label">1. Raw</div>
+            <div class="stage-body">
+              provider request/response、tool result、verifier outcome を append-only / content-addressed で保存。<strong>memory として直接 recall しない</strong>。
+            </div>
+          </div>
+          <div class="stage-arrow">▼ event trigger (session close / verifier / reviewer / 反復失敗)</div>
+          <div class="stage-row">
+            <div class="stage-label">2. Candidate</div>
+            <div class="stage-body">
+              candidate extractor が typed candidate を作る。fields: <code>candidate_id</code>, <code>memory_kind</code>, <code>scope</code>, <code>source_refs</code>, <code>claim</code> or <code>procedure</code>, <code>trigger_conditions</code>, <code>validity</code>, <code>confidence</code>, <code>utility_score</code>, <code>privacy_class</code>, <code>created_at</code>, <code>last_verified_at</code>, <code>valid_from/until</code>, <code>supersedes/contradicts/derived_from</code>。
+            </div>
+          </div>
+          <div class="stage-arrow">▼ kind 別 approval gate</div>
+          <div class="stage-row">
+            <div class="stage-label">3. Approve</div>
+            <div class="stage-body">
+              scope / contradiction / freshness / privacy / utility / reviewer or user or policy。失敗側の <code>failure_shield</code>、手順側の <code>procedural</code> は特に強いゲート。<strong>in-place 書き換え禁止</strong>。<code>superseded_by</code> / <code>contradicted_by</code> / <code>stale_due_to</code> で revision lineage を残す。
+            </div>
+          </div>
+          <div class="stage-arrow">▼ Durable に書く</div>
+          <div class="stage-row">
+            <div class="stage-label">4. Durable</div>
+            <div class="stage-body">
+              typed entry + revision lineage + invalidators。indexes: exact / path / symbol / tag (+ optional vector / typed graph edges)。stale は時間だけでなく file hash / symbol move / verifier 変更 / contract 変更 / preference 変更 / reviewer 否決 / provider 変更にも紐づく。
+            </div>
+          </div>
+          <div class="stage-arrow">▼ model からの recall 要求</div>
+          <div class="stage-row">
+            <div class="stage-label">5. Recall</div>
+            <div class="stage-body">
+              request validation → scope/kind filter → exact/path/symbol/tag → (optional) vector → (optional) bounded graph expansion → contradiction/staleness filter → rerank → bounded projection。出力は evidence (id, kind, scope, summary, why_relevant, source/proof refs, validity, confidence, staleness, related ids, dropped_count_by_reason)。<strong>instruction / next-action / hidden chain-of-thought を含めない</strong>。
+            </div>
+          </div>
+          <div class="stage-arrow">▼ (late-V2 のみ) PromptSectionRegistry 経由</div>
+          <div class="stage-row">
+            <div class="stage-label">6. Inject</div>
+            <div class="stage-body">
+              高信頼 preference / 活性 convention のみを <em>小さく</em> projection。<strong>ToolRegistry / MemoryToolProvider とは別経路</strong>。raw transcript や古いモデル文は決して injection しない。memory は system policy / tool access / task contract / verifier 出力 / fresh repo evidence を上書きしてはならない。
+            </div>
+          </div>
+          <div class="stage-arrow">▼ 並列に流れる trace</div>
+          <div class="stage-row">
+            <div class="stage-label">7. Score</div>
+            <div class="stage-body">
+              trace event は generic (Recall@k, MRR, stale, contradiction, abstention, write precision, invalidation latency) と mew downstream (verifier pass on/off, pass^N, failure-shield block 数, reviewer rescue, memory-attributable win rate, novel-task canary) を分けて記録。Harbor fixtures が合否判定、MemoryArena / LongMemEval-V2 / AMA-Bench / STATE-Bench は補助比較。
+            </div>
+          </div>
+        </div>
+
+        <p class="legend">図のレーン番号は実装段階ではなく <em>責務</em> の分離を示す。V0/V1 では Recall lane を read-only の native tool に限定し、Inject lane は閉じておく。Score lane は V1 から JSONL で稼働させ、V2 で dashboard に出す想定。</p>
+      </section>
+
+      <section id="sources">
+        <h2>8. 主要参照</h2>
+        <p>本文書は元 2 資料を <em>変更せず</em> 統合したものである。元の Markdown を直接読むこと。詳細な arXiv ID や URL は 2 資料の source inventory に列挙されているため、ここでは重複を避けて要点ポインタのみ示す。</p>
+
+        <ul>
+          <li><strong>72103:</strong> <code>docs/REVIEW_2026-05-20_M6_25_MEMORY_SUBSYSTEM_LITERATURE.md</code> — Executive Finding、Practical Memory Classification、Write / Recall Path、Approval gates、V0 / V1 / V2 scope、Source inventory。</li>
+          <li><strong>72630:</strong> <code>docs/REVIEW_2026-05-20_AGENT_MEMORY_TRENDS.md</code> — パターン早見表、Survey/system/benchmark 表、Hype vs 実用、MemoryArena 位置づけ、指標カテゴリ表、Source inventory。</li>
+          <li><strong>設計対応文書:</strong> <code>docs/DESIGN_2026-05-20_M6_25_MEMORY_SYSTEM_TOOL_PROVIDER.md</code>。本レビューの設計含意は同設計文書の方向と一致する。</li>
+          <li><strong>ベンチマーク中核参照:</strong> MemoryArena (arXiv:2602.16313)、LongMemEval-V2 (arXiv:2605.12493)、AMA-Bench (arXiv:2602.22769)、MemoryAgentBench (arXiv:2507.05257)、STATE-Bench (Microsoft Open Source Blog 2026-05-19)、LongMemEval (arXiv:2410.10813)、LoCoMo (arXiv:2402.17753)、MemEvoBench (arXiv:2604.15774)。詳細は元資料を参照。</li>
+        </ul>
+      </section>
+
+      <footer>
+        生成日: 2026-05-20 / 元 Markdown は変更していない。本 HTML は閲覧用の整理であり、実装承認ではない。
+      </footer>
+    </main>
+  </div>
+</body>
+</html>

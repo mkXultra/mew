@@ -129,6 +129,7 @@ WORK_SESSION_KNOWLEDGE_LIMIT = 30
 WORK_SESSION_KNOWLEDGE_BUDGET = 3000
 WORK_TASK_NOTES_CONTEXT_LINES = 12
 WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS = 1.0
+WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS = 1.0
 WORK_TASK_GOAL_TERM_RE = re.compile(r"\b[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)+\b")
 WORK_TASK_GOAL_TERM_STOPWORDS = {
     "dry-run",
@@ -204,6 +205,28 @@ def _call_model_json_without_guard(*args, **kwargs):
     return _agent_call_model_json_with_retries(*args, **kwargs)
 
 
+def _recv_work_model_call_payload(recv_conn, process, timeout_value):
+    deadline = time.monotonic() + timeout_value
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _terminate_work_model_process(process)
+            raise ModelBackendError("request timed out")
+        poll_timeout = min(WORK_MODEL_TIMEOUT_POLL_SLICE_SECONDS, remaining)
+        try:
+            ready = recv_conn.poll(poll_timeout)
+        except (BrokenPipeError, EOFError, OSError) as exc:
+            _terminate_work_model_process(process)
+            raise ModelBackendError("request timed out; model timeout guard child exited without result") from exc
+        if not ready:
+            continue
+        try:
+            return recv_conn.recv()
+        except (EOFError, BrokenPipeError, OSError) as exc:
+            _terminate_work_model_process(process)
+            raise ModelBackendError("request timed out; model timeout guard child exited without result") from exc
+
+
 def call_model_json_with_retries(*args, **kwargs):
     kwargs.setdefault("retry_delays", ())
     on_text_delta = kwargs.get("on_text_delta")
@@ -231,23 +254,14 @@ def call_model_json_with_retries(*args, **kwargs):
     )
     process.start()
     send_conn.close()
-    payload = None
-    child_crash = None
     try:
-        if recv_conn.poll(timeout_value):
-            try:
-                payload = recv_conn.recv()
-            except (EOFError, BrokenPipeError, OSError) as exc:
-                child_crash = exc
-        else:
-            _terminate_work_model_process(process)
-            raise ModelBackendError("request timed out")
+        payload = _recv_work_model_call_payload(recv_conn, process, timeout_value)
+    except BaseException:
+        _terminate_work_model_process(process)
+        raise
     finally:
         recv_conn.close()
     process.join(timeout=WORK_MODEL_PROCESS_JOIN_GRACE_SECONDS)
-    if child_crash is not None:
-        _terminate_work_model_process(process)
-        return _call_model_json_without_guard(*args, **kwargs)
     if payload is None:
         raise ModelBackendError("request timed out")
     if payload.get("status") == "ok":
@@ -6493,7 +6507,7 @@ def _build_work_think_prompt_legacy(context):
         "If work_session.resume.failed_patch_repair is present, the previous write proposal was on-task but failed on exact old text; repair that same proposal using current anchors, preserve its must_preserve_terms/proposal_snippets, and do not substitute a nearby patch. "
         "If work_session.resume.broad_rollback_slice_repair is present, stop retrying the whole broad patch. Choose one smaller complete slice that includes its source, local tests/docs/report evidence, and verifier; record the remaining scope in working_memory before continuing. If broad_rollback_slice_repair.slice_focus is presentation_readability, split the visible text/wrapping/bubble/row/readability slice first before reconnecting broader live/state behavior. "
         "If work_session.resume.retry_context is present, treat it as the authoritative compact state after a rejected or rolled-back write: use its latest failure/status, target_windows, and pending_constraints, and do not reuse raw patch bodies from rejected or rolled-back tool_calls. "
-        "If work_session.resume.active_compatibility_frontier is present and open, treat its compact_summary, evidence_refs, open_candidates, and closure_state.next_action as the current compatibility reentry pointer before broad rediscovery; deterministic action guards may redirect blocked broad verifier, repeated search, or finish actions when closure_state.guard_mode requires it. "
+        "If work_session.resume.active_compatibility_frontier is present and open, treat its compact_summary, evidence_refs, open_candidates, and closure_state.next_action as the current compatibility reentry pointer before broad rediscovery; deterministic action guards may redirect blocked broad verifier, repeated search, or finish actions when closure_state.guard_mode requires it. If active_compatibility_frontier is absent or closed, it does not add a deterministic action guard. "
         "Use work_session.resume.continuity as the reentry contract. If continuity.status is weak or broken, or continuity.missing is non-empty, treat continuity.recommendation as the first repair queue before side-effecting actions; prefer targeted reads, remember, or ask_user to repair missing memory, risk, next-action, approval, recovery, verifier, budget, decision, or user-pivot state. "
         "For code navigation, prefer search_text for symbols or option names before broad read_file; after search_text gives line numbers, use read_file with line_start and line_count to inspect only the relevant window. Explicit line_start/line_count reads auto-scale max_chars for edit preparation, so prefer one bridging line-window read over repeating the same span when a single-file edit needs a larger exact old-text window. If a handler definition is not in the current file but the symbol appears imported, search the broader project tree or allowed read root for that symbol instead of repeating same-file searches. "
         "If current guidance, recent windows, or the latest failure already name an exact line_start/line_count window, refresh that same targeted window instead of falling back to an offset read_file from the top of the file. "
@@ -6509,7 +6523,7 @@ def _build_work_think_prompt_legacy(context):
         "If work_session.resume.verifier_failure_repair_agenda is present, treat it as the active repair queue: use its error_lines, source_locations, symbols, runtime_contract_gap, and latest_changed_dry_run_write to make one small applied edit batch before broader exploration. If runtime_contract_gap is present for a VM, emulator, interpreter, simulator, or custom runtime harness, preserve its kind/signature and map the built artifact with readelf/nm/objdump/addr2line plus runtime source reads before another rebuild. If the failure names multiple same-family symbols or source locations, repair the visible sibling set together instead of fixing only the first occurrence. If the traceback points into an installed/generated artifact but the workspace contains matching source under allowed write roots, inspect/edit the workspace source and reinstall or reverify rather than patching the installed artifact directly. "
         "If work_session.resume.stale_runtime_artifact_risk is present, the prior self-check created a /tmp runtime artifact that may short-circuit a fresh external verifier. Preserve the proof in acceptance_checks or working_memory.last_verified_state, then run a small cleanup command to clean stale runtime artifacts before finish unless the task explicitly requires that artifact to pre-exist. "
         "A runnable smoke command with exit_code=0 is not enough to finish when the task asks for generated artifacts, saved files, stdout/stderr text, rendered frames, screenshots, or other externally checked behavior; before finish, inspect those artifact/output properties or run a small command that asserts them. If those acceptance properties remain unverified, keep working or remember the exact unverified acceptance gap instead of claiming the verifier demonstrated it. "
-        "For runtime frame, screenshot, or image-output tasks, artifact existence, nonzero pixels, valid headers, or self-consistent dimensions are not enough; cite a completed tool that checks expected dimensions/resolution, reference similarity, or exact stdout/boot markers before finish. "
+        "For runtime frame, screenshot, or image-output tasks, artifact existence, nonzero pixels, valid headers, or self-consistent dimensions are not enough; cite a completed tool that checks task-provided expected dimensions/resolution, task-provided reference similarity/SSIM, or explicit expected-output markers before finish. "
         "For external dependency/source acquisition tasks, identify the authoritative source channel before invasive repair: prefer project docs, package-manager metadata, official release/distribution archives, signed checksums, release notes, or upstream download pages when available. Use a non-Python source fetch tool such as curl, wget, gh, or git for authority-producing archive acquisition; if the image lacks one and a package manager exists, install curl or wget before the source fetch. Python download snippets are only last-resort transport and should be paired with non-Python authority evidence before finish. When proving saved source authority from an existing archive and saved authority metadata, use top-level failing readback commands such as `test -f archive; sha256sum archive; tar -tzf archive` rather than wrapping hash/list readbacks in `if`, `while`, `|| true`, pipes, redirection, or other optional control-flow. Place or repeat saved source readbacks after noisy build/install output and close to the final artifact proof, so retained command output still includes metadata, archive hash, and archive root. Treat VCS-generated tag/archive URLs as source-tree fallbacks that may omit release packaging or compatibility shims. If a build from one source artifact hits dependency/API incompatibility, record source provenance in working_memory and evaluate a higher-authority source option before alternate toolchain surgery. "
         "For long dependency/toolchain/source-build tasks, preserve work_session.resume.long_build_state when present. For every run_command/run_tests that contributes source authority, configure, dependency generation, build, runtime install, default smoke, final artifact proof, or verifier acceptance, include execution_contract with purpose/stage/proof_role/acceptance_kind/expected_artifacts/declared_target_refs. run_command and run_tests use managed execution by default; if a command yields, continue useful read-only investigation or targeted planning and use poll_command/read_command_output to return to that command before relying on its result. Prerequisite installation, configure, dependency generation, or partial make/build output is progress, not completion, while a required final executable/artifact is missing. Before installing a distro toolchain for a source project with version constraints, run or inspect the smallest compatibility probe; if configure or package-manager output invalidates a toolchain/package path, record it in working_memory and switch paths instead of retrying it. If configure rejects an installed dependency version but the source tree is otherwise grounded, inspect ./configure --help or equivalent project help and try cheap source-provided compatibility/override flags before building an alternate toolchain from scratch. When probing configure/project help through grep, rg, awk, sed, or another filter, include external/use-external/prebuilt/system/library terms or inspect unfiltered help before concluding no source-provided external/prebuilt branch exists. If configure or source-script inspection shows compatibility-hook variables such as 'LIBRARY_* = local # external', treat that as source-provided external/prebuilt branch evidence and try the branch before starting a version-pinned source toolchain. If a package manager offers prebuilt dependencies and the project exposes or likely supports a source compatibility override, try the prebuilt dependency plus override path before starting a version-pinned source-built dependency/toolchain install; once source help or configure exposes an external/prebuilt compatibility branch, commit to one coherent branch early and reserve enough wall budget for its final artifact build instead of serially probing weaker branches. A plain ignore-version or allow-unsupported configure retry is not the same as trying an exposed external/prebuilt/system dependency branch; if that plain override fails with a dependency API or library-location mismatch, install the missing prebuilt/dev package when available and retry the external/prebuilt branch before starting version-pinned source toolchain work. If compatibility repair turns into edits under a vendored/third-party dependency or proof library while the final artifact is still missing, stop local dependency patch surgery and switch to a supported dependency version or source-provided external/prebuilt dependency branch before another long rebuild. For release archive/tag source builds, a versioned archive URL, tag/root directory, or tarball identity can ground the patch-level release even when an internal VERSION file only records the major/minor series; do not abort just because internal files omit a patch suffix already grounded by the archive/tag. If a Makefile/CMake/project build reports missing generated dependencies, missing source-path prefixes, or absent dependency files, run the project's dependency-generation/configure target before repeating the final target. When the task names one final executable/artifact, inspect available build targets and prefer the shortest explicit target that produces that artifact (for example the executable name) over full project, proof, doc, test, or all-target builds unless the task explicitly requires the full build. For compiler/toolchain tasks, a trivial return-only smoke binary is not enough if the toolchain has runtime or standard-library link requirements; install or configure the project's runtime/library target and verify a program that exercises the default link path before finish. If a default compile/link smoke fails with a missing runtime library such as 'cannot find -lfoo', do not restart source acquisition, configure, or clean rebuild; build/install the shortest runtime/library target into the default lookup path and rerun the same default smoke. If a local smoke only passes by adding custom runtime/library flags such as -stdlib, -L, LD_LIBRARY_PATH, or LIBRARY_PATH, treat that as diagnostic only; install/configure the runtime into the default lookup path and rerun the same compile/link smoke without those custom path flags before finish. If runtime install reports a missing library artifact, build the shortest explicit runtime-library target first, then retry install and the default-link smoke. If parent make reports no rule for a runtime/lib*.a or similar subdir library target, switch to the runtime subdirectory's own Makefile with make -C <runtime-dir> all/install instead of retrying the invalid parent target path. Do not restart package-manager or source-tree setup after a compatible toolchain path is found; allocate remaining wall budget to one shortest idempotent continuation command that produces the missing final artifact. For genuinely long prerequisite or source-build commands, set a bounded run_command timeout sized to the remaining wall budget instead of repeatedly slicing the same build into default-timeout commands. Then prove the final artifact exists and is executable/invokable before finish. "
         "For loadable runtime components such as native modules, extensions, shared libraries, plugins, or generated executables, import/load/path evidence only proves loadability or existence. If the task says the component should work, run a component-specific behavioral smoke in the original runtime context: invoke exported behavior, run the advertised command path, or run tests that explicitly exercise that component before finish. "

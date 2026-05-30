@@ -1,0 +1,43 @@
+{
+  "kind": "m6_24_hot_path_phase0_baseline",
+  "schema_version": 1,
+  "phase": "m6_24_hot_path_collapse_phase_0",
+  "captured_at": "2026-05-09T21:18:00+09:00",
+  "source_artifact": "proof-artifacts/terminal-bench/harbor-smoke/mew-make-mips-interpreter-step-check-10min-20260509-211800/2026-05-09__21-18-00/make-mips-interpreter__q2YrJkY/agent/terminal-bench-harbor-smoke/unknown-task/implement_v2/proof-manifest.json",
+  "baselines": {
+    "B_first_edit_turn": 4,
+    "B_first_verifier_turn": 4,
+    "B_model_turns_10m": 17,
+    "B_prompt_dynamic_hot_path": 795,
+    "B_prompt_normal_total": 47261,
+    "B_same_family_repeats_10m": 0,
+    "B_sidecar_per_turn_growth": 53426.824,
+    "B_sidecar_total": 908256,
+    "B_tool_calls_10m": 30,
+    "B_tool_result_p95": 18302
+  },
+  "metrics": {
+    "hot_path_projection": {
+      "normal_full_prompt_bytes": 47261,
+      "normal_full_prompt_bytes_total": 650945,
+      "normal_full_prompt_turn_count": 17,
+      "provider_visible_tool_result_bytes": 121466,
+      "normal_dynamic_hot_path_bytes": 795,
+      "ordinary_resident_summary_bytes": 883
+    },
+    "resident_sidecar_state": {
+      "total_bytes": 908256,
+      "per_turn_growth_bytes": 53426.824,
+      "families": {
+        "frontier_todo_recovery_cards": 5359,
+        "integration_observation_detail": 18191,
+        "tool_call_result": 289671,
+        "transcript_history": 595035
+      }
+    }
+  },
+  "notes": [
+    "Baseline values are intentionally task-shape evidence, not success evidence.",
+    "Fastcheck uses this baseline to detect relative sidecar growth while HOT_PATH_COLLAPSE reduces model-visible prompt weight."
+  ]
+}

@@ -109,7 +109,19 @@ DOGFOOD_SCENARIOS = (
     "m6_13-deliberation-internalization",
     "m6_24-terminal-bench-replay",
     "m6_24-compile-compcert-emulator",
+    "m6_24-expected-artifact-contract-emulator",
+    "m6_24-external-artifact-mismatch-emulator",
+    "m6_24-runtime-producer-blocked-emulator",
+    "m6_24-runtime-artifact-latency-emulator",
     "m6_24-repository-test-tail-emulator",
+    "m6_24-final-verifier-budget-emulator",
+    "m6_24-same-family-compatibility-emulator",
+    "m6_24-runtime-finish-gate-emulator",
+    "m6_24-implement-v2-terminal-failure-reaction-emulator",
+    "m6_24-implement-v2-hard-runtime-reaction-budget-emulator",
+    "m6_24-implement-v2-hard-runtime-progress-continuation-emulator",
+    "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator",
+    "m6_24-implement-v2-tool-contract-recovery-emulator",
 )
 M2_COMPARATIVE_TASK_SHAPES = (
     "standard",
@@ -14667,6 +14679,950 @@ def _write_terminal_bench_replay_fixture(workspace, *, task="compile-compcert"):
     return job_dir
 
 
+def _write_expected_artifact_contract_emulator_fixture(workspace, *, task="make-doom-for-mips"):
+    job_dir = Path(workspace) / "expected-artifact-contract-emulator-fixture"
+    trial_name = f"{task}__expected-artifact-contract"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    v2_dir = artifact_dir / "implement_v2"
+    verifier_dir = trial_dir / "verifier"
+    v2_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "expected-artifact-contract-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text("missing runtime frame artifact\n", encoding="utf-8")
+    stdout_contract = {
+        "schema_version": 3,
+        "id": "contract:stdout-probe",
+        "role": "diagnostic",
+        "stage": "diagnostic",
+        "purpose": "diagnostic",
+        "proof_role": "progress",
+        "acceptance_kind": "progress_only",
+        "expected_exit": {"mode": "zero"},
+        "expected_artifacts": [
+            {
+                "id": "stdout",
+                "kind": "stdout",
+                "target": {"type": "stream", "stream": "stdout"},
+                "path": "",
+                "required": True,
+                "source": "model_declared",
+                "confidence": "high",
+                "freshness": "exists_before_or_after",
+                "checks": [
+                    {"kind": "non_empty", "type": "non_empty"},
+                    {"kind": "text_contains", "value": "ELF", "type": "text_contains", "text": "ELF"},
+                ],
+            }
+        ],
+    }
+    stdout_tool_run_record = {
+        "schema_version": 1,
+        "record_id": "tool-run:stdout-probe",
+        "command_run_id": "command:stdout-probe",
+        "provider_call_id": "stdout-probe",
+        "declared_tool_name": "run_command",
+        "effective_tool_name": "run_command",
+        "contract_id": "contract:stdout-probe",
+        "status": "completed",
+        "exit_code": 0,
+        "timed_out": False,
+        "interrupted": False,
+        "semantic_exit": {"ok": True, "category": "ok", "source": "default", "message": "exit code 0 accepted"},
+        "stdout_preview": "ELF 32-bit MSB executable, MIPS",
+        "stderr_preview": "",
+    }
+    stdout_artifact_evidence = [
+        {
+            "schema_version": 1,
+            "evidence_id": "artifact-evidence:stdout:tool-run:stdout-probe",
+            "artifact_id": "stdout",
+            "command_run_id": "command:stdout-probe",
+            "tool_run_record_id": "tool-run:stdout-probe",
+            "contract_id": "contract:stdout-probe",
+            "target": {"type": "stream", "stream": "stdout"},
+            "path": "",
+            "kind": "stdout",
+            "required": True,
+            "source": "model_declared",
+            "confidence": "high",
+            "freshness": "exists_before_or_after",
+            "pre_run_stat": {},
+            "post_run_stat": {"exists": True, "size": 31, "mtime": None, "path": ""},
+            "checks": [
+                {
+                    "id": "stdout:non_empty:0",
+                    "type": "non_empty",
+                    "passed": True,
+                    "severity": "blocking",
+                    "observed": {"exists": True, "size": 31},
+                    "message": "",
+                },
+                {
+                    "id": "stdout:text_contains:1",
+                    "type": "text_contains",
+                    "passed": True,
+                    "severity": "blocking",
+                    "observed": {"text_present": True, "needle": "ELF"},
+                    "message": "",
+                },
+            ],
+            "status": "passed",
+            "blocking": False,
+        }
+    ]
+    stdout_classification = {
+        "schema_version": 1,
+        "classification_id": "failure:contract:stdout-probe",
+        "phase": "unknown",
+        "kind": "unknown_failure",
+        "class": "unknown_failure",
+        "confidence": "low",
+        "retryable": False,
+        "summary": "no structured failure evidence",
+        "evidence_refs": [],
+        "required_next_probe": "",
+    }
+    contract = {
+        "schema_version": 3,
+        "id": "contract:runtime-frame",
+        "role": "runtime",
+        "stage": "verification",
+        "purpose": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "external_verifier",
+        "expected_exit": {"mode": "any"},
+        "verifier_required": True,
+        "expected_artifacts": [
+            {
+                "id": "frame.bmp",
+                "kind": "file",
+                "path": "/tmp/doom/frame.bmp",
+                "required": True,
+                "confidence": "high",
+                "producer_substep_id": "runtime-smoke",
+                "freshness": "created_after_run_start",
+                "checks": [{"type": "exists", "severity": "blocking"}],
+            }
+        ],
+        "substeps": [
+            {
+                "id": "runtime-smoke",
+                "role": "runtime",
+                "stage": "verification",
+                "purpose": "verification",
+                "proof_role": "verifier",
+                "acceptance_kind": "external_verifier",
+                "expected_exit": {"mode": "any"},
+                "produces_artifacts": ["frame.bmp"],
+                "verifier_required": True,
+            }
+        ],
+    }
+    tool_run_record = {
+        "schema_version": 1,
+        "record_id": "tool-run:runtime-frame",
+        "command_run_id": "command:runtime-frame",
+        "provider_call_id": "runtime-frame",
+        "declared_tool_name": "run_command",
+        "effective_tool_name": "run_command",
+        "contract_id": "contract:runtime-frame",
+        "substep_id": "runtime-smoke",
+        "status": "failed",
+        "exit_code": 2,
+        "timed_out": False,
+        "interrupted": False,
+        "semantic_exit": {"ok": True, "category": "ok", "source": "contract_override", "message": "any exit accepted"},
+        "stdout_preview": "renderer started and Program terminated at PC=0x4002e8",
+        "stderr_preview": "runtime returned nonzero and no frame artifact was written",
+    }
+    artifact_evidence = [
+        {
+            "schema_version": 1,
+            "evidence_id": "artifact-evidence:frame.bmp:tool-run:runtime-frame",
+            "artifact_id": "frame.bmp",
+            "command_run_id": "command:runtime-frame",
+            "tool_run_record_id": "tool-run:runtime-frame",
+            "contract_id": "contract:runtime-frame",
+            "substep_id": "runtime-smoke",
+            "target": {"path": "/tmp/doom/frame.bmp"},
+            "path": "/tmp/doom/frame.bmp",
+            "kind": "file",
+            "required": True,
+            "source": "model_declared",
+            "confidence": "high",
+            "freshness": "created_after_run_start",
+            "pre_run_stat": {"exists": False, "path": "/tmp/doom/frame.bmp"},
+            "post_run_stat": {"exists": False, "path": "/tmp/doom/frame.bmp"},
+            "checks": [
+                {
+                    "id": "frame.bmp:exists:0",
+                    "type": "exists",
+                    "passed": False,
+                    "severity": "blocking",
+                    "observed": {"exists": False},
+                    "message": "artifact frame.bmp check exists failed",
+                }
+            ],
+            "status": "failed",
+            "blocking": True,
+        }
+    ]
+    expected_classification = {
+        "schema_version": 1,
+        "classification_id": "failure:contract:runtime-frame",
+        "phase": "runtime",
+        "kind": "missing_artifact",
+        "class": "runtime_artifact_missing",
+        "confidence": "high",
+        "retryable": True,
+        "summary": "required artifact frame.bmp failed structured checks",
+        "evidence_refs": [
+            {"kind": "tool_run_record", "id": "tool-run:runtime-frame"},
+            {"kind": "command_run", "id": "command:runtime-frame"},
+            {"kind": "artifact_evidence", "id": "artifact-evidence:frame.bmp:tool-run:runtime-frame"},
+        ],
+        "required_next_probe": "Inspect the producing substep and artifact path before another rebuild.",
+    }
+    payload = {
+        "command": "make -j2 && node vm.js --write-frame /tmp/doom/frame.bmp",
+        "cwd": "/tmp/doom",
+        "exit_code": 2,
+        "stdout_tail": "renderer started and Program terminated at PC=0x4002e8",
+        "stderr_tail": "runtime returned nonzero and no frame artifact was written",
+        "execution_contract_normalized": contract,
+        "tool_run_record": tool_run_record,
+        "artifact_evidence": artifact_evidence,
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:contract:runtime-frame",
+            "contract_id": "contract:runtime-frame",
+            "verdict": "fail",
+            "reason": "required run or artifact evidence failed",
+        },
+        "failure_classification": expected_classification,
+        "structured_finish_gate": {"blocked": True, "reasons": ["runtime_artifact_missing"]},
+    }
+    stdout_payload = {
+        "command": "file /tmp/doom/doomgeneric_mips",
+        "cwd": "/tmp/doom",
+        "exit_code": 0,
+        "stdout": "ELF 32-bit MSB executable, MIPS",
+        "stdout_tail": "ELF 32-bit MSB executable, MIPS",
+        "stderr": "",
+        "stderr_tail": "",
+        "execution_contract_normalized": stdout_contract,
+        "tool_run_record": stdout_tool_run_record,
+        "artifact_evidence": stdout_artifact_evidence,
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:contract:stdout-probe",
+            "contract_id": "contract:stdout-probe",
+            "verdict": "pass",
+            "reason": "all required evidence present",
+        },
+        "failure_classification": stdout_classification,
+        "structured_finish_gate": {"blocked": False, "reasons": []},
+    }
+    report = {
+        "work_exit_code": 1,
+        "resume": {},
+        "work_report": {
+            "stop_reason": "implement_v2_blocked",
+            "selected_lane": "implement_v2",
+            "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+            "implement_lane_result": {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 0,
+                },
+            },
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps({"command": "mew work --oneshot --instruction expected-artifact", "exit_code": 1, "timed_out": False}),
+        encoding="utf-8",
+    )
+    (v2_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "tool_calls": [
+                        {
+                            "tool_name": "run_command",
+                            "arguments": {"command": stdout_payload["command"], "execution_contract": stdout_contract},
+                        },
+                        {
+                            "tool_name": "run_command",
+                            "arguments": {"command": payload["command"], "execution_contract": contract},
+                        },
+                    ],
+                }
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (v2_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "tool_results": [
+                    {
+                        "provider_call_id": "stdout-probe",
+                        "tool_name": "run_command",
+                        "status": "completed",
+                        "content": [stdout_payload],
+                    },
+                    {
+                        "provider_call_id": "runtime-frame",
+                        "tool_name": "run_command",
+                        "status": "failed",
+                        "content": [payload],
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
+def _write_external_artifact_mismatch_emulator_fixture(workspace, *, task="make-mips-interpreter"):
+    job_dir = Path(workspace) / "external-artifact-mismatch-emulator-fixture"
+    trial_name = f"{task}__external-artifact-mismatch"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    v2_dir = artifact_dir / "implement_v2"
+    verifier_dir = trial_dir / "verifier"
+    v2_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "external-artifact-mismatch-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text(
+        "E FileNotFoundError: [Errno 2] No such file or directory: '/tmp/frame.bmp'\n",
+        encoding="utf-8",
+    )
+    report = {
+        "work_exit_code": 1,
+        "resume": {},
+        "work_report": {
+            "stop_reason": "implement_v2_blocked",
+            "runtime_id": "implement_v2_model_json_tool_loop",
+            "selected_lane": "implement_v2",
+            "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+            "implement_lane_result": {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 0,
+                },
+            },
+        },
+    }
+    payload = {
+        "command": "node vm.js && test -s /app/frame000000.bmp",
+        "cwd": "/app",
+        "exit_code": 0,
+        "stdout": "FRAME_QUALITY_OK 640x400 saved frame000000.bmp\n",
+        "stdout_tail": "FRAME_QUALITY_OK 640x400 saved frame000000.bmp\n",
+        "stderr": "",
+        "stderr_tail": "",
+        "artifact_evidence": [
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:/tmp/vmout.txt",
+                "artifact_id": "/tmp/vmout.txt",
+                "path": "/tmp/vmout.txt",
+                "status": "passed",
+                "blocking": False,
+                "checks": [{"type": "exists", "passed": True, "severity": "blocking"}],
+            },
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:/app/frame000000.bmp",
+                "artifact_id": "/app/frame000000.bmp",
+                "path": "/app/frame000000.bmp",
+                "status": "passed",
+                "blocking": False,
+                "checks": [{"type": "exists", "passed": True, "severity": "blocking"}],
+            }
+        ],
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:verify-final-frame",
+            "verdict": "pass",
+            "reason": "all required internal artifact evidence present",
+        },
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps({"command": "mew work --oneshot --instruction external-artifact", "exit_code": 1, "timed_out": False}),
+        encoding="utf-8",
+    )
+    (v2_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "tool_calls": [
+                        {
+                            "tool_name": "run_command",
+                            "arguments": {"command": payload["command"]},
+                        }
+                    ],
+                }
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (v2_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "tool_results": [
+                    {
+                        "provider_call_id": "verify-final-frame",
+                        "tool_name": "run_command",
+                        "status": "completed",
+                        "content": [payload],
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
+def _write_runtime_producer_blocked_emulator_fixture(workspace, *, task="make-mips-interpreter"):
+    job_dir = Path(workspace) / "runtime-producer-blocked-emulator-fixture"
+    trial_name = f"{task}__runtime-producer-blocked"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    v2_dir = artifact_dir / "implement_v2"
+    verifier_dir = trial_dir / "verifier"
+    v2_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "runtime-producer-blocked-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text(
+        "E FileNotFoundError: [Errno 2] No such file or directory: '/tmp/frame.bmp'\n",
+        encoding="utf-8",
+    )
+    report = {
+        "work_exit_code": 1,
+        "resume": {},
+        "work_report": {
+            "stop_reason": "implement_v2_blocked",
+            "runtime_id": "implement_v2_model_json_tool_loop",
+            "selected_lane": "implement_v2",
+            "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+            "implement_lane_result": {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 1,
+                },
+            },
+        },
+    }
+    tool_run_record = {
+        "schema_version": 1,
+        "record_id": "tool-run-record:runtime-producer-blocked",
+        "command_run_id": "command:runtime-producer-blocked",
+        "provider_call_id": "runtime-producer-blocked",
+        "declared_tool_name": "run_command",
+        "effective_tool_name": "run_command",
+        "contract_id": "contract:runtime-producer-blocked",
+        "status": "failed",
+        "exit_code": 1,
+        "timed_out": False,
+        "interrupted": False,
+        "semantic_exit": {"ok": False, "category": "nonzero_exit", "source": "exit_code"},
+        "stdout_preview": (
+            "DoomGeneric initialized. Frames will be saved to /tmp/frame.bmp\n"
+            "Trying IWAD file:doom2.wad\n"
+            "vm_status=1\n"
+        ),
+        "stderr_preview": "Error: ENOENT: no such file or directory, open 'frame0.bmp'\n",
+    }
+    failure_classification = {
+        "schema_version": 1,
+        "classification_id": "failure:contract:runtime-producer-blocked",
+        "phase": "runtime",
+        "kind": "missing_artifact",
+        "class": "runtime_artifact_missing",
+        "secondary_classes": ["runtime_failure"],
+        "secondary_kinds": ["nonzero_exit"],
+        "confidence": "high",
+        "retryable": True,
+        "summary": "required artifact /app/frame0.bmp failed structured checks",
+        "evidence_refs": [
+            {"kind": "tool_run_record", "id": "tool-run-record:runtime-producer-blocked"},
+            {"kind": "command_run", "id": "command:runtime-producer-blocked"},
+            {"kind": "artifact_evidence", "id": "artifact-evidence:/app/frame0.bmp"},
+        ],
+        "required_next_probe": "Inspect the producing substep and artifact path before another rebuild.",
+    }
+    payload = {
+        "command": "timeout 30s node vm.js; test -s /app/frame0.bmp",
+        "cwd": "/app",
+        "exit_code": 1,
+        "status": "failed",
+        "stdout": (
+            "DoomGeneric initialized. Frames will be saved to /tmp/frame.bmp\n"
+            "-iwad not specified, trying a few iwad names\n"
+            "Trying IWAD file:doom2.wad\n"
+            "vm_status=1\n"
+        ),
+        "stdout_tail": (
+            "DoomGeneric initialized. Frames will be saved to /tmp/frame.bmp\n"
+            "-iwad not specified, trying a few iwad names\n"
+            "Trying IWAD file:doom2.wad\n"
+            "vm_status=1\n"
+        ),
+        "stderr": "Error: ENOENT: no such file or directory, open 'frame0.bmp'\n",
+        "stderr_tail": "Error: ENOENT: no such file or directory, open 'frame0.bmp'\n",
+        "execution_contract_normalized": {
+            "schema_version": 3,
+            "id": "contract:runtime-producer-blocked",
+            "role": "runtime",
+            "stage": "verification",
+            "proof_role": "verifier",
+            "acceptance_kind": "external_verifier",
+            "expected_exit": {"mode": "zero"},
+            "expected_artifacts": [
+                {
+                    "id": "/app/frame0.bmp",
+                    "kind": "file",
+                    "target": {"type": "path", "path": "/app/frame0.bmp"},
+                    "path": "/app/frame0.bmp",
+                    "required": True,
+                    "checks": [{"type": "exists"}],
+                }
+            ],
+        },
+        "tool_run_record": tool_run_record,
+        "artifact_evidence": [
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:/app/frame0.bmp",
+                "artifact_id": "/app/frame0.bmp",
+                "command_run_id": "command:runtime-producer-blocked",
+                "tool_run_record_id": "tool-run-record:runtime-producer-blocked",
+                "contract_id": "contract:runtime-producer-blocked",
+                "path": "/app/frame0.bmp",
+                "target": {"path": "/app/frame0.bmp"},
+                "kind": "file",
+                "required": True,
+                "status": "failed",
+                "blocking": True,
+                "checks": [
+                    {
+                        "id": "/app/frame0.bmp:exists:0",
+                        "type": "exists",
+                        "passed": False,
+                        "severity": "blocking",
+                        "observed": {"exists": False},
+                    }
+                ],
+            }
+        ],
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:runtime-producer-blocked",
+            "contract_id": "contract:runtime-producer-blocked",
+            "verdict": "fail",
+            "reason": "runtime exited before producing expected frame",
+        },
+        "failure_classification": failure_classification,
+        "structured_finish_gate": {"blocked": True, "reasons": ["runtime_artifact_missing"]},
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps({"command": "mew work --oneshot --instruction runtime-producer", "exit_code": 1, "timed_out": False}),
+        encoding="utf-8",
+    )
+    (v2_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "tool_calls": [
+                        {
+                            "tool_name": "run_command",
+                            "arguments": {"command": payload["command"]},
+                        }
+                    ],
+                }
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (v2_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "tool_results": [
+                    {
+                        "provider_call_id": "runtime-producer-blocked",
+                        "tool_name": "run_command",
+                        "status": "failed",
+                        "content": [payload],
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
+def _write_runtime_artifact_latency_emulator_fixture(workspace, *, task="make-mips-interpreter"):
+    job_dir = Path(workspace) / "runtime-artifact-latency-emulator-fixture"
+    trial_name = f"{task}__runtime-artifact-latency"
+    trial_dir = job_dir / trial_name
+    artifact_dir = trial_dir / "agent" / "terminal-bench-harbor-smoke" / "unknown-task"
+    v2_dir = artifact_dir / "implement_v2"
+    verifier_dir = trial_dir / "verifier"
+    v2_dir.mkdir(parents=True, exist_ok=True)
+    verifier_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "id": "runtime-artifact-latency-emulator-job",
+                "n_total_trials": 1,
+                "stats": {
+                    "n_trials": 1,
+                    "n_errors": 0,
+                    "evals": {
+                        "mew__terminal-bench/terminal-bench-2": {
+                            "n_trials": 1,
+                            "n_errors": 0,
+                            "metrics": [{"mean": 0.0}],
+                        }
+                    },
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (trial_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "trial_name": trial_name,
+                "task_name": f"terminal-bench/{task}",
+                "verifier_result": {"reward": 0.0},
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (verifier_dir / "reward.txt").write_text("0\n", encoding="utf-8")
+    (verifier_dir / "test-stdout.txt").write_text(
+        "FAILED ../tests/test_outputs.py::test_vm_execution - AssertionError: Expected text not found\n"
+        "FAILED ../tests/test_outputs.py::test_frame_bmp_exists - AssertionError: File /tmp/frame.bmp does not exist\n"
+        "E FileNotFoundError: [Errno 2] No such file or directory: '/tmp/frame.bmp'\n",
+        encoding="utf-8",
+    )
+    report = {
+        "work_exit_code": 1,
+        "post_run_cleanup": {},
+        "resume": {},
+        "work_report": {
+            "stop_reason": "implement_v2_blocked",
+            "runtime_id": "implement_v2_model_json_tool_loop",
+            "selected_lane": "implement_v2",
+            "steps": [{"action": {"type": "implement_lane", "lane": "implement_v2"}}],
+            "implement_lane_result": {
+                "lane": "implement_v2",
+                "status": "blocked",
+                "metrics": {
+                    "runtime_id": "implement_v2_model_json_tool_loop",
+                    "replay_valid": True,
+                    "terminal_evidence_count": 1,
+                    "write_evidence_count": 1,
+                },
+            },
+        },
+    }
+    contract = {
+        "schema_version": 3,
+        "id": "contract:external-frame-final",
+        "role": "runtime",
+        "stage": "verification",
+        "purpose": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "external_verifier",
+        "expected_exit": {"mode": "any"},
+        "expected_artifacts": [
+            {
+                "id": "/tmp/frame.bmp",
+                "kind": "file",
+                "target": {"type": "path", "path": "/tmp/frame.bmp"},
+                "path": "/tmp/frame.bmp",
+                "required": True,
+                "checks": [{"type": "exists"}, {"type": "non_empty"}],
+            },
+            {
+                "id": "stdout",
+                "kind": "stdout",
+                "target": {"type": "stream", "stream": "stdout"},
+                "required": True,
+                "checks": [{"type": "text_contains", "text": "I_InitGraphics"}],
+            },
+        ],
+    }
+    payload = {
+        "command": "rm -f /tmp/frame.bmp && node /app/vm.js && python3 - <<'PY'\nfrom pathlib import Path\nassert Path('/tmp/frame.bmp').exists()\nPY",
+        "cwd": "/app",
+        "exit_code": 0,
+        "status": "completed",
+        "stdout": "I_InitGraphics: DOOM screen size: w x h: 320 x 200\nBMP_OK /tmp/frame.bmp\n",
+        "stdout_tail": "I_InitGraphics: DOOM screen size: w x h: 320 x 200\nBMP_OK /tmp/frame.bmp\n",
+        "stderr": "",
+        "stderr_tail": "",
+        "execution_contract_normalized": contract,
+        "tool_run_record": {
+            "schema_version": 1,
+            "record_id": "tool-run-record:external-frame-final",
+            "command_run_id": "command:external-frame-final",
+            "provider_call_id": "external-frame-final",
+            "declared_tool_name": "run_command",
+            "effective_tool_name": "run_command",
+            "contract_id": "contract:external-frame-final",
+            "status": "completed",
+            "exit_code": 0,
+            "timed_out": False,
+            "interrupted": False,
+            "semantic_exit": {"ok": True, "category": "ok", "source": "default"},
+            "stdout_preview": "I_InitGraphics: DOOM screen size: w x h: 320 x 200\nBMP_OK /tmp/frame.bmp\n",
+            "stderr_preview": "",
+        },
+        "artifact_evidence": [
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:/tmp/frame.bmp",
+                "artifact_id": "/tmp/frame.bmp",
+                "command_run_id": "command:external-frame-final",
+                "tool_run_record_id": "tool-run-record:external-frame-final",
+                "contract_id": "contract:external-frame-final",
+                "path": "/tmp/frame.bmp",
+                "target": {"path": "/tmp/frame.bmp"},
+                "kind": "file",
+                "required": True,
+                "status": "passed",
+                "blocking": False,
+                "checks": [
+                    {"id": "/tmp/frame.bmp:exists:0", "type": "exists", "passed": True, "severity": "blocking"},
+                    {"id": "/tmp/frame.bmp:non_empty:1", "type": "non_empty", "passed": True, "severity": "blocking"},
+                ],
+            },
+            {
+                "schema_version": 1,
+                "evidence_id": "artifact-evidence:stdout",
+                "artifact_id": "stdout",
+                "command_run_id": "command:external-frame-final",
+                "tool_run_record_id": "tool-run-record:external-frame-final",
+                "contract_id": "contract:external-frame-final",
+                "target": {"stream": "stdout"},
+                "kind": "stdout",
+                "required": True,
+                "status": "passed",
+                "blocking": False,
+                "checks": [
+                    {"id": "stdout:text_contains:0", "type": "text_contains", "passed": True, "severity": "blocking"}
+                ],
+            },
+        ],
+        "verifier_evidence": {
+            "schema_version": 1,
+            "verifier_id": "verifier:external-frame-final",
+            "contract_id": "contract:external-frame-final",
+            "verdict": "pass",
+            "reason": "internal final verifier-shaped evidence passed",
+        },
+        "failure_classification": {
+            "schema_version": 1,
+            "classification_id": "failure:contract:external-frame-final",
+            "phase": "unknown",
+            "kind": "unknown_failure",
+            "class": "unknown_failure",
+            "confidence": "low",
+            "retryable": False,
+            "summary": "no structured failure evidence",
+            "evidence_refs": [],
+            "required_next_probe": "",
+        },
+        "structured_finish_gate": {"blocked": False, "reasons": []},
+    }
+    (artifact_dir / "mew-report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    (artifact_dir / "command-transcript.json").write_text(
+        json.dumps({"command": "mew work --oneshot --instruction runtime-artifact-latency", "exit_code": 1, "timed_out": False}),
+        encoding="utf-8",
+    )
+    (v2_dir / "history.json").write_text(
+        json.dumps(
+            [
+                {
+                    "turn": 1,
+                    "tool_calls": [
+                        {
+                            "tool_name": "run_command",
+                            "arguments": {"command": payload["command"], "execution_contract": contract},
+                        }
+                    ],
+                }
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (v2_dir / "proof-manifest.json").write_text(
+        json.dumps(
+            {
+                "tool_results": [
+                    {
+                        "provider_call_id": "external-frame-final",
+                        "tool_name": "run_command",
+                        "status": "completed",
+                        "content": [payload],
+                    }
+                ]
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return job_dir
+
+
 def _write_repository_test_tail_emulator_fixture(workspace, *, task="build-cython-ext"):
     job_dir = Path(workspace) / "repository-test-tail-emulator-fixture"
     trial_name = f"{task}__repository-tail"
@@ -14733,6 +15689,65 @@ FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError
     )
     test_command_run_id = "work_session:1:command_run:1"
     next_action = "patch the remaining repository test failure, reinstall, and rerun the repository test tail"
+    frontier_fingerprint = "repository-tail-frontier-fixture"
+    active_frontier = {
+        "schema_version": 1,
+        "id": "compat-frontier-repository-tail-1",
+        "status": "open",
+        "failure_signature": {
+            "schema_version": 1,
+            "kind": "verifier_failure",
+            "fingerprint": frontier_fingerprint,
+            "family_key": "repository-tail-family-fixture",
+            "command_shape": "repository test tail",
+            "exit_class": "nonzero",
+            "runtime_component_kind": "unknown",
+            "token_categories": {
+                "error_tokens": ["repository_tail_failed"],
+                "failing_test_tokens": ["tests/test_repository_tail.py::test_tail"],
+                "stack_anchor_tokens": [],
+            },
+        },
+        "evidence_refs": [{"kind": "command_evidence", "id": 1, "summary": "repository-tail verifier failure"}],
+        "anchors": [
+            {
+                "id": "anchor-repository-tail",
+                "kind": "test_name",
+                "subject": "tests/test_repository_tail.py::test_tail",
+                "read_status": "not_needed",
+            }
+        ],
+        "sibling_candidates": [
+            {
+                "id": "candidate-repository-tail",
+                "kind": "test",
+                "subject": "tests/test_repository_tail.py::test_tail",
+                "status": "anchored",
+                "reason": "repository tail remains failing after the main smoke passed",
+                "evidence_refs": [{"kind": "command_evidence", "id": 1}],
+            }
+        ],
+        "closure_state": {
+            "state": "cheap_verify_needed",
+            "reason": "repository test tail remains open",
+            "evidence_strength": "blocking",
+            "guard_mode": "block_finish",
+            "open_candidate_count": 1,
+            "verifier_obligations": ["rerun repository-test-tail proof"],
+            "blocked_action_kinds": ["finish"],
+            "finish_allowed": False,
+            "next_action": next_action,
+        },
+        "compact_summary": {
+            "one_line": "repository-test-tail frontier; 1 sibling candidate open",
+            "failure_signature": frontier_fingerprint,
+            "evidence_refs": [{"kind": "command_evidence", "id": 1}],
+            "open_candidates": ["candidate-repository-tail"],
+            "next_action": next_action,
+            "guard_mode": "block_finish",
+            "blocked_action_kinds": ["finish"],
+        },
+    }
     report = {
         "summary": "mew work --oneshot completed generic work-session attempt",
         "task_id": 1,
@@ -14749,6 +15764,7 @@ FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError
             "phase": "failed",
             "next_action": next_action,
             "long_build_state": {},
+            "active_compatibility_frontier": active_frontier,
         },
         "work_report": {
             "session_id": 1,
@@ -14820,6 +15836,116 @@ FAILED ../tests/test_outputs.py::test_pyknotid_repository_tests - AssertionError
         + "\n",
         encoding="utf-8",
     )
+    return job_dir
+
+
+def _write_final_verifier_budget_emulator_job_fixture(workspace, *, task="build-cython-ext"):
+    """Write a minimal Harbor-shaped final-verifier budget fixture.
+
+    This deliberately starts from the repository-tail fixture so replay has a
+    complete Terminal-Bench job shape, then replaces the final step with the
+    historical budget-blocked final-verifier action. The default
+    `m6_24-final-verifier-budget-emulator` path must exercise that shape; using
+    an unmodified repository-tail fixture makes the scenario validate the wrong
+    failure family.
+    """
+
+    job_dir = _write_repository_test_tail_emulator_fixture(workspace, task=task)
+    report_path = next(Path(job_dir).rglob("mew-report.json"))
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    final_command = (
+        "cd /tmp && python - <<'PY'\n"
+        "import pyknotid\n"
+        "from pyknotid.spacecurves import chelpers, ccomplexity\n"
+        "from pyknotid import cinvariants\n"
+        "print('final smoke')\n"
+        "PY\n"
+        "python -m pytest -q /app/pyknotid/tests "
+        "--ignore=/app/pyknotid/tests/test_random_curves.py "
+        "--ignore=/app/pyknotid/tests/test_catalogue.py"
+    )
+    final_contract = {
+        "schema_version": 2,
+        "purpose": "verification",
+        "stage": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "candidate_final_proof",
+        "risk_class": "read_only",
+        "continuation_policy": {
+            "mode": "managed",
+            "resume_policy": "same_resume_identity",
+            "terminal_required_for_acceptance": True,
+            "yield_after_seconds": 60,
+            "final_proof_reserve_seconds": 60,
+        },
+        "source_authority_requirement": {"mode": "consumes_authority", "required": True},
+        "declared_target_refs": [
+            {"kind": "source_tree", "path": "/app/pyknotid", "ref": "source-tree:primary"},
+            {
+                "kind": "artifact",
+                "path": "/usr/local/lib/python3.13/site-packages/pyknotid",
+                "ref": "global-python-install",
+            },
+        ],
+    }
+    raw_action = {
+        "type": "run_tests",
+        "cwd": "/app",
+        "command": final_command,
+        "timeout": 180,
+        "foreground_budget_seconds": 60,
+        "execution_contract": final_contract,
+        "task_done": False,
+    }
+    blocked_action = dict(raw_action)
+    blocked_action.update(
+        {
+            "timeout": 4.658,
+            "long_command_budget": {
+                "action_kind": "start_long_command",
+                "stage": "verification",
+                "requested_timeout_seconds": 180.0,
+                "effective_timeout_seconds": 4.658,
+                "minimum_timeout_seconds": 61.0,
+                "diagnostic_budget": False,
+            },
+            "wall_timeout_ceiling": {
+                "blocked": True,
+                "stop_reason": "long_command_budget_blocked",
+                "reason": "long-command effective timeout cannot satisfy yield_after < effective_timeout_seconds",
+                "available_tool_timeout_seconds": 4.658,
+                "remaining_seconds": 64.658,
+                "reserve_seconds": 60.0,
+            },
+        }
+    )
+    payload["work_report"]["stop_reason"] = "long_command_budget_blocked"
+    payload["work_report"]["wall_timeout"] = True
+    payload["resume"]["active_compatibility_frontier"] = {}
+    payload["resume"]["next_action"] = "verify the world and review side-effecting work before retry"
+    payload["work_report"]["steps"].append(
+        {
+            "index": 3,
+            "status": "blocked",
+            "action": {"type": "wait", "reason": blocked_action["wall_timeout_ceiling"]["reason"]},
+            "model_turn": {
+                "id": 3,
+                "status": "failed",
+                "error": blocked_action["wall_timeout_ceiling"]["reason"],
+                "action_plan": {
+                    "summary": "Run the final verifier after repair and smoke evidence.",
+                    "action": raw_action,
+                },
+                "action": {
+                    "type": "wait",
+                    "reason": blocked_action["wall_timeout_ceiling"]["reason"],
+                    "blocked_action": blocked_action,
+                },
+            },
+            "wall_timeout": blocked_action["wall_timeout_ceiling"],
+        }
+    )
+    report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return job_dir
 
 
@@ -15407,6 +16533,10 @@ def _m6_24_terminal_bench_replay_assertions(
     blockers=None,
     mew_exit_code=None,
     external_reward=None,
+    next_action_contains=None,
+    structured_failure_class=None,
+    structured_replay_mismatch_count=None,
+    source_output_contract_path=None,
 ):
     if job_dir:
         assertions = {}
@@ -15429,6 +16559,14 @@ def _m6_24_terminal_bench_replay_assertions(
         assertions["mew_exit_code"] = mew_exit_code
     if external_reward is not None:
         assertions["external_reward"] = external_reward
+    if next_action_contains:
+        assertions["next_action_contains"] = next_action_contains
+    if structured_failure_class:
+        assertions["structured_failure_class"] = structured_failure_class
+    if structured_replay_mismatch_count is not None:
+        assertions["structured_replay_mismatch_count"] = structured_replay_mismatch_count
+    if source_output_contract_path:
+        assertions["source_output_contract_path"] = source_output_contract_path
     return assertions
 
 
@@ -15443,6 +16581,10 @@ def run_m6_24_terminal_bench_replay_scenario(
     blockers=None,
     mew_exit_code=None,
     external_reward=None,
+    next_action_contains=None,
+    structured_failure_class=None,
+    structured_replay_mismatch_count=None,
+    source_output_contract_path=None,
 ):
     checks = []
     commands = []
@@ -15455,6 +16597,10 @@ def run_m6_24_terminal_bench_replay_scenario(
         blockers=blockers,
         mew_exit_code=mew_exit_code,
         external_reward=external_reward,
+        next_action_contains=next_action_contains,
+        structured_failure_class=structured_failure_class,
+        structured_replay_mismatch_count=structured_replay_mismatch_count,
+        source_output_contract_path=source_output_contract_path,
     )
     replay = replay_terminal_bench_job(
         source,
@@ -15492,6 +16638,228 @@ def run_m6_24_terminal_bench_replay_scenario(
         "replay_status": replay.get("status"),
         "first_trial": first_trial.get("trial_name") or "",
         "current_long_build": current_long,
+        "structured_execution_replay": (
+            ((first_trial.get("current") or {}).get("implement_v2") or {}).get("structured_execution_replay") or {}
+        ),
+        "source_output_contract_path": (
+            ((first_trial.get("current") or {}).get("implement_v2") or {}).get("source_output_contract_path") or ""
+        ),
+    }
+    return report
+
+
+def run_m6_24_expected_artifact_contract_emulator_scenario(workspace, *, job_dir=None):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_expected_artifact_contract_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="make-doom-for-mips",
+        assertions={
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+            "next_action_contains": "expected runtime artifact",
+            "structured_execution_replay_required": True,
+            "structured_failure_class": "runtime_artifact_missing",
+            "structured_replay_mismatch_count": 0,
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_v2 = ((first_trial.get("current") or {}).get("implement_v2") or {})
+    structured_replay = current_v2.get("structured_execution_replay") if isinstance(current_v2, dict) else {}
+    latest = (
+        structured_replay.get("latest_failure_classification")
+        if isinstance(structured_replay, dict)
+        else {}
+    )
+    _scenario_check(
+        checks,
+        "m6_24_expected_artifact_contract_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_expected_artifact_contract_recomputes_runtime_artifact_missing",
+        isinstance(latest, dict) and latest.get("class") == "runtime_artifact_missing",
+        latest,
+        "runtime_artifact_missing",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_expected_artifact_contract_compares_stored_classification",
+        isinstance(structured_replay, dict)
+        and structured_replay.get("stored_classification_count") == 2
+        and structured_replay.get("mismatch_count") == 0,
+        structured_replay,
+        "stored classification matches recomputed classification",
+    )
+    report = _scenario_report("m6_24-expected-artifact-contract-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "replay_status": replay.get("status"),
+        "structured_execution_replay": structured_replay if isinstance(structured_replay, dict) else {},
+        "next_action": ((first_trial.get("current") or {}).get("next_action") or ""),
+    }
+    return report
+
+
+def run_m6_24_external_artifact_mismatch_emulator_scenario(workspace, *, job_dir=None):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_external_artifact_mismatch_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="make-mips-interpreter",
+        assertions={
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+            "next_action_contains": "/tmp/frame.bmp",
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_v2 = ((first_trial.get("current") or {}).get("implement_v2") or {})
+    _scenario_check(
+        checks,
+        "m6_24_external_artifact_mismatch_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_external_artifact_mismatch_extracts_expected_path",
+        current_v2.get("external_expected_artifact_missing") == ["/tmp/frame.bmp"],
+        current_v2.get("external_expected_artifact_missing"),
+        ["/tmp/frame.bmp"],
+    )
+    _scenario_check(
+        checks,
+        "m6_24_external_artifact_mismatch_routes_next_action",
+        "/tmp/frame.bmp" in (((first_trial.get("current") or {}).get("next_action") or "")),
+        ((first_trial.get("current") or {}).get("next_action") or ""),
+        "next action mentions external expected artifact path",
+    )
+    report = _scenario_report("m6_24-external-artifact-mismatch-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "replay_status": replay.get("status"),
+        "external_expected_artifact_missing": current_v2.get("external_expected_artifact_missing") or [],
+        "next_action": ((first_trial.get("current") or {}).get("next_action") or ""),
+    }
+    return report
+
+
+def run_m6_24_runtime_producer_blocked_emulator_scenario(workspace, *, job_dir=None):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_runtime_producer_blocked_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="make-mips-interpreter",
+        assertions={
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+            "next_action_contains": "runtime producer/resource/syscall frontier",
+            "structured_execution_replay_required": True,
+            "structured_failure_class": "runtime_artifact_missing",
+            "structured_replay_mismatch_count": 0,
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_v2 = ((first_trial.get("current") or {}).get("implement_v2") or {})
+    next_action = ((first_trial.get("current") or {}).get("next_action") or "")
+    structured_replay = current_v2.get("structured_execution_replay") if isinstance(current_v2, dict) else {}
+    _scenario_check(
+        checks,
+        "m6_24_runtime_producer_blocked_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_producer_blocked_keeps_runtime_class",
+        (
+            isinstance(structured_replay, dict)
+            and (structured_replay.get("latest_failure_classification") or {}).get("class")
+            == "runtime_artifact_missing"
+        ),
+        structured_replay,
+        "runtime_artifact_missing",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_producer_blocked_routes_frontier",
+        "runtime producer/resource/syscall frontier" in next_action,
+        next_action,
+        "next action routes to runtime producer frontier",
+    )
+    report = _scenario_report("m6_24-runtime-producer-blocked-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "replay_status": replay.get("status"),
+        "structured_execution_replay": structured_replay if isinstance(structured_replay, dict) else {},
+        "external_expected_artifact_missing": current_v2.get("external_expected_artifact_missing") or [],
+        "next_action": next_action,
+    }
+    return report
+
+
+def run_m6_24_runtime_artifact_latency_emulator_scenario(workspace, *, job_dir=None):
+    checks = []
+    commands = []
+    source = Path(job_dir).expanduser() if job_dir else _write_runtime_artifact_latency_emulator_fixture(workspace)
+    replay = replay_terminal_bench_job(
+        source,
+        task="make-mips-interpreter",
+        assertions={
+            "mew_exit_code": 1,
+            "external_reward": 0.0,
+            "next_action_contains": "runtime_artifact_latency_contract",
+            "structured_execution_replay_required": True,
+            "structured_replay_mismatch_count": 0,
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    current_v2 = ((first_trial.get("current") or {}).get("implement_v2") or {})
+    next_action = ((first_trial.get("current") or {}).get("next_action") or "")
+    _scenario_check(
+        checks,
+        "m6_24_runtime_artifact_latency_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_artifact_latency_detects_external_missing_artifact",
+        current_v2.get("external_verifier_missing_artifacts") == ["/tmp/frame.bmp"],
+        current_v2.get("external_verifier_missing_artifacts"),
+        ["/tmp/frame.bmp"],
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_artifact_latency_keeps_internal_pass",
+        "/tmp/frame.bmp" in (current_v2.get("passed_structured_artifacts") or []),
+        current_v2.get("passed_structured_artifacts") or [],
+        "internal structured verifier passed /tmp/frame.bmp",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_artifact_latency_routes_contract_gap",
+        "runtime_artifact_latency_contract" in next_action,
+        next_action,
+        "next action routes to external lifecycle/cwd/latency contract",
+    )
+    report = _scenario_report("m6_24-runtime-artifact-latency-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "replay_status": replay.get("status"),
+        "external_verifier_missing_artifacts": current_v2.get("external_verifier_missing_artifacts") or [],
+        "passed_structured_artifacts": current_v2.get("passed_structured_artifacts") or [],
+        "next_action": next_action,
     }
     return report
 
@@ -15603,7 +16971,9 @@ def run_m6_24_repository_test_tail_emulator_scenario(
     replay = replay_terminal_bench_job(
         source,
         task=task_filter,
-        assertions={"external_reward": 0.0},
+        assertions={
+            "external_reward": 0.0,
+        },
     )
     first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
     verifier_path = Path(first_trial.get("verifier_stdout_path") or "")
@@ -15629,6 +16999,47 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         replay.get("checks") or [],
         "terminal-bench replay pass",
     )
+    current_frontier = ((first_trial.get("current") or {}).get("active_compatibility_frontier") or {})
+    stored_frontier = ((first_trial.get("stored") or {}).get("active_compatibility_frontier") or {})
+    finish_false_positive = bool(summary.get("finish_false_positive"))
+    stored_signature = stored_frontier.get("signature") or ""
+    stored_family_key = stored_frontier.get("family_key") or ""
+    stored_next_action = stored_frontier.get("next_action") or ""
+    stored_open_candidate_ids = stored_frontier.get("open_candidate_ids") or []
+    stored_evidence_ref_count = int(stored_frontier.get("evidence_ref_count") or 0)
+    stored_frontier_present = bool(stored_signature)
+    if stored_frontier_present:
+        frontier_preserved = (
+            bool(stored_family_key)
+            and bool(stored_next_action)
+            and bool(stored_open_candidate_ids)
+            and stored_evidence_ref_count > 0
+            and current_frontier.get("signature") == stored_frontier.get("signature")
+            and current_frontier.get("family_key") == stored_frontier.get("family_key")
+            and bool(current_frontier.get("next_action"))
+            and current_frontier.get("next_action") == stored_frontier.get("next_action")
+            and int(current_frontier.get("open_candidate_count") or 0) >= 1
+            and (current_frontier.get("open_candidate_ids") or []) == stored_open_candidate_ids
+            and int(current_frontier.get("evidence_ref_count") or 0) == stored_evidence_ref_count
+        )
+        frontier_expected = "stored frontier signature, family, next action, open candidates, and evidence refs preserved across replay"
+    elif finish_false_positive:
+        frontier_preserved = True
+        frontier_expected = "historical finish false-positive artifact without stored frontier is proved by finish-false-positive detection"
+    else:
+        frontier_preserved = (
+            bool(current_frontier.get("signature"))
+            and bool(current_frontier.get("next_action"))
+            and int(current_frontier.get("open_candidate_count") or 0) >= 1
+        )
+        frontier_expected = "historical artifact without stored frontier still recomputes an active frontier"
+    _scenario_check(
+        checks,
+        "m6_24_repository_test_tail_emulator_preserves_active_frontier",
+        frontier_preserved,
+        {"stored": stored_frontier, "current": current_frontier},
+        frontier_expected,
+    )
     _scenario_check(
         checks,
         "m6_24_repository_test_tail_emulator_detects_main_smoke_passed",
@@ -15636,7 +17047,6 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         summary,
         "main smoke/example usage passed before repository tail failed",
     )
-    finish_false_positive = bool(summary.get("finish_false_positive"))
     if finish_false_positive:
         _scenario_check(
             checks,
@@ -15717,10 +17127,1601 @@ def run_m6_24_repository_test_tail_emulator_scenario(
         "fixture_path": str(fixture_path),
         "replay_status": replay.get("status"),
         "trial_count": replay.get("trial_count"),
-        "first_trial": first_trial.get("trial_name") or "",
+        "first_trial": first_trial,
         "summary": summary,
         "llm_action_fixture_count": len(contexts),
         "managed_action_projection": projection,
+    }
+    return report
+
+
+def _final_verifier_budget_summary(trial_entry):
+    latest = ((trial_entry or {}).get("latest_llm_action_fixture") or {})
+    raw_action = latest.get("raw_action") if isinstance(latest.get("raw_action"), dict) else {}
+    post_policy = latest.get("post_policy_action") if isinstance(latest.get("post_policy_action"), dict) else {}
+    blocked = post_policy.get("blocked_action") if isinstance(post_policy.get("blocked_action"), dict) else {}
+    contract = blocked.get("execution_contract") if isinstance(blocked.get("execution_contract"), dict) else {}
+    raw_contract = raw_action.get("execution_contract") if isinstance(raw_action.get("execution_contract"), dict) else {}
+    wall_timeout_ceiling = (
+        blocked.get("wall_timeout_ceiling") if isinstance(blocked.get("wall_timeout_ceiling"), dict) else {}
+    )
+    long_command_budget = (
+        blocked.get("long_command_budget") if isinstance(blocked.get("long_command_budget"), dict) else {}
+    )
+    effective_contract = contract or raw_contract
+    return {
+        "trial_name": (trial_entry or {}).get("trial_name") or "",
+        "external_reward": (trial_entry or {}).get("external_reward"),
+        "mew_exit_code": (trial_entry or {}).get("mew_exit_code"),
+        "stop_reason": (trial_entry or {}).get("stop_reason") or "",
+        "wall_timeout": bool((trial_entry or {}).get("wall_timeout")),
+        "latest_action_type": raw_action.get("type") or "",
+        "post_policy_type": post_policy.get("type") or "",
+        "post_policy_reason": post_policy.get("reason") or "",
+        "stage": effective_contract.get("stage") or "",
+        "proof_role": effective_contract.get("proof_role") or "",
+        "purpose": effective_contract.get("purpose") or "",
+        "acceptance_kind": effective_contract.get("acceptance_kind") or "",
+        "risk_class": effective_contract.get("risk_class") or "",
+        "wall_timeout_ceiling": wall_timeout_ceiling,
+        "long_command_budget": long_command_budget,
+        "requested_timeout_seconds": blocked.get("timeout"),
+        "foreground_budget_seconds": blocked.get("foreground_budget_seconds"),
+        "task_done": bool(raw_action.get("task_done")),
+    }
+
+
+def _write_final_verifier_budget_fixture_json(path, *, replay, summary, contexts):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "kind": "final_verifier_budget_emulator",
+        "generated_at": now_iso(),
+        "replay_status": replay.get("status"),
+        "trial_count": replay.get("trial_count"),
+        "summary": summary,
+        "latest_llm_action_fixture": _public_llm_action_fixture(contexts[-1]) if contexts else {},
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload
+
+
+def _evaluate_final_verifier_budget_current_policy(summary, latest):
+    from .commands import (
+        _positive_float_or_none,
+        apply_work_tool_wall_timeout_ceiling,
+        work_tool_long_command_budget_policy,
+    )
+
+    raw_action = (latest or {}).get("raw_action") if isinstance((latest or {}).get("raw_action"), dict) else {}
+    if not raw_action:
+        return {"evaluated": False, "reason": "missing raw action"}
+    action_type = str(raw_action.get("type") or "")
+    parameters = dict(raw_action)
+    observed_ceiling = summary.get("wall_timeout_ceiling") if isinstance(summary.get("wall_timeout_ceiling"), dict) else {}
+    max_wall_seconds = (
+        _positive_float_or_none(observed_ceiling.get("remaining_seconds"))
+        or _positive_float_or_none(summary.get("foreground_budget_seconds"))
+        or 66.0
+    )
+    policy = work_tool_long_command_budget_policy(action_type, parameters, task={}, session={})
+    ceiling = apply_work_tool_wall_timeout_ceiling(
+        action_type,
+        parameters,
+        max_wall_seconds=max_wall_seconds,
+        run_started_at=time.monotonic(),
+        recovery_reserve_seconds=policy.get("reserve_seconds") or 0.0,
+        long_command_budget_policy=policy,
+    )
+    return {
+        "evaluated": True,
+        "max_wall_seconds": max_wall_seconds,
+        "policy": policy,
+        "ceiling": ceiling,
+        "post_policy_parameters": parameters,
+    }
+
+
+def run_m6_24_final_verifier_budget_emulator_scenario(
+    workspace,
+    *,
+    job_dir=None,
+    task=None,
+):
+    checks = []
+    commands = []
+    task_filter = task or "build-cython-ext"
+    source = (
+        Path(job_dir).expanduser()
+        if job_dir
+        else _write_final_verifier_budget_emulator_job_fixture(workspace, task=task_filter)
+    )
+    replay = replay_terminal_bench_job(
+        source,
+        task=task_filter,
+        assertions={
+            "external_reward": 0.0,
+        },
+    )
+    first_trial = ((replay.get("trials") or [])[:1] or [{}])[0]
+    contexts = terminal_bench_llm_action_fixture_contexts(source, task=task_filter)
+    projection = _evaluate_managed_action_projection(contexts)
+    summary = _final_verifier_budget_summary(first_trial)
+    current_policy = _evaluate_final_verifier_budget_current_policy(
+        summary,
+        first_trial.get("latest_llm_action_fixture") if isinstance(first_trial, dict) else {},
+    )
+    ceiling = summary.get("wall_timeout_ceiling") if isinstance(summary.get("wall_timeout_ceiling"), dict) else {}
+    budget = summary.get("long_command_budget") if isinstance(summary.get("long_command_budget"), dict) else {}
+    fixture_path = Path(workspace) / "final-verifier-budget-fixture.json"
+    fixture = _write_final_verifier_budget_fixture_json(
+        fixture_path,
+        replay=replay,
+        summary=summary,
+        contexts=contexts,
+    )
+
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_replay_passes",
+        replay.get("status") == "pass",
+        replay.get("checks") or [],
+        "terminal-bench replay pass",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_detects_budget_stop",
+        summary.get("stop_reason") == "long_command_budget_blocked"
+        and bool(summary.get("wall_timeout"))
+        and summary.get("mew_exit_code") not in (0, None),
+        summary,
+        "mew stopped before final verifier because remaining wall budget could not satisfy verifier budget",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_identifies_final_verifier_action",
+        summary.get("latest_action_type") in {"run_tests", "run_command"}
+        and summary.get("stage") == "verification"
+        and summary.get("proof_role") == "verifier"
+        and summary.get("acceptance_kind") in {"candidate_final_proof", "external_verifier"},
+        summary,
+        "latest blocked action is a final verifier/proof action, not another repair or source step",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_preserves_block_reason",
+        bool(ceiling.get("blocked"))
+        and ceiling.get("stop_reason") == "long_command_budget_blocked"
+        and "effective timeout cannot satisfy" in str(ceiling.get("reason") or summary.get("post_policy_reason") or ""),
+        {"ceiling": ceiling, "post_policy_reason": summary.get("post_policy_reason")},
+        "wall-time ceiling records the precise reserve/budget reason",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_preserves_verification_budget",
+        budget.get("stage") == "verification"
+        and str(budget.get("action_kind") or "") in {"start_long_command", "start_command", "run_command"}
+        and float(budget.get("minimum_timeout_seconds") or 0.0) > float(budget.get("effective_timeout_seconds") or 0.0),
+        budget,
+        "policy preserves verification budget details showing why the final proof could not start",
+    )
+    current_ceiling = current_policy.get("ceiling") if isinstance(current_policy.get("ceiling"), dict) else {}
+    current_policy_payload = current_policy.get("policy") if isinstance(current_policy.get("policy"), dict) else {}
+    current_parameters = (
+        current_policy.get("post_policy_parameters")
+        if isinstance(current_policy.get("post_policy_parameters"), dict)
+        else {}
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_current_policy_can_start_final_verifier",
+        bool(current_policy.get("evaluated"))
+        and bool(current_policy_payload.get("final_verifier_spends_final_proof_reserve"))
+        and not bool(current_ceiling.get("blocked"))
+        and float(current_parameters.get("timeout") or 0.0)
+        >= float(current_policy_payload.get("minimum_timeout_seconds") or 0.0),
+        current_policy,
+        "current policy lets the typed final verifier spend the final-proof reserve and start with the available wall budget",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_preserves_managed_contract_projection",
+        not projection.get("managed_lost"),
+        projection,
+        "current normalize_work_model_action preserves foreground_budget_seconds/execution_contract for managed run actions",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_preserves_runtime_command_identity",
+        not projection.get("runtime_identity_mismatches"),
+        projection,
+        "managed executor receives the same command_run_id recorded in the work session",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_final_verifier_budget_emulator_writes_fixture",
+        fixture_path.is_file() and (fixture.get("summary") or {}).get("stop_reason") == "long_command_budget_blocked",
+        {"fixture_path": str(fixture_path), "summary": fixture.get("summary")},
+        "final-verifier-budget fixture file",
+    )
+
+    report = _scenario_report("m6_24-final-verifier-budget-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "job_dir": str(source),
+        "task": task_filter,
+        "fixture_path": str(fixture_path),
+        "replay_status": replay.get("status"),
+        "trial_count": replay.get("trial_count"),
+        "first_trial": first_trial,
+        "summary": summary,
+        "current_policy": current_policy,
+        "llm_action_fixture_count": len(contexts),
+        "managed_action_projection": projection,
+    }
+    return report
+
+
+def _same_family_compatibility_frontier_fixture():
+    return {
+        "schema_version": 1,
+        "id": "compat-frontier-same-family-1",
+        "status": "open",
+        "failure_signature": {
+            "schema_version": 1,
+            "kind": "verifier_failure",
+            "fingerprint": "same-family-frontier-fixture",
+            "family_key": "same-family-fixture",
+            "command_shape": "generic compatibility verifier",
+            "exit_class": "nonzero",
+            "runtime_component_kind": "unknown",
+            "failing_tests": ["tests/test_widget.py::test_same_family_tail"],
+            "token_categories": {
+                "error_tokens": ["compatibility_failure"],
+                "failing_test_tokens": ["tests/test_widget.py::test_same_family_tail"],
+                "stack_anchor_tokens": ["src/widget.py"],
+            },
+        },
+        "evidence_refs": [{"kind": "command_evidence", "id": 7, "summary": "same-family verifier failure"}],
+        "anchors": [
+            {
+                "id": "anchor-widget-source",
+                "kind": "source_location",
+                "subject": "src/widget.py:42",
+                "path": "src/widget.py",
+                "line": 42,
+                "read_status": "unread",
+                "evidence_refs": [{"kind": "command_evidence", "id": 7}],
+            }
+        ],
+        "sibling_candidates": [
+            {
+                "id": "candidate-widget-source",
+                "kind": "file",
+                "subject": "src/widget.py",
+                "path": "src/widget.py",
+                "status": "anchored",
+                "reason": "same-family verifier output names this source surface",
+                "evidence_refs": [{"kind": "command_evidence", "id": 7}],
+            }
+        ],
+        "closure_state": {
+            "state": "read_needed",
+            "reason": "same-family compatibility frontier has unread anchors",
+            "evidence_strength": "blocking",
+            "guard_mode": "block_broad",
+            "open_candidate_count": 1,
+            "unread_anchor_count": 1,
+            "unverified_patch_batch_count": 0,
+            "verifier_obligations": ["read same-family source anchor before broad verifier"],
+            "blocked_action_kinds": ["broad_verifier", "finish"],
+            "broad_verifier_allowed": False,
+            "finish_allowed": False,
+            "next_action": "read_file src/widget.py:42",
+        },
+    }
+
+
+def run_m6_24_same_family_compatibility_emulator_scenario(workspace):
+    from .compatibility_frontier import active_compatibility_frontier_action_guard
+
+    checks = []
+    commands = []
+    frontier = _same_family_compatibility_frontier_fixture()
+    broad_action = {
+        "type": "run_tests",
+        "command": "pytest -q",
+        "reason": "try the broad verifier again",
+    }
+    replacement, decision = active_compatibility_frontier_action_guard(
+        frontier,
+        broad_action,
+        resume={"phase": "active"},
+    )
+    _scenario_check(
+        checks,
+        "m6_24_same_family_compatibility_emulator_blocks_broad_cycle",
+        bool(decision.get("applied")) and decision.get("blocked_action_kind") == "broad_verifier",
+        {"decision": decision, "replacement": replacement},
+        "open same-family frontier redirects broad verifier",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_same_family_compatibility_emulator_preserves_frontier_obligations",
+        frontier["failure_signature"]["fingerprint"] == "same-family-frontier-fixture"
+        and frontier["closure_state"]["next_action"] == "read_file src/widget.py:42"
+        and len(frontier["sibling_candidates"]) >= 1,
+        {
+            "signature": frontier["failure_signature"].get("fingerprint"),
+            "next_action": frontier["closure_state"].get("next_action"),
+            "candidate_count": len(frontier.get("sibling_candidates") or []),
+        },
+        "frontier signature, next action, and candidate obligation",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_same_family_compatibility_emulator_redirects_to_anchor_read",
+        replacement.get("type") == "read_file" and replacement.get("path") == "src/widget.py",
+        replacement,
+        "read_file replacement for unread source anchor",
+    )
+    report = _scenario_report("m6_24-same-family-compatibility-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "frontier": {
+            "id": frontier.get("id"),
+            "signature": frontier["failure_signature"].get("fingerprint"),
+            "next_action": frontier["closure_state"].get("next_action"),
+            "candidate_count": len(frontier.get("sibling_candidates") or []),
+        },
+        "guard_decision": decision,
+        "replacement_action": replacement,
+    }
+    return report
+
+
+def run_m6_24_runtime_finish_gate_emulator_scenario(workspace):
+    from .acceptance import acceptance_done_gate_decision
+    from .implement_lane.execution_evidence import EvidenceEvent, OracleBundle, OracleObligation
+
+    checks = []
+    commands = []
+    task_description = "The native module should run in its original runtime context."
+    session = {
+        "command_evidence": [
+            {
+                "id": 1,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(native_module.__file__)'",
+                "output_tail": "/tmp/native_module.so\n",
+            },
+            {
+                "id": 2,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(native_module.run())'",
+                "output_tail": "ok\n",
+            },
+            {
+                "id": 3,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "node vm.js && python3 inspect_frame.py",
+                "output_tail": (
+                    "I_InitGraphics: framebuffer: x_res: 640, y_res: 400\n"
+                    "saved /tmp/frame.bmp\n"
+                    "path=/tmp/frame.bmp exists=True size=768054\n"
+                ),
+            },
+            {
+                "id": 4,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "node vm.js && python3 check_frame_similarity.py",
+                "output_tail": (
+                    "expected dimensions 640x400\n"
+                    "reference similarity passed l2=0.01\n"
+                    "saved /tmp/frame.bmp\n"
+                ),
+            },
+            {
+                "id": 5,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "node vm.js && python3 weak_frame_claims.py",
+                "output_tail": (
+                    "exact stdout I_InitGraphics\n"
+                    "expected size 768054\n"
+                    "reference file exists\n"
+                    "similarity failed l2=999.0\n"
+                    "saved /tmp/frame.bmp\n"
+                ),
+            },
+        ]
+    }
+    import_only_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Runtime component behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #1 imported the module and printed its path.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 1}],
+            }
+        ],
+    }
+    behavior_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Runtime component behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #2 invoked native_module.run().",
+                "evidence_refs": [{"kind": "command_evidence", "id": 2}],
+            }
+        ],
+    }
+    visual_format_only_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "first rendered frame is correct",
+                "status": "verified",
+                "evidence": "Command evidence #3 proved /tmp/frame.bmp exists and boot/framebuffer stdout appeared.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 3}],
+            }
+        ],
+    }
+    visual_quality_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "first rendered frame is correct",
+                "status": "verified",
+                "evidence": "Command evidence #4 checked expected dimensions and reference similarity for /tmp/frame.bmp.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 4}],
+            }
+        ],
+    }
+    visual_alias_false_positive_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "first rendered frame is correct",
+                "status": "verified",
+                "evidence": (
+                    "Command evidence #5 reported exact stdout, expected size, reference, "
+                    "and failed-l2 aliases for /tmp/frame.bmp without an expected-dimensions "
+                    "or reference-similarity pass."
+                ),
+                "evidence_refs": [{"kind": "command_evidence", "id": 5}],
+            }
+        ],
+    }
+    import_only_decision = acceptance_done_gate_decision(task_description, import_only_action, session=session)
+    behavior_decision = acceptance_done_gate_decision(task_description, behavior_action, session=session)
+    visual_task_description = (
+        "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+        "I will check that the first rendered frame is correct."
+    )
+    visual_format_only_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        visual_format_only_action,
+        session=session,
+    )
+    visual_quality_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        visual_quality_action,
+        session=session,
+    )
+    visual_alias_false_positive_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        visual_alias_false_positive_action,
+        session=session,
+    )
+    typed_visual_obligation = OracleObligation(
+        id="oracle:frame:visual_similarity",
+        kind="visual_similarity",
+        subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+        source="dogfood",
+    )
+    typed_artifact_obligation = OracleObligation(
+        id="oracle:frame:exists",
+        kind="artifact_exists",
+        subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        expected={"exists": True},
+        source="dogfood",
+    )
+    typed_missing_obligation = OracleObligation(
+        id="oracle:frame:visual_similarity",
+        kind="visual_similarity",
+        subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        expected={"missing_reference": True},
+        source="dogfood",
+    )
+    typed_visual_bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="dogfood",
+        obligations=(typed_artifact_obligation, typed_visual_obligation),
+    )
+    typed_missing_bundle = OracleBundle(
+        id="oracle:bundle:visual-missing",
+        source="dogfood",
+        obligations=(typed_missing_obligation,),
+    )
+    typed_visual_pass = EvidenceEvent(
+        id="ev:oracle:frame:visual-pass",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "/tmp/frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    typed_artifact_pass = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        obligation_id="oracle:frame:exists",
+        refs=({"kind": "tool_call", "id": "verify-frame"},),
+        provenance={"source": "verifier_evidence"},
+    )
+    typed_visual_self_proxy = EvidenceEvent(
+        id="ev:oracle:frame:self-proxy",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "/tmp/frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "model_authored"},
+    )
+    typed_visual_retired_blockers = [
+        "runtime_final_verifier_artifact_evidence",
+        "runtime_visual_artifact_quality_evidence",
+    ]
+    typed_format_only_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [{"kind": "evidence_event", "id": "ev:artifact:frame-only"}],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": typed_missing_bundle.as_dict(),
+                "evidence_events": [
+                    EvidenceEvent(
+                        id="ev:artifact:frame-only",
+                        kind="artifact_check",
+                        status="passed",
+                        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                    ).as_dict()
+                ],
+            }
+        },
+    )
+    typed_visual_quality_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [
+                {"kind": "evidence_event", "id": typed_artifact_pass.id},
+                {"kind": "evidence_event", "id": typed_visual_pass.id},
+            ],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": typed_visual_bundle.as_dict(),
+                "evidence_events": [typed_artifact_pass.as_dict(), typed_visual_pass.as_dict()],
+                "retired_legacy_blockers": typed_visual_retired_blockers,
+            }
+        },
+    )
+    typed_visual_self_proxy_decision = acceptance_done_gate_decision(
+        visual_task_description,
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [
+                {"kind": "evidence_event", "id": typed_artifact_pass.id},
+                {"kind": "evidence_event", "id": typed_visual_self_proxy.id},
+            ],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": typed_visual_bundle.as_dict(),
+                "evidence_events": [typed_artifact_pass.as_dict(), typed_visual_self_proxy.as_dict()],
+            }
+        },
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_blocks_import_path_only_finish",
+        import_only_decision.get("decision") == "block_continue"
+        and any(
+            blocker.get("code") == "runtime_component_behavior_evidence"
+            for blocker in import_only_decision.get("blockers") or []
+            if isinstance(blocker, dict)
+        ),
+        import_only_decision,
+        "import/path proof is blocked before finish",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_allows_callable_behavior_finish",
+        behavior_decision.get("decision") == "allow_complete",
+        behavior_decision,
+        "explicit callable behavior proof allows finish",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_blocks_visual_boot_or_exists_only_finish",
+        visual_format_only_decision.get("decision") == "block_continue"
+        and any(
+            blocker.get("code") == "runtime_visual_artifact_quality_evidence"
+            for blocker in visual_format_only_decision.get("blockers") or []
+            if isinstance(blocker, dict)
+        ),
+        visual_format_only_decision,
+        "visual artifact existence and boot stdout are blocked without quality proof",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_allows_visual_similarity_finish",
+        visual_quality_decision.get("decision") == "allow_complete",
+        visual_quality_decision,
+        "expected dimensions or reference similarity proof allows visual finish",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_blocks_visual_alias_false_positive_finish",
+        visual_alias_false_positive_decision.get("decision") == "block_continue"
+        and any(
+            blocker.get("code") == "runtime_visual_artifact_quality_evidence"
+            for blocker in visual_alias_false_positive_decision.get("blockers") or []
+            if isinstance(blocker, dict)
+        ),
+        visual_alias_false_positive_decision,
+        "unqualified exact stdout, expected size, reference, and l2 aliases are blocked",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_typed_blocks_format_only_finish",
+        typed_format_only_decision.get("decision") == "block_continue"
+        and typed_format_only_decision.get("gate_source") == "typed_evidence",
+        typed_format_only_decision,
+        "typed visual finish blocks format-only evidence on missing visual oracle obligation",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_typed_allows_grounded_visual_finish",
+        typed_visual_quality_decision.get("decision") == "allow_complete"
+        and typed_visual_quality_decision.get("gate_source") == "typed_evidence"
+        and typed_visual_quality_decision.get("legacy_warnings"),
+        typed_visual_quality_decision,
+        "typed visual finish allows trusted visual similarity evidence and retires covered legacy blockers",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_runtime_finish_gate_emulator_typed_blocks_self_proxy_finish",
+        typed_visual_self_proxy_decision.get("decision") == "block_continue"
+        and typed_visual_self_proxy_decision.get("gate_source") == "typed_evidence",
+        typed_visual_self_proxy_decision,
+        "typed visual finish blocks model-authored self-proxy visual quality evidence",
+    )
+    report = _scenario_report("m6_24-runtime-finish-gate-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "import_only_decision": import_only_decision,
+        "behavior_decision": behavior_decision,
+        "visual_format_only_decision": visual_format_only_decision,
+        "visual_quality_decision": visual_quality_decision,
+        "visual_alias_false_positive_decision": visual_alias_false_positive_decision,
+        "typed_format_only_decision": typed_format_only_decision,
+        "typed_visual_quality_decision": typed_visual_quality_decision,
+        "typed_visual_self_proxy_decision": typed_visual_self_proxy_decision,
+    }
+    return report
+
+
+def run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput
+    from .legacy_experiments.model_json_runtime import run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    failing_command = "printf 'compile start\\n'; sleep 0.1; printf 'compile failed\\n' >&2; exit 2"
+    outputs = [
+        {
+            "summary": "start final compile command that fails after foreground handoff",
+            "tool_calls": [
+                {
+                    "id": "compile-closeout-fail",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": failing_command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 0,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "react to the terminal failure and verify the repair",
+            "tool_calls": [
+                {
+                    "id": "terminal-repair-verify",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf repaired > terminal-reaction.txt && test \"$(cat terminal-reaction.txt)\" = repaired",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "terminal failure repaired",
+                "acceptance_evidence": ["terminal-repair-verify confirmed terminal-reaction.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-terminal-failure-reaction",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Repair a failed terminal build and verify terminal-reaction.txt.",
+                "max_wall_seconds": 5,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state.get("proof_manifest") or {}
+    tool_results = manifest.get("tool_results") or []
+    first_result = tool_results[0] if tool_results else {}
+    metrics = result.metrics
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_completes",
+        result.status == "completed",
+        {"status": result.status, "finish": result.updated_lane_state.get("finish")},
+        "completed after one bounded reaction turn",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_projects_closeout_failure",
+        first_result.get("status") == "failed" and int(metrics.get("command_closeout_count") or 0) == 1,
+        {"first_result_status": first_result.get("status"), "command_closeout_count": metrics.get("command_closeout_count")},
+        "final yielded terminal command is closed out as failed",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_spends_one_reaction_turn",
+        int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 1
+        and int(metrics.get("model_turns") or 0) == 2,
+        {
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "one reaction turn is added beyond base max_turns",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_prompts_reaction_scope",
+        len(prompts) >= 2 and "terminal_failure_reaction_turns_used: 1/1" in prompts[1],
+        {"prompt_count": len(prompts), "second_prompt_excerpt": (prompts[1] if len(prompts) >= 2 else "")[:300]},
+        "reaction prompt carries reaction-turn counter",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_terminal_failure_reaction_emulator_writes_repair_artifact",
+        (Path(workspace) / "terminal-reaction.txt").read_text(encoding="utf-8", errors="replace") == "repaired",
+        {"path": str(Path(workspace) / "terminal-reaction.txt")},
+        "repair verification command wrote the expected artifact",
+    )
+    report = _scenario_report("m6_24-implement-v2-terminal-failure-reaction-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "command_closeout_count": metrics.get("command_closeout_count"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "first_tool_result_status": first_result.get("status"),
+        "repair_artifact": str(Path(workspace) / "terminal-reaction.txt"),
+    }
+    return report
+
+
+def run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput
+    from .legacy_experiments.model_json_runtime import run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    outputs = []
+    for index in range(1, 8):
+        outputs.append(
+            {
+                "summary": f"cheap runtime diagnostic {index}",
+                "tool_calls": [
+                    {
+                        "id": f"diagnostic-{index}",
+                        "name": "run_command",
+                        "arguments": {
+                            "command": f"printf 'diagnostic-{index}\\n'",
+                            "cwd": ".",
+                            "use_shell": True,
+                        },
+                    }
+                ],
+                "finish": {"outcome": "continue"},
+            }
+        )
+    outputs.extend(
+        [
+            {
+                "summary": "base budget reaches a runtime artifact miss",
+                "tool_calls": [
+                    {
+                        "id": "runtime-miss-1",
+                        "name": "run_command",
+                        "arguments": {
+                            "command": "printf 'Program terminated at PC=0x0\\n' >&2; exit 2",
+                            "cwd": ".",
+                            "use_shell": True,
+                        },
+                    }
+                ],
+                "finish": {"outcome": "continue"},
+            },
+            {
+                "summary": "first hard-runtime reaction still misses the artifact",
+                "tool_calls": [
+                    {
+                        "id": "runtime-miss-2",
+                        "name": "run_command",
+                        "arguments": {
+                            "command": "printf 'still no runtime artifact\\n' >&2; exit 2",
+                            "cwd": ".",
+                            "use_shell": True,
+                        },
+                    }
+                ],
+                "finish": {"outcome": "continue"},
+            },
+            {
+                "summary": "second hard-runtime reaction repairs and verifies",
+                "tool_calls": [
+                    {
+                        "id": "runtime-repair-verify",
+                        "name": "run_command",
+                        "arguments": {
+                            "command": (
+                                "printf repaired > hard-runtime-reaction.txt "
+                                "&& printf 'runtime-ready\\n' > runtime.log "
+                                "&& test \"$(cat hard-runtime-reaction.txt)\" = repaired "
+                                "&& test -s runtime.log"
+                            ),
+                            "cwd": ".",
+                            "use_shell": True,
+                            "execution_contract": {
+                                "role": "runtime",
+                                "stage": "verification",
+                                "proof_role": "verifier",
+                                "acceptance_kind": "external_verifier",
+                                "expected_exit": 0,
+                                "expected_artifacts": [
+                                    {
+                                        "path": "runtime.log",
+                                        "checks": [{"exists": True}, {"non_empty": True}],
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                ],
+                "finish": {
+                    "outcome": "completed",
+                    "summary": "hard runtime artifact failure repaired",
+                    "acceptance_evidence": ["runtime-repair-verify confirmed hard-runtime-reaction.txt"],
+                },
+            },
+        ]
+    )
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        if not outputs:
+            return {
+                "summary": "unexpected extra hard-runtime reaction turn",
+                "finish": {"outcome": "failed", "summary": "unexpected extra hard-runtime reaction turn"},
+            }
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-hard-runtime-reaction-budget",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and a vm.js runtime harness. Build the source-backed "
+                    "MIPS ELF so node vm.js prints stdout and writes runtime.log."
+                ),
+                "final_artifact": "runtime.log",
+                "max_wall_seconds": 1800,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+                "artifact_dir": str(Path(workspace) / "artifacts"),
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=8,
+    )
+    metrics = result.metrics
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_reaction_budget_emulator_completes",
+        result.status == "completed",
+        {"status": result.status, "finish": result.updated_lane_state.get("finish")},
+        "hard-runtime task can spend more than one terminal-failure reaction turn",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_reaction_budget_emulator_expands_limit",
+        int(metrics.get("terminal_failure_reaction_turn_limit") or 0) >= 4
+        and int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 2
+        and int(metrics.get("model_turns") or 0) == 10,
+        {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "expanded hard-runtime budget permits a second bounded reaction turn",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_reaction_budget_emulator_prompts_counter",
+        len(prompts) >= 10
+        and "terminal_failure_reaction_turns_used: 2/" in prompts[9]
+        and "Hard-runtime frontier continuation gate" not in prompts[9],
+        {"prompt_count": len(prompts), "tenth_prompt_excerpt": (prompts[9] if len(prompts) >= 10 else "")[:300]},
+        "second reaction prompt carries the expanded reaction counter without provider-visible frontier steering",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_reaction_budget_emulator_writes_repair_artifact",
+        (Path(workspace) / "hard-runtime-reaction.txt").exists()
+        and (Path(workspace) / "hard-runtime-reaction.txt").read_text(encoding="utf-8", errors="replace") == "repaired",
+        {"path": str(Path(workspace) / "hard-runtime-reaction.txt")},
+        "second reaction turn wrote the expected repair artifact",
+    )
+    report = _scenario_report("m6_24-implement-v2-hard-runtime-reaction-budget-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "repair_artifact": str(Path(workspace) / "hard-runtime-reaction.txt"),
+    }
+    return report
+
+
+def run_m6_24_implement_v2_hard_runtime_progress_continuation_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput
+    from .legacy_experiments.model_json_runtime import run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    runtime_contract = {
+        "role": "runtime",
+        "stage": "verification",
+        "proof_role": "verifier",
+        "acceptance_kind": "external_verifier",
+        "expected_artifacts": [
+            {
+                "path": "frame.txt",
+                "checks": [{"exists": True}, {"non_empty": True}],
+            }
+        ],
+    }
+    outputs = [
+        {
+            "summary": "first runtime frontier misses the frame artifact",
+            "tool_calls": [
+                {
+                    "id": "runtime-miss-pc0",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'Program terminated at PC=0x0\\nExecuted 8 instructions\\n'; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "second runtime frontier shows measurable runtime progress",
+            "tool_calls": [
+                {
+                    "id": "runtime-miss-pc40",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf 'Program terminated at PC=0x40c848\\nExecuted 4634462 instructions\\n'; exit 2"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "third turn repairs the progressed runtime frontier",
+            "tool_calls": [
+                {
+                    "id": "runtime-repair-verify",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf frame > frame.txt && test -s frame.txt",
+                        "cwd": ".",
+                        "use_shell": True,
+                        "execution_contract": runtime_contract,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "runtime frame artifact repaired",
+                "acceptance_evidence": ["runtime-repair-verify confirmed frame.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        if not outputs:
+            return {
+                "summary": "unexpected extra hard-runtime progress continuation turn",
+                "finish": {"outcome": "failed", "summary": "unexpected extra hard-runtime progress continuation turn"},
+            }
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-hard-runtime-progress-continuation",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": (
+                    "I provided source code and a vm.js runtime harness. Build the source-backed "
+                    "runtime artifact so node vm.js prints stdout and writes frame.txt."
+                ),
+                "final_artifact": "frame.txt",
+                "max_wall_seconds": 1800,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "terminal_failure_reaction_turns": 1,
+                "hard_runtime_progress_continuation_turns": 1,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+                "artifact_dir": str(Path(workspace) / "artifacts"),
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    metrics = result.metrics
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_progress_continuation_emulator_completes",
+        result.status == "completed",
+        {"status": result.status, "finish": result.updated_lane_state.get("finish")},
+        "new hard-runtime frontier progress can earn one bounded continuation credit",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_progress_continuation_emulator_spends_credit",
+        int(metrics.get("terminal_failure_reaction_turn_limit") or 0) == 2
+        and int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 2
+        and int(metrics.get("hard_runtime_progress_continuation_turns_used") or 0) == 1
+        and int(metrics.get("model_turns") or 0) == 3,
+        {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "hard_runtime_progress_continuation_turn_limit": metrics.get(
+                "hard_runtime_progress_continuation_turn_limit"
+            ),
+            "hard_runtime_progress_continuation_turns_used": metrics.get(
+                "hard_runtime_progress_continuation_turns_used"
+            ),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "progress continuation increases the reaction limit only after a new runtime frontier signature",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_progress_continuation_emulator_prompts_counter",
+        len(prompts) >= 3
+        and "terminal_failure_reaction_turns_used: 2/2" in prompts[2]
+        and "Hard-runtime frontier continuation gate" not in prompts[2],
+        {"prompt_count": len(prompts), "third_prompt_excerpt": (prompts[2] if len(prompts) >= 3 else "")[:300]},
+        "progress continuation prompt carries the expanded reaction counter without provider-visible frontier steering",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_hard_runtime_progress_continuation_emulator_writes_repair_artifact",
+        (Path(workspace) / "frame.txt").exists()
+        and (Path(workspace) / "frame.txt").read_text(encoding="utf-8", errors="replace") == "frame",
+        {"path": str(Path(workspace) / "frame.txt")},
+        "progress continuation turn wrote the expected repair artifact",
+    )
+    report = _scenario_report(
+        "m6_24-implement-v2-hard-runtime-progress-continuation-emulator",
+        workspace,
+        commands,
+        checks,
+    )
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "hard_runtime_progress_continuation_turn_limit": metrics.get(
+                "hard_runtime_progress_continuation_turn_limit"
+            ),
+            "hard_runtime_progress_continuation_turns_used": metrics.get(
+                "hard_runtime_progress_continuation_turns_used"
+            ),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "repair_artifact": str(Path(workspace) / "frame.txt"),
+    }
+    return report
+
+
+def run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput
+    from .legacy_experiments.model_json_runtime import run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    outputs = [
+        {
+            "summary": "verifier fails before the final base turn",
+            "tool_calls": [
+                {
+                    "id": "failed-runtime-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": "printf 'runtime failed\\n' >&2; exit 2",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "final base turn diagnoses the unresolved failure",
+            "tool_calls": [
+                {
+                        "id": "diagnose-runtime-failure",
+                        "name": "run_command",
+                        "arguments": {
+                        "command": "printf 'diagnostic\\n'",
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "bounded reaction turn repairs and verifies",
+            "tool_calls": [
+                {
+                    "id": "repair-prior-terminal-failure",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": (
+                            "printf repaired > prior-terminal-reaction.txt "
+                            "&& test \"$(cat prior-terminal-reaction.txt)\" = repaired"
+                        ),
+                        "cwd": ".",
+                        "use_shell": True,
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "prior terminal failure repaired",
+                "acceptance_evidence": ["repair-prior-terminal-failure confirmed prior-terminal-reaction.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-prior-terminal-failure-diagnostic",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Repair a failed runtime verifier after diagnostic evidence.",
+                "max_wall_seconds": 5,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=2,
+    )
+    manifest = result.updated_lane_state.get("proof_manifest") or {}
+    tool_results = manifest.get("tool_results") or []
+    metrics = result.metrics
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_completes",
+        result.status == "completed",
+        {"status": result.status, "finish": result.updated_lane_state.get("finish")},
+        "completed after a diagnostic-only final base turn plus one bounded reaction turn",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_keeps_prior_failure",
+        len(tool_results) >= 3
+        and tool_results[0].get("status") == "failed"
+        and tool_results[1].get("status") == "completed",
+        {"tool_result_statuses": [item.get("status") for item in tool_results[:3]]},
+        "prior terminal failure remains actionable after a successful diagnostic command",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_spends_one_reaction_turn",
+        int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 1
+        and int(metrics.get("model_turns") or 0) == 3,
+        {
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "one reaction turn is added after final diagnostic evidence",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_prompts_reaction_scope",
+        len(prompts) >= 3 and "terminal_failure_reaction_turns_used: 1/1" in prompts[2],
+        {"prompt_count": len(prompts), "third_prompt_excerpt": (prompts[2] if len(prompts) >= 3 else "")[:300]},
+        "reaction prompt carries reaction-turn counter",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_writes_repair_artifact",
+        (Path(workspace) / "prior-terminal-reaction.txt").read_text(encoding="utf-8", errors="replace") == "repaired",
+        {"path": str(Path(workspace) / "prior-terminal-reaction.txt")},
+        "repair verification command wrote the expected artifact",
+    )
+    report = _scenario_report(
+        "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator",
+        workspace,
+        commands,
+        checks,
+    )
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "terminal_failure_reaction_turn_limit": metrics.get("terminal_failure_reaction_turn_limit"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "model_turns": metrics.get("model_turns"),
+        },
+        "tool_result_statuses": [item.get("status") for item in tool_results[:3]],
+        "repair_artifact": str(Path(workspace) / "prior-terminal-reaction.txt"),
+    }
+    return report
+
+
+def run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(workspace):
+    from .implement_lane import ImplementLaneInput
+    from .legacy_experiments.model_json_runtime import run_live_json_implement_v2
+    from .work_lanes import IMPLEMENT_V2_LANE
+
+    checks = []
+    commands = []
+    verifier_command = "printf recovered > tool-contract-recovery.txt && test -s tool-contract-recovery.txt"
+    outputs = [
+        {
+            "summary": "spend final base turn on shell-shaped run_tests",
+            "tool_calls": [
+                {
+                    "id": "bad-shell-verifier",
+                    "name": "run_tests",
+                    "arguments": {
+                        "command": verifier_command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "execution_contract": {
+                            "purpose": "verification",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "candidate_final_proof",
+                            "expected_artifact": {"path": "tool-contract-recovery.txt", "kind": "log"},
+                        },
+                    },
+                }
+            ],
+            "finish": {"outcome": "continue"},
+        },
+        {
+            "summary": "retry preserved verifier with run_command",
+            "tool_calls": [
+                {
+                    "id": "corrected-shell-verifier",
+                    "name": "run_command",
+                    "arguments": {
+                        "command": verifier_command,
+                        "cwd": ".",
+                        "use_shell": True,
+                        "timeout": 5,
+                        "foreground_budget_seconds": 1,
+                        "execution_contract": {
+                            "purpose": "verification",
+                            "stage": "verification",
+                            "proof_role": "verifier",
+                            "acceptance_kind": "candidate_final_proof",
+                            "expected_artifact": {"path": "tool-contract-recovery.txt", "kind": "log"},
+                        },
+                    },
+                }
+            ],
+            "finish": {
+                "outcome": "completed",
+                "summary": "tool-contract recovery verified artifact",
+                "acceptance_evidence": ["corrected-shell-verifier wrote tool-contract-recovery.txt"],
+            },
+        },
+    ]
+    prompts = []
+
+    def fake_model(*args, **_kwargs):
+        prompts.append(args[2])
+        return outputs.pop(0)
+
+    result = run_live_json_implement_v2(
+        ImplementLaneInput(
+            work_session_id="dogfood-m6-24-tool-contract-recovery",
+            task_id="dogfood-task",
+            workspace=str(workspace),
+            lane=IMPLEMENT_V2_LANE,
+            model_backend="codex",
+            model="gpt-5.5",
+            task_contract={
+                "description": "Recover a shell-shaped verifier sent to run_tests and verify the generated artifact.",
+                "max_wall_seconds": 10,
+            },
+            lane_config={
+                "mode": "full",
+                "allowed_read_roots": [str(workspace)],
+                "allowed_write_roots": [str(workspace)],
+                "allow_shell": True,
+                "allow_verify": True,
+                "debug_model_frontier_update": True,
+                "route_run_tests_shell_surface": False,
+                "terminal_failure_reaction_turns": 1,
+                "tool_contract_recovery_turns": 1,
+                "terminal_failure_reaction_min_wall_seconds": 0,
+            },
+        ),
+        model_auth={"path": "auth.json"},
+        model_json_callable=fake_model,
+        max_turns=1,
+    )
+    manifest = result.updated_lane_state.get("proof_manifest") or {}
+    tool_calls = manifest.get("tool_calls") or []
+    tool_results = manifest.get("tool_results") or []
+    first_result = tool_results[0] if tool_results else {}
+    first_payload = ((first_result.get("content") or [])[:1] or [{}])[0]
+    metrics = result.metrics
+    frontier = result.updated_lane_state.get("lane_hard_runtime_frontier") or {}
+    next_verifier = frontier.get("next_verifier_shaped_command") if isinstance(frontier, dict) else {}
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_completes",
+        result.status == "completed"
+        and int(metrics.get("terminal_evidence_count") or 0) > 0
+        and metrics.get("runtime_id") == "implement_v2_model_json_tool_loop",
+        {
+            "status": result.status,
+            "finish": result.updated_lane_state.get("finish"),
+            "terminal_evidence_count": metrics.get("terminal_evidence_count"),
+            "runtime_id": metrics.get("runtime_id"),
+        },
+        "completed only after corrected terminal verifier evidence in implement_v2",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_pairs_provider_calls",
+        len(tool_calls) == len(tool_results) == 2 and metrics.get("replay_valid") is True,
+        {"tool_calls": len(tool_calls), "tool_results": len(tool_results), "replay_valid": metrics.get("replay_valid")},
+        "every provider call has exactly one paired result",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_marks_tool_contract_misuse",
+        first_payload.get("failure_class") == "tool_contract_misuse"
+        and first_payload.get("failure_subclass") == "run_tests_shell_surface"
+        and first_payload.get("terminal_failure_reaction_eligible") is False,
+        first_payload,
+        "shell-shaped run_tests returns structured tool-contract misuse",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_spends_only_tool_contract_turn",
+        int(metrics.get("tool_contract_recovery_turns_used") or 0) == 1
+        and int(metrics.get("terminal_failure_reaction_turns_used") or 0) == 0,
+        {
+            "tool_contract_recovery_turns_used": metrics.get("tool_contract_recovery_turns_used"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+        },
+        "tool-contract recovery does not consume terminal-failure reaction budget",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_prompts_narrow_retry",
+        len(prompts) >= 2
+        and "Tool-contract recovery turn" in prompts[1]
+        and "terminal-failure reaction turn" not in prompts[1],
+        {"prompt_count": len(prompts), "second_prompt_excerpt": (prompts[1] if len(prompts) >= 2 else "")[:500]},
+        "second prompt is the narrow run_command retry prompt",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_avoids_legacy_projection",
+        int(metrics.get("ignored_model_frontier_state_updates") or 0) == 0
+        and int(metrics.get("legacy_projection_field_rejected_count") or 0) == 0,
+        {
+            "next_verifier": next_verifier,
+            "final_artifact": frontier.get("final_artifact"),
+            "ignored_model_frontier_state_updates": metrics.get("ignored_model_frontier_state_updates"),
+            "legacy_projection_field_rejected_count": metrics.get("legacy_projection_field_rejected_count"),
+        },
+        "tool-contract recovery avoids model-authored frontier projection",
+    )
+    _scenario_check(
+        checks,
+        "m6_24_implement_v2_tool_contract_recovery_emulator_writes_artifact",
+        (Path(workspace) / "tool-contract-recovery.txt").exists()
+        and (Path(workspace) / "tool-contract-recovery.txt").read_text(encoding="utf-8", errors="replace") == "recovered",
+        {"path": str(Path(workspace) / "tool-contract-recovery.txt")},
+        "corrected verifier command produced the expected artifact",
+    )
+    report = _scenario_report("m6_24-implement-v2-tool-contract-recovery-emulator", workspace, commands, checks)
+    report["artifacts"] = {
+        "status": result.status,
+        "metrics": {
+            "base_max_turns": metrics.get("base_max_turns"),
+            "turn_budget_limit": metrics.get("turn_budget_limit"),
+            "tool_contract_recovery_turn_limit": metrics.get("tool_contract_recovery_turn_limit"),
+            "tool_contract_recovery_turns_used": metrics.get("tool_contract_recovery_turns_used"),
+            "terminal_failure_reaction_turns_used": metrics.get("terminal_failure_reaction_turns_used"),
+            "terminal_evidence_count": metrics.get("terminal_evidence_count"),
+            "runtime_id": metrics.get("runtime_id"),
+        },
+        "first_tool_result_status": first_result.get("status"),
+        "frontier": frontier,
+        "repair_artifact": str(Path(workspace) / "tool-contract-recovery.txt"),
     }
     return report
 
@@ -15831,11 +18832,55 @@ def run_dogfood_scenario(args):
                     blockers=getattr(args, "terminal_bench_assert_blocker", None),
                     mew_exit_code=getattr(args, "terminal_bench_assert_mew_exit_code", None),
                     external_reward=getattr(args, "terminal_bench_assert_external_reward", None),
+                    next_action_contains=getattr(args, "terminal_bench_assert_next_action_contains", None),
+                    structured_failure_class=getattr(
+                        args,
+                        "terminal_bench_assert_structured_failure_class",
+                        None,
+                    ),
+                    structured_replay_mismatch_count=getattr(
+                        args,
+                        "terminal_bench_assert_structured_replay_mismatch_count",
+                        None,
+                    ),
+                    source_output_contract_path=getattr(
+                        args,
+                        "terminal_bench_assert_source_output_contract_path",
+                        None,
+                    ),
                 )
             )
         elif name == "m6_24-compile-compcert-emulator":
             reports.append(
                 run_m6_24_compile_compcert_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-expected-artifact-contract-emulator":
+            reports.append(
+                run_m6_24_expected_artifact_contract_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-external-artifact-mismatch-emulator":
+            reports.append(
+                run_m6_24_external_artifact_mismatch_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-runtime-producer-blocked-emulator":
+            reports.append(
+                run_m6_24_runtime_producer_blocked_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                )
+            )
+        elif name == "m6_24-runtime-artifact-latency-emulator":
+            reports.append(
+                run_m6_24_runtime_artifact_latency_emulator_scenario(
                     scenario_workspace,
                     job_dir=getattr(args, "terminal_bench_job_dir", None),
                 )
@@ -15848,6 +18893,36 @@ def run_dogfood_scenario(args):
                     task=getattr(args, "terminal_bench_task", None),
                 )
             )
+        elif name == "m6_24-final-verifier-budget-emulator":
+            reports.append(
+                run_m6_24_final_verifier_budget_emulator_scenario(
+                    scenario_workspace,
+                    job_dir=getattr(args, "terminal_bench_job_dir", None),
+                    task=getattr(args, "terminal_bench_task", None),
+                )
+            )
+        elif name == "m6_24-same-family-compatibility-emulator":
+            reports.append(run_m6_24_same_family_compatibility_emulator_scenario(scenario_workspace))
+        elif name == "m6_24-runtime-finish-gate-emulator":
+            reports.append(run_m6_24_runtime_finish_gate_emulator_scenario(scenario_workspace))
+        elif name == "m6_24-implement-v2-terminal-failure-reaction-emulator":
+            reports.append(run_m6_24_implement_v2_terminal_failure_reaction_emulator_scenario(scenario_workspace))
+        elif name == "m6_24-implement-v2-hard-runtime-reaction-budget-emulator":
+            reports.append(
+                run_m6_24_implement_v2_hard_runtime_reaction_budget_emulator_scenario(scenario_workspace)
+            )
+        elif name == "m6_24-implement-v2-hard-runtime-progress-continuation-emulator":
+            reports.append(
+                run_m6_24_implement_v2_hard_runtime_progress_continuation_emulator_scenario(
+                    scenario_workspace
+                )
+            )
+        elif name == "m6_24-implement-v2-prior-terminal-failure-diagnostic-emulator":
+            reports.append(
+                run_m6_24_implement_v2_prior_terminal_failure_diagnostic_emulator_scenario(scenario_workspace)
+            )
+        elif name == "m6_24-implement-v2-tool-contract-recovery-emulator":
+            reports.append(run_m6_24_implement_v2_tool_contract_recovery_emulator_scenario(scenario_workspace))
         elif name == "m6_9-active-memory-recall":
             reports.append(run_m6_9_active_memory_recall_scenario(scenario_workspace, env=env))
         elif name == "m6_9-repeated-task-recall":

@@ -101,6 +101,26 @@ def normalize_latest_run(config: ReferenceTraceRun) -> list[dict[str, object]]:
     return summaries
 
 
+def summarize_frontier_reference_metrics(summaries: Sequence[dict[str, object]]) -> dict[str, object]:
+    summary_list = list(summaries)
+    anchor_to_patch = [
+        float(summary["time_from_first_anchor_to_first_patch_seconds"])
+        for summary in summary_list
+        if summary.get("time_from_first_anchor_to_first_patch_seconds") is not None
+    ]
+    broad_cycles = [
+        int(summary.get("same_frontier_broad_cycle_count") or 0)
+        for summary in summary_list
+    ]
+    return {
+        "trace_count": len(summary_list),
+        "anchor_to_patch_observed_count": len(anchor_to_patch),
+        "min_time_from_first_anchor_to_first_patch_seconds": min(anchor_to_patch) if anchor_to_patch else None,
+        "max_time_from_first_anchor_to_first_patch_seconds": max(anchor_to_patch) if anchor_to_patch else None,
+        "same_frontier_broad_cycle_count": sum(broad_cycles),
+    }
+
+
 def latest_run_dir(jobs_dir: Path) -> Path:
     candidates = [path for path in jobs_dir.iterdir() if path.is_dir()]
     if not candidates:

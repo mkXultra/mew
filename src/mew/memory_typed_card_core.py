@@ -1,0 +1,3926 @@
+"""Phase B deterministic core for typed memory cards.
+
+This module intentionally stays behind the generic harness adapter boundary. It
+implements a small in-memory source-of-truth core over the Phase A typed-card
+schemas: raw provenance capture, candidate/proposal lifecycle, approval/commit
+gates, direct-scan retrieval, mutations, audit, and usage records.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import hashlib
+import json
+import math
+import re
+import time
+from typing import Any
+import urllib.error
+import urllib.request
+
+from .memory_typed_cards import (
+    ApprovalState,
+    Applicability,
+    Authority,
+    AuthorityEvidenceEvent,
+    AuthoritySource,
+    AuthorityStrength,
+    CandidateProducer,
+    ContradictionState,
+    CurrentEvidenceSnapshot,
+    DroppedReason,
+    EvidenceLink,
+    EvidenceRole,
+    GraphEdge,
+    GraphEdgeType,
+    GraphRefs,
+    GraphNode,
+    Invalidator,
+    InvalidatorKind,
+    Lifecycle,
+    MemoryAuditEvent,
+    MemoryAuditFields,
+    MemoryCandidate,
+    MemoryCard,
+    MemoryCardKind,
+    MemoryRevision,
+    MemoryTimestamps,
+    MemoryTraceEvent,
+    NodeType,
+    PrivacyRules,
+    ProjectionMode,
+    ProvenanceEvent,
+    ProvenanceProducer,
+    ProvenanceReceipt,
+    RawEventKind,
+    RawMemoryExtractorConfig,
+    RawMemoryIngestRequest,
+    RedactionPolicy,
+    RedactionState,
+    RetentionState,
+    Scope,
+    ScopeLevel,
+    StalenessState,
+    TraceActor,
+    Valence,
+    stable_hash,
+    stable_json,
+    stable_short_hash,
+)
+
+
+ModelJsonCaller = Callable[[str, Mapping[str, Any], str, str, str, int], Any]
+ModelStructuredJsonCaller = Callable[..., Any]
+ModelAuthLoader = Callable[[str, str], Mapping[str, Any]]
+RawExtractor = Callable[[RawMemoryIngestRequest, ProvenanceEvent, Scope], Mapping[str, Any]]
+
+_SCORE_QUANTUM = Decimal("0.0001")
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_./:-]+")
+_FORBIDDEN_SEED_KEYS = {
+    "gold",
+    "gold_label",
+    "expected",
+    "expected_answer",
+    "expected_answer_ids",
+    "trap",
+    "trap_family",
+    "fixture_mode",
+    "scorer_view",
+    "must_not_return_evidence_ids",
+}
+_FORBIDDEN_PATCH_PATHS = {
+    "card_id",
+    "schema_version",
+    "kind",
+    "scope",
+    "scope.level",
+    "scope.namespace",
+    "authority",
+    "authority.source",
+    "authority.strength",
+    "authority.source_refs",
+    "evidence_links",
+    "evidence_refs",
+    "support_refs",
+    "approval_state",
+    "staleness_state",
+    "contradiction_state",
+    "revision",
+    "timestamps.created_at",
+    "audit",
+    "graph_refs",
+}
+_ALLOWED_CLEAR_FIELDS = {"details", "lifecycle.expires_at", "privacy.redaction_policy"}
+_AUTHORITY_RANK = {
+    AuthorityStrength.OBSERVATION.value: Decimal("0.0000"),
+    AuthorityStrength.HINT.value: Decimal("0.1000"),
+    AuthorityStrength.SHOULD.value: Decimal("0.2000"),
+    AuthorityStrength.MUST.value: Decimal("0.3000"),
+}
+_AUTHORITY_SOURCE_RANK = {
+    AuthoritySource.SELF.value: Decimal("0.0000"),
+    AuthoritySource.SCORING.value: Decimal("0.0500"),
+    AuthoritySource.VERIFIER.value: Decimal("0.1000"),
+    AuthoritySource.REVIEWER.value: Decimal("0.1200"),
+    AuthoritySource.USER.value: Decimal("0.1400"),
+    AuthoritySource.MAINTAINER.value: Decimal("0.1600"),
+    AuthoritySource.SYSTEM.value: Decimal("0.1800"),
+}
+_NORMAL_COMMIT_ACTORS = {
+    TraceActor.CORE.value,
+    TraceActor.DEBUG.value,
+    TraceActor.SCORING.value,
+    TraceActor.MAINTAINER.value,
+}
+_NORMAL_APPROVE_ACTORS = {
+    TraceActor.CORE.value,
+    TraceActor.DEBUG.value,
+    TraceActor.SCORING.value,
+    TraceActor.USER.value,
+    TraceActor.REVIEWER.value,
+    TraceActor.VERIFIER.value,
+    TraceActor.MAINTAINER.value,
+}
+_MUTATION_ACTORS = {
+    TraceActor.CORE.value,
+    TraceActor.DEBUG.value,
+    TraceActor.SCORING.value,
+    TraceActor.ADAPTER.value,
+    TraceActor.USER.value,
+    TraceActor.REVIEWER.value,
+    TraceActor.MAINTAINER.value,
+}
+_SEMANTIC_PATCH_FIELDS = {
+    "summary",
+    "details",
+    "retrieval_terms",
+    "applicability",
+    "valence",
+    "invalidators",
+    "confidence",
+}
+_LATENCY_SOURCE_PRECEDENCE = ("wall_clock", "replayed_artifact", "deterministic_mock")
+_SUMMARY_SEARCH_BACKENDS = {"direct_scan_lexical", "bm25", "vector", "hybrid", "replay"}
+_EMBEDDING_PROVIDERS = {"none", "ollama", "openai", "local_file"}
+_DEFAULT_SUMMARY_SEARCH_BACKEND = "direct_scan_lexical"
+_DEFAULT_EMBEDDING_PROVIDER = "none"
+_DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+_DEFAULT_OLLAMA_EMBEDDING_MODEL = "qwen3-embedding:0.6b"
+_GRAPH_EXPANSION_MODIFIER = Decimal("0.2500")
+_GRAPH_EXPANSION_EDGE_TYPES = {
+    GraphEdgeType.MENTIONS.value,
+    GraphEdgeType.APPLIES_TO.value,
+    GraphEdgeType.PROVED_BY.value,
+    GraphEdgeType.SUPPORTS.value,
+    GraphEdgeType.AVOIDS.value,
+    GraphEdgeType.FIXES.value,
+    GraphEdgeType.FAILS_ON.value,
+    GraphEdgeType.LOCATED_IN.value,
+    GraphEdgeType.RELATED.value,
+}
+_MAX_RETRIEVAL_TERM_CHARS = 96
+_ANCHOR_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "in",
+    "is",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "to",
+    "uses",
+    "use",
+    "with",
+}
+_QUERY_RELEVANCE_STOPWORDS = _ANCHOR_STOPWORDS | {
+    "does",
+    "do",
+    "did",
+    "what",
+    "which",
+    "who",
+    "whom",
+    "whose",
+    "when",
+    "where",
+    "why",
+    "how",
+    "have",
+    "has",
+    "had",
+}
+_RAW_SPEAKER_ROLE_TOKENS = {"user", "assistant", "system", "tool", "developer"}
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def canonical_score(value: Any) -> str:
+    """Return a CanonicalScore string using Decimal ROUND_HALF_UP."""
+
+    try:
+        if isinstance(value, Decimal):
+            decimal = value
+        elif isinstance(value, float):
+            if math.isnan(value) or math.isinf(value):
+                raise ValueError("score must be finite")
+            decimal = Decimal(str(value))
+        else:
+            decimal = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError("score must be a finite decimal") from exc
+    if decimal.is_nan() or decimal.is_infinite():
+        raise ValueError("score must be finite")
+    rounded = decimal.quantize(_SCORE_QUANTUM, rounding=ROUND_HALF_UP)
+    if rounded == Decimal("-0.0000"):
+        rounded = Decimal("0.0000")
+    return f"{rounded:.4f}"
+
+
+def raw_memory_extraction_schema() -> dict[str, Any]:
+    """Provider structured-output schema for raw memory extraction."""
+
+    string_array = {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "Canonical typed refs only. Use the provided default_scope_key when the "
+            "claim applies to the current scope; use an empty array when unsure."
+        ),
+    }
+    nullable_string = {"type": ["string", "null"]}
+    nullable_scope_ref = {"type": ["string", "null"]}
+    scope_schema = {
+        "type": ["object", "null"],
+        "additionalProperties": False,
+        "required": [
+            "level",
+            "namespace",
+            "user_id",
+            "project_id",
+            "repo_ref",
+            "branch_ref",
+            "task_ref",
+            "task_family",
+            "lane_id",
+        ],
+        "properties": {
+            "level": {"type": "string", "enum": [item.value for item in ScopeLevel]},
+            "namespace": {"type": "string"},
+            "user_id": nullable_scope_ref,
+            "project_id": nullable_scope_ref,
+            "repo_ref": nullable_scope_ref,
+            "branch_ref": nullable_scope_ref,
+            "task_ref": nullable_scope_ref,
+            "task_family": nullable_scope_ref,
+            "lane_id": nullable_scope_ref,
+        },
+    }
+    candidate_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "kind",
+            "summary",
+            "details",
+            "retrieval_terms",
+            "confidence",
+            "scope",
+            "authority",
+            "valence",
+            "applicability",
+            "evidence_links",
+            "graph_nodes",
+            "graph_edges",
+            "proposed_by",
+            "write_reason",
+            "ambiguous",
+        ],
+        "properties": {
+            "kind": {"type": "string", "enum": [item.value for item in MemoryCardKind]},
+            "summary": {
+                "type": "string",
+                "description": "Synthesized memory claim, not raw transcript text.",
+            },
+            "details": nullable_string,
+            "retrieval_terms": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 32,
+                "description": (
+                    "Concise retrieval anchors copied or minimally normalized from raw text. "
+                    "Preserve identifying subject, target context, condition, object, and value terms; "
+                    "do not include full sentences or transcript excerpts."
+                ),
+            },
+            "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "scope": scope_schema,
+            "authority": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["source", "strength", "source_refs"],
+                "properties": {
+                    "source": {"type": "string", "enum": [item.value for item in AuthoritySource]},
+                    "strength": {"type": "string", "enum": [item.value for item in AuthorityStrength]},
+                    "source_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Use the provided provenance_event_id for self/hint extraction.",
+                    },
+                },
+            },
+            "valence": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["polarity", "effect"],
+                "properties": {
+                    "polarity": {"type": "string", "enum": ["positive", "negative", "neutral"]},
+                    "effect": {"type": "string", "enum": ["use", "avoid", "verify", "ask", "ignore"]},
+                },
+            },
+            "applicability": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["applies_to", "does_not_apply_to", "prerequisites", "counterexamples"],
+                "properties": {
+                    "applies_to": string_array,
+                    "does_not_apply_to": string_array,
+                    "prerequisites": string_array,
+                    "counterexamples": string_array,
+                },
+            },
+            "evidence_links": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["ref_id", "role", "active", "added_by_mutation_id", "note"],
+                    "properties": {
+                        "ref_id": {"type": "string"},
+                        "role": {"type": "string", "enum": [item.value for item in EvidenceRole]},
+                        "active": {"type": "boolean"},
+                        "added_by_mutation_id": nullable_string,
+                        "note": nullable_string,
+                    },
+                },
+                "description": "If provided, cite the provenance_event_id as current_support.",
+            },
+            "graph_nodes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["node_type", "canonical_ref", "display_name", "content_hash", "metadata"],
+                    "properties": {
+                        "node_type": {"type": "string", "enum": [item.value for item in NodeType]},
+                        "canonical_ref": {"type": "string"},
+                        "display_name": {"type": "string"},
+                        "content_hash": nullable_string,
+                        "metadata": {"type": "object", "additionalProperties": False, "properties": {}},
+                    },
+                },
+                "maxItems": 8,
+                "description": (
+                    "Optional graph anchors explicitly present in raw text. "
+                    "Use only file/symbol/test/command/error_signature/task refs that are directly stated; "
+                    "return [] when unsure."
+                ),
+            },
+            "graph_edges": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "from_node_type",
+                        "from_canonical_ref",
+                        "from_display_name",
+                        "to_node_type",
+                        "to_canonical_ref",
+                        "to_display_name",
+                        "edge_type",
+                        "confidence",
+                    ],
+                    "properties": {
+                        "from_node_type": {"type": "string", "enum": [item.value for item in NodeType]},
+                        "from_canonical_ref": {"type": "string"},
+                        "from_display_name": {"type": "string"},
+                        "to_node_type": {"type": "string", "enum": [item.value for item in NodeType]},
+                        "to_canonical_ref": {"type": "string"},
+                        "to_display_name": {"type": "string"},
+                        "edge_type": {"type": "string", "enum": [item.value for item in GraphEdgeType]},
+                        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    },
+                },
+                "maxItems": 8,
+                "description": (
+                    "Optional graph relationships explicitly stated in raw text. "
+                    "Use only retrieval-safe relationships such as related, mentions, located_in, fixes, "
+                    "supports, proved_by, avoids, or fails_on; return [] when unsure."
+                ),
+            },
+            "proposed_by": {"type": "string", "enum": [item.value for item in CandidateProducer]},
+            "write_reason": {"type": "string"},
+            "ambiguous": {"type": "boolean"},
+        },
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["decision", "candidate", "dropped"],
+        "properties": {
+            "decision": {"type": "string", "enum": ["candidate", "reject", "clarification_needed"]},
+            "candidate": {
+                **candidate_schema,
+                "type": ["object", "null"],
+                "description": "Null when decision is reject or clarification_needed.",
+            },
+            "dropped": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["reason", "summary", "ref_id"],
+                    "properties": {
+                        "reason": {
+                            "type": "string",
+                            "enum": [
+                                "ambiguous",
+                                "raw_transcript",
+                                "low_confidence",
+                                "not_memory",
+                                "unsupported",
+                            ],
+                        },
+                        "summary": {"type": "string"},
+                        "ref_id": nullable_string,
+                    },
+                },
+            },
+        },
+    }
+
+
+def raw_memory_extraction_prompt(request: RawMemoryIngestRequest, provenance_event: ProvenanceEvent, scope: Scope) -> str:
+    payload = {
+        "task": "Extract proposal-only typed memory candidates from raw text.",
+        "schema": {
+            "decision": "candidate | reject | clarification_needed",
+            "candidate": {
+                "kind": "reentry_snapshot | task_episode | semantic_fact | procedure | policy_or_preference",
+                "summary": "synthesized memory claim, not raw transcript",
+                "details": "optional synthesized details or null",
+                "retrieval_terms": ["raw subject", "target context", "condition", "object", "value"],
+                "confidence": 0.0,
+                "authority": {"source": "self", "strength": "hint", "source_refs": []},
+                "valence": {"polarity": "neutral", "effect": "use"},
+                "applicability": {"applies_to": [], "does_not_apply_to": [], "prerequisites": [], "counterexamples": []},
+                "evidence_links": [],
+                "graph_nodes": [],
+                "graph_edges": [],
+                "proposed_by": "model",
+                "write_reason": "raw ingest extractor proposal",
+                "ambiguous": False,
+                "scope": None,
+            },
+            "dropped": [{"reason": "ambiguous | raw_transcript | low_confidence", "summary": "short reason"}],
+        },
+        "rules": [
+            "Return exactly one JSON object matching the schema.",
+            "Do not mark anything committed or approved.",
+            "Do not copy raw transcript into summary or details.",
+            "Populate retrieval_terms with short raw-text anchors that make the claim findable even if summary/details are paraphrased.",
+            "For retrieval_terms, preserve the original identifying terms for the subject, target context, condition, object, and value; for example, keep names, colors, folders, review types, product names, and other discriminators.",
+            "Keep retrieval_terms as concise terms or short phrases, not full sentences.",
+            "When ambiguous, return clarification_needed, reject, or a low-confidence proposal.",
+            "Every candidate must cite the provided provenance event through current_support evidence.",
+            "Applicability fields must contain canonical typed refs only, never natural-language descriptions.",
+            "For applies_to, use trusted_runtime_context.default_scope_key when the candidate applies to the current scope and no narrower canonical typed ref is known.",
+            "Set candidate.scope to null unless the raw text explicitly contains the same trusted runtime scope; graph refs do not change memory scope.",
+            "Use empty applicability arrays when unsure; typed validation will reject invalid refs.",
+            "Do not emit invalidators from raw extraction; they are assigned by later governance paths when needed.",
+            "For graph_nodes, include only explicit raw references such as file paths, test names, command names, error signatures, tasks, or symbols. Do not invent nodes.",
+            "For graph_edges, include only relationships directly stated in raw text. Do not infer a relationship from topical similarity.",
+            "Canonical graph refs should be deterministic strings such as file:<repo>:<branch-or-main>:<path>, test:<repo>:<test-ref>, command:<normalized-command>, symbol:<repo>:<symbol-ref>, error:<signature>, or task:<task-ref>.",
+        ],
+        "trusted_runtime_context": {
+            "provenance_event_id": provenance_event.event_id,
+            "default_scope": scope.to_dict(),
+            "default_scope_key": scope.scope_key(),
+        },
+        "raw_text": request.raw_text,
+    }
+    return stable_json(payload)
+
+
+class ModelRawMemoryExtractor:
+    """Default production extractor binding through mew model_backends.
+
+    Tests should inject ``call_json`` and ``load_auth`` or pass a fake extractor
+    to ``TypedMemoryCore.ingest_raw`` so no live model call is made.
+    """
+
+    def __init__(
+        self,
+        *,
+        config: RawMemoryExtractorConfig | None = None,
+        model_auth: Mapping[str, Any] | None = None,
+        base_url: str = "",
+        timeout: int = 120,
+        call_json: ModelJsonCaller | None = None,
+        call_structured_json: ModelStructuredJsonCaller | None = None,
+        load_auth: ModelAuthLoader | None = None,
+    ) -> None:
+        self.config = config or RawMemoryExtractorConfig()
+        self.model_auth = model_auth
+        self.base_url = base_url
+        self.timeout = int(timeout or 120)
+        self.call_json = call_json
+        self.call_structured_json = call_structured_json
+        self.load_auth = load_auth
+
+    def __call__(
+        self,
+        request: RawMemoryIngestRequest,
+        provenance_event: ProvenanceEvent,
+        scope: Scope,
+    ) -> Mapping[str, Any]:
+        auth = self.model_auth
+        if auth is None:
+            loader = self.load_auth
+            if loader is None:
+                from .model_backends import load_model_auth
+
+                loader = load_model_auth
+            auth = loader(self.config.backend, self.config.auth_path)
+        prompt = raw_memory_extraction_prompt(request, provenance_event, scope)
+        if self.call_structured_json is not None:
+            payload = self.call_structured_json(
+                self.config.backend,
+                auth,
+                prompt,
+                self.config.model,
+                self.base_url,
+                self.timeout,
+                schema_name="raw_memory_extraction",
+                json_schema=raw_memory_extraction_schema(),
+                strict=True,
+            )
+        elif self.call_json is not None:
+            payload = self.call_json(self.config.backend, auth, prompt, self.config.model, self.base_url, self.timeout)
+        elif self.config.call_interface == "call_model_json":
+            from .model_backends import call_model_json
+
+            payload = call_model_json(self.config.backend, auth, prompt, self.config.model, self.base_url, self.timeout)
+        else:
+            from .model_backends import call_model_structured_json
+
+            payload = call_model_structured_json(
+                self.config.backend,
+                auth,
+                prompt,
+                self.config.model,
+                self.base_url,
+                self.timeout,
+                schema_name="raw_memory_extraction",
+                json_schema=raw_memory_extraction_schema(),
+                strict=True,
+            )
+        if not isinstance(payload, Mapping):
+            raise ValueError("raw memory extractor must return a JSON object")
+        return payload
+
+
+@dataclass(frozen=True)
+class RawIngestResult:
+    status: str
+    provenance_receipt: ProvenanceReceipt
+    provenance_event: ProvenanceEvent
+    candidate: MemoryCandidate | None
+    proposal_card: MemoryCard | None
+    dropped: tuple[DroppedReason, ...]
+    audit_events: tuple[MemoryAuditEvent, ...]
+    extractor_config: RawMemoryExtractorConfig
+    request_hash: str
+    result_hash: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "provenance_receipt": self.provenance_receipt.to_dict(),
+            "provenance_event": self.provenance_event.to_dict(),
+            "candidate": self.candidate.to_dict() if self.candidate else None,
+            "proposal_card": self.proposal_card.to_dict() if self.proposal_card else None,
+            "dropped": [item.to_dict() for item in self.dropped],
+            "audit_events": [item.to_dict() for item in self.audit_events],
+            "extractor_config": self.extractor_config.to_dict(),
+            "request_hash": self.request_hash,
+            "result_hash": self.result_hash,
+        }
+
+
+@dataclass(frozen=True)
+class MemoryLifecycleResult:
+    card: MemoryCard
+    audit_event: MemoryAuditEvent
+
+
+@dataclass(frozen=True)
+class MemoryCommitResult:
+    card: MemoryCard
+    audit_event: MemoryAuditEvent
+    bypass: str | None = None
+
+
+@dataclass(frozen=True)
+class MemoryMutation:
+    mutation_id: str
+    op: str
+    target_card_id: str
+    replacement_card: MemoryCard | None = None
+    patch: Mapping[str, Any] | None = None
+    reason: str = ""
+    actor: str = TraceActor.DEBUG.value
+    authority_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "mutation_id", _required_text(self.mutation_id, "mutation_id"))
+        op = _required_text(self.op, "mutation.op")
+        if op not in {"update", "delete", "forget", "supersede", "tombstone"}:
+            raise ValueError("mutation.op must be update, delete, forget, supersede, or tombstone")
+        object.__setattr__(self, "op", op)
+        object.__setattr__(self, "target_card_id", _required_text(self.target_card_id, "target_card_id"))
+        actor = _required_text(self.actor, "mutation.actor")
+        if actor not in _MUTATION_ACTORS:
+            raise PermissionError(f"actor={actor} cannot mutate memory")
+        object.__setattr__(self, "actor", actor)
+        object.__setattr__(self, "reason", _clean_text(self.reason) or op)
+        object.__setattr__(self, "authority_refs", tuple(_required_text(item, "authority_refs") for item in self.authority_refs))
+        if self.patch is not None and not isinstance(self.patch, Mapping):
+            raise ValueError("mutation.patch must be an object")
+
+
+@dataclass(frozen=True)
+class MemoryMutationResult:
+    mutation: MemoryMutation
+    cards: tuple[MemoryCard, ...]
+    audit_event: MemoryAuditEvent
+    dropped: tuple[DroppedReason, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mutation": {
+                "mutation_id": self.mutation.mutation_id,
+                "op": self.mutation.op,
+                "target_card_id": self.mutation.target_card_id,
+                "reason": self.mutation.reason,
+                "actor": self.mutation.actor,
+                "authority_refs": list(self.mutation.authority_refs),
+            },
+            "cards": [card.to_dict() for card in self.cards],
+            "audit_event": self.audit_event.to_dict(),
+            "dropped": [item.to_dict() for item in self.dropped],
+        }
+
+
+@dataclass(frozen=True)
+class MemoryRecallRequest:
+    query: str
+    scope: Scope
+    authorization_scope: Scope | None = None
+    applicability_refs: tuple[str, ...] = ()
+    kinds: tuple[str, ...] = ()
+    limit: int = 5
+    include_maybe_stale: bool = False
+    current_evidence: CurrentEvidenceSnapshot | None = None
+    now: str | None = None
+    latency_source: str = "deterministic_mock"
+    expand_graph: bool = False
+    graph_max_depth: int = 1
+    graph_max_items: int = 16
+    graph_max_nodes: int | None = None
+    graph_max_edges: int | None = None
+    graph_max_cards: int | None = None
+    graph_max_fanout: int | None = None
+    graph_max_latency_ms: int | None = None
+    max_projection_chars: int | None = None
+    summary_search_backend: str = _DEFAULT_SUMMARY_SEARCH_BACKEND
+    embedding_provider: str = _DEFAULT_EMBEDDING_PROVIDER
+    embedding_model_id: str | None = None
+    embedding_base_url: str = _DEFAULT_OLLAMA_BASE_URL
+    embedding_timeout_s: int = 30
+    request_id: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "query", _clean_text(self.query))
+        scope = self.scope if isinstance(self.scope, Scope) else Scope.from_dict(self.scope)
+        object.__setattr__(self, "scope", scope)
+        if self.authorization_scope is None:
+            object.__setattr__(self, "authorization_scope", scope)
+        elif not isinstance(self.authorization_scope, Scope):
+            object.__setattr__(self, "authorization_scope", Scope.from_dict(self.authorization_scope))
+        object.__setattr__(self, "applicability_refs", tuple(_required_text(item, "applicability_refs") for item in self.applicability_refs))
+        object.__setattr__(self, "kinds", tuple(MemoryCardKind(item).value for item in self.kinds))
+        object.__setattr__(self, "limit", max(0, int(self.limit or 0)))
+        if self.current_evidence is not None and not isinstance(self.current_evidence, CurrentEvidenceSnapshot):
+            object.__setattr__(self, "current_evidence", CurrentEvidenceSnapshot(**self.current_evidence))
+        object.__setattr__(self, "now", _clean_text(self.now) or None)
+        if self.latency_source not in {"wall_clock", "deterministic_mock", "replayed_artifact"}:
+            raise ValueError("latency_source must be wall_clock, deterministic_mock, or replayed_artifact")
+        object.__setattr__(self, "expand_graph", bool(self.expand_graph))
+        graph_max_depth = int(self.graph_max_depth or 0)
+        if graph_max_depth < 0 or graph_max_depth > 1:
+            raise ValueError("graph_max_depth supports only 0 or 1 in Phase D")
+        object.__setattr__(self, "graph_max_depth", graph_max_depth)
+        graph_max_items = int(self.graph_max_items or 0)
+        if graph_max_items < 0:
+            raise ValueError("graph_max_items must be non-negative")
+        object.__setattr__(self, "graph_max_items", graph_max_items)
+        object.__setattr__(self, "graph_max_nodes", _optional_non_negative_int(self.graph_max_nodes, "graph_max_nodes"))
+        object.__setattr__(self, "graph_max_edges", _optional_non_negative_int(self.graph_max_edges, "graph_max_edges"))
+        object.__setattr__(self, "graph_max_cards", _optional_non_negative_int(self.graph_max_cards, "graph_max_cards"))
+        object.__setattr__(self, "graph_max_fanout", _optional_non_negative_int(self.graph_max_fanout, "graph_max_fanout"))
+        object.__setattr__(self, "graph_max_latency_ms", _optional_non_negative_int(self.graph_max_latency_ms, "graph_max_latency_ms"))
+        object.__setattr__(self, "max_projection_chars", _optional_non_negative_int(self.max_projection_chars, "max_projection_chars"))
+        backend = _clean_text(self.summary_search_backend) or _DEFAULT_SUMMARY_SEARCH_BACKEND
+        if backend not in _SUMMARY_SEARCH_BACKENDS:
+            raise ValueError("summary_search_backend is invalid")
+        object.__setattr__(self, "summary_search_backend", backend)
+        provider = _clean_text(self.embedding_provider) or _DEFAULT_EMBEDDING_PROVIDER
+        if backend in {"vector", "hybrid"} and provider == "none":
+            provider = "ollama"
+        if provider not in _EMBEDDING_PROVIDERS:
+            raise ValueError("embedding_provider is invalid")
+        object.__setattr__(self, "embedding_provider", provider)
+        model_id = _clean_text(self.embedding_model_id) or None
+        if backend in {"vector", "hybrid"} and provider == "ollama" and model_id is None:
+            model_id = _DEFAULT_OLLAMA_EMBEDDING_MODEL
+        object.__setattr__(self, "embedding_model_id", model_id)
+        object.__setattr__(self, "embedding_base_url", (_clean_text(self.embedding_base_url) or _DEFAULT_OLLAMA_BASE_URL).rstrip("/"))
+        timeout_s = int(self.embedding_timeout_s or 0)
+        if timeout_s <= 0:
+            raise ValueError("embedding_timeout_s must be positive")
+        object.__setattr__(self, "embedding_timeout_s", timeout_s)
+        request_id = self.request_id or "req_" + stable_short_hash(self.to_request_payload(), length=16)
+        object.__setattr__(self, "request_id", request_id)
+
+    def to_request_payload(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "scope": self.scope.to_dict(),
+            "authorization_scope": self.authorization_scope.to_dict() if self.authorization_scope else None,
+            "applicability_refs": list(self.applicability_refs),
+            "kinds": list(self.kinds),
+            "limit": self.limit,
+            "include_maybe_stale": self.include_maybe_stale,
+            "current_evidence": self.current_evidence.to_dict() if self.current_evidence else None,
+            "now": self.now,
+            "latency_source": self.latency_source,
+            "expand_graph": self.expand_graph,
+            "graph_max_depth": self.graph_max_depth,
+            "graph_max_items": self.graph_max_items,
+            "graph_max_nodes": self.graph_max_nodes,
+            "graph_max_edges": self.graph_max_edges,
+            "graph_max_cards": self.graph_max_cards,
+            "graph_max_fanout": self.graph_max_fanout,
+            "graph_max_latency_ms": self.graph_max_latency_ms,
+            "max_projection_chars": self.max_projection_chars,
+            "summary_search_backend": self.summary_search_backend,
+            "embedding_provider": self.embedding_provider,
+            "embedding_model_id": self.embedding_model_id,
+            "embedding_base_url": self.embedding_base_url,
+            "embedding_timeout_s": self.embedding_timeout_s,
+        }
+
+
+@dataclass(frozen=True)
+class SummarySearchBackendIdentity:
+    backend_kind: str
+    backend_version: str = "v1"
+    surface_config_hash: str = ""
+    backend_config_hash: str = ""
+    embedding_provider: str = "none"
+    embedding_model_id: str | None = None
+    replay_artifact_id: str | None = None
+
+    def __post_init__(self) -> None:
+        backend_kind = _clean_text(self.backend_kind) or _DEFAULT_SUMMARY_SEARCH_BACKEND
+        if backend_kind not in _SUMMARY_SEARCH_BACKENDS:
+            raise ValueError("backend_kind is invalid")
+        object.__setattr__(self, "backend_kind", backend_kind)
+        object.__setattr__(self, "backend_version", _clean_text(self.backend_version) or "v1")
+        surface_config_hash = _clean_text(self.surface_config_hash) or _default_retrieval_surface_config_hash()
+        object.__setattr__(self, "surface_config_hash", surface_config_hash)
+        provider = _clean_text(self.embedding_provider) or "none"
+        if provider not in _EMBEDDING_PROVIDERS:
+            raise ValueError("embedding_provider is invalid")
+        object.__setattr__(self, "embedding_provider", provider)
+        object.__setattr__(self, "embedding_model_id", _clean_text(self.embedding_model_id) or None)
+        backend_config_hash = _clean_text(self.backend_config_hash) or stable_hash(
+            {
+                "backend_kind": backend_kind,
+                "backend_version": self.backend_version,
+                "surface_config_hash": surface_config_hash,
+                "embedding_provider": provider,
+                "embedding_model_id": self.embedding_model_id,
+            }
+        )
+        object.__setattr__(self, "backend_config_hash", backend_config_hash)
+        object.__setattr__(self, "replay_artifact_id", _clean_text(self.replay_artifact_id) or None)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "backend_kind": self.backend_kind,
+            "backend_version": self.backend_version,
+            "surface_config_hash": self.surface_config_hash,
+            "backend_config_hash": self.backend_config_hash,
+            "embedding_provider": self.embedding_provider,
+            "embedding_model_id": self.embedding_model_id,
+            "replay_artifact_id": self.replay_artifact_id,
+        }
+
+
+@dataclass(frozen=True)
+class SummarySearchHit:
+    card_id: str
+    backend_score: Decimal
+    score_components: Mapping[str, str | None] = field(default_factory=dict)
+    matched_fields: tuple[str, ...] = ()
+    backend_identity: SummarySearchBackendIdentity = field(
+        default_factory=lambda: SummarySearchBackendIdentity(backend_kind=_DEFAULT_SUMMARY_SEARCH_BACKEND)
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "card_id", _required_text(self.card_id, "search_hit.card_id"))
+        object.__setattr__(self, "backend_score", Decimal(canonical_score(self.backend_score)))
+        object.__setattr__(self, "score_components", dict(self.score_components))
+        object.__setattr__(self, "matched_fields", tuple(_required_text(item, "matched_fields") for item in self.matched_fields))
+
+
+class SummarySearchBackend:
+    """Candidate-scoring backend over authorization-prefiltered card surfaces."""
+
+    identity: SummarySearchBackendIdentity
+
+    def search(
+        self,
+        *,
+        query: str,
+        cards: Sequence[MemoryCard],
+        request: MemoryRecallRequest,
+        surface_config_hash: str,
+        limit: int,
+    ) -> tuple[SummarySearchHit, ...]:
+        raise NotImplementedError
+
+
+class DirectScanLexicalSummarySearchBackend(SummarySearchBackend):
+    def __init__(self, *, backend_kind: str = "direct_scan_lexical", surface_config_hash: str | None = None) -> None:
+        if backend_kind not in {"direct_scan_lexical", "bm25"}:
+            raise ValueError("direct lexical backend_kind must be direct_scan_lexical or bm25")
+        self.identity = SummarySearchBackendIdentity(
+            backend_kind=backend_kind,
+            surface_config_hash=surface_config_hash or _default_retrieval_surface_config_hash(),
+            embedding_provider="none",
+        )
+
+    def search(
+        self,
+        *,
+        query: str,
+        cards: Sequence[MemoryCard],
+        request: MemoryRecallRequest,
+        surface_config_hash: str,
+        limit: int,
+    ) -> tuple[SummarySearchHit, ...]:
+        query_tokens = _tokens(query)
+        hits: list[SummarySearchHit] = []
+        for card in sorted(cards, key=lambda item: item.card_id):
+            lexical = Decimal("0.0000")
+            matched_fields: tuple[str, ...] = ()
+            if query_tokens:
+                scoring_tokens = _meaningful_query_tokens(query_tokens) or query_tokens
+                field_tokens = _card_field_tokens(card)
+                matched_fields = tuple(sorted(field for field, tokens in field_tokens.items() if scoring_tokens & tokens))
+                all_tokens: set[str] = set()
+                for tokens in field_tokens.values():
+                    all_tokens.update(tokens)
+                overlap = len(scoring_tokens & all_tokens)
+                if not request.applicability_refs and overlap < _minimum_query_overlap(query_tokens):
+                    continue
+                lexical = Decimal(overlap) / Decimal(max(1, len(scoring_tokens)))
+            hits.append(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score=lexical,
+                    score_components={
+                        "lexical_score": canonical_score(lexical),
+                        "summary_backend_score": canonical_score(lexical),
+                        "vector_score": None,
+                    },
+                    matched_fields=matched_fields,
+                    backend_identity=replace(self.identity, surface_config_hash=surface_config_hash),
+                )
+            )
+        return tuple(hits[: max(0, limit)])
+
+
+class OllamaVectorSummarySearchBackend(SummarySearchBackend):
+    def __init__(
+        self,
+        *,
+        model_id: str = _DEFAULT_OLLAMA_EMBEDDING_MODEL,
+        base_url: str = _DEFAULT_OLLAMA_BASE_URL,
+        timeout_s: int = 30,
+        surface_config_hash: str | None = None,
+    ) -> None:
+        self.model_id = _required_text(model_id, "embedding_model_id")
+        self.base_url = (_clean_text(base_url) or _DEFAULT_OLLAMA_BASE_URL).rstrip("/")
+        self.timeout_s = int(timeout_s or 30)
+        self.identity = SummarySearchBackendIdentity(
+            backend_kind="vector",
+            surface_config_hash=surface_config_hash or _default_retrieval_surface_config_hash(),
+            embedding_provider="ollama",
+            embedding_model_id=self.model_id,
+            backend_config_hash=stable_hash(
+                {
+                    "backend_kind": "vector",
+                    "embedding_provider": "ollama",
+                    "embedding_model_id": self.model_id,
+                    "base_url": self.base_url,
+                    "timeout_s": self.timeout_s,
+                }
+            ),
+        )
+
+    def search(
+        self,
+        *,
+        query: str,
+        cards: Sequence[MemoryCard],
+        request: MemoryRecallRequest,
+        surface_config_hash: str,
+        limit: int,
+    ) -> tuple[SummarySearchHit, ...]:
+        if not cards:
+            return ()
+        query = _clean_text(query)
+        identity = replace(self.identity, surface_config_hash=surface_config_hash)
+        if not query:
+            return tuple(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score=Decimal("0"),
+                    score_components={"lexical_score": None, "summary_backend_score": "0.0000", "vector_score": "0.0000"},
+                    backend_identity=identity,
+                )
+                for card in sorted(cards, key=lambda item: item.card_id)[: max(0, limit)]
+            )
+        sorted_cards = sorted(cards, key=lambda item: item.card_id)
+        inputs = [query, *(_vector_surface_text(card) for card in sorted_cards)]
+        vectors = _ollama_embed(
+            model=self.model_id,
+            inputs=inputs,
+            base_url=self.base_url,
+            timeout_s=self.timeout_s,
+        )
+        if len(vectors) != len(inputs):
+            raise RuntimeError("ollama embedding response length mismatch")
+        query_vector = vectors[0]
+        hits = []
+        for card, vector in zip(sorted_cards, vectors[1:]):
+            score = _cosine_score(query_vector, vector)
+            hits.append(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score=score,
+                    score_components={
+                        "lexical_score": None,
+                        "summary_backend_score": canonical_score(score),
+                        "vector_score": canonical_score(score),
+                    },
+                    matched_fields=("summary",),
+                    backend_identity=identity,
+                )
+            )
+        hits.sort(key=lambda item: (-item.backend_score, item.card_id))
+        return tuple(hits[: max(0, limit)])
+
+
+class HybridSummarySearchBackend(SummarySearchBackend):
+    def __init__(
+        self,
+        *,
+        model_id: str = _DEFAULT_OLLAMA_EMBEDDING_MODEL,
+        base_url: str = _DEFAULT_OLLAMA_BASE_URL,
+        timeout_s: int = 30,
+        surface_config_hash: str | None = None,
+    ) -> None:
+        self.vector_backend = OllamaVectorSummarySearchBackend(
+            model_id=model_id,
+            base_url=base_url,
+            timeout_s=timeout_s,
+            surface_config_hash=surface_config_hash,
+        )
+        self.identity = SummarySearchBackendIdentity(
+            backend_kind="hybrid",
+            surface_config_hash=surface_config_hash or _default_retrieval_surface_config_hash(),
+            embedding_provider="ollama",
+            embedding_model_id=model_id,
+            backend_config_hash=stable_hash(
+                {
+                    "backend_kind": "hybrid",
+                    "embedding_provider": "ollama",
+                    "embedding_model_id": model_id,
+                    "base_url": base_url.rstrip("/"),
+                    "timeout_s": int(timeout_s or 30),
+                    "anchor_policy": "retrieval_terms_exact_v1",
+                    "vector_weight": "0.8500",
+                    "anchor_weight": "0.2500",
+                }
+            ),
+        )
+
+    def search(
+        self,
+        *,
+        query: str,
+        cards: Sequence[MemoryCard],
+        request: MemoryRecallRequest,
+        surface_config_hash: str,
+        limit: int,
+    ) -> tuple[SummarySearchHit, ...]:
+        vector_hits = {
+            hit.card_id: hit
+            for hit in self.vector_backend.search(
+                query=query,
+                cards=cards,
+                request=request,
+                surface_config_hash=surface_config_hash,
+                limit=len(cards),
+            )
+        }
+        query_tokens = _tokens(query)
+        identity = replace(self.identity, surface_config_hash=surface_config_hash)
+        hits = []
+        for card in sorted(cards, key=lambda item: item.card_id):
+            vector_hit = vector_hits.get(card.card_id)
+            vector_score = Decimal("0.0000") if vector_hit is None else Decimal(canonical_score(vector_hit.backend_score))
+            anchor_score = _retrieval_terms_anchor_score(card, query, query_tokens)
+            backend_score = min(
+                Decimal("1.0000"),
+                (vector_score * Decimal("0.8500")) + (anchor_score * Decimal("0.2500")),
+            )
+            matched_fields = set(vector_hit.matched_fields if vector_hit else ())
+            if anchor_score > 0:
+                matched_fields.add("retrieval_terms")
+            hits.append(
+                SummarySearchHit(
+                    card_id=card.card_id,
+                    backend_score=backend_score,
+                    score_components={
+                        "summary_backend_score": canonical_score(backend_score),
+                        "lexical_score": canonical_score(anchor_score),
+                        "vector_score": canonical_score(vector_score),
+                        "anchor_score": canonical_score(anchor_score),
+                    },
+                    matched_fields=tuple(sorted(matched_fields)),
+                    backend_identity=identity,
+                )
+            )
+        hits.sort(key=lambda item: (-item.backend_score, item.card_id))
+        return tuple(hits[: max(0, limit)])
+
+
+@dataclass(frozen=True)
+class _GraphExpansionResult:
+    card_modifiers: Mapping[str, Decimal]
+    nodes_expanded: int
+    edges_expanded: int
+    cards_expanded: int = 0
+    dropped_counts: Mapping[str, int] = field(default_factory=dict)
+    dropped: tuple[DroppedReason, ...] = ()
+
+
+@dataclass(frozen=True)
+class MemoryUsage:
+    latency_ms: float
+    latency_source: str
+    cards_scanned: int
+    cards_ranked: int
+    cards_returned: int
+    cards_dropped: int
+    graph_nodes_expanded: int = 0
+    graph_edges_expanded: int = 0
+    graph_cards_expanded: int = 0
+    projection_chars: int = 0
+    index_mode: str = "direct_scan"
+    token_count: int | None = None
+    cost_units: float | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "cards_scanned",
+            "cards_ranked",
+            "cards_returned",
+            "cards_dropped",
+            "graph_nodes_expanded",
+            "graph_edges_expanded",
+            "graph_cards_expanded",
+            "projection_chars",
+        ):
+            value = int(getattr(self, name))
+            if value < 0:
+                raise ValueError(f"usage.{name} must be non-negative")
+            object.__setattr__(self, name, value)
+        latency = float(self.latency_ms)
+        if math.isnan(latency) or math.isinf(latency) or latency < 0:
+            raise ValueError("usage.latency_ms must be a non-negative finite float")
+        object.__setattr__(self, "latency_ms", latency)
+        if self.latency_source not in {"wall_clock", "deterministic_mock", "replayed_artifact"}:
+            raise ValueError("usage.latency_source is invalid")
+        if self.index_mode not in {"direct_scan", "sync_lexical", "graph_index", "vector", "hybrid", "replay"}:
+            raise ValueError("usage.index_mode is invalid")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "latency_ms": self.latency_ms,
+            "latency_source": self.latency_source,
+            "cards_scanned": self.cards_scanned,
+            "cards_ranked": self.cards_ranked,
+            "cards_returned": self.cards_returned,
+            "cards_dropped": self.cards_dropped,
+            "graph_nodes_expanded": self.graph_nodes_expanded,
+            "graph_edges_expanded": self.graph_edges_expanded,
+            "graph_cards_expanded": self.graph_cards_expanded,
+            "projection_chars": self.projection_chars,
+            "index_mode": self.index_mode,
+            "token_count": self.token_count,
+            "cost_units": self.cost_units,
+        }
+
+
+@dataclass(frozen=True)
+class RankedMemoryEvidence:
+    rank: int
+    evidence_ref: str
+    support_experience_ids: tuple[str, ...]
+    source_experience_ids: tuple[str, ...]
+    lineage_experience_ids: tuple[str, ...]
+    provenance_refs: tuple[str, ...]
+    source_mutation_ids: tuple[str, ...]
+    mutation_refs: tuple[str, ...]
+    score: str
+    score_type: str
+    score_components: Mapping[str, str | None]
+    state: str
+    scope_id: str
+    metadata: Mapping[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rank": self.rank,
+            "evidence_ref": self.evidence_ref,
+            "support_experience_ids": list(self.support_experience_ids),
+            "source_experience_ids": list(self.source_experience_ids),
+            "lineage_experience_ids": list(self.lineage_experience_ids),
+            "provenance_refs": list(self.provenance_refs),
+            "source_mutation_ids": list(self.source_mutation_ids),
+            "mutation_refs": list(self.mutation_refs),
+            "score": self.score,
+            "score_type": self.score_type,
+            "score_components": dict(self.score_components),
+            "state": self.state,
+            "scope_id": self.scope_id,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class CallerVisibleDroppedRecord:
+    reason: str
+    evidence_ref: str | None = None
+    detail: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"reason": self.reason, "evidence_ref": self.evidence_ref, "detail": self.detail}
+
+
+@dataclass(frozen=True)
+class MemoryRetrieveResult:
+    ranked_evidence: tuple[RankedMemoryEvidence, ...]
+    abstained: bool
+    abstained_reason: str | None
+    dropped: tuple[CallerVisibleDroppedRecord, ...]
+    dropped_count_by_reason: Mapping[str, int]
+    usage: MemoryUsage
+    request_id: str
+    request_hash: str
+    result_hash: str
+    audit_event: MemoryAuditEvent
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ranked_evidence": [item.to_dict() for item in self.ranked_evidence],
+            "abstained": self.abstained,
+            "abstained_reason": self.abstained_reason,
+            "dropped": [item.to_dict() for item in self.dropped],
+            "dropped_count_by_reason": dict(self.dropped_count_by_reason),
+            "usage": self.usage.to_dict(),
+            "request_id": self.request_id,
+            "request_hash": self.request_hash,
+            "result_hash": self.result_hash,
+        }
+
+
+@dataclass(frozen=True)
+class MemoryUsageReport:
+    scope: Scope | None
+    usage: MemoryUsage
+    request_count: int
+    window_start: str | None = None
+    window_end: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scope": self.scope.to_dict() if self.scope else None,
+            "window_start": self.window_start,
+            "window_end": self.window_end,
+            "request_count": self.request_count,
+            "usage": self.usage.to_dict(),
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class TransientReentryRecord:
+    record_id: str
+    session_id: str
+    scope: Scope
+    summary: str
+    created_at: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "record_id", _required_text(self.record_id, "record_id"))
+        object.__setattr__(self, "session_id", _required_text(self.session_id, "session_id"))
+        object.__setattr__(self, "scope", self.scope if isinstance(self.scope, Scope) else Scope.from_dict(self.scope))
+        object.__setattr__(self, "summary", _required_text(self.summary, "summary"))
+        object.__setattr__(self, "created_at", _required_text(self.created_at, "created_at"))
+        object.__setattr__(self, "metadata", dict(self.metadata))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "record_id": self.record_id,
+            "session_id": self.session_id,
+            "scope": self.scope.to_dict(),
+            "summary": self.summary,
+            "created_at": self.created_at,
+            "metadata": dict(self.metadata),
+        }
+
+
+@dataclass(frozen=True)
+class TransientReentryRecallResult:
+    records: tuple[TransientReentryRecord, ...]
+    request_hash: str
+    result_hash: str
+    audit_event: MemoryAuditEvent
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "records": [record.to_dict() for record in self.records],
+            "request_hash": self.request_hash,
+            "result_hash": self.result_hash,
+            "audit_event": self.audit_event.to_dict(),
+        }
+
+
+class TypedMemoryCore:
+    """Small deterministic Phase B memory core over typed-card value objects."""
+
+    def __init__(
+        self,
+        *,
+        extractor: RawExtractor | None = None,
+        extractor_config: RawMemoryExtractorConfig | None = None,
+        summary_search_backend: SummarySearchBackend | None = None,
+        clock: Callable[[], str] = utc_now_iso,
+        perf_clock: Callable[[], float] = time.perf_counter,
+    ) -> None:
+        self.extractor = extractor
+        self.extractor_config = extractor_config or RawMemoryExtractorConfig()
+        self.summary_search_backend = summary_search_backend
+        self.clock = clock
+        self.perf_clock = perf_clock
+        self.provenance_events: dict[str, ProvenanceEvent] = {}
+        self.raw_payloads: dict[str, str] = {}
+        self.candidates: dict[str, MemoryCandidate] = {}
+        self.memory_cards: dict[str, MemoryCard] = {}
+        self.graph_nodes: dict[str, GraphNode] = {}
+        self.graph_edges: dict[str, GraphEdge] = {}
+        self.memory_audit_log: list[MemoryAuditEvent] = []
+        self.transient_reentry_records: dict[str, list[TransientReentryRecord]] = {}
+
+    def ingest_raw(
+        self,
+        request: RawMemoryIngestRequest,
+        *,
+        scope: Scope,
+        actor: str = ProvenanceProducer.USER.value,
+        extractor: RawExtractor | None = None,
+        source_experience_id: str | None = None,
+        source_run_id: str | None = None,
+        source_session_id: str | None = None,
+        source_turn_id: str | None = None,
+    ) -> RawIngestResult:
+        request_hash = stable_hash(request.to_dict())
+        provenance_event, receipt, capture_audit = self.capture_raw_provenance(
+            request,
+            scope=scope,
+            actor=actor,
+            source_experience_id=source_experience_id,
+            source_run_id=source_run_id,
+            source_session_id=source_session_id,
+            source_turn_id=source_turn_id,
+        )
+        extractor_fn = extractor or self.extractor or ModelRawMemoryExtractor(config=self.extractor_config)
+        try:
+            payload = extractor_fn(request, provenance_event, scope)
+            if not isinstance(payload, Mapping):
+                raise ValueError("extractor output must be an object")
+        except Exception as exc:
+            dropped = (DroppedReason(reason="extractor_error", ref_id=provenance_event.event_id, detail=str(exc)),)
+            audit = self._append_audit(
+                operation="extract_candidate",
+                actor=TraceActor.MODEL_PROPOSAL.value,
+                request_hash=request_hash,
+                result_payload={"status": "rejected", "reason": str(exc)},
+                provenance_event_ids=(provenance_event.event_id,),
+                dropped=dropped,
+            )
+            result = RawIngestResult(
+                status="rejected",
+                provenance_receipt=receipt,
+                provenance_event=provenance_event,
+                candidate=None,
+                proposal_card=None,
+                dropped=dropped,
+                audit_events=(capture_audit, audit),
+                extractor_config=self.extractor_config,
+                request_hash=request_hash,
+                result_hash=stable_hash({"status": "rejected", "provenance_event_id": provenance_event.event_id}),
+            )
+            return result
+
+        candidate, status, dropped = self._candidate_from_extractor_payload(
+            payload,
+            request=request,
+            provenance_event=provenance_event,
+            default_scope=scope,
+        )
+        extract_audit = self._append_audit(
+            operation="extract_candidate",
+            actor=TraceActor.MODEL_PROPOSAL.value if candidate and candidate.proposed_by == CandidateProducer.MODEL.value else TraceActor.CORE.value,
+            request_hash=request_hash,
+            result_payload={"status": status, "candidate_id": candidate.candidate_id if candidate else None},
+            provenance_event_ids=(provenance_event.event_id,),
+            card_ids=(),
+            dropped=dropped,
+            metadata={
+                "extractor_config_hash": stable_hash(self.extractor_config.to_dict()),
+                "candidate_hash": candidate.stable_hash() if candidate else None,
+            },
+        )
+        audit_events = [capture_audit, extract_audit]
+        proposal_card: MemoryCard | None = None
+        if candidate is not None:
+            self.candidates[candidate.candidate_id] = candidate
+            proposal_card, propose_audit = self.propose_memory(candidate, source_provenance_id=provenance_event.event_id)
+            audit_events.append(propose_audit)
+            if status == "candidate":
+                status = "proposal"
+            if Decimal(str(candidate.confidence)) < Decimal("0.50"):
+                status = "low_confidence_proposal"
+        result_payload = {
+            "status": status,
+            "provenance_event_id": provenance_event.event_id,
+            "candidate_id": candidate.candidate_id if candidate else None,
+            "proposal_card_id": proposal_card.card_id if proposal_card else None,
+        }
+        return RawIngestResult(
+            status=status,
+            provenance_receipt=receipt,
+            provenance_event=provenance_event,
+            candidate=candidate,
+            proposal_card=proposal_card,
+            dropped=dropped,
+            audit_events=tuple(audit_events),
+            extractor_config=self.extractor_config,
+            request_hash=request_hash,
+            result_hash=stable_hash(result_payload),
+        )
+
+    def capture_raw_provenance(
+        self,
+        request: RawMemoryIngestRequest,
+        *,
+        scope: Scope,
+        actor: str = ProvenanceProducer.USER.value,
+        source_experience_id: str | None = None,
+        source_run_id: str | None = None,
+        source_session_id: str | None = None,
+        source_turn_id: str | None = None,
+        source_mutation_id: str | None = None,
+    ) -> tuple[ProvenanceEvent, ProvenanceReceipt, MemoryAuditEvent]:
+        timestamp = self.clock()
+        payload_hash = stable_hash({"raw_text": request.raw_text})
+        event_id = self._unique_id(
+            self.provenance_events,
+            "prov",
+            {
+                "kind": RawEventKind.RAW_TRANSCRIPT.value,
+                "payload_hash": payload_hash,
+                "scope": scope.to_dict(),
+                "source_experience_id": source_experience_id,
+            },
+        )
+        excerpt = _bounded_excerpt(request.raw_text)
+        event = ProvenanceEvent(
+            event_id=event_id,
+            event_kind=RawEventKind.RAW_TRANSCRIPT.value,
+            actor=actor,
+            scope=scope,
+            payload_ref=f"raw_payloads:{event_id}",
+            provenance_excerpt=excerpt,
+            payload_hash=payload_hash,
+            content_mime="text/plain",
+            source_run_id=source_run_id,
+            source_session_id=source_session_id,
+            source_turn_id=source_turn_id,
+            source_experience_id=source_experience_id,
+            source_mutation_id=source_mutation_id,
+            created_at=timestamp,
+        )
+        self.provenance_events[event.event_id] = event
+        self.raw_payloads[event.event_id] = request.raw_text
+        audit = self._append_audit(
+            operation="capture_provenance",
+            actor=TraceActor.CORE.value,
+            request_hash=stable_hash(request.to_dict()),
+            result_payload={"event_id": event.event_id, "payload_hash": event.payload_hash},
+            provenance_event_ids=(event.event_id,),
+            metadata={
+                "payload_hash": payload_hash,
+                "payload_ref": event.payload_ref,
+                "excerpt_hash": stable_hash({"provenance_excerpt": excerpt}) if excerpt else None,
+            },
+        )
+        receipt = ProvenanceReceipt(
+            event_id=event.event_id,
+            event_kind=event.event_kind,
+            producer=event.actor,
+            scope=event.scope,
+            payload_hash=event.payload_hash,
+            excerpt_hash=stable_hash({"provenance_excerpt": excerpt}) if excerpt else None,
+            source_experience_id=event.source_experience_id,
+            source_mutation_id=event.source_mutation_id,
+            redaction_state=event.redaction_state,
+            retention_state=event.retention_state,
+            audit_id=audit.audit_id,
+        )
+        return event, receipt, audit
+
+    def propose_memory(self, candidate: MemoryCandidate, *, source_provenance_id: str | None = None) -> tuple[MemoryCard, MemoryAuditEvent]:
+        timestamp = self.clock()
+        audit_id = "pending"
+        created_by = TraceActor.MODEL_PROPOSAL.value if candidate.proposed_by == CandidateProducer.MODEL.value else TraceActor.CORE.value
+        card_id = self._unique_id(
+            self.memory_cards,
+            "mem",
+            {"candidate_id": candidate.candidate_id, "candidate_hash": candidate.stable_hash()},
+        )
+        metadata = {
+            "candidate_id": candidate.candidate_id,
+            "candidate_hash": candidate.stable_hash(),
+            "source_provenance_id": source_provenance_id,
+        }
+        card = MemoryCard(
+            card_id=card_id,
+            kind=candidate.proposed_kind,
+            summary=candidate.summary,
+            details=candidate.details,
+            retrieval_terms=candidate.retrieval_terms,
+            confidence=candidate.confidence,
+            scope=candidate.proposed_scope,
+            lifecycle=Lifecycle(lifespan="project_durable"),
+            authority=candidate.proposed_authority,
+            valence=candidate.proposed_valence,
+            applicability=candidate.proposed_applicability,
+            evidence_links=candidate.evidence_links,
+            invalidators=candidate.proposed_invalidators,
+            staleness_state=StalenessState.FRESH.value,
+            contradiction_state=ContradictionState.NONE.value,
+            approval_state=ApprovalState.PROPOSAL.value,
+            projection_mode=ProjectionMode.DEBUG_ONLY.value,
+            graph_refs=candidate.proposed_graph_refs,
+            privacy=PrivacyRules(allowed_scope_ids=(candidate.proposed_scope.scope_key(),)),
+            timestamps=MemoryTimestamps(created_at=timestamp, updated_at=timestamp),
+            revision=MemoryRevision(version=1),
+            audit=MemoryAuditFields(created_by=created_by, write_reason=candidate.write_reason, create_audit_id=audit_id),
+            metadata=metadata,
+        )
+        audit = self._append_audit(
+            operation="propose",
+            actor=created_by,
+            request_hash=candidate.stable_hash(),
+            result_payload={"card_id": card.card_id, "approval_state": card.approval_state},
+            card_ids=(card.card_id,),
+            provenance_event_ids=(source_provenance_id,) if source_provenance_id else (),
+            metadata={"candidate_id": candidate.candidate_id},
+        )
+        card = replace(card, audit=replace(card.audit, create_audit_id=audit.audit_id))
+        self.memory_cards[card.card_id] = card
+        return card, audit
+
+    def approve_memory(
+        self,
+        card_id: str,
+        *,
+        actor: str = TraceActor.DEBUG.value,
+        approval_refs: Sequence[str] = (),
+        reason: str = "approved",
+    ) -> MemoryLifecycleResult:
+        actor = _required_text(actor, "actor")
+        if actor not in _NORMAL_APPROVE_ACTORS:
+            raise PermissionError(f"actor={actor} cannot approve memory")
+        card = self._card(card_id)
+        self._assert_transition(card.approval_state, ApprovalState.APPROVED.value, actor=actor, operation="approve")
+        if actor in {TraceActor.USER.value, TraceActor.REVIEWER.value, TraceActor.VERIFIER.value, TraceActor.MAINTAINER.value} and not approval_refs:
+            raise PermissionError(f"actor={actor} approval requires approval provenance refs")
+        for ref_id in approval_refs:
+            self._require_provenance(ref_id)
+        links = tuple(card.evidence_links) + tuple(
+            EvidenceLink(ref_id=ref_id, role=EvidenceRole.APPROVAL.value, active=True, note=reason)
+            for ref_id in approval_refs
+        )
+        audit = self._append_audit(
+            operation="approve",
+            actor=actor,
+            request_hash=stable_hash({"card_id": card_id, "approval_refs": list(approval_refs), "reason": reason}),
+            result_payload={"card_id": card.card_id, "approval_state": ApprovalState.APPROVED.value},
+            card_ids=(card.card_id,),
+            provenance_event_ids=tuple(approval_refs),
+            metadata={"reason": reason},
+        )
+        updated = replace(
+            card,
+            approval_state=ApprovalState.APPROVED.value,
+            evidence_links=links,
+            timestamps=replace(card.timestamps, updated_at=self.clock()),
+            audit=replace(card.audit, last_semantic_mutation_audit_id=audit.audit_id),
+        )
+        self.memory_cards[updated.card_id] = updated
+        return MemoryLifecycleResult(card=updated, audit_event=audit)
+
+    def reject_memory(
+        self,
+        card_id: str,
+        *,
+        actor: str = TraceActor.DEBUG.value,
+        reason: str = "rejected",
+    ) -> MemoryLifecycleResult:
+        actor = _required_text(actor, "actor")
+        if actor not in _NORMAL_APPROVE_ACTORS:
+            raise PermissionError(f"actor={actor} cannot reject memory proposals")
+        card = self._card(card_id)
+        self._assert_transition(card.approval_state, ApprovalState.REJECTED.value, actor=actor, operation="approve")
+        audit = self._append_audit(
+            operation="approve",
+            actor=actor,
+            request_hash=stable_hash({"card_id": card_id, "reason": reason, "decision": "rejected"}),
+            result_payload={"card_id": card.card_id, "approval_state": ApprovalState.REJECTED.value},
+            card_ids=(card.card_id,),
+            metadata={"reason": reason, "decision": "rejected"},
+        )
+        rejected = replace(
+            card,
+            approval_state=ApprovalState.REJECTED.value,
+            timestamps=replace(card.timestamps, updated_at=self.clock()),
+            audit=replace(card.audit, last_semantic_mutation_audit_id=audit.audit_id),
+        )
+        self.memory_cards[rejected.card_id] = rejected
+        return MemoryLifecycleResult(card=rejected, audit_event=audit)
+
+    def commit_memory(
+        self,
+        card_id: str,
+        *,
+        actor: str = TraceActor.CORE.value,
+        reason: str = "committed",
+    ) -> MemoryCommitResult:
+        actor = _required_text(actor, "actor")
+        if actor == TraceActor.MODEL_PROPOSAL.value:
+            raise PermissionError("model proposals cannot commit durable memory")
+        if actor not in _NORMAL_COMMIT_ACTORS:
+            raise PermissionError(f"actor={actor} cannot commit memory")
+        snapshot = self._snapshot_state()
+        card = self._card(card_id)
+        try:
+            self._assert_transition(card.approval_state, ApprovalState.COMMITTED.value, actor=actor, operation="commit")
+            pending = replace(card, approval_state=ApprovalState.COMMITTED.value)
+            self._validate_commit_card(pending, actor=actor, operation="commit")
+            audit = self._append_audit(
+                operation="commit",
+                actor=actor,
+                request_hash=stable_hash({"card_id": card_id, "reason": reason}),
+                result_payload={"card_id": card.card_id, "approval_state": ApprovalState.COMMITTED.value},
+                card_ids=(card.card_id,),
+                provenance_event_ids=tuple(link.ref_id for link in pending.evidence_links),
+                metadata={"reason": reason},
+            )
+            committed = replace(
+                pending,
+                timestamps=replace(card.timestamps, updated_at=self.clock()),
+                audit=replace(card.audit, last_semantic_mutation_audit_id=audit.audit_id),
+            )
+            self.memory_cards[committed.card_id] = committed
+            return MemoryCommitResult(card=committed, audit_event=audit)
+        except Exception:
+            self._restore_state(snapshot)
+            raise
+
+    def approve_and_commit_memory(
+        self,
+        card_id: str,
+        *,
+        actor: str = TraceActor.DEBUG.value,
+        approval_refs: Sequence[str] = (),
+        reason: str = "approved and committed",
+    ) -> tuple[MemoryLifecycleResult, MemoryCommitResult]:
+        approved = self.approve_memory(card_id, actor=actor, approval_refs=approval_refs, reason=reason)
+        commit_actor = actor if actor in _NORMAL_COMMIT_ACTORS else TraceActor.CORE.value
+        committed = self.commit_memory(approved.card.card_id, actor=commit_actor, reason=reason)
+        return approved, committed
+
+    def seed_committed_card_for_eval(
+        self,
+        card: MemoryCard,
+        *,
+        actor: str = TraceActor.ADAPTER.value,
+        public_operation_id: str = "seed_eval",
+        source_experience_id: str | None = None,
+    ) -> MemoryCommitResult:
+        actor = _required_text(actor, "actor")
+        if actor not in {TraceActor.ADAPTER.value, TraceActor.SCORING.value}:
+            raise PermissionError("seed_eval bypass is restricted to adapter or scoring actors")
+        _reject_forbidden_metadata(card.metadata, "seed_eval.metadata")
+        snapshot = self._snapshot_state()
+        try:
+            seeded = replace(
+                card,
+                approval_state=ApprovalState.COMMITTED.value,
+                audit=replace(card.audit, created_by=actor),
+            )
+            self._validate_commit_card(seeded, actor=actor, operation="seed_eval")
+            audit = self._append_audit(
+                operation="seed_eval",
+                actor=actor,
+                request_hash=stable_hash({"card": card.to_dict(), "public_operation_id": public_operation_id}),
+                result_payload={"card_id": seeded.card_id, "approval_state": seeded.approval_state},
+                card_ids=(seeded.card_id,),
+                provenance_event_ids=tuple(link.ref_id for link in seeded.evidence_links),
+                metadata={"public_operation_id": public_operation_id, "source_experience_id": source_experience_id},
+            )
+            seeded = replace(
+                seeded,
+                audit=replace(seeded.audit, create_audit_id=audit.audit_id, last_semantic_mutation_audit_id=audit.audit_id),
+            )
+            self.memory_cards[seeded.card_id] = seeded
+            return MemoryCommitResult(card=seeded, audit_event=audit, bypass="seed_eval")
+        except Exception:
+            self._restore_state(snapshot)
+            raise
+
+    def import_migrated_card(self, card: MemoryCard, *, source_schema_version: str = "legacy") -> MemoryCommitResult:
+        if card.audit.created_by != TraceActor.MIGRATION.value:
+            raise PermissionError("migration bypass requires card.audit.created_by=migration")
+        snapshot = self._snapshot_state()
+        try:
+            migrated = replace(card, approval_state=ApprovalState.COMMITTED.value)
+            self._validate_commit_card(migrated, actor=TraceActor.MIGRATION.value, operation="migrate")
+            audit = self._append_audit(
+                operation="migrate",
+                actor=TraceActor.MIGRATION.value,
+                request_hash=stable_hash({"card": card.to_dict(), "source_schema_version": source_schema_version}),
+                result_payload={"card_id": migrated.card_id, "approval_state": migrated.approval_state},
+                card_ids=(migrated.card_id,),
+                provenance_event_ids=tuple(link.ref_id for link in migrated.evidence_links),
+                metadata={"source_schema_version": source_schema_version, "target_schema_version": migrated.schema_version},
+            )
+            migrated = replace(
+                migrated,
+                audit=replace(migrated.audit, create_audit_id=audit.audit_id, last_semantic_mutation_audit_id=audit.audit_id),
+            )
+            self.memory_cards[migrated.card_id] = migrated
+            return MemoryCommitResult(card=migrated, audit_event=audit, bypass="migration")
+        except Exception:
+            self._restore_state(snapshot)
+            raise
+
+    def emergency_restore_new_revision(
+        self,
+        card: MemoryCard,
+        *,
+        source_card_id: str,
+        actor: str = TraceActor.CORE.value,
+        reason: str = "emergency restore",
+    ) -> MemoryCommitResult:
+        if card.card_id == source_card_id:
+            raise ValueError("emergency restore must create a new card revision, not reverse the old card state")
+        snapshot = self._snapshot_state()
+        try:
+            restored = replace(
+                card,
+                approval_state=ApprovalState.COMMITTED.value,
+                revision=replace(card.revision, supersedes=tuple(sorted({*card.revision.supersedes, source_card_id}))),
+            )
+            self._validate_commit_card(restored, actor=actor, operation="rollback")
+            audit = self._append_audit(
+                operation="rollback",
+                actor=actor,
+                request_hash=stable_hash({"card": card.to_dict(), "source_card_id": source_card_id, "reason": reason}),
+                result_payload={"card_id": restored.card_id, "source_card_id": source_card_id},
+                card_ids=(restored.card_id, source_card_id),
+                provenance_event_ids=tuple(link.ref_id for link in restored.evidence_links),
+                metadata={"reason": reason},
+            )
+            restored = replace(
+                restored,
+                audit=replace(restored.audit, create_audit_id=audit.audit_id, last_semantic_mutation_audit_id=audit.audit_id),
+            )
+            self.memory_cards[restored.card_id] = restored
+            return MemoryCommitResult(card=restored, audit_event=audit, bypass="emergency_restore")
+        except Exception:
+            self._restore_state(snapshot)
+            raise
+
+    def mutate_memory(self, mutation: MemoryMutation) -> MemoryMutationResult:
+        snapshot = self._snapshot_state()
+        try:
+            target = self._card(mutation.target_card_id)
+            if mutation.op == "update":
+                cards = (self._mutate_update(target, mutation),)
+            elif mutation.op == "delete":
+                cards = (self._mutate_terminal(target, mutation, deleted=True),)
+            elif mutation.op == "tombstone":
+                cards = (self._mutate_terminal(target, mutation, tombstone=True),)
+            elif mutation.op == "forget":
+                cards = (self._mutate_forget(target, mutation),)
+            elif mutation.op == "supersede":
+                cards = self._mutate_supersede(target, mutation)
+            else:  # pragma: no cover - dataclass validation keeps this unreachable.
+                raise ValueError(f"unsupported mutation op: {mutation.op}")
+            audit = self._append_audit(
+                operation="mutate",
+                actor=mutation.actor,
+                request_hash=stable_hash(
+                    {
+                        "mutation_id": mutation.mutation_id,
+                        "op": mutation.op,
+                        "target_card_id": mutation.target_card_id,
+                        "patch": _stable_patch_payload(mutation.patch),
+                        "replacement_card": mutation.replacement_card.to_dict() if mutation.replacement_card else None,
+                        "reason": mutation.reason,
+                        "actor": mutation.actor,
+                        "authority_refs": list(mutation.authority_refs),
+                    }
+                ),
+                result_payload={"card_ids": [card.card_id for card in cards], "op": mutation.op},
+                card_ids=tuple(card.card_id for card in cards),
+                provenance_event_ids=tuple(mutation.authority_refs),
+                mutation_ids=(mutation.mutation_id,),
+                metadata={"reason": mutation.reason, "op": mutation.op},
+            )
+            updated_cards = []
+            for card in cards:
+                updated = replace(card, audit=replace(card.audit, last_semantic_mutation_audit_id=audit.audit_id))
+                self.memory_cards[updated.card_id] = updated
+                updated_cards.append(updated)
+            return MemoryMutationResult(mutation=mutation, cards=tuple(updated_cards), audit_event=audit)
+        except Exception:
+            self._restore_state(snapshot)
+            raise
+
+    def retrieve(self, request: MemoryRecallRequest, *, actor: str = TraceActor.CORE.value) -> MemoryRetrieveResult:
+        start = self.perf_clock()
+        request_hash = stable_hash(request.to_request_payload())
+        query_tokens = _tokens(request.query)
+        dropped: list[CallerVisibleDroppedRecord] = []
+        internal_dropped: list[DroppedReason] = []
+        dropped_counts: dict[str, int] = {}
+        scored_by_card: dict[str, tuple[dict[str, str | None], MemoryCard, Decimal, bool, SummarySearchHit | None]] = {}
+        graph_candidates: dict[str, MemoryCard] = {}
+        visible_cards: list[MemoryCard] = []
+        scanned = 0
+        now = request.now or self.clock()
+        for card in sorted(self.memory_cards.values(), key=lambda item: item.card_id):
+            scanned += 1
+            reason = self._coarse_visibility_drop_reason(card, request)
+            if reason is not None:
+                _add_drop(reason, card, dropped, internal_dropped, dropped_counts)
+                continue
+            visible_cards.append(card)
+
+        surface_config_hash = _default_retrieval_surface_config_hash()
+        summary_backend = self._summary_search_backend(request, surface_config_hash=surface_config_hash)
+        search_hits = {
+            hit.card_id: hit
+            for hit in summary_backend.search(
+                query=request.query,
+                cards=tuple(visible_cards),
+                request=request,
+                surface_config_hash=surface_config_hash,
+                limit=len(visible_cards),
+            )
+        }
+        backend_identity = summary_backend.identity
+        for card in visible_cards:
+            reason = self._post_visibility_drop_reason(card, request, now=now)
+            if reason is None:
+                reason = self._invalidator_drop_reason(card, request.current_evidence)
+            if reason is not None:
+                _add_drop(reason, card, dropped, internal_dropped, dropped_counts)
+                continue
+            graph_candidates[card.card_id] = card
+            hit = search_hits.get(card.card_id)
+            if hit is None and query_tokens and not request.applicability_refs:
+                _add_drop("no_relevant_memory", card, dropped, internal_dropped, dropped_counts)
+                continue
+            components, final_score, exact_scope = self._score_card(card, query_tokens, request, summary_hit=hit)
+            scored_by_card[card.card_id] = (components, card, final_score, exact_scope, hit)
+
+        expansion = self._expand_graph_candidates(
+            seed_cards=tuple(item[1] for item in scored_by_card.values()),
+            candidate_cards=graph_candidates,
+            existing_card_ids=set(scored_by_card),
+            request=request,
+        )
+        for reason, count in expansion.dropped_counts.items():
+            dropped_counts[reason] = dropped_counts.get(reason, 0) + count
+        internal_dropped.extend(expansion.dropped)
+        for card_id, graph_modifier in expansion.card_modifiers.items():
+            card = graph_candidates.get(card_id)
+            if card is None or card_id in scored_by_card:
+                continue
+            components, final_score, exact_scope = self._score_card(
+                card,
+                query_tokens,
+                request,
+                summary_hit=None,
+                graph_modifier=graph_modifier,
+            )
+            scored_by_card[card.card_id] = (components, card, final_score, exact_scope, None)
+
+        scored = list(scored_by_card.values())
+
+        scored.sort(
+            key=lambda item: (
+                -item[2],
+                not item[3],
+                -_AUTHORITY_RANK[item[1].authority.strength],
+                item[1].timestamps.last_verified_at is None,
+                _reverse_iso(item[1].timestamps.last_verified_at),
+                len(item[1].summary),
+                item[1].card_id,
+            )
+        )
+        ranked = []
+        projection_chars = 0
+        for components, card, _final_score, _exact_scope, hit in scored:
+            if len(ranked) >= request.limit:
+                break
+            card_projection_chars = len(card.summary)
+            if request.max_projection_chars is not None and projection_chars + card_projection_chars > request.max_projection_chars:
+                _add_drop("projection_char_budget_exhausted", card, dropped, internal_dropped, dropped_counts)
+                continue
+            ranked.append(
+                self._ranked_evidence(
+                    len(ranked) + 1,
+                    card,
+                    components,
+                    summary_hit=hit,
+                    backend_identity=backend_identity,
+                )
+            )
+            projection_chars += card_projection_chars
+        latency_ms = 0.0
+        if request.latency_source == "wall_clock":
+            latency_ms = round((self.perf_clock() - start) * 1000.0, 3)
+        usage = MemoryUsage(
+            latency_ms=latency_ms,
+            latency_source=request.latency_source,
+            cards_scanned=scanned,
+            cards_ranked=len(scored),
+            cards_returned=len(ranked),
+            cards_dropped=sum(dropped_counts.values()),
+            graph_nodes_expanded=expansion.nodes_expanded,
+            graph_edges_expanded=expansion.edges_expanded,
+            graph_cards_expanded=expansion.cards_expanded,
+            projection_chars=projection_chars,
+            index_mode="graph_index" if expansion.nodes_expanded or expansion.edges_expanded else _index_mode_for_backend(backend_identity.backend_kind),
+        )
+        abstained = not ranked
+        if not self.memory_cards:
+            abstained_reason = "no_memory"
+        elif abstained and dropped_counts and sum(dropped_counts.values()) == scanned:
+            if set(dropped_counts) == {"privacy_block"}:
+                abstained_reason = "privacy_block"
+            elif "no_relevant_memory" in dropped_counts:
+                abstained_reason = "no_relevant_memory"
+            else:
+                abstained_reason = "all_dropped"
+        elif abstained:
+            abstained_reason = "no_relevant_memory"
+        else:
+            abstained_reason = None
+        result_payload = {
+            "ranked_evidence": [item.to_dict() for item in ranked],
+            "abstained": abstained,
+            "abstained_reason": abstained_reason,
+            "dropped_count_by_reason": dropped_counts,
+            "usage": usage.to_dict(),
+            "summary_search_backend": backend_identity.to_dict(),
+            "request_id": request.request_id,
+            "request_hash": request_hash,
+        }
+        result_hash = stable_hash(result_payload)
+        audit = self._append_audit(
+            operation="retrieve",
+            actor=actor,
+            request_hash=request_hash,
+            result_payload={"result_hash": result_hash, "cards_returned": len(ranked), "dropped": dropped_counts},
+            card_ids=tuple(item.evidence_ref for item in ranked),
+            dropped=tuple(internal_dropped),
+            usage=usage.to_dict(),
+            metadata={"request_id": request.request_id, "index_mode": usage.index_mode, "summary_search_backend": backend_identity.to_dict()},
+        )
+        return MemoryRetrieveResult(
+            ranked_evidence=tuple(ranked),
+            abstained=abstained,
+            abstained_reason=abstained_reason,
+            dropped=tuple(dropped),
+            dropped_count_by_reason=dropped_counts,
+            usage=usage,
+            request_id=request.request_id or "",
+            request_hash=request_hash,
+            result_hash=result_hash,
+            audit_event=audit,
+        )
+
+    def report_usage(self, scope: Scope | None = None) -> MemoryUsageReport:
+        retrieve_audits = [event for event in self.memory_audit_log if event.operation == "retrieve"]
+        if scope is not None:
+            scope_key = scope.scope_key()
+            retrieve_audits = [
+                event
+                for event in retrieve_audits
+                if any((self.memory_cards.get(card_id) and self.memory_cards[card_id].scope.scope_key() == scope_key) for card_id in event.card_ids)
+            ]
+        index_counts: dict[str, int] = {}
+        latency_counts: dict[str, int] = {}
+        token_missing = 0
+        cost_missing = 0
+        token_sum = 0
+        cost_sum = Decimal("0")
+        totals = {
+            "latency_ms": 0.0,
+            "cards_scanned": 0,
+            "cards_ranked": 0,
+            "cards_returned": 0,
+            "cards_dropped": 0,
+            "graph_nodes_expanded": 0,
+            "graph_edges_expanded": 0,
+            "graph_cards_expanded": 0,
+            "projection_chars": 0,
+        }
+        for event in retrieve_audits:
+            usage = event.usage
+            for key in totals:
+                totals[key] += usage.get(key, 0) or 0
+            index = usage.get("index_mode") or "direct_scan"
+            index_counts[index] = index_counts.get(index, 0) + 1
+            latency_source = usage.get("latency_source") or "deterministic_mock"
+            latency_counts[latency_source] = latency_counts.get(latency_source, 0) + 1
+            if usage.get("token_count") is None:
+                token_missing += 1
+            else:
+                token_sum += int(usage["token_count"])
+            if usage.get("cost_units") is None:
+                cost_missing += 1
+            else:
+                cost_sum += Decimal(str(usage["cost_units"]))
+        index_mode = "direct_scan"
+        for candidate in ("graph_index", "hybrid", "vector", "replay", "sync_lexical", "direct_scan"):
+            if index_counts.get(candidate):
+                index_mode = candidate
+                break
+        latency_source = "deterministic_mock"
+        for candidate in _LATENCY_SOURCE_PRECEDENCE:
+            if latency_counts.get(candidate):
+                latency_source = candidate
+                break
+        usage = MemoryUsage(
+            latency_ms=float(totals["latency_ms"]),
+            latency_source=latency_source,
+            cards_scanned=totals["cards_scanned"],
+            cards_ranked=totals["cards_ranked"],
+            cards_returned=totals["cards_returned"],
+            cards_dropped=totals["cards_dropped"],
+            graph_nodes_expanded=totals["graph_nodes_expanded"],
+            graph_edges_expanded=totals["graph_edges_expanded"],
+            graph_cards_expanded=totals["graph_cards_expanded"],
+            projection_chars=totals["projection_chars"],
+            index_mode=index_mode,
+            token_count=None if token_missing else token_sum,
+            cost_units=None if cost_missing else float(cost_sum),
+        )
+        return MemoryUsageReport(
+            scope=scope,
+            usage=usage,
+            request_count=len(retrieve_audits),
+            metadata={
+                "index_mode_counts": index_counts,
+                "latency_source_counts": latency_counts,
+                "missing_token_count_requests": token_missing,
+                "missing_cost_units_requests": cost_missing,
+            },
+        )
+
+    def derived_graph_index_snapshot(self) -> dict[str, Any]:
+        edges_by_node = self._graph_edges_by_node()
+        active_card_graph_refs = []
+        for card in sorted(self.memory_cards.values(), key=lambda item: item.card_id):
+            if not _card_in_derived_graph_index(card):
+                continue
+            node_ids = tuple(sorted(card.graph_refs.node_ids))
+            edge_ids = tuple(sorted(card.graph_refs.edge_ids))
+            if not node_ids and not edge_ids:
+                continue
+            active_card_graph_refs.append(
+                {
+                    "card_id": card.card_id,
+                    "kind": card.kind,
+                    "scope_key": card.scope.scope_key(),
+                    "node_ids": list(node_ids),
+                    "edge_ids": list(edge_ids),
+                }
+            )
+        snapshot = {
+            "schema_version": "derived_graph_index_snapshot.v1",
+            "active_card_graph_refs": active_card_graph_refs,
+            "edges": [
+                {
+                    "edge_id": edge.edge_id,
+                    "edge_type": edge.edge_type,
+                    "scope_key": edge.scope.scope_key(),
+                    "from_node_id": edge.from_node_id,
+                    "from_node_type": edge.from_node_type,
+                    "from_node_present": edge.from_node_id in self.graph_nodes,
+                    "to_node_id": edge.to_node_id,
+                    "to_node_type": edge.to_node_type,
+                    "to_node_present": edge.to_node_id in self.graph_nodes,
+                    "staleness_state": edge.staleness_state,
+                    "active_support_evidence_count": _graph_edge_active_support_link_count(edge),
+                    "visible_support_evidence_count": self._graph_edge_visible_support_count(edge),
+                }
+                for edge in sorted(self.graph_edges.values(), key=lambda item: item.edge_id)
+            ],
+            "nodes": [
+                {
+                    "node_id": node.node_id,
+                    "node_type": node.node_type,
+                    "scope_key": node.scope_key,
+                    "canonical_ref": node.canonical_ref,
+                    "content_hash": node.content_hash,
+                    "staleness_state": node.staleness_state,
+                    "edge_ids": [edge.edge_id for edge in edges_by_node.get(node.node_id, ())],
+                }
+                for node in sorted(self.graph_nodes.values(), key=lambda item: item.node_id)
+            ],
+        }
+        snapshot["snapshot_hash"] = stable_hash(snapshot)
+        return snapshot
+
+    def verify_derived_graph_index(self, *, expected_snapshot_hash: str | None = None) -> dict[str, Any]:
+        snapshot = self.derived_graph_index_snapshot()
+        issues = self._derived_graph_index_issues()
+        if expected_snapshot_hash and expected_snapshot_hash != snapshot["snapshot_hash"]:
+            issues.append(
+                {
+                    "issue_type": "snapshot_hash_mismatch",
+                    "expected": expected_snapshot_hash,
+                    "actual": snapshot["snapshot_hash"],
+                }
+            )
+        return {
+            "ok": not issues,
+            "snapshot_hash": snapshot["snapshot_hash"],
+            "snapshot": snapshot,
+            "issues": issues,
+        }
+
+    def _derived_graph_index_issues(self) -> list[dict[str, Any]]:
+        issues: list[dict[str, Any]] = []
+        for card in sorted(self.memory_cards.values(), key=lambda item: item.card_id):
+            if not _card_in_derived_graph_index(card):
+                continue
+            for node_id in sorted(card.graph_refs.node_ids):
+                node = self.graph_nodes.get(node_id)
+                if node is None:
+                    issues.append(_derived_graph_issue("graph_ref_node_missing", card_id=card.card_id, node_id=node_id))
+                elif node.staleness_state != StalenessState.FRESH.value:
+                    issues.append(
+                        _derived_graph_issue(
+                            "stale_graph_node_in_active_card_ref",
+                            card_id=card.card_id,
+                            node_id=node_id,
+                            staleness_state=node.staleness_state,
+                        )
+                    )
+            for edge_id in sorted(card.graph_refs.edge_ids):
+                edge = self.graph_edges.get(edge_id)
+                if edge is None:
+                    issues.append(_derived_graph_issue("graph_ref_edge_missing", card_id=card.card_id, edge_id=edge_id))
+                    continue
+                if edge.staleness_state != StalenessState.FRESH.value:
+                    issues.append(
+                        _derived_graph_issue(
+                            "stale_graph_edge_in_active_card_ref",
+                            card_id=card.card_id,
+                            edge_id=edge_id,
+                            staleness_state=edge.staleness_state,
+                        )
+                    )
+                issues.extend(_derived_graph_edge_endpoint_issues(edge, card_id=card.card_id, nodes=self.graph_nodes))
+        for edge in sorted(self.graph_edges.values(), key=lambda item: item.edge_id):
+            issues.extend(_derived_graph_edge_endpoint_issues(edge, card_id=None, nodes=self.graph_nodes))
+            if (
+                edge.edge_type in _GRAPH_EXPANSION_EDGE_TYPES
+                and _graph_edge_active_support_link_count(edge) > 0
+                and self._graph_edge_visible_support_count(edge) == 0
+            ):
+                issues.append(_derived_graph_issue("graph_edge_support_evidence_unavailable", edge_id=edge.edge_id))
+        return _dedupe_graph_issues(issues)
+
+    def store_transient_reentry(
+        self,
+        *,
+        session_id: str,
+        scope: Scope,
+        summary: str,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> TransientReentryRecord:
+        record = TransientReentryRecord(
+            record_id=self._unique_id(
+                {record.record_id: record for records in self.transient_reentry_records.values() for record in records},
+                "transient",
+                {"session_id": session_id, "scope": scope.to_dict(), "summary": summary},
+            ),
+            session_id=session_id,
+            scope=scope,
+            summary=summary,
+            created_at=self.clock(),
+            metadata=metadata or {},
+        )
+        self.transient_reentry_records.setdefault(record.session_id, []).append(record)
+        return record
+
+    def retrieve_transient_reentry(
+        self,
+        *,
+        session_id: str,
+        scope: Scope,
+        actor: str = TraceActor.CORE.value,
+    ) -> TransientReentryRecallResult:
+        session_id = _required_text(session_id, "session_id")
+        scope = scope if isinstance(scope, Scope) else Scope.from_dict(scope)
+        request_hash = stable_hash({"session_id": session_id, "scope": scope.to_dict()})
+        records = tuple(
+            record
+            for record in self.transient_reentry_records.get(session_id, ())
+            if record.scope.scope_key() == scope.scope_key()
+        )
+        result_payload = {"records": [record.to_dict() for record in records], "request_hash": request_hash}
+        audit = self._append_audit(
+            operation="retrieve_transient",
+            actor=actor,
+            request_hash=request_hash,
+            result_payload=result_payload,
+            metadata={"session_id": session_id, "record_count": len(records), "durable_support_ids": False},
+        )
+        return TransientReentryRecallResult(
+            records=records,
+            request_hash=request_hash,
+            result_hash=stable_hash(result_payload),
+            audit_event=audit,
+        )
+
+    def add_graph_node(self, node: GraphNode) -> None:
+        self.graph_nodes[node.node_id] = node
+
+    def add_graph_edge(self, edge: GraphEdge) -> None:
+        existing = self.graph_edges.get(edge.edge_id)
+        if existing is None:
+            self.graph_edges[edge.edge_id] = edge
+            return
+        staleness_state = edge.staleness_state
+        if existing.staleness_state != StalenessState.FRESH.value:
+            staleness_state = existing.staleness_state
+        self.graph_edges[edge.edge_id] = replace(
+            existing,
+            evidence_links=_dedupe_evidence_links((*existing.evidence_links, *edge.evidence_links)),
+            confidence=max(existing.confidence, edge.confidence),
+            staleness_state=staleness_state,
+            updated_at=max(existing.updated_at, edge.updated_at),
+        )
+
+    def _candidate_from_extractor_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        request: RawMemoryIngestRequest,
+        provenance_event: ProvenanceEvent,
+        default_scope: Scope,
+    ) -> tuple[MemoryCandidate | None, str, tuple[DroppedReason, ...]]:
+        decision = _clean_text(payload.get("decision") or payload.get("status") or "candidate").casefold()
+        if decision not in {"candidate", "reject", "rejected", "clarification_needed"}:
+            decision = "clarification_needed"
+        dropped = []
+        if _contains_forbidden_model_commit(payload):
+            dropped.append(DroppedReason(reason="model_requested_commit", ref_id=provenance_event.event_id))
+        if decision in {"reject", "rejected"}:
+            return None, "rejected", tuple(dropped or (DroppedReason(reason="extractor_rejected", ref_id=provenance_event.event_id),))
+        if decision == "clarification_needed":
+            return None, "clarification_needed", tuple(dropped or (DroppedReason(reason="clarification_needed", ref_id=provenance_event.event_id),))
+        raw_candidate = payload.get("candidate") if isinstance(payload.get("candidate"), Mapping) else payload
+        if not isinstance(raw_candidate, Mapping):
+            return None, "clarification_needed", (DroppedReason(reason="invalid_candidate", ref_id=provenance_event.event_id),)
+        confidence = _bounded_confidence(raw_candidate.get("confidence", payload.get("confidence", 0.0)))
+        ambiguous = bool(raw_candidate.get("ambiguous") or payload.get("ambiguous"))
+        if ambiguous and confidence > 0.49:
+            confidence = 0.49
+        summary = _clean_text(raw_candidate.get("summary") or "")
+        if not summary:
+            return None, "clarification_needed", (DroppedReason(reason="missing_summary", ref_id=provenance_event.event_id),)
+        if _looks_like_raw_copy(summary, request.raw_text):
+            return None, "rejected", (DroppedReason(reason="raw_transcript_not_memory", ref_id=provenance_event.event_id),)
+        details = _clean_text(raw_candidate.get("details") or "") or None
+        if details and _looks_like_raw_copy(details, request.raw_text):
+            return None, "rejected", (DroppedReason(reason="raw_transcript_not_memory", ref_id=provenance_event.event_id),)
+        retrieval_terms = _retrieval_anchor_terms(raw_candidate.get("retrieval_terms") or (), request.raw_text)
+        scope = default_scope
+        if isinstance(raw_candidate.get("scope"), Mapping):
+            try:
+                proposed_scope = Scope.from_dict(raw_candidate["scope"])
+            except Exception as exc:
+                dropped.append(DroppedReason(reason="invalid_scope_override", ref_id=provenance_event.event_id, detail=str(exc)))
+            else:
+                if proposed_scope.scope_key() == default_scope.scope_key():
+                    scope = proposed_scope
+                else:
+                    dropped.append(
+                        DroppedReason(
+                            reason="ignored_scope_override",
+                            ref_id=provenance_event.event_id,
+                            detail="raw extractor scope override did not match trusted runtime scope",
+                        )
+                    )
+        authority_payload = raw_candidate.get("authority") if isinstance(raw_candidate.get("authority"), Mapping) else {}
+        source_refs = tuple(authority_payload.get("source_refs") or ())
+        if not source_refs:
+            source_refs = (provenance_event.event_id,)
+        authority = Authority(
+            source=authority_payload.get("source", AuthoritySource.SELF.value),
+            strength=authority_payload.get("strength", AuthorityStrength.HINT.value),
+            source_refs=source_refs,
+        )
+        valence = Valence.from_dict(raw_candidate.get("valence") or {})
+        applicability_payload = raw_candidate.get("applicability") if isinstance(raw_candidate.get("applicability"), Mapping) else {}
+        applies_to = list(applicability_payload.get("applies_to") or ())
+        if scope.scope_key() not in applies_to:
+            applies_to.append(scope.scope_key())
+        applicability_payload = {**applicability_payload, "applies_to": tuple(applies_to)}
+        applicability = Applicability.from_dict(applicability_payload)
+        invalidators = tuple(Invalidator.from_dict(item) for item in raw_candidate.get("invalidators") or ())
+        graph_refs, graph_drops = self._graph_refs_from_extractor_payload(
+            raw_candidate,
+            scope=scope,
+            provenance_event=provenance_event,
+        )
+        dropped.extend(graph_drops)
+        proposed_by = raw_candidate.get("proposed_by") or CandidateProducer.MODEL.value
+        evidence_links = (
+            EvidenceLink(
+                ref_id=provenance_event.event_id,
+                role=EvidenceRole.CURRENT_SUPPORT.value,
+                active=True,
+                note="raw ingest extracted support",
+            ),
+        )
+        candidate_id = self._unique_id(
+            self.candidates,
+            "cand",
+            {
+                "provenance_event_id": provenance_event.event_id,
+                "summary": summary,
+                "kind": raw_candidate.get("kind", MemoryCardKind.SEMANTIC_FACT.value),
+            },
+        )
+        candidate = MemoryCandidate(
+            candidate_id=candidate_id,
+            proposed_kind=raw_candidate.get("kind", MemoryCardKind.SEMANTIC_FACT.value),
+            summary=summary,
+            details=details,
+            retrieval_terms=retrieval_terms,
+            evidence_links=evidence_links,
+            proposed_scope=scope,
+            proposed_authority=authority,
+            proposed_valence=valence,
+            proposed_applicability=applicability,
+            proposed_invalidators=invalidators,
+            confidence=confidence,
+            write_reason=_clean_text(raw_candidate.get("write_reason") or "raw ingest extractor proposal"),
+            proposed_by=proposed_by,
+            proposed_graph_refs=graph_refs,
+        )
+        if confidence < 0.5:
+            dropped.append(DroppedReason(reason="low_confidence", ref_id=provenance_event.event_id))
+        return candidate, "candidate", tuple(dropped)
+
+    def _graph_refs_from_extractor_payload(
+        self,
+        raw_candidate: Mapping[str, Any],
+        *,
+        scope: Scope,
+        provenance_event: ProvenanceEvent,
+    ) -> tuple[GraphRefs, tuple[DroppedReason, ...]]:
+        raw_nodes = raw_candidate.get("graph_nodes") or ()
+        raw_edges = raw_candidate.get("graph_edges") or ()
+        dropped: list[DroppedReason] = []
+        if isinstance(raw_nodes, (str, bytes)) or not isinstance(raw_nodes, Sequence):
+            dropped.append(DroppedReason(reason="invalid_graph_material", detail="graph_nodes must be a sequence"))
+            raw_nodes = ()
+        if isinstance(raw_edges, (str, bytes)) or not isinstance(raw_edges, Sequence):
+            dropped.append(DroppedReason(reason="invalid_graph_material", detail="graph_edges must be a sequence"))
+            raw_edges = ()
+        node_ids: list[str] = []
+        edge_ids: list[str] = []
+        nodes_by_key: dict[tuple[str, str], GraphNode] = {}
+
+        def add_node(
+            *,
+            node_type: str,
+            canonical_ref: str,
+            display_name: str = "",
+            content_hash: str | None = None,
+            metadata: Mapping[str, Any] | None = None,
+            include_ref: bool = True,
+        ) -> GraphNode:
+            now = self.clock()
+            node = GraphNode.build(
+                node_type=node_type,
+                scope=scope,
+                canonical_ref=canonical_ref,
+                display_name=display_name or canonical_ref,
+                content_hash=content_hash,
+                metadata=metadata or {},
+                created_at=now,
+                updated_at=now,
+            )
+            self.add_graph_node(node)
+            nodes_by_key[(node.node_type, node.canonical_ref)] = node
+            if include_ref:
+                node_ids.append(node.node_id)
+            return node
+
+        for raw_node in raw_nodes:
+            if not isinstance(raw_node, Mapping):
+                dropped.append(DroppedReason(reason="invalid_graph_material", detail="graph_nodes entries must be objects"))
+                continue
+            try:
+                add_node(
+                    node_type=str(raw_node.get("node_type") or raw_node.get("type") or ""),
+                    canonical_ref=str(raw_node.get("canonical_ref") or raw_node.get("ref") or ""),
+                    display_name=str(raw_node.get("display_name") or raw_node.get("canonical_ref") or ""),
+                    content_hash=_clean_text(raw_node.get("content_hash")) or None,
+                    metadata=raw_node.get("metadata") if isinstance(raw_node.get("metadata"), Mapping) else {},
+                )
+            except Exception as exc:
+                dropped.append(DroppedReason(reason="invalid_graph_material", detail=str(exc)))
+                continue
+
+        for raw_edge in raw_edges:
+            if not isinstance(raw_edge, Mapping):
+                dropped.append(DroppedReason(reason="invalid_graph_material", detail="graph_edges entries must be objects"))
+                continue
+            try:
+                from_type = str(raw_edge.get("from_node_type") or raw_edge.get("from_type") or "")
+                to_type = str(raw_edge.get("to_node_type") or raw_edge.get("to_type") or "")
+                from_ref = str(raw_edge.get("from_canonical_ref") or raw_edge.get("from_ref") or "")
+                to_ref = str(raw_edge.get("to_canonical_ref") or raw_edge.get("to_ref") or "")
+                from_node = nodes_by_key.get((from_type, from_ref)) or add_node(
+                    node_type=from_type,
+                    canonical_ref=from_ref,
+                    display_name=str(raw_edge.get("from_display_name") or from_ref),
+                    include_ref=False,
+                )
+                to_node = nodes_by_key.get((to_type, to_ref)) or add_node(
+                    node_type=to_type,
+                    canonical_ref=to_ref,
+                    display_name=str(raw_edge.get("to_display_name") or to_ref),
+                    include_ref=False,
+                )
+                now = self.clock()
+                edge = GraphEdge.build(
+                    from_node_id=from_node.node_id,
+                    from_node_type=from_node.node_type,
+                    to_node_id=to_node.node_id,
+                    to_node_type=to_node.node_type,
+                    edge_type=str(raw_edge.get("edge_type") or GraphEdgeType.RELATED.value),
+                    scope=scope,
+                    evidence_links=(
+                        EvidenceLink(
+                            ref_id=provenance_event.event_id,
+                            role=EvidenceRole.CURRENT_SUPPORT.value,
+                            active=True,
+                            note="raw ingest extracted graph edge",
+                        ),
+                    ),
+                    confidence=raw_edge.get("confidence", 1.0),
+                    created_at=now,
+                    updated_at=now,
+                )
+            except Exception as exc:
+                dropped.append(DroppedReason(reason="invalid_graph_material", detail=str(exc)))
+                continue
+            self.add_graph_edge(edge)
+            edge_ids.append(edge.edge_id)
+        return GraphRefs(node_ids=tuple(sorted(set(node_ids))), edge_ids=tuple(sorted(set(edge_ids)))), tuple(dropped)
+
+    def _mutate_update(self, target: MemoryCard, mutation: MemoryMutation) -> MemoryCard:
+        if target.approval_state != ApprovalState.COMMITTED.value:
+            raise ValueError("update requires a committed target card")
+        patch = _normalize_patch(mutation.patch or {})
+        if not patch:
+            raise ValueError("update requires at least one allowed patch field")
+        evidence_links = self._replacement_evidence_links(
+            target,
+            mutation,
+            requires_replacement_support=bool(_SEMANTIC_PATCH_FIELDS & set(patch)),
+        )
+        lifecycle = target.lifecycle
+        if "lifecycle" in patch and "expires_at" in patch["lifecycle"]:
+            lifecycle = replace(lifecycle, expires_at=patch["lifecycle"]["expires_at"])
+        privacy = target.privacy
+        if "privacy" in patch and "redaction_policy" in patch["privacy"]:
+            privacy = replace(privacy, redaction_policy=patch["privacy"]["redaction_policy"] or RedactionPolicy.NONE.value)
+        details = target.details
+        if "details" in patch:
+            details = patch["details"]
+        invalidators = target.invalidators
+        if "invalidators" in patch:
+            invalidators = tuple(Invalidator.from_dict(item) if isinstance(item, Mapping) else item for item in patch["invalidators"])
+        updated = replace(
+            target,
+            summary=patch.get("summary", target.summary),
+            details=details,
+            retrieval_terms=tuple(patch.get("retrieval_terms", target.retrieval_terms)),
+            confidence=patch.get("confidence", target.confidence),
+            applicability=Applicability.from_dict(patch["applicability"]) if "applicability" in patch else target.applicability,
+            valence=Valence.from_dict(patch["valence"]) if "valence" in patch else target.valence,
+            evidence_links=evidence_links,
+            invalidators=invalidators,
+            lifecycle=lifecycle,
+            privacy=privacy,
+            timestamps=replace(target.timestamps, updated_at=self.clock()),
+            revision=replace(target.revision, version=target.revision.version + 1),
+            metadata={**target.metadata, "last_mutation_op": "update", "last_mutation_id": mutation.mutation_id},
+        )
+        self._validate_commit_card(updated, actor=mutation.actor, operation="mutate")
+        return updated
+
+    def _mutate_terminal(
+        self,
+        target: MemoryCard,
+        mutation: MemoryMutation,
+        *,
+        deleted: bool = False,
+        tombstone: bool = False,
+    ) -> MemoryCard:
+        if target.approval_state not in {ApprovalState.COMMITTED.value, ApprovalState.SUPERSEDED.value}:
+            raise ValueError(f"{mutation.op} requires an active or superseded target card")
+        metadata = {**target.metadata, "last_mutation_op": mutation.op, "last_mutation_id": mutation.mutation_id}
+        if deleted:
+            metadata["phase_b_deleted"] = True
+        if tombstone:
+            metadata["phase_b_tombstoned"] = True
+        return replace(
+            target,
+            approval_state=ApprovalState.TOMBSTONED.value,
+            timestamps=replace(target.timestamps, updated_at=self.clock(), tombstoned_at=self.clock()),
+            metadata=metadata,
+        )
+
+    def _mutate_forget(self, target: MemoryCard, mutation: MemoryMutation) -> MemoryCard:
+        if target.approval_state not in {ApprovalState.COMMITTED.value, ApprovalState.SUPERSEDED.value, ApprovalState.TOMBSTONED.value}:
+            raise ValueError("forget requires an existing durable target card")
+        if not mutation.authority_refs and mutation.actor not in {TraceActor.USER.value, TraceActor.DEBUG.value, TraceActor.MAINTAINER.value}:
+            raise PermissionError("forget requires privacy/security/user authority refs or a privileged actor")
+        for link in target.evidence_links:
+            event = self.provenance_events.get(link.ref_id)
+            if event is None:
+                continue
+            redacted = replace(
+                event,
+                provenance_excerpt=None,
+                payload_ref=None,
+                redaction_state=RedactionState.RESTRICTED.value,
+                retention_state=RetentionState.DELETED.value,
+            )
+            self.provenance_events[event.event_id] = redacted
+            self.raw_payloads.pop(event.event_id, None)
+        forgotten_links = tuple(replace(link, active=False, note="forgotten") for link in target.evidence_links)
+        return replace(
+            target,
+            approval_state=ApprovalState.TOMBSTONED.value,
+            evidence_links=forgotten_links,
+            timestamps=replace(target.timestamps, updated_at=self.clock(), tombstoned_at=self.clock()),
+            metadata={**target.metadata, "phase_b_forgotten": True, "last_mutation_op": "forget", "last_mutation_id": mutation.mutation_id},
+        )
+
+    def _mutate_supersede(self, target: MemoryCard, mutation: MemoryMutation) -> tuple[MemoryCard, MemoryCard]:
+        if target.approval_state != ApprovalState.COMMITTED.value:
+            raise ValueError("supersede requires a committed target card")
+        if mutation.replacement_card is not None:
+            replacement = mutation.replacement_card
+            if replacement.card_id == target.card_id:
+                raise ValueError("supersede replacement must use a new card_id")
+            self._validate_replacement_card_support(target, replacement, mutation)
+            replacement = replace(
+                replacement,
+                approval_state=ApprovalState.COMMITTED.value,
+                revision=replace(
+                    replacement.revision,
+                    supersedes=tuple(sorted({*replacement.revision.supersedes, target.card_id})),
+                ),
+            )
+        else:
+            patch = _normalize_patch(mutation.patch or {})
+            if "summary" not in patch:
+                raise ValueError("supersede requires replacement summary when no replacement_card is supplied")
+            evidence_links = self._replacement_evidence_links(
+                target,
+                mutation,
+                requires_replacement_support=True,
+            )
+            new_id = self._unique_id(
+                self.memory_cards,
+                "mem",
+                {"supersedes": target.card_id, "mutation_id": mutation.mutation_id, "summary": patch["summary"]},
+            )
+            replacement = replace(
+                target,
+                card_id=new_id,
+                summary=patch["summary"],
+                details=patch.get("details", target.details),
+                retrieval_terms=tuple(patch.get("retrieval_terms", target.retrieval_terms)),
+                evidence_links=evidence_links,
+                approval_state=ApprovalState.COMMITTED.value,
+                staleness_state=StalenessState.FRESH.value,
+                contradiction_state=ContradictionState.NONE.value,
+                timestamps=MemoryTimestamps(created_at=self.clock(), updated_at=self.clock()),
+                revision=MemoryRevision(version=target.revision.version + 1, supersedes=(target.card_id,)),
+                metadata={**target.metadata, "last_mutation_op": "supersede", "last_mutation_id": mutation.mutation_id},
+            )
+        self._validate_commit_card(replacement, actor=mutation.actor, operation="mutate")
+        old = replace(
+            target,
+            approval_state=ApprovalState.SUPERSEDED.value,
+            staleness_state=StalenessState.SUPERSEDED.value,
+            timestamps=replace(target.timestamps, updated_at=self.clock(), superseded_at=self.clock()),
+            revision=replace(target.revision, superseded_by=tuple(sorted({*target.revision.superseded_by, replacement.card_id}))),
+            metadata={**target.metadata, "last_mutation_op": "supersede", "last_mutation_id": mutation.mutation_id},
+        )
+        return old, replacement
+
+    def _replacement_evidence_links(
+        self,
+        target: MemoryCard,
+        mutation: MemoryMutation,
+        *,
+        requires_replacement_support: bool,
+    ) -> tuple[EvidenceLink, ...]:
+        if not requires_replacement_support:
+            return target.evidence_links
+        if not mutation.authority_refs:
+            raise ValueError("semantic update/supersede requires replacement provenance current_support refs")
+        active_support_refs = {
+            link.ref_id
+            for link in target.evidence_links
+            if link.active and link.role == EvidenceRole.CURRENT_SUPPORT.value
+        }
+        for ref_id in mutation.authority_refs:
+            event = self._require_provenance(ref_id)
+            if ref_id in active_support_refs:
+                raise ValueError("replacement provenance must not reuse existing active current_support refs")
+            if event.source_mutation_id != mutation.mutation_id:
+                raise ValueError("replacement provenance must cite the current mutation as source_mutation_id")
+        old_links = tuple(
+            replace(link, active=False, note=f"replaced by {mutation.mutation_id}")
+            if link.active and link.role == EvidenceRole.CURRENT_SUPPORT.value
+            else link
+            for link in target.evidence_links
+        )
+        new_links = tuple(
+            EvidenceLink(
+                ref_id=ref_id,
+                role=EvidenceRole.CURRENT_SUPPORT.value,
+                active=True,
+                added_by_mutation_id=mutation.mutation_id,
+                note="replacement support",
+            )
+            for ref_id in mutation.authority_refs
+        )
+        return old_links + new_links
+
+    def _validate_replacement_card_support(self, target: MemoryCard, replacement: MemoryCard, mutation: MemoryMutation) -> None:
+        active_target_support_refs = {
+            link.ref_id
+            for link in target.evidence_links
+            if link.active and link.role in {EvidenceRole.CURRENT_SUPPORT.value, EvidenceRole.PROOF.value}
+        }
+        active_replacement_support = tuple(
+            link
+            for link in replacement.evidence_links
+            if link.active and link.role in {EvidenceRole.CURRENT_SUPPORT.value, EvidenceRole.PROOF.value}
+        )
+        if not active_replacement_support:
+            return
+        for link in active_replacement_support:
+            event = self._require_provenance(link.ref_id)
+            if link.ref_id in active_target_support_refs:
+                raise ValueError("replacement provenance must not reuse existing active current_support refs")
+            if event.source_mutation_id != mutation.mutation_id:
+                raise ValueError("replacement provenance must cite the current mutation as source_mutation_id")
+
+    def _drop_reason(self, card: MemoryCard, request: MemoryRecallRequest, *, now: str) -> str | None:
+        reason = self._coarse_visibility_drop_reason(card, request)
+        if reason is not None:
+            return reason
+        return self._post_visibility_drop_reason(card, request, now=now)
+
+    def _coarse_visibility_drop_reason(self, card: MemoryCard, request: MemoryRecallRequest) -> str | None:
+        if not _privacy_allows(card, request.authorization_scope or request.scope, shared_policy_ids=()):
+            return "privacy_block"
+        if not _scope_allows(request.scope, card.scope, card_kind=card.kind):
+            return "out_of_scope"
+        return None
+
+    def _post_visibility_drop_reason(self, card: MemoryCard, request: MemoryRecallRequest, *, now: str) -> str | None:
+        if not _applicability_allows(card, request):
+            return "out_of_scope"
+        if card.approval_state != ApprovalState.COMMITTED.value:
+            return _inactive_drop_reason(card)
+        if request.kinds and card.kind not in request.kinds:
+            return "kind_mismatch"
+        if card.lifecycle.expires_at and _iso_lte(card.lifecycle.expires_at, now):
+            return "stale"
+        if card.staleness_state == StalenessState.MAYBE_STALE.value and not request.include_maybe_stale:
+            return "stale"
+        if card.staleness_state in {StalenessState.STALE.value, StalenessState.SUPERSEDED.value}:
+            return card.staleness_state
+        if card.contradiction_state in {ContradictionState.CONTRADICTED.value, ContradictionState.POSSIBLE.value}:
+            return "contradicted"
+        if not any(self._visible_support_link(link) for link in card.evidence_links if link.active):
+            return "missing_evidence"
+        return None
+
+    def _summary_search_backend(self, request: MemoryRecallRequest, *, surface_config_hash: str) -> SummarySearchBackend:
+        if self.summary_search_backend is not None:
+            return self.summary_search_backend
+        if request.summary_search_backend in {"direct_scan_lexical", "bm25"}:
+            return DirectScanLexicalSummarySearchBackend(
+                backend_kind=request.summary_search_backend,
+                surface_config_hash=surface_config_hash,
+            )
+        if request.summary_search_backend == "vector":
+            if request.embedding_provider != "ollama":
+                raise ValueError("only ollama vector summary search is implemented")
+            return OllamaVectorSummarySearchBackend(
+                model_id=request.embedding_model_id or _DEFAULT_OLLAMA_EMBEDDING_MODEL,
+                base_url=request.embedding_base_url,
+                timeout_s=request.embedding_timeout_s,
+                surface_config_hash=surface_config_hash,
+            )
+        if request.summary_search_backend == "hybrid":
+            if request.embedding_provider != "ollama":
+                raise ValueError("only ollama hybrid summary search is implemented")
+            return HybridSummarySearchBackend(
+                model_id=request.embedding_model_id or _DEFAULT_OLLAMA_EMBEDDING_MODEL,
+                base_url=request.embedding_base_url,
+                timeout_s=request.embedding_timeout_s,
+                surface_config_hash=surface_config_hash,
+            )
+        raise ValueError("summary_search_backend is not implemented")
+
+    def _invalidator_drop_reason(self, card: MemoryCard, current_evidence: CurrentEvidenceSnapshot | None) -> str | None:
+        if not current_evidence:
+            return None
+        for invalidator in card.invalidators:
+            if _invalidator_triggered(card, invalidator, current_evidence):
+                return "invalidator_triggered"
+        return None
+
+    def _expand_graph_candidates(
+        self,
+        *,
+        seed_cards: Sequence[MemoryCard],
+        candidate_cards: Mapping[str, MemoryCard],
+        existing_card_ids: set[str],
+        request: MemoryRecallRequest,
+    ) -> _GraphExpansionResult:
+        if (
+            not request.expand_graph
+            or request.limit == 0
+            or request.graph_max_depth == 0
+            or request.graph_max_items == 0
+            or request.graph_max_nodes == 0
+            or request.graph_max_edges == 0
+            or request.graph_max_cards == 0
+            or request.graph_max_fanout == 0
+            or not seed_cards
+        ):
+            return _GraphExpansionResult(card_modifiers={}, nodes_expanded=0, edges_expanded=0)
+        dropped_counts: dict[str, int] = {}
+        dropped: list[DroppedReason] = []
+        frontier = self._seed_graph_node_ids(
+            seed_cards,
+            current_evidence=request.current_evidence,
+            dropped_counts=dropped_counts,
+            dropped=dropped,
+        )
+        if not frontier:
+            return _GraphExpansionResult(
+                card_modifiers={},
+                nodes_expanded=0,
+                edges_expanded=0,
+                dropped_counts=dropped_counts,
+                dropped=tuple(dropped),
+            )
+
+        edges_by_node = self._graph_edges_by_node()
+        expanded_nodes: set[str] = set()
+        expanded_edges: set[str] = set()
+        total_budget = request.graph_max_items
+        latency_started_at = self.perf_clock() if request.graph_max_latency_ms is not None else None
+
+        for node_id in sorted(frontier):
+            if self._graph_latency_budget_exhausted(request, latency_started_at):
+                _add_graph_drop("graph_latency_budget_exhausted", node_id, dropped_counts, dropped)
+                break
+            if len(expanded_nodes) + len(expanded_edges) >= total_budget:
+                _add_graph_drop("graph_item_budget_exhausted", node_id, dropped_counts, dropped)
+                break
+            if request.graph_max_nodes is not None and len(expanded_nodes) >= request.graph_max_nodes:
+                _add_graph_drop("graph_node_budget_exhausted", node_id, dropped_counts, dropped)
+                break
+            node = self.graph_nodes.get(node_id)
+            node_drop_reason = _graph_node_drop_reason(node, request.current_evidence)
+            if node_drop_reason is not None:
+                _add_graph_drop(node_drop_reason, node_id, dropped_counts, dropped)
+                continue
+            expanded_nodes.add(node_id)
+            node_fanout = 0
+            for edge in edges_by_node.get(node_id, ()):
+                if self._graph_latency_budget_exhausted(request, latency_started_at):
+                    _add_graph_drop("graph_latency_budget_exhausted", edge.edge_id, dropped_counts, dropped)
+                    break
+                if len(expanded_nodes) + len(expanded_edges) >= total_budget:
+                    _add_graph_drop("graph_item_budget_exhausted", edge.edge_id, dropped_counts, dropped)
+                    break
+                if request.graph_max_edges is not None and len(expanded_edges) >= request.graph_max_edges:
+                    _add_graph_drop("graph_edge_budget_exhausted", edge.edge_id, dropped_counts, dropped)
+                    break
+                if edge.edge_id in expanded_edges or edge.edge_type not in _GRAPH_EXPANSION_EDGE_TYPES:
+                    continue
+                if request.graph_max_fanout is not None and node_fanout >= request.graph_max_fanout:
+                    _add_graph_drop("graph_fanout_budget_exhausted", edge.edge_id, dropped_counts, dropped)
+                    break
+                node_fanout += 1
+                edge_drop_reason = self._graph_edge_drop_reason(edge)
+                if edge_drop_reason is not None:
+                    _add_graph_drop(edge_drop_reason, edge.edge_id, dropped_counts, dropped)
+                    continue
+                if edge.from_node_id not in self.graph_nodes or edge.to_node_id not in self.graph_nodes:
+                    _add_graph_drop("uncanonicalized_graph_endpoint", edge.edge_id, dropped_counts, dropped)
+                    continue
+                other_node_id = edge.to_node_id if edge.from_node_id == node_id else edge.from_node_id
+                other_node = self.graph_nodes.get(other_node_id)
+                other_node_drop_reason = _graph_node_drop_reason(other_node, request.current_evidence)
+                if other_node_drop_reason is None:
+                    expanded_edges.add(edge.edge_id)
+                    if len(expanded_nodes) + len(expanded_edges) >= total_budget:
+                        continue
+                    if request.graph_max_nodes is not None and len(expanded_nodes) >= request.graph_max_nodes:
+                        _add_graph_drop("graph_node_budget_exhausted", other_node_id, dropped_counts, dropped)
+                        continue
+                    expanded_nodes.add(other_node_id)
+                else:
+                    _add_graph_drop(other_node_drop_reason, other_node_id, dropped_counts, dropped)
+
+        card_modifiers: dict[str, Decimal] = {}
+        for card_id, card in sorted(candidate_cards.items()):
+            if self._graph_latency_budget_exhausted(request, latency_started_at):
+                _add_graph_drop("graph_latency_budget_exhausted", card_id, dropped_counts, dropped)
+                break
+            if card_id in existing_card_ids:
+                continue
+            if set(card.graph_refs.node_ids) & expanded_nodes or set(card.graph_refs.edge_ids) & expanded_edges:
+                if request.graph_max_cards is not None and len(card_modifiers) >= request.graph_max_cards:
+                    _add_graph_drop("graph_card_budget_exhausted", card_id, dropped_counts, dropped)
+                    continue
+                card_modifiers[card_id] = _GRAPH_EXPANSION_MODIFIER
+        return _GraphExpansionResult(
+            card_modifiers=card_modifiers,
+            nodes_expanded=len(expanded_nodes),
+            edges_expanded=len(expanded_edges),
+            cards_expanded=len(card_modifiers),
+            dropped_counts=dropped_counts,
+            dropped=tuple(dropped),
+        )
+
+    def _graph_latency_budget_exhausted(self, request: MemoryRecallRequest, started_at: float | None) -> bool:
+        if started_at is None or request.graph_max_latency_ms is None:
+            return False
+        elapsed_ms = (self.perf_clock() - started_at) * 1000.0
+        return elapsed_ms >= request.graph_max_latency_ms
+
+    def _seed_graph_node_ids(
+        self,
+        seed_cards: Sequence[MemoryCard],
+        *,
+        current_evidence: CurrentEvidenceSnapshot | None,
+        dropped_counts: dict[str, int],
+        dropped: list[DroppedReason],
+    ) -> set[str]:
+        node_ids: set[str] = set()
+        for card in seed_cards:
+            for node_id in card.graph_refs.node_ids:
+                node = self.graph_nodes.get(node_id)
+                node_drop_reason = _graph_node_drop_reason(node, current_evidence)
+                if node_drop_reason is None:
+                    node_ids.add(node_id)
+                else:
+                    _add_graph_drop(node_drop_reason, node_id, dropped_counts, dropped)
+            for edge_id in card.graph_refs.edge_ids:
+                edge = self.graph_edges.get(edge_id)
+                if edge is None:
+                    _add_graph_drop("uncanonicalized_graph_edge", edge_id, dropped_counts, dropped)
+                    continue
+                if edge.edge_type not in _GRAPH_EXPANSION_EDGE_TYPES:
+                    continue
+                edge_drop_reason = self._graph_edge_drop_reason(edge)
+                if edge_drop_reason is not None:
+                    _add_graph_drop(edge_drop_reason, edge.edge_id, dropped_counts, dropped)
+                    continue
+                from_node = self.graph_nodes.get(edge.from_node_id)
+                from_drop_reason = _graph_node_drop_reason(from_node, current_evidence)
+                if from_drop_reason is None:
+                    node_ids.add(edge.from_node_id)
+                else:
+                    _add_graph_drop(
+                        from_drop_reason,
+                        from_node.node_id if from_node is not None else edge.edge_id,
+                        dropped_counts,
+                        dropped,
+                    )
+                to_node = self.graph_nodes.get(edge.to_node_id)
+                to_drop_reason = _graph_node_drop_reason(to_node, current_evidence)
+                if to_drop_reason is None:
+                    node_ids.add(edge.to_node_id)
+                else:
+                    _add_graph_drop(
+                        to_drop_reason,
+                        to_node.node_id if to_node is not None else edge.edge_id,
+                        dropped_counts,
+                        dropped,
+                    )
+        return node_ids
+
+    def _graph_edges_by_node(self) -> dict[str, tuple[GraphEdge, ...]]:
+        grouped: dict[str, list[GraphEdge]] = {}
+        for edge in self.graph_edges.values():
+            grouped.setdefault(edge.from_node_id, []).append(edge)
+            grouped.setdefault(edge.to_node_id, []).append(edge)
+        return {node_id: tuple(sorted(edges, key=lambda item: item.edge_id)) for node_id, edges in grouped.items()}
+
+    def _score_card(
+        self,
+        card: MemoryCard,
+        query_tokens: set[str],
+        request: MemoryRecallRequest,
+        *,
+        summary_hit: SummarySearchHit | None = None,
+        graph_modifier: Decimal = Decimal("0"),
+    ) -> tuple[dict[str, str | None], Decimal, bool]:
+        exact_scope = request.scope.scope_key() == card.scope.scope_key()
+        structured = Decimal("1.0000")
+        backend_score = Decimal("0.0000")
+        if summary_hit is not None:
+            backend_score = Decimal(canonical_score(summary_hit.backend_score))
+        lexical: Decimal | None = None
+        vector_score: Decimal | None = None
+        if summary_hit is not None:
+            if (value := summary_hit.score_components.get("lexical_score")) is not None:
+                lexical = Decimal(value)
+            if (value := summary_hit.score_components.get("vector_score")) is not None:
+                vector_score = Decimal(value)
+        if lexical is None and query_tokens:
+            card_tokens = _tokens(_card_search_text(card))
+            lexical = Decimal(len(query_tokens & card_tokens)) / Decimal(max(1, len(query_tokens)))
+        if lexical is None:
+            lexical = Decimal("0.0000")
+        if summary_hit is None:
+            backend_score = lexical
+        scope_modifier = Decimal("0.3000") if exact_scope else Decimal("0.1000")
+        authority_modifier = _AUTHORITY_RANK[card.authority.strength] + _AUTHORITY_SOURCE_RANK[card.authority.source]
+        freshness_modifier = Decimal("0.2000") if card.staleness_state == StalenessState.FRESH.value else Decimal("0.0000")
+        contradiction_modifier = Decimal("0.0000") if card.contradiction_state == ContradictionState.NONE.value else Decimal("-0.2000")
+        confidence_modifier = Decimal(str(card.confidence)) / Decimal("10")
+        final = (
+            structured
+            + (backend_score * Decimal("2.0000"))
+            + scope_modifier
+            + authority_modifier
+            + freshness_modifier
+            + contradiction_modifier
+            + confidence_modifier
+            + graph_modifier
+        )
+        components = {
+            "structured_match": canonical_score(structured),
+            "summary_backend_score": canonical_score(backend_score),
+            "lexical_score": canonical_score(lexical),
+            "vector_score": canonical_score(vector_score) if vector_score is not None else None,
+            "reranker_score": None,
+            "scope_modifier": canonical_score(scope_modifier),
+            "authority_modifier": canonical_score(authority_modifier),
+            "freshness_modifier": canonical_score(freshness_modifier),
+            "contradiction_modifier": canonical_score(contradiction_modifier),
+            "confidence_modifier": canonical_score(confidence_modifier),
+            "graph_modifier": canonical_score(graph_modifier),
+            "budget_modifier": canonical_score(Decimal("0")),
+            "final_score": canonical_score(final),
+        }
+        if summary_hit is not None:
+            for key, value in summary_hit.score_components.items():
+                components.setdefault(key, value)
+        return components, Decimal(components["final_score"]), exact_scope
+
+    def _ranked_evidence(
+        self,
+        rank: int,
+        card: MemoryCard,
+        components: Mapping[str, str | None],
+        *,
+        summary_hit: SummarySearchHit | None = None,
+        backend_identity: SummarySearchBackendIdentity | None = None,
+    ) -> RankedMemoryEvidence:
+        support_ref_ids = tuple(
+            sorted(
+                link.ref_id
+                for link in card.evidence_links
+                if link.active and link.role == EvidenceRole.CURRENT_SUPPORT.value and self._visible_support_link(link)
+            )
+        )
+        source_ref_ids = tuple(
+            sorted(
+                link.ref_id
+                for link in card.evidence_links
+                if link.active and link.role in {EvidenceRole.CURRENT_SUPPORT.value, EvidenceRole.PROOF.value} and self._visible_support_link(link)
+            )
+        )
+        lineage_ref_ids = tuple(sorted(link.ref_id for link in card.evidence_links if link.role in {EvidenceRole.LINEAGE.value, EvidenceRole.SUPERSESSION.value}))
+        refs_by_role: dict[str, list[str]] = {}
+        for link in card.evidence_links:
+            if link.active and self._visible_support_link(link):
+                refs_by_role.setdefault(link.role, []).append(link.ref_id)
+        support_experience_ids = _experience_ids(self.provenance_events, support_ref_ids)
+        source_experience_ids = _experience_ids(self.provenance_events, source_ref_ids)
+        lineage_experience_ids = _experience_ids(self.provenance_events, lineage_ref_ids)
+        source_mutation_ids = tuple(
+            sorted(
+                {
+                    event.source_mutation_id
+                    for ref_id in source_ref_ids
+                    if (event := self.provenance_events.get(ref_id)) is not None and event.source_mutation_id
+                }
+            )
+        )
+        mutation_refs = tuple(
+            sorted(
+                ref
+                for ref in (
+                    *(link.added_by_mutation_id for link in card.evidence_links if link.added_by_mutation_id),
+                    card.metadata.get("last_mutation_id"),
+                )
+                if ref
+            )
+        )
+        state = "maybe_stale" if card.staleness_state == StalenessState.MAYBE_STALE.value else "active"
+        return RankedMemoryEvidence(
+            rank=rank,
+            evidence_ref=card.card_id,
+            support_experience_ids=support_experience_ids,
+            source_experience_ids=source_experience_ids,
+            lineage_experience_ids=lineage_experience_ids,
+            provenance_refs=support_ref_ids,
+            source_mutation_ids=source_mutation_ids,
+            mutation_refs=mutation_refs,
+            score=components["final_score"] or "0.0000",
+            score_type="deterministic_weighted_sum",
+            score_components=dict(components),
+            state=state,
+            scope_id=card.scope.scope_key(),
+            metadata={
+                "card_id": card.card_id,
+                "card_kind": card.kind,
+                "summary": card.summary,
+                "retrieval_terms": list(card.retrieval_terms),
+                "approval_state": card.approval_state,
+                "staleness_state": card.staleness_state,
+                "contradiction_state": card.contradiction_state,
+                "authority": card.authority.to_dict(),
+                "applicability": card.applicability.to_dict(),
+                "matched_fields": list(summary_hit.matched_fields) if summary_hit else [],
+                "summary_search_backend": (
+                    summary_hit.backend_identity.to_dict()
+                    if summary_hit is not None
+                    else (backend_identity.to_dict() if backend_identity is not None else None)
+                ),
+                "provenance_refs_by_role": {key: sorted(value) for key, value in refs_by_role.items()},
+            },
+        )
+
+    def _visible_support_link(self, link: EvidenceLink) -> bool:
+        event = self.provenance_events.get(link.ref_id)
+        if event is None:
+            return True
+        return event.redaction_state != RedactionState.RESTRICTED.value and event.retention_state == RetentionState.ACTIVE.value
+
+    def _graph_edge_drop_reason(self, edge: GraphEdge) -> str | None:
+        if edge.staleness_state != StalenessState.FRESH.value:
+            return "stale_graph_edge"
+        if not any(self._visible_graph_edge_support_link(link) for link in edge.evidence_links):
+            return "missing_graph_edge_evidence"
+        return None
+
+    def _visible_graph_edge_support_link(self, link: EvidenceLink) -> bool:
+        if not link.active or link.role not in {EvidenceRole.CURRENT_SUPPORT.value, EvidenceRole.PROOF.value}:
+            return False
+        event = self.provenance_events.get(link.ref_id)
+        if event is None:
+            return False
+        return event.redaction_state != RedactionState.RESTRICTED.value and event.retention_state == RetentionState.ACTIVE.value
+
+    def _graph_edge_visible_support_count(self, edge: GraphEdge) -> int:
+        return sum(1 for link in edge.evidence_links if self._visible_graph_edge_support_link(link))
+
+    def _validate_commit_card(self, card: MemoryCard, *, actor: str, operation: str) -> None:
+        if card.approval_state != ApprovalState.COMMITTED.value:
+            raise ValueError("commit validation requires approval_state=committed")
+        if not any(link.active and link.role in {EvidenceRole.CURRENT_SUPPORT.value, EvidenceRole.PROOF.value} for link in card.evidence_links):
+            raise ValueError("committed durable cards require active current_support or proof evidence")
+        if not card.privacy.allowed_scope_ids:
+            raise ValueError("committed durable cards require privacy.allowed_scope_ids")
+        if card.scope.scope_key() not in card.privacy.allowed_scope_ids and not any(ref.startswith("shared_policy:v1:") for ref in card.privacy.allowed_scope_ids):
+            raise ValueError("committed durable cards must include their canonical scope_key in privacy.allowed_scope_ids")
+        for link in card.evidence_links:
+            if link.ref_id in self.provenance_events:
+                continue
+            if link.role in {EvidenceRole.CURRENT_SUPPORT.value, EvidenceRole.PROOF.value, EvidenceRole.APPROVAL.value}:
+                raise ValueError(f"evidence link {link.ref_id} does not resolve to provenance")
+        for node_id in card.graph_refs.node_ids:
+            if node_id not in self.graph_nodes:
+                raise ValueError(f"graph_refs.node_ids unresolved: {node_id}")
+        for edge_id in card.graph_refs.edge_ids:
+            if edge_id not in self.graph_edges:
+                raise ValueError(f"graph_refs.edge_ids unresolved: {edge_id}")
+        self._validate_authority(card, actor=actor, operation=operation)
+
+    def _validate_authority(self, card: MemoryCard, *, actor: str, operation: str) -> None:
+        source = card.authority.source
+        if actor == TraceActor.MODEL_PROPOSAL.value:
+            raise PermissionError("model proposal actor cannot authorize committed memory")
+        if source == AuthoritySource.SCORING.value and operation != "seed_eval":
+            raise PermissionError("authority.source=scoring is restricted to seed_eval paths")
+        if card.authority.strength in {AuthorityStrength.SHOULD.value, AuthorityStrength.MUST.value} and not card.authority.source_refs:
+            raise PermissionError("authority strength should/must requires source_refs")
+        if source in {
+            AuthoritySource.USER.value,
+            AuthoritySource.REVIEWER.value,
+            AuthoritySource.VERIFIER.value,
+            AuthoritySource.MAINTAINER.value,
+            AuthoritySource.SYSTEM.value,
+        }:
+            if not card.authority.source_refs:
+                raise PermissionError(f"authority.source={source} requires matching provenance refs")
+            if not any(self._provenance_matches_authority(ref_id, source) for ref_id in card.authority.source_refs):
+                raise PermissionError(f"authority.source={source} requires matching provenance refs")
+        if source == AuthoritySource.SELF.value and card.authority.strength not in {AuthorityStrength.OBSERVATION.value, AuthorityStrength.HINT.value}:
+            raise PermissionError("self authority may only be observation or hint")
+
+    def _provenance_matches_authority(self, ref_id: str, source: str) -> bool:
+        event = self.provenance_events.get(ref_id)
+        if event is None:
+            return False
+        if event.actor == source:
+            return True
+        if event.event_kind == RawEventKind.APPROVAL.value and source in {AuthoritySource.REVIEWER.value, AuthoritySource.USER.value, AuthoritySource.MAINTAINER.value, AuthoritySource.SYSTEM.value}:
+            return True
+        if source == AuthoritySource.VERIFIER.value and event.event_kind == RawEventKind.VERIFIER_OUTPUT.value:
+            return True
+        return False
+
+    def _assert_transition(self, current: str, target: str, *, actor: str, operation: str) -> None:
+        if current in {ApprovalState.REJECTED.value, ApprovalState.TOMBSTONED.value, ApprovalState.SUPERSEDED.value}:
+            if target not in _allowed_transitions(current):
+                raise ValueError(f"forbidden approval_state transition: {current} -> {target}")
+        if target == ApprovalState.COMMITTED.value and current != ApprovalState.APPROVED.value:
+            if operation not in {"seed_eval", "migrate", "rollback"}:
+                raise ValueError("candidate/proposal -> committed bypass is restricted to seed_eval, migration, or emergency restore")
+        if target not in _allowed_transitions(current):
+            raise ValueError(f"forbidden approval_state transition: {current} -> {target}")
+        if actor == TraceActor.MODEL_PROPOSAL.value and target == ApprovalState.COMMITTED.value:
+            raise PermissionError("model proposals cannot commit durable memory")
+
+    def _require_provenance(self, ref_id: str) -> ProvenanceEvent:
+        event = self.provenance_events.get(ref_id)
+        if event is None:
+            raise ValueError(f"unknown provenance ref: {ref_id}")
+        return event
+
+    def _card(self, card_id: str) -> MemoryCard:
+        try:
+            return self.memory_cards[card_id]
+        except KeyError as exc:
+            raise KeyError(f"unknown memory card: {card_id}") from exc
+
+    def _append_audit(
+        self,
+        *,
+        operation: str,
+        actor: str,
+        request_hash: str,
+        result_payload: Mapping[str, Any],
+        card_ids: Sequence[str] = (),
+        provenance_event_ids: Sequence[str | None] = (),
+        mutation_ids: Sequence[str] = (),
+        dropped: Sequence[DroppedReason] = (),
+        usage: Mapping[str, Any] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> MemoryAuditEvent:
+        result_hash = stable_hash(result_payload)
+        audit_id = self._unique_id(
+            {event.audit_id: event for event in self.memory_audit_log},
+            "audit",
+            {"operation": operation, "request_hash": request_hash, "result_hash": result_hash, "actor": actor},
+        )
+        trace = MemoryTraceEvent(
+            operation=operation,
+            request_hash=request_hash,
+            result_hash=result_hash,
+            actor=actor,
+            card_ids=tuple(card_ids),
+            provenance_event_ids=tuple(ref for ref in provenance_event_ids if ref),
+            mutation_ids=tuple(mutation_ids),
+            dropped=tuple(dropped),
+            usage=usage or {},
+            metadata=metadata or {},
+        )
+        audit = MemoryAuditEvent.from_trace(trace, audit_id=audit_id, created_at=self.clock())
+        self.memory_audit_log.append(audit)
+        return audit
+
+    def _snapshot_state(self) -> dict[str, Any]:
+        return {
+            "memory_cards": dict(self.memory_cards),
+            "provenance_events": dict(self.provenance_events),
+            "raw_payloads": dict(self.raw_payloads),
+            "graph_nodes": dict(self.graph_nodes),
+            "graph_edges": dict(self.graph_edges),
+            "memory_audit_log": list(self.memory_audit_log),
+            "transient_reentry_records": {key: list(value) for key, value in self.transient_reentry_records.items()},
+        }
+
+    def _restore_state(self, snapshot: Mapping[str, Any]) -> None:
+        self.memory_cards = dict(snapshot["memory_cards"])
+        self.provenance_events = dict(snapshot["provenance_events"])
+        self.raw_payloads = dict(snapshot["raw_payloads"])
+        self.graph_nodes = dict(snapshot["graph_nodes"])
+        self.graph_edges = dict(snapshot["graph_edges"])
+        self.memory_audit_log = list(snapshot["memory_audit_log"])
+        self.transient_reentry_records = {
+            key: list(value)
+            for key, value in snapshot["transient_reentry_records"].items()
+        }
+
+    def _unique_id(self, existing: Mapping[str, Any], prefix: str, payload: Mapping[str, Any]) -> str:
+        base = f"{prefix}_{stable_short_hash(payload, length=16)}"
+        if base not in existing:
+            return base
+        index = 2
+        while f"{base}_{index}" in existing:
+            index += 1
+        return f"{base}_{index}"
+
+
+def _allowed_transitions(current: str) -> set[str]:
+    return {
+        ApprovalState.CANDIDATE.value: {ApprovalState.PROPOSAL.value, ApprovalState.REJECTED.value},
+        ApprovalState.PROPOSAL.value: {ApprovalState.APPROVED.value, ApprovalState.REJECTED.value},
+        ApprovalState.APPROVED.value: {ApprovalState.COMMITTED.value, ApprovalState.REJECTED.value},
+        ApprovalState.COMMITTED.value: {ApprovalState.SUPERSEDED.value, ApprovalState.TOMBSTONED.value},
+        ApprovalState.SUPERSEDED.value: {ApprovalState.TOMBSTONED.value},
+        ApprovalState.REJECTED.value: set(),
+        ApprovalState.TOMBSTONED.value: set(),
+    }[current]
+
+
+def _bounded_excerpt(text: str) -> str:
+    cleaned = _clean_text(text)
+    if len(cleaned) <= 240:
+        return cleaned
+    digest = hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:12]
+    return cleaned[:219].rstrip() + f" #sha256:{digest}"
+
+
+def _clean_text(value: Any) -> str:
+    return " ".join(str(value or "").strip().split())
+
+
+def _dedupe_evidence_links(links: Sequence[EvidenceLink]) -> tuple[EvidenceLink, ...]:
+    seen: set[tuple[str, str, bool, str | None, str | None]] = set()
+    unique: list[EvidenceLink] = []
+    for link in links:
+        key = (link.ref_id, link.role, link.active, link.added_by_mutation_id, link.note)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(link)
+    return tuple(sorted(unique, key=lambda item: (item.ref_id, item.role, item.added_by_mutation_id or "", item.note or "", item.active)))
+
+
+def _graph_edge_active_support_link_count(edge: GraphEdge) -> int:
+    return sum(
+        1
+        for link in edge.evidence_links
+        if link.active and link.role in {EvidenceRole.CURRENT_SUPPORT.value, EvidenceRole.PROOF.value}
+    )
+
+
+def _optional_non_negative_int(value: Any, field_name: str) -> int | None:
+    if value is None:
+        return None
+    integer = int(value)
+    if integer < 0:
+        raise ValueError(f"{field_name} must be non-negative")
+    return integer
+
+
+def _required_text(value: Any, field_name: str) -> str:
+    text = _clean_text(value)
+    if not text:
+        raise ValueError(f"{field_name} must not be empty")
+    return text
+
+
+def _bounded_confidence(value: Any) -> float:
+    number = float(value or 0.0)
+    if math.isnan(number) or math.isinf(number):
+        raise ValueError("confidence must be finite")
+    return max(0.0, min(1.0, number))
+
+
+def _tokens(text: str) -> set[str]:
+    return {match.group(0).casefold() for match in _TOKEN_RE.finditer(text or "")}
+
+
+def _default_retrieval_surface_config_hash() -> str:
+    return stable_hash(
+        {
+            "included_fields": [
+                "summary",
+                "details",
+                "retrieval_terms",
+                "applicability.applies_to",
+                "applicability.prerequisites",
+                "applicability.counterexamples",
+            ],
+            "field_weights": {
+                "summary": "1.0000",
+                "details": "0.6000",
+                "retrieval_terms": "1.4000",
+                "applicability.applies_to": "0.4000",
+                "applicability.prerequisites": "0.3000",
+                "applicability.counterexamples": "0.1000",
+            },
+            "tokenizer_id": "mew-token-v1",
+            "normalizer_id": "casefold-ascii-token-v1",
+            "stopword_policy_id": "query-relevance-stopwords-v1",
+        }
+    )
+
+
+def _meaningful_query_tokens(query_tokens: set[str]) -> set[str]:
+    return {token for token in query_tokens if token not in _QUERY_RELEVANCE_STOPWORDS}
+
+
+def _query_overlap_count(card: MemoryCard, query_tokens: set[str]) -> int:
+    meaningful = _meaningful_query_tokens(query_tokens)
+    if not meaningful:
+        meaningful = query_tokens
+    return len(meaningful & _tokens(_card_search_text(card)))
+
+
+def _minimum_query_overlap(query_tokens: set[str]) -> int:
+    meaningful = _meaningful_query_tokens(query_tokens)
+    return 2 if len(meaningful) >= 4 else 1
+
+
+def _retrieval_anchor_terms(values: Any, raw_text: str) -> tuple[str, ...]:
+    terms: list[str] = []
+    raw_values: Sequence[Any]
+    if isinstance(values, str):
+        raw_values = (values,)
+    elif isinstance(values, Sequence):
+        raw_values = values
+    else:
+        raw_values = ()
+    for value in raw_values:
+        text = _clean_text(value)
+        if len(text) > 96:
+            text = text[:96].rstrip()
+        if text:
+            terms.append(text)
+    for match in _TOKEN_RE.finditer(raw_text or ""):
+        token = _raw_retrieval_anchor_token(match.group(0))
+        if token is None:
+            continue
+        terms.append(token)
+    return tuple(_normalize_patch_retrieval_terms(terms)[:32])
+
+
+def _raw_retrieval_anchor_token(value: str) -> str | None:
+    token = _clean_text(value).strip(".,;:!?()[]{}\"'<>")
+    if len(token) < 2:
+        return None
+    token_key = token.casefold().rstrip(":")
+    if token_key in _ANCHOR_STOPWORDS or token_key in _RAW_SPEAKER_ROLE_TOKENS:
+        return None
+    if len(token) > _MAX_RETRIEVAL_TERM_CHARS:
+        return None
+    return token
+
+
+def _normalize_patch_retrieval_terms(values: Any) -> list[str]:
+    if isinstance(values, (str, bytes)) or not isinstance(values, Sequence):
+        raise ValueError("retrieval_terms must be a sequence")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = _clean_text(value)
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(text)
+    return normalized
+
+
+def _card_search_text(card: MemoryCard) -> str:
+    return " ".join(_card_field_texts(card).values())
+
+
+def _card_field_texts(card: MemoryCard) -> dict[str, str]:
+    applicability = card.applicability.to_dict()
+    return {
+        "summary": card.summary,
+        "details": card.details or "",
+        "retrieval_terms": " ".join(card.retrieval_terms),
+        "applicability.applies_to": " ".join(applicability.get("applies_to") or ()),
+        "applicability.prerequisites": " ".join(applicability.get("prerequisites") or ()),
+        "applicability.counterexamples": " ".join(applicability.get("counterexamples") or ()),
+    }
+
+
+def _card_field_tokens(card: MemoryCard) -> dict[str, set[str]]:
+    return {field: _tokens(text) for field, text in _card_field_texts(card).items()}
+
+
+def _vector_surface_text(card: MemoryCard) -> str:
+    fields = _card_field_texts(card)
+    return "\n".join(
+        part
+        for part in (
+            fields["summary"],
+            fields["details"],
+            fields["retrieval_terms"],
+            fields["applicability.applies_to"],
+            fields["applicability.prerequisites"],
+        )
+        if part
+    )
+
+
+def _retrieval_terms_anchor_score(card: MemoryCard, query: str, query_tokens: set[str]) -> Decimal:
+    if not card.retrieval_terms:
+        return Decimal("0")
+    meaningful = _meaningful_query_tokens(query_tokens) or query_tokens
+    term_text = " ".join(card.retrieval_terms)
+    term_tokens = _tokens(term_text)
+    token_score = Decimal("0")
+    if meaningful:
+        token_score = Decimal(len(meaningful & term_tokens)) / Decimal(max(1, len(meaningful)))
+    normalized_query = _clean_text(query).casefold()
+    phrase_score = Decimal("0")
+    for term in card.retrieval_terms:
+        normalized_term = _clean_text(term).casefold()
+        if not normalized_term:
+            continue
+        if normalized_term in normalized_query or normalized_query in normalized_term:
+            phrase_score = Decimal("1.0000")
+            break
+    return max(token_score, phrase_score)
+
+
+def _index_mode_for_backend(backend_kind: str) -> str:
+    if backend_kind == "bm25":
+        return "sync_lexical"
+    if backend_kind in {"vector", "hybrid", "replay"}:
+        return backend_kind
+    return "direct_scan"
+
+
+def _ollama_embed(*, model: str, inputs: Sequence[str], base_url: str, timeout_s: int) -> list[list[float]]:
+    payload = json.dumps({"model": model, "input": list(inputs)}).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/embed",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"ollama embedding request failed: {exc}") from exc
+    embeddings = data.get("embeddings")
+    if not isinstance(embeddings, list):
+        raise RuntimeError("ollama embedding response missing embeddings")
+    return [[float(item) for item in vector] for vector in embeddings]
+
+
+def _cosine_score(left: Sequence[float], right: Sequence[float]) -> Decimal:
+    if not left or not right or len(left) != len(right):
+        return Decimal("0")
+    dot = sum(float(a) * float(b) for a, b in zip(left, right))
+    left_norm = math.sqrt(sum(float(a) * float(a) for a in left))
+    right_norm = math.sqrt(sum(float(b) * float(b) for b in right))
+    if left_norm <= 0 or right_norm <= 0:
+        return Decimal("0")
+    cosine = dot / (left_norm * right_norm)
+    cosine = max(0.0, min(1.0, cosine))
+    return Decimal(str(cosine))
+
+
+def _contains_forbidden_model_commit(payload: Mapping[str, Any]) -> bool:
+    values = [payload.get("approval_state"), payload.get("state")]
+    candidate = payload.get("candidate")
+    if isinstance(candidate, Mapping):
+        values.extend([candidate.get("approval_state"), candidate.get("state")])
+    return any(_clean_text(value) == ApprovalState.COMMITTED.value for value in values)
+
+
+def _looks_like_raw_copy(value: str, raw_text: str) -> bool:
+    if not value:
+        return False
+    normalized_value = _clean_text(value).casefold()
+    normalized_raw = _clean_text(raw_text).casefold()
+    if len(normalized_value) > 240 and normalized_value in normalized_raw:
+        return True
+    speaker_lines = sum(1 for line in value.splitlines() if re.match(r"\s*(user|assistant|tool|system|developer)\s*:", line, re.I))
+    return speaker_lines >= 2
+
+
+def _reject_forbidden_metadata(metadata: Mapping[str, Any], path: str) -> None:
+    for key, value in metadata.items():
+        key_text = str(key)
+        if key_text in _FORBIDDEN_SEED_KEYS:
+            raise ValueError(f"{path} must not include fixture leakage key: {key_text}")
+        if isinstance(value, Mapping):
+            _reject_forbidden_metadata(value, f"{path}.{key_text}")
+
+
+def _stable_patch_payload(patch: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
+    if patch is None:
+        return None
+    return _normalize_patch(patch)
+
+
+def _normalize_patch(patch: Mapping[str, Any]) -> dict[str, Any]:
+    _reject_forbidden_patch_paths(patch)
+    result: dict[str, Any] = {}
+    clear_fields = tuple(sorted(str(item) for item in patch.get("clear_fields") or ()))
+    for field_path in clear_fields:
+        if field_path not in _ALLOWED_CLEAR_FIELDS:
+            raise ValueError(f"clear_fields contains unsupported field: {field_path}")
+    if "summary" in patch:
+        if patch["summary"] is None:
+            raise ValueError("summary cannot be null")
+        result["summary"] = _required_text(patch["summary"], "summary")
+    if "details" in patch:
+        if patch["details"] is None and "details" not in clear_fields:
+            raise ValueError("details=null requires clear_fields")
+        result["details"] = None if patch["details"] is None else _clean_text(patch["details"])
+    if "retrieval_terms" in patch:
+        if patch["retrieval_terms"] is None:
+            raise ValueError("retrieval_terms cannot be null")
+        result["retrieval_terms"] = _normalize_patch_retrieval_terms(patch["retrieval_terms"])
+    if "applicability" in patch:
+        if patch["applicability"] is None:
+            raise ValueError("applicability cannot be null")
+        result["applicability"] = Applicability.from_dict(patch["applicability"]).to_dict()
+    if "valence" in patch:
+        if patch["valence"] is None:
+            raise ValueError("valence cannot be null")
+        result["valence"] = Valence.from_dict(patch["valence"]).to_dict()
+    if "invalidators" in patch:
+        if patch["invalidators"] is None:
+            raise ValueError("invalidators cannot be null")
+        result["invalidators"] = [Invalidator.from_dict(item).to_dict() if isinstance(item, Mapping) else item.to_dict() for item in patch["invalidators"]]
+    if "confidence" in patch:
+        if patch["confidence"] is None:
+            raise ValueError("confidence cannot be null")
+        result["confidence"] = _bounded_confidence(patch["confidence"])
+    if "lifecycle" in patch:
+        lifecycle = patch["lifecycle"] or {}
+        if "expires_at" in lifecycle:
+            if lifecycle["expires_at"] is None and "lifecycle.expires_at" not in clear_fields:
+                raise ValueError("lifecycle.expires_at=null requires clear_fields")
+            result["lifecycle"] = {"expires_at": _clean_text(lifecycle["expires_at"]) or None}
+    if "privacy" in patch:
+        privacy = patch["privacy"] or {}
+        if "redaction_policy" in privacy:
+            if privacy["redaction_policy"] is None and "privacy.redaction_policy" not in clear_fields:
+                raise ValueError("privacy.redaction_policy=null requires clear_fields")
+            result["privacy"] = {"redaction_policy": _clean_text(privacy["redaction_policy"]) or None}
+    return result
+
+
+def _reject_forbidden_patch_paths(value: Mapping[str, Any], prefix: str = "") -> None:
+    for key, child in value.items():
+        key_text = str(key)
+        path = f"{prefix}.{key_text}" if prefix else key_text
+        if path in _FORBIDDEN_PATCH_PATHS:
+            raise ValueError(f"forbidden mutation patch field: {path}")
+        if isinstance(child, Mapping):
+            _reject_forbidden_patch_paths(child, path)
+
+
+def _inactive_drop_reason(card: MemoryCard) -> str:
+    if card.metadata.get("phase_b_forgotten"):
+        return "forgotten"
+    if card.metadata.get("phase_b_deleted"):
+        return "deleted"
+    if card.approval_state == ApprovalState.TOMBSTONED.value:
+        return "tombstoned"
+    if card.approval_state == ApprovalState.SUPERSEDED.value:
+        return "superseded"
+    return "not_committed"
+
+
+def _add_drop(
+    reason: str,
+    card: MemoryCard,
+    dropped: list[CallerVisibleDroppedRecord],
+    internal_dropped: list[DroppedReason],
+    counts: dict[str, int],
+) -> None:
+    counts[reason] = counts.get(reason, 0) + 1
+    internal_dropped.append(DroppedReason(reason=reason, ref_id=card.card_id))
+    if reason not in {"privacy_block", "forgotten", "out_of_scope"}:
+        dropped.append(CallerVisibleDroppedRecord(reason=reason, evidence_ref=card.card_id))
+    else:
+        dropped.append(CallerVisibleDroppedRecord(reason=reason, evidence_ref=None))
+
+
+def _add_graph_drop(
+    reason: str,
+    ref_id: str,
+    counts: dict[str, int],
+    internal_dropped: list[DroppedReason],
+) -> None:
+    if any(item.reason == reason and item.ref_id == ref_id for item in internal_dropped):
+        return
+    counts[reason] = counts.get(reason, 0) + 1
+    internal_dropped.append(DroppedReason(reason=reason, ref_id=ref_id))
+
+
+def _card_in_derived_graph_index(card: MemoryCard) -> bool:
+    return (
+        card.approval_state == ApprovalState.COMMITTED.value
+        and card.staleness_state == StalenessState.FRESH.value
+        and card.metadata.get("phase_b_forgotten") is not True
+        and card.metadata.get("phase_b_deleted") is not True
+    )
+
+
+def _derived_graph_edge_endpoint_issues(
+    edge: GraphEdge,
+    *,
+    card_id: str | None,
+    nodes: Mapping[str, GraphNode],
+) -> list[dict[str, Any]]:
+    issues = []
+    endpoint_specs = (
+        ("from", edge.from_node_id, edge.from_node_type),
+        ("to", edge.to_node_id, edge.to_node_type),
+    )
+    for side, node_id, expected_type in endpoint_specs:
+        node = nodes.get(node_id)
+        if node is None:
+            issues.append(
+                _derived_graph_issue(
+                    f"graph_edge_{side}_node_missing",
+                    card_id=card_id,
+                    edge_id=edge.edge_id,
+                    node_id=node_id,
+                )
+            )
+            continue
+        if node.node_type != expected_type:
+            issues.append(
+                _derived_graph_issue(
+                    f"graph_edge_{side}_node_type_mismatch",
+                    card_id=card_id,
+                    edge_id=edge.edge_id,
+                    node_id=node_id,
+                    expected_node_type=expected_type,
+                    actual_node_type=node.node_type,
+                )
+            )
+        if node.staleness_state != StalenessState.FRESH.value:
+            issues.append(
+                _derived_graph_issue(
+                    f"graph_edge_{side}_node_stale",
+                    card_id=card_id,
+                    edge_id=edge.edge_id,
+                    node_id=node_id,
+                    staleness_state=node.staleness_state,
+                )
+            )
+    return issues
+
+
+def _derived_graph_issue(issue_type: str, **fields: Any) -> dict[str, Any]:
+    return {"issue_type": issue_type, **{key: value for key, value in sorted(fields.items()) if value is not None}}
+
+
+def _dedupe_graph_issues(issues: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    by_hash = {stable_hash(issue): dict(issue) for issue in issues}
+    return [by_hash[key] for key in sorted(by_hash)]
+
+
+def _graph_node_drop_reason(node: GraphNode | None, evidence: CurrentEvidenceSnapshot | None) -> str | None:
+    if node is None:
+        return "uncanonicalized_graph_endpoint"
+    if node.staleness_state != StalenessState.FRESH.value:
+        return "stale_graph_node"
+    if evidence is None:
+        return None
+    if node.node_type == NodeType.FILE.value:
+        for state in evidence.file_states:
+            if not _graph_file_evidence_matches(node, state):
+                continue
+            if state.state == "missing":
+                return "uncanonicalized_graph_endpoint"
+            if state.state == "unknown" or _graph_hash_changed(node.content_hash, state.content_hash):
+                return "stale_graph_node"
+    elif node.node_type == NodeType.SYMBOL.value:
+        for state in evidence.symbol_states:
+            if not _graph_ref_evidence_matches(node, state.node_id, state.canonical_ref):
+                continue
+            if state.state == "missing":
+                return "uncanonicalized_graph_endpoint"
+            if (
+                state.state in {"moved", "unknown"}
+                or (state.node_id == node.node_id and state.canonical_ref != node.canonical_ref)
+                or _graph_hash_changed(node.content_hash, state.content_hash)
+            ):
+                return "stale_graph_node"
+    elif node.node_type == NodeType.COMMAND.value:
+        for state in evidence.command_states:
+            if not _graph_ref_evidence_matches(node, state.node_id, state.normalized_command_ref):
+                continue
+            if (
+                state.state in {"changed", "unknown"}
+                or (state.node_id == node.node_id and state.normalized_command_ref != node.canonical_ref)
+                or _graph_hash_changed(node.content_hash, state.command_hash)
+            ):
+                return "stale_graph_node"
+    return None
+
+
+def _graph_file_evidence_matches(node: GraphNode, state: Any) -> bool:
+    return _graph_ref_evidence_matches(node, state.node_id, state.path)
+
+
+def _graph_ref_evidence_matches(node: GraphNode, node_id: str, evidence_ref: str) -> bool:
+    return node.node_id == node_id or _graph_canonical_ref_matches(node.canonical_ref, evidence_ref)
+
+
+def _graph_canonical_ref_matches(canonical_ref: str, evidence_ref: str) -> bool:
+    return canonical_ref == evidence_ref or canonical_ref.endswith(":" + evidence_ref)
+
+
+def _graph_hash_changed(baseline_hash: str | None, current_hash: str | None) -> bool:
+    return bool(baseline_hash and current_hash and baseline_hash != current_hash)
+
+
+def _privacy_allows(card: MemoryCard, authorization_scope: Scope, *, shared_policy_ids: Sequence[str]) -> bool:
+    allowed = set(card.privacy.allowed_scope_ids)
+    if not allowed:
+        return False
+    if authorization_scope.scope_key() in allowed:
+        return True
+    if card.scope.scope_key() in allowed and _scope_allows(authorization_scope, card.scope, card_kind=card.kind):
+        return True
+    if allowed & set(shared_policy_ids):
+        return True
+    return False
+
+
+def _scope_allows(caller: Scope, card_scope: Scope, *, card_kind: str) -> bool:
+    if caller.scope_key() == card_scope.scope_key():
+        return True
+    if card_scope.level == ScopeLevel.TASK.value:
+        return bool(caller.task_ref and caller.task_ref == card_scope.task_ref and _same_repo_or_project(caller, card_scope))
+    if card_scope.level == ScopeLevel.TASK_FAMILY.value:
+        return bool(caller.task_family and caller.task_family == card_scope.task_family and _same_repo_or_project(caller, card_scope))
+    if card_scope.level == ScopeLevel.BRANCH.value:
+        return bool(caller.repo_ref and caller.repo_ref == card_scope.repo_ref and caller.branch_ref and caller.branch_ref == card_scope.branch_ref)
+    if card_scope.level == ScopeLevel.REPO.value:
+        return bool(caller.repo_ref and caller.repo_ref == card_scope.repo_ref and not card_scope.branch_ref)
+    if card_scope.level == ScopeLevel.PROJECT.value:
+        return bool(caller.project_id and caller.project_id == card_scope.project_id)
+    if card_scope.level == ScopeLevel.USER.value:
+        return bool(caller.user_id and caller.user_id == card_scope.user_id and card_kind == MemoryCardKind.POLICY_OR_PREFERENCE.value)
+    if card_scope.level in {ScopeLevel.TEAM.value, ScopeLevel.SHARED.value}:
+        return caller.namespace == card_scope.namespace
+    return False
+
+
+def _same_repo_or_project(left: Scope, right: Scope) -> bool:
+    if (left.repo_ref or right.repo_ref) and left.repo_ref != right.repo_ref:
+        return False
+    if (left.project_id or right.project_id) and left.project_id != right.project_id:
+        return False
+    return True
+
+
+def _applicability_allows(card: MemoryCard, request: MemoryRecallRequest) -> bool:
+    request_refs = set(request.applicability_refs)
+    request_refs.add(request.scope.scope_key())
+    does_not = {item.value for item in (*card.applicability.does_not_apply_to, *card.applicability.counterexamples)}
+    if request_refs & does_not:
+        return False
+    applies = {item.value for item in card.applicability.applies_to}
+    if applies and not (request_refs & applies):
+        return False
+    return True
+
+
+def _invalidator_triggered(card: MemoryCard, invalidator: Invalidator, evidence: CurrentEvidenceSnapshot) -> bool:
+    if invalidator.kind == InvalidatorKind.FILE_HASH_CHANGED.value:
+        for state in evidence.file_states:
+            if _node_or_ref_matches(state.node_id, state.path, invalidator):
+                return state.state == "missing" or bool(invalidator.baseline_hash and state.content_hash and invalidator.baseline_hash != state.content_hash)
+    if invalidator.kind in {InvalidatorKind.SYMBOL_MOVED.value, InvalidatorKind.SYMBOL_REMOVED.value}:
+        for state in evidence.symbol_states:
+            if _node_or_ref_matches(state.node_id, state.canonical_ref, invalidator):
+                if invalidator.kind == InvalidatorKind.SYMBOL_MOVED.value:
+                    return state.state == "moved" or bool(invalidator.baseline_ref and state.canonical_ref and invalidator.baseline_ref != state.canonical_ref)
+                return state.state == "missing"
+    if invalidator.kind == InvalidatorKind.COMMAND_CHANGED.value:
+        for state in evidence.command_states:
+            if _node_or_ref_matches(state.node_id, state.normalized_command_ref, invalidator):
+                return state.state == "changed" or bool(invalidator.baseline_hash and state.command_hash and invalidator.baseline_hash != state.command_hash)
+    if invalidator.kind == InvalidatorKind.VERIFIER_CHANGED.value:
+        for result in evidence.verifier_results:
+            if invalidator.baseline_ref and result.verifier_ref != invalidator.baseline_ref:
+                continue
+            if invalidator.baseline_hash and result.result_hash and invalidator.baseline_hash != result.result_hash:
+                return True
+            if invalidator.baseline_value and result.result_value and invalidator.baseline_value != result.result_value:
+                return True
+    if invalidator.kind == InvalidatorKind.BRANCH_CHANGED.value:
+        return bool(invalidator.baseline_value and evidence.branch_ref and invalidator.baseline_value != evidence.branch_ref)
+    if invalidator.kind == InvalidatorKind.TASK_CONTRACT_CHANGED.value and evidence.task_contract:
+        contract = evidence.task_contract
+        if invalidator.baseline_ref and contract.ref != invalidator.baseline_ref:
+            return True
+        if invalidator.baseline_hash and contract.hash and contract.hash != invalidator.baseline_hash:
+            return True
+    if invalidator.kind in {
+        InvalidatorKind.REVIEWER_VETOED.value,
+        InvalidatorKind.USER_PREFERENCE_UPDATED.value,
+        InvalidatorKind.POLICY_SUPERSEDED.value,
+    }:
+        return any(_authority_event_triggers(card, invalidator, event) for event in evidence.authority_events)
+    if invalidator.kind == InvalidatorKind.PROCEDURE_FAILED_RECENTLY.value:
+        targets = {item.value for item in card.applicability.applies_to}
+        targets.update(ref for ref in (invalidator.target_node_id, invalidator.baseline_ref, invalidator.ref) if ref)
+        for result in evidence.verifier_results:
+            result_refs = {item.value for item in result.applicability_refs}
+            result_refs.update(result.error_signature_refs)
+            if result.task_ref:
+                result_refs.add(result.task_ref)
+            if invalidator.baseline_observed_at and not _iso_lt(invalidator.baseline_observed_at, result.observed_at):
+                continue
+            if result.result_value in {"fail", "error"} and targets & result_refs:
+                return True
+    return False
+
+
+def _node_or_ref_matches(node_id: str, ref: str, invalidator: Invalidator) -> bool:
+    return bool(
+        (invalidator.target_node_id and node_id == invalidator.target_node_id)
+        or (invalidator.baseline_ref and ref == invalidator.baseline_ref)
+        or (invalidator.ref and ref == invalidator.ref)
+    )
+
+
+def _authority_event_triggers(card: MemoryCard, invalidator: Invalidator, event: AuthorityEvidenceEvent) -> bool:
+    if invalidator.baseline_observed_at and not _iso_lt(invalidator.baseline_observed_at, event.observed_at):
+        return False
+    if not _scope_allows(card.scope, event.target_scope, card_kind=card.kind) and not _scope_allows(event.target_scope, card.scope, card_kind=card.kind):
+        return False
+    if invalidator.baseline_ref and invalidator.baseline_ref in event.supersedes_refs:
+        return True
+    return bool(invalidator.baseline_ref and event.ref == invalidator.baseline_ref)
+
+
+def _experience_ids(events: Mapping[str, ProvenanceEvent], ref_ids: Sequence[str]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                event.source_experience_id
+                for ref_id in ref_ids
+                if (event := events.get(ref_id)) is not None
+                and event.source_experience_id
+                and event.redaction_state != RedactionState.RESTRICTED.value
+                and event.retention_state == RetentionState.ACTIVE.value
+            }
+        )
+    )
+
+
+def _reverse_iso(value: str | None) -> str:
+    return "" if value is None else "".join(chr(255 - ord(char)) for char in value)
+
+
+def _iso_lte(left: str, right: str) -> bool:
+    return left <= right
+
+
+def _iso_lt(left: str, right: str) -> bool:
+    return left < right

@@ -1,6 +1,8 @@
 import json
+import http.client
 import io
 import os
+import signal
 import socket
 import tempfile
 import unittest
@@ -9,10 +11,16 @@ import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 
+from mew import codex_api
 from mew.codex_api import (
+    CODEX_RESPONSES_WEBSOCKET_BETA,
     call_codex_json,
+    call_codex_responses_raw,
+    call_codex_structured_json,
     call_codex_web_api,
+    codex_websocket_headers,
     decode_sse_data_line,
+    extract_json_object,
     extract_response_refusal,
     extract_sse_text,
     extract_sse_response_parts,
@@ -87,6 +95,28 @@ class _FakeResponseStream:
 
 
 class CodexApiTests(unittest.TestCase):
+    def test_codex_websocket_url_matches_responses_endpoint(self):
+        self.assertEqual(
+            codex_api._responses_websocket_url(
+                "https://chatgpt.com/backend-api/codex"
+            ),
+            "wss://chatgpt.com/backend-api/codex/responses",
+        )
+
+    def test_codex_websocket_headers_include_beta_and_identity(self):
+        headers = codex_websocket_headers(
+            {
+                "access_token": "tok",
+                "account_id": "acct_123",
+            },
+            conversation_id="thread-1",
+        )
+
+        self.assertEqual(headers["Authorization"], "Bearer tok")
+        self.assertEqual(headers["OpenAI-Beta"], CODEX_RESPONSES_WEBSOCKET_BETA)
+        self.assertEqual(headers["x-client-request-id"], "thread-1")
+        self.assertEqual(headers["chatgpt-account-id"], "acct_123")
+
     def test_sse_text_delta_helpers_extract_streaming_text(self):
         raw = "\n".join(
             [
@@ -184,6 +214,136 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(text, "ok")
         self.assertEqual(captured["body"]["reasoning"], {"effort": "high"})
         self.assertTrue(captured["body"]["stream"])
+
+    def test_call_codex_responses_raw_sends_existing_body_without_prompt_wrapper(self):
+        captured = {}
+        request_body = {
+            "model": "gpt-5.5",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+            "tools": [{"type": "function", "name": "finish", "parameters": {"type": "object"}}],
+            "stream": True,
+            "store": False,
+        }
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["url"] = request.full_url
+            return FakeUrlopenResponse(
+                [b"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-1\"}}\n"],
+                headers={"content-type": "text/event-stream"},
+            )
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            raw, content_type = call_codex_responses_raw(
+                {"access_token": "token"},
+                request_body,
+                "https://example.invalid/api",
+                1,
+            )
+
+        self.assertEqual(captured["body"], request_body)
+        self.assertEqual(captured["url"], "https://example.invalid/api/responses")
+        self.assertEqual(content_type, "text/event-stream")
+        self.assertIn("response.completed", raw)
+
+    def test_call_codex_structured_json_sends_text_format_schema(self):
+        captured = {}
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["decision"],
+            "properties": {"decision": {"type": "string", "enum": ["reject"]}},
+        }
+
+        def fake_urlopen(request, timeout):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            captured["url"] = request.full_url
+            return FakeUrlopenResponse(
+                [json.dumps({"output_text": "{\"decision\":\"reject\"}"}).encode("utf-8")],
+                headers={"content-type": "application/json"},
+            )
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            payload = call_codex_structured_json(
+                {"access_token": "secret-token"},
+                "prompt",
+                "gpt-5.5",
+                "https://example.invalid/api",
+                1,
+                schema_name="raw_memory_extraction",
+                json_schema=schema,
+            )
+
+        self.assertEqual(payload, {"decision": "reject"})
+        self.assertEqual(captured["url"], "https://example.invalid/api/responses")
+        self.assertEqual(
+            captured["body"]["text"]["format"],
+            {
+                "type": "json_schema",
+                "name": "raw_memory_extraction",
+                "strict": True,
+                "schema": schema,
+            },
+        )
+        self.assertTrue(captured["body"]["stream"])
+        self.assertFalse(captured["body"]["store"])
+        self.assertNotIn("secret-token", json.dumps(captured["body"]))
+
+    def test_call_codex_structured_json_parse_error_is_bounded_and_token_free(self):
+        def fake_urlopen(request, timeout):
+            return FakeUrlopenResponse(
+                [json.dumps({"output_text": "not json " + ("x" * 800)}).encode("utf-8")],
+                headers={"content-type": "application/json"},
+            )
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            with self.assertRaises(CodexApiError) as context:
+                call_codex_structured_json(
+                    {"access_token": "secret-token"},
+                    "prompt",
+                    "gpt-5.5",
+                    "https://example.invalid/api",
+                    1,
+                    schema_name="raw_memory_extraction",
+                    json_schema={"type": "object"},
+                )
+
+        message = str(context.exception)
+        self.assertIn("failed to parse structured JSON response", message)
+        self.assertNotIn("secret-token", message)
+        self.assertLess(len(message), 700)
+
+    def test_call_codex_responses_raw_salvages_partial_sse_on_incomplete_read(self):
+        request_body = {
+            "model": "gpt-5.5",
+            "input": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "name": "finish", "parameters": {"type": "object"}}],
+            "stream": True,
+            "store": False,
+        }
+        partial = b'data: {"type":"response.completed","response":{"id":"resp-partial"}}\n'
+
+        def fake_urlopen(_request, timeout):
+            return FakeUrlopenResponse(
+                [],
+                headers={"content-type": "text/event-stream"},
+                readline_side_effects=[
+                    b'data: {"type":"response.created","response":{"id":"resp-partial"}}\n',
+                    http.client.IncompleteRead(partial=partial),
+                ],
+            )
+
+        with patch("mew.codex_api.urllib.request.urlopen", side_effect=fake_urlopen):
+            raw, content_type = call_codex_responses_raw(
+                {"access_token": "token"},
+                request_body,
+                "https://example.invalid/api",
+                1,
+            )
+
+        self.assertEqual(content_type, "text/event-stream")
+        self.assertIn("response.created", raw)
+        self.assertIn("response.completed", raw)
 
     def test_call_codex_web_api_sends_image_inputs(self):
         captured = {}
@@ -560,6 +720,15 @@ class CodexApiTests(unittest.TestCase):
                     5,
                 )
 
+    def test_extract_json_object_accepts_valid_object_before_trailing_text(self):
+        payload = extract_json_object('{"summary":"ok","tool_calls":[]} trailing note {"ignored": true}')
+
+        self.assertEqual(payload, {"summary": "ok", "tool_calls": []})
+
+    def test_extract_json_object_does_not_skip_malformed_outer_object_for_nested_object(self):
+        with self.assertRaisesRegex(CodexApiError, "response did not contain valid JSON object"):
+            extract_json_object('{"summary": {"nested": true} trailing')
+
     def test_call_codex_web_api_enforces_total_timeout_while_streaming(self):
         lines = [
             sse_line({"type": "response.output_text.delta", "delta": "hel"}),
@@ -593,7 +762,7 @@ class CodexApiTests(unittest.TestCase):
             readline_side_effects=[socket.timeout("idle")],
         )
         with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
-            with patch("mew.codex_api.time.monotonic", side_effect=[0.0, 0.0]):
+            with patch("mew.codex_api.time.monotonic", side_effect=[0.0, 0.0, 0.0]):
                 with self.assertRaisesRegex(CodexApiError, "request timed out"):
                     call_codex_web_api(
                         {"access_token": "token"},
@@ -605,6 +774,25 @@ class CodexApiTests(unittest.TestCase):
                     )
 
         self.assertEqual(deltas, [])
+
+    def test_call_codex_web_api_hard_deadline_interrupts_blocked_stream_read(self):
+        class BlockingReadResponse(FakeUrlopenResponse):
+            def readline(self):
+                handler = signal.getsignal(signal.SIGALRM)
+                handler(signal.SIGALRM, None)
+                return b""
+
+        response = BlockingReadResponse([], headers={"content-type": "text/event-stream"})
+
+        with patch("mew.codex_api.urllib.request.urlopen", return_value=response):
+            with self.assertRaisesRegex(CodexApiError, "request timed out"):
+                call_codex_web_api(
+                    {"access_token": "token"},
+                    "prompt",
+                    "model",
+                    "https://example.invalid",
+                    45,
+                )
 
     def test_call_codex_web_api_enforces_timeout_when_keepalives_arrive_without_deltas(self):
         deltas = []
@@ -655,7 +843,7 @@ class CodexApiTests(unittest.TestCase):
         self.assertEqual(text, "ok")
         self.assertEqual(deltas, ["ok"])
         self.assertEqual(captured["timeout"], 45)
-        self.assertEqual(response.socket_timeouts, [45.0, 44.0, 43.5])
+        self.assertEqual(response.socket_timeouts, [44.0, 43.5, 43.0])
 
     def test_call_codex_web_api_wraps_timed_out_response_reader_oserror(self):
         response = FakeUrlopenResponse(

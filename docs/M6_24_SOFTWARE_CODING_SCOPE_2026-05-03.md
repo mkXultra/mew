@@ -53,6 +53,9 @@ explicitly promotes a BuildOrchestrationLane benchmark.
 ## Controller Update
 
 - Rebaseline M6.24 against only these 25 tasks.
+- Current active rebaseline is `implement_v2`; use
+  `docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md` for task queue state and
+  v2 evidence.
 - Compare mew against frozen Codex `0.121.0` / `gpt-5.5@openai` targets for the
   same 25 tasks and trial counts.
 - Select the next improvement target from an in-scope task or a generic repair

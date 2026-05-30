@@ -4,6 +4,7 @@ from mew.acceptance import (
     coerce_acceptance_checks,
     exact_command_example_requirements,
     extract_acceptance_constraints,
+    finish_continuation_prompt,
     implementation_contract_source_requirements,
     is_long_dependency_toolchain_build_task,
     is_model_inference_output_task,
@@ -11,8 +12,1283 @@ from mew.acceptance import (
     is_query_only_hidden_model_task,
     is_runtime_visual_artifact_task,
     long_dependency_final_artifacts,
+    runtime_component_finish_gate_decision,
 )
 from mew.acceptance_evidence import long_dependency_artifact_proven_by_call
+from mew.implement_lane.execution_evidence import (
+    DoneDecision,
+    EvidenceEvent,
+    FinishClaim,
+    OracleBundle,
+    OracleObligation,
+    evidence_events_from_tool_payload,
+    recommend_finish_evidence_refs,
+    resolve_typed_finish,
+)
+
+
+def test_resolve_typed_finish_returns_neutral_without_oracle_bundle():
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:artifact:frame"},)),
+        None,
+        (EvidenceEvent(id="ev:artifact:frame", kind="artifact_check", status="passed", observed={"path": "frame.bmp"}),),
+    )
+
+    assert isinstance(decision, DoneDecision)
+    assert decision.decision == "no_typed_decision"
+    assert decision.gate_source == "none"
+
+
+def test_resolve_typed_finish_blocks_completed_finish_without_refs():
+    bundle = OracleBundle(
+        id="oracle:bundle:frame",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+        ),
+    )
+
+    decision = resolve_typed_finish(FinishClaim(outcome="completed"), bundle, ())
+
+    assert decision.decision == "block_continue"
+    assert decision.gate_source == "typed_evidence"
+    assert decision.missing_obligations
+    assert "typed evidence" in decision.continuation_prompt
+    assert "frame.bmp" in decision.continuation_prompt
+
+
+def test_resolve_typed_finish_allows_cited_passing_artifact_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:frame",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.bmp", "status": "passed"},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:artifact:frame"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "allow_complete"
+    assert decision.gate_source == "typed_evidence"
+
+
+def test_resolve_typed_finish_invalid_refs_report_only_uncovered_obligations():
+    bundle = OracleBundle(
+        id="oracle:bundle:multi",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+            OracleObligation(
+                id="oracle:log:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "log", "path": "/tmp/run.log"},
+                expected={"exists": True},
+                source="test",
+            ),
+        ),
+    )
+    frame_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {"kind": "evidence_event", "id": "ev:artifact:frame"},
+                {"kind": "evidence_event", "id": "missing-ref"},
+            ),
+        ),
+        bundle,
+        (frame_event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert any(ref["id"] == "missing-ref" for ref in decision.invalid_evidence_refs)
+    assert "/tmp/run.log" in decision.continuation_prompt
+    assert "/tmp/frame.bmp" not in decision.continuation_prompt
+
+
+def test_resolve_typed_finish_allows_redundant_invalid_ref_when_obligations_are_covered():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:verifier:run",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        provider_call_id="call_verify_1",
+        refs=(
+            {"kind": "verifier_evidence", "id": "verifier:run"},
+            {
+                "kind": "typed_evidence_ref",
+                "id": "implement-v2-evidence://attempt/verifier_evidence/verifier-run",
+            },
+        ),
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {
+                    "kind": "evidence_event",
+                    "id": "implement-v2-evidence://attempt/verifier_evidence/verifier-run",
+                },
+                {"kind": "evidence_event", "id": "/mew/proof-artifacts/truncated"},
+            ),
+        ),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_accepts_provider_tool_result_alias_for_verifier_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:verifier:run",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        provider_call_id="call_verify_1",
+        refs=({"kind": "verifier_evidence", "id": "verifier:run"},),
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=({"kind": "evidence_event", "id": "tool-result:call_verify_1"},),
+        ),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_tool_payload_typed_ref_alias_resolves_to_verifier_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    payload_ref = "implement-v2-evidence://attempt/tool_run_record/tool-run-record-call-verify"
+    events = evidence_events_from_tool_payload(
+        tool_index=1,
+        tool_name="run_tests",
+        tool_status="completed",
+        provider_call_id="call_verify_1",
+        payload={
+            "evidence_refs": [payload_ref],
+            "tool_run_record": {
+                "record_id": "tool-run-record:verify",
+                "command_run_id": "command-run:verify",
+                "provider_call_id": "call_verify_1",
+                "status": "completed",
+                "exit_code": 0,
+            },
+            "verifier_evidence": {
+                "verifier_id": "verifier:run",
+                "contract_id": "contract:verify",
+                "verdict": "pass",
+            },
+            "failure_classification": {
+                "classification_id": "failure:unknown",
+                "failure_class": "unknown_failure",
+                "phase": "unknown",
+                "kind": "unknown_failure",
+            },
+        },
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": payload_ref},)),
+        bundle,
+        events,
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_tool_payload_route_typed_ref_alias_resolves_to_verifier_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    route_ref = "implement-v2-evidence://attempt/command_run/command-run-verify"
+    failure_ref = "implement-v2-evidence://attempt/failure_classification/failure-unknown"
+    finish_gate_ref = "implement-v2-evidence://attempt/structured_finish_gate/gate-verify"
+    events = evidence_events_from_tool_payload(
+        tool_index=1,
+        tool_name="run_tests",
+        tool_status="completed",
+        provider_call_id="call_verify_1",
+        payload={
+            "tool_route_decision": {"typed_evidence_refs": [route_ref, failure_ref, finish_gate_ref]},
+            "tool_run_record": {
+                "record_id": "tool-run-record:verify",
+                "command_run_id": "command-run:verify",
+                "provider_call_id": "call_verify_1",
+                "status": "completed",
+                "exit_code": 0,
+            },
+            "verifier_evidence": {
+                "verifier_id": "verifier:run",
+                "contract_id": "contract:verify",
+                "verdict": "pass",
+            },
+            "failure_classification": {
+                "classification_id": "failure:unknown",
+                "failure_class": "unknown_failure",
+                "phase": "unknown",
+                "kind": "unknown_failure",
+                "evidence_refs": [{"kind": "typed_evidence_ref", "id": failure_ref}],
+            },
+            "structured_finish_gate": {
+                "blocked": True,
+                "evidence_refs": [{"kind": "typed_evidence_ref", "id": finish_gate_ref}],
+            },
+        },
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": route_ref},)),
+        bundle,
+        events,
+    )
+
+    assert decision.decision == "allow_complete"
+
+    failure_decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": failure_ref},)),
+        bundle,
+        events,
+    )
+    finish_gate_decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": finish_gate_ref},)),
+        bundle,
+        events,
+    )
+
+    assert failure_decision.decision != "allow_complete"
+    assert finish_gate_decision.decision != "allow_complete"
+
+
+def test_tool_payload_tool_result_alias_resolves_to_covering_verifier_not_unknown_failure():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"verifier_id": "verifier:run"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    events = evidence_events_from_tool_payload(
+        tool_index=1,
+        tool_name="run_tests",
+        tool_status="completed",
+        provider_call_id="call_verify_1",
+        payload={
+            "tool_run_record": {
+                "record_id": "tool-run-record:verify",
+                "command_run_id": "command-run:verify",
+                "provider_call_id": "call_verify_1",
+                "status": "completed",
+                "exit_code": 0,
+            },
+            "verifier_evidence": {
+                "verifier_id": "verifier:run",
+                "contract_id": "contract:verify",
+                "verdict": "pass",
+            },
+            "failure_classification": {
+                "classification_id": "failure:unknown",
+                "failure_class": "unknown_failure",
+                "phase": "unknown",
+                "kind": "unknown_failure",
+            },
+        },
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "tool-result:call_verify_1"},)),
+        bundle,
+        events,
+    )
+    bare_provider_decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "call_verify_1"},)),
+        bundle,
+        events,
+    )
+
+    assert decision.decision == "allow_complete"
+    assert bare_provider_decision.decision == "allow_complete"
+
+
+def test_finish_alias_prefers_passing_closeout_over_same_command_yielded_verifier():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    yielded = EvidenceEvent(
+        id="ev:verifier:yielded",
+        kind="verifier_result",
+        status="unknown",
+        observed={"verdict": "unknown"},
+        contract_id="contract:verify",
+        provider_call_id="verify-1",
+        command_run_id="command-run:verify",
+        refs=({"kind": "verifier_evidence", "id": "verifier:yielded"},),
+    )
+    closeout = EvidenceEvent(
+        id="ev:verifier:closeout",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        contract_id="contract:verify",
+        provider_call_id="call-active-command-closeout-002",
+        command_run_id="command-run:verify",
+        refs=({"kind": "verifier_evidence", "id": "verifier:closeout"},),
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "command-run:verify"},)),
+        bundle,
+        (yielded, closeout),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_finish_alias_prefers_latest_same_logical_verifier_event():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:run",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    yielded = EvidenceEvent(
+        id="ev:verifier:contract:verify",
+        kind="verifier_result",
+        status="unknown",
+        observed={"verdict": "unknown"},
+        contract_id="contract:verify",
+        provider_call_id="verify-1",
+        command_run_id="command-run:verify",
+        refs=({"kind": "verifier_evidence", "id": "verifier:contract:verify"},),
+    )
+    closeout = EvidenceEvent(
+        id="ev:verifier:contract:verify",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        contract_id="contract:verify",
+        provider_call_id="call-active-command-closeout-002",
+        command_run_id="command-run:verify",
+        refs=({"kind": "verifier_evidence", "id": "verifier:contract:verify"},),
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:verifier:contract:verify"},)),
+        bundle,
+        (yielded, closeout),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_does_not_cross_satisfy_source_grounding():
+    bundle = OracleBundle(
+        id="oracle:bundle:source",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:source:b",
+                kind="source_grounding",
+                subject={"path": "src/b.py"},
+                expected={"grounded": True},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:source:a",
+        kind="source_grounding",
+        status="passed",
+        observed={"path": "src/a.py", "grounded": True},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:source:a"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.missing_obligations
+
+
+def test_resolve_typed_finish_does_not_cross_satisfy_verifier_contracts():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:b",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:b"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:verifier:a",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:a"},
+        contract_id="contract:a",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:verifier:a"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.missing_obligations
+
+
+def test_resolve_typed_finish_rejects_visual_similarity_without_oracle_measurement():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"missing_reference": True},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:oracle:frame",
+        kind="oracle_check",
+        status="passed",
+        observed={"kind": "visual_similarity", "artifact_id": "frame", "candidate_path": "frame.bmp"},
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:oracle:frame"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.missing_obligations
+
+
+def test_resolve_typed_finish_rejects_candidate_derived_visual_similarity():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:oracle:frame",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "model_authored"},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:oracle:frame"},)),
+        bundle,
+        (event,),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.missing_obligations
+
+
+def test_resolve_typed_finish_rejects_candidate_visual_pass_after_visual_failure():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+                source="test",
+            ),
+        ),
+    )
+    trusted_pass = EvidenceEvent(
+        id="ev:oracle:trusted",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    failed_oracle = EvidenceEvent(
+        id="ev:oracle:failed",
+        kind="oracle_check",
+        status="failed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.5,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    candidate_pass = EvidenceEvent(
+        id="ev:oracle:candidate",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "model_authored"},
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {"kind": "evidence_event", "id": "ev:oracle:trusted"},
+                {"kind": "evidence_event", "id": "ev:oracle:candidate"},
+            ),
+        ),
+        bundle,
+        (trusted_pass, failed_oracle, candidate_pass),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.failed_evidence_refs
+
+
+def test_resolve_typed_finish_ignores_superseding_failure_for_other_verifier_contract():
+    bundle = OracleBundle(
+        id="oracle:bundle:verifier",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:verifier:a",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:a"},
+                expected={"verdict": "pass"},
+                source="test",
+            ),
+        ),
+    )
+    pass_event = EvidenceEvent(
+        id="ev:verifier:a:pass",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:a"},
+        contract_id="contract:a",
+    )
+    other_failure = EvidenceEvent(
+        id="ev:verifier:b:fail",
+        kind="verifier_result",
+        status="failed",
+        observed={"verdict": "fail", "contract_id": "contract:b"},
+        contract_id="contract:b",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:verifier:a:pass"},)),
+        bundle,
+        (pass_event, other_failure),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_rejects_artifact_pass_superseded_by_same_contract_verifier_failure():
+    bundle = OracleBundle(
+        id="oracle:bundle:artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.txt"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+    failed_verifier = EvidenceEvent(
+        id="ev:verifier:verify",
+        kind="verifier_result",
+        status="failed",
+        observed={"verdict": "fail"},
+        contract_id="contract:verify",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(outcome="completed", evidence_refs=({"kind": "evidence_event", "id": "ev:artifact:frame"},)),
+        bundle,
+        (artifact_event, failed_verifier),
+    )
+
+    assert decision.decision == "block_continue"
+    assert decision.failed_evidence_refs
+
+
+def test_resolve_typed_finish_uses_latest_artifact_cover_after_same_contract_retry():
+    bundle = OracleBundle(
+        id="oracle:bundle:artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.txt"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    first_artifact = EvidenceEvent(
+        id="ev:artifact:first",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+    failed_verifier = EvidenceEvent(
+        id="ev:verifier:first",
+        kind="verifier_result",
+        status="failed",
+        observed={"verdict": "fail"},
+        contract_id="contract:verify",
+    )
+    latest_artifact = EvidenceEvent(
+        id="ev:artifact:latest",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+    latest_verifier = EvidenceEvent(
+        id="ev:verifier:latest",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        contract_id="contract:verify",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {"kind": "evidence_event", "id": "ev:artifact:first"},
+                {"kind": "evidence_event", "id": "ev:artifact:latest"},
+                {"kind": "evidence_event", "id": "ev:verifier:latest"},
+            ),
+        ),
+        bundle,
+        (first_artifact, failed_verifier, latest_artifact, latest_verifier),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_recommend_finish_evidence_refs_selects_late_covering_events():
+    bundle = OracleBundle(
+        id="oracle:bundle:late-artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+            OracleObligation(
+                id="oracle:contract:verify:verifier_pass",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    early_events = tuple(
+        EvidenceEvent(
+            id=f"ev:artifact:early:{index}",
+            kind="artifact_check",
+            status="passed",
+            observed={"artifact_id": f"early-{index}", "path": f"early-{index}.txt"},
+            contract_id=f"contract:early:{index}",
+        )
+        for index in range(20)
+    )
+    latest_artifact = EvidenceEvent(
+        id="ev:artifact:late-frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.bmp"},
+        contract_id="contract:verify",
+    )
+    latest_verifier = EvidenceEvent(
+        id="ev:verifier:late-pass",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:verify"},
+        contract_id="contract:verify",
+    )
+
+    refs = recommend_finish_evidence_refs(bundle, (*early_events, latest_artifact, latest_verifier), limit=16)
+
+    assert {"kind": "evidence_event", "id": "ev:artifact:late-frame"} in refs
+    assert {"kind": "evidence_event", "id": "ev:verifier:late-pass"} in refs
+    assert len(refs) <= 16
+    decision = resolve_typed_finish(FinishClaim(outcome="completed", evidence_refs=refs), bundle, (*early_events, latest_artifact, latest_verifier))
+    assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_accepts_string_evidence_refs():
+    bundle = OracleBundle(
+        id="oracle:bundle:artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.txt"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+
+    decision = resolve_typed_finish(
+        {"outcome": "completed", "evidence_refs": ["ev:artifact:frame"]},
+        bundle,
+        (artifact_event,),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_accepts_command_run_id_alias_for_covering_events():
+    bundle = OracleBundle(
+        id="oracle:bundle:runtime-frame",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="execution_contract",
+            ),
+            OracleObligation(
+                id="oracle:contract:verify:verifier_pass",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="execution_contract",
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.bmp"},
+        refs=({"kind": "command_run", "id": "cmd:final-verifier"},),
+        contract_id="contract:verify",
+        command_run_id="cmd:final-verifier",
+    )
+    verifier_event = EvidenceEvent(
+        id="ev:verifier:final",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:verify"},
+        refs=({"kind": "command_run", "id": "cmd:final-verifier"},),
+        contract_id="contract:verify",
+        command_run_id="cmd:final-verifier",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=({"kind": "command_run", "id": "cmd:final-verifier"},),
+        ),
+        bundle,
+        (artifact_event, verifier_event),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_resolve_typed_finish_accepts_provider_call_alias_embedded_in_command_run_id():
+    command_run_id = "1:1:implement_v2:native:command:call_FinalVerifier-344e5304"
+    bundle = OracleBundle(
+        id="oracle:bundle:runtime-frame",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.bmp"},
+                expected={"exists": True},
+                source="execution_contract",
+            ),
+            OracleObligation(
+                id="oracle:contract:verify:verifier_pass",
+                kind="verifier_pass",
+                subject={"contract_id": "contract:verify"},
+                expected={"verdict": "pass"},
+                source="execution_contract",
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.bmp"},
+        contract_id="contract:verify",
+        command_run_id=command_run_id,
+    )
+    verifier_event = EvidenceEvent(
+        id="ev:verifier:final",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass", "contract_id": "contract:verify"},
+        contract_id="contract:verify",
+        command_run_id=command_run_id,
+    )
+
+    decision = resolve_typed_finish(
+        {"outcome": "completed", "evidence_refs": ["call_FinalVerifier"]},
+        bundle,
+        (artifact_event, verifier_event),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_finish_continuation_prompt_points_visual_quality_to_task_verifiers():
+    prompt = finish_continuation_prompt(
+        [
+            "runtime visual artifact quality evidence ungrounded: artifact existence, "
+            "nonzero pixels, valid headers, or self-consistent dimensions are not enough"
+        ]
+    )
+
+    assert "task-provided verifier/test/reference artifacts" in prompt
+    assert "expected-output markers" in prompt
+    assert "Do not rely on artifact existence" in prompt
+
+
+def test_resolve_typed_finish_allows_latest_same_contract_verifier_pass_after_failure():
+    bundle = OracleBundle(
+        id="oracle:bundle:artifact",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:contract:verify:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "frame.txt"},
+                expected={"exists": True},
+                source="execution_contract",
+                provenance_refs=({"kind": "execution_contract", "id": "contract:verify"},),
+            ),
+        ),
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "frame.txt"},
+        contract_id="contract:verify",
+    )
+    failed_verifier = EvidenceEvent(
+        id="ev:verifier:first",
+        kind="verifier_result",
+        status="failed",
+        observed={"verdict": "fail"},
+        contract_id="contract:verify",
+    )
+    latest_verifier = EvidenceEvent(
+        id="ev:verifier:latest",
+        kind="verifier_result",
+        status="passed",
+        observed={"verdict": "pass"},
+        contract_id="contract:verify",
+    )
+
+    decision = resolve_typed_finish(
+        FinishClaim(
+            outcome="completed",
+            evidence_refs=(
+                {"kind": "evidence_event", "id": "ev:artifact:frame"},
+                {"kind": "evidence_event", "id": "ev:verifier:latest"},
+            ),
+        ),
+        bundle,
+        (artifact_event, failed_verifier, latest_verifier),
+    )
+
+    assert decision.decision == "allow_complete"
+
+
+def test_acceptance_done_gate_allows_typed_retired_runtime_visual_family():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:oracle:frame",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "/tmp/frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        obligation_id="oracle:frame:exists",
+        refs=({"kind": "tool_call", "id": "verify-frame"},),
+        provenance={"source": "verifier_evidence"},
+    )
+    decision = acceptance_done_gate_decision(
+        (
+            "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+            "I will check that the first rendered frame is correct."
+        ),
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [
+                {"kind": "evidence_event", "id": "ev:artifact:frame"},
+                {"kind": "evidence_event", "id": "ev:oracle:frame"},
+            ],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": bundle.as_dict(),
+                "evidence_events": [artifact_event.as_dict(), event.as_dict()],
+                "retired_legacy_blockers": [
+                    "runtime_final_verifier_artifact_evidence",
+                    "runtime_visual_artifact_quality_evidence",
+                ],
+            }
+        },
+    )
+
+    assert decision["decision"] == "allow_complete"
+    assert decision["gate_source"] == "typed_evidence"
+    assert decision["legacy_warnings"]
+
+
+def test_acceptance_done_gate_keeps_legacy_block_when_typed_family_not_retired():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+            OracleObligation(
+                id="oracle:frame:visual_similarity",
+                kind="visual_similarity",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"reference_path": "/tmp/target.png", "threshold": 0.95, "comparator": ">="},
+                source="test",
+            ),
+        ),
+    )
+    event = EvidenceEvent(
+        id="ev:oracle:frame",
+        kind="oracle_check",
+        status="passed",
+        observed={
+            "kind": "visual_similarity",
+            "artifact_id": "frame",
+            "candidate_path": "/tmp/frame.bmp",
+            "reference_path": "/tmp/target.png",
+            "score": 0.99,
+            "threshold": 0.95,
+        },
+        obligation_id="oracle:frame:visual_similarity",
+        oracle_id="oracle:frame:visual_similarity",
+        provenance={"source": "verifier_evidence"},
+    )
+    artifact_event = EvidenceEvent(
+        id="ev:artifact:frame",
+        kind="artifact_check",
+        status="passed",
+        observed={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+        obligation_id="oracle:frame:exists",
+        refs=({"kind": "tool_call", "id": "verify-frame"},),
+        provenance={"source": "verifier_evidence"},
+    )
+
+    decision = acceptance_done_gate_decision(
+        (
+            "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+            "I will check that the first rendered frame is correct."
+        ),
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [
+                {"kind": "evidence_event", "id": "ev:artifact:frame"},
+                {"kind": "evidence_event", "id": "ev:oracle:frame"},
+            ],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": bundle.as_dict(),
+                "evidence_events": [artifact_event.as_dict(), event.as_dict()],
+            }
+        },
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["gate_source"] == "legacy_string_safety"
+    assert decision["blockers"][0]["code"] == "runtime_final_verifier_artifact_evidence"
+
+
+def test_acceptance_done_gate_continuation_keeps_legacy_artifact_path_when_typed_blocks_first():
+    bundle = OracleBundle(
+        id="oracle:bundle:visual",
+        source="test",
+        obligations=(
+            OracleObligation(
+                id="oracle:frame:exists",
+                kind="artifact_exists",
+                subject={"artifact_id": "frame", "path": "/tmp/frame.bmp"},
+                expected={"exists": True},
+                source="test",
+            ),
+        ),
+    )
+
+    decision = acceptance_done_gate_decision(
+        (
+            "Run the VM so it saves rendered frames to /tmp/frame.bmp. "
+            "The final verifier checks that /tmp/frame.bmp exists."
+        ),
+        {
+            "type": "finish",
+            "task_done": True,
+            "evidence_refs": [{"kind": "evidence_event", "id": "missing-ref"}],
+        },
+        session={
+            "typed_acceptance": {
+                "oracle_bundle": bundle.as_dict(),
+                "evidence_events": [],
+            }
+        },
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["gate_source"] == "typed_evidence"
+    assert any(blocker["code"] == "invalid_typed_evidence_ref" for blocker in decision["blockers"])
+    assert any(blocker["code"] == "runtime_final_verifier_artifact_evidence" for blocker in decision["blockers"])
+    assert "invalid evidence ref missing-ref" in decision["continuation_prompt"]
+    assert "/tmp/frame.bmp" in decision["continuation_prompt"]
+    assert "runtime final verifier artifact evidence missing" in decision["continuation_prompt"]
+    assert "deterministic done gate" in decision["continuation_prompt"]
 
 
 def test_extract_acceptance_constraints_keeps_output_and_edit_scope_rules():
@@ -73,7 +1349,7 @@ def test_acceptance_finish_blocker_rejects_stateful_output_relabel_only():
                 "result": {
                     "stdout": "PASS: asserted live desk label appears in the speech bubble.",
                 },
-            }
+            },
         ]
     }
 
@@ -153,6 +1429,521 @@ def test_acceptance_finish_blocker_accepts_runtime_component_behavior_proof():
     }
 
     assert acceptance_finish_blocker(text, action, session=session) == ""
+
+
+def test_runtime_component_finish_gate_accepts_targeted_component_test_ref():
+    text = "The native module should work in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #21 ran the targeted component test.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 21}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 21,
+                "tool": "run_tests",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "pytest tests/test_runtime_component.py::test_component_behavior",
+                "output_tail": "repository-test-tail targeted component test passed\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_rejects_failed_poll_command_behavior_ref():
+    text = "The generated executable should run in its runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runtime behavior",
+                "status": "verified",
+                "evidence": "Tool #9 executed the runtime behavior smoke.",
+                "evidence_refs": [{"kind": "tool_call", "id": 9}],
+            }
+        ],
+    }
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "poll_command",
+                "status": "completed",
+                "parameters": {
+                    "command_run_id": "cmd-1",
+                    "command": "./dist/tool --smoke",
+                    "execution_contract": {
+                        "stage": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+                "result": {
+                    "status": "failed",
+                    "exit_code": 1,
+                    "timed_out": False,
+                    "stderr": "execution smoke failed\n",
+                },
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_rejects_attribute_access_only():
+    text = "The native module should work in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #22 checked the module has the behavior attribute.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 22}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 22,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(hasattr(native_module, \"behavior\"))'",
+                "output_tail": "True\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_rejects_import_only_run_tests():
+    text = "The native module should run in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module runtime behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #23 ran an import test.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 23}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 23,
+                "tool": "run_tests",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "pytest tests/test_runtime_component.py::test_import_runtime_component",
+                "output_tail": "test_import_runtime_component passed; imported module path /tmp/native_module.so\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_rejects_verifier_labeled_path_probe():
+    text = "The native module should execute in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module runtime behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #24 ran the verifier-labeled command.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 24}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 24,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(native_module.__file__)'",
+                "execution_contract": {"acceptance_kind": "external_verifier", "proof_role": "verifier"},
+                "output_tail": "external verifier path proof passed: /tmp/native_module.so\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_rejects_verifier_labeled_hasattr_probe():
+    text = "The native module should execute in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module runtime behavior proof",
+                "status": "verified",
+                "evidence": "Command evidence #25 ran the verifier-labeled command.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 25}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 25,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(hasattr(native_module, \"behavior\"))'",
+                "execution_contract": {"acceptance_kind": "external_verifier", "proof_role": "verifier"},
+                "output_tail": "external verifier behavior attribute exists: True\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_blocks_generated_executable_path_until_execution_smoke():
+    text = "The generated executable should run from the repository runtime context."
+    path_only_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #26 proved the executable path exists.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 26}],
+            }
+        ],
+    }
+    smoke_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #27 executed the smoke path.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 27}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 26,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "test -x dist/tool && echo executable path exists",
+                "output_tail": "executable path exists\n",
+            },
+            {
+                "id": 27,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "./dist/tool --smoke",
+                "output_tail": "execution smoke passed\n",
+            },
+        ]
+    }
+
+    blocked = runtime_component_finish_gate_decision(text, path_only_action, session=session)
+    allowed = runtime_component_finish_gate_decision(text, smoke_action, session=session)
+
+    assert blocked["decision"] == "block_continue"
+    assert blocked["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+    assert allowed["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_blocks_non_behavior_entrypoint_shapes():
+    text = "The generated executable should run from the repository runtime context."
+    blocked_commands = [
+        ("python setup.py build", "build completed\n"),
+        ("python -m build", "wheel built\n"),
+        ("python -m pip install .", "installed package\n"),
+        ("node build.js", "build script completed\n"),
+        ("./configure", "configured successfully\n"),
+        ("./dist/tool --help", "usage: tool [OPTIONS]\n"),
+        ("./dist/tool --version", "tool 1.2.3\n"),
+        ("python readback.py", "readback matched expected path\n"),
+        ("node list.js", "listing generated files\n"),
+        ("./dist/noop", "no-op completed\n"),
+    ]
+    session = {"command_evidence": []}
+    for offset, (command, output_tail) in enumerate(blocked_commands, start=40):
+        session["command_evidence"].append(
+            {
+                "id": offset,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": command,
+                "output_tail": output_tail,
+            }
+        )
+
+    for offset, (command, _output_tail) in enumerate(blocked_commands, start=40):
+        action = {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Generated executable runs.",
+                    "status": "verified",
+                    "evidence": f"Command evidence #{offset} ran {command}.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": offset}],
+                }
+            ],
+        }
+        decision = runtime_component_finish_gate_decision(text, action, session=session)
+        assert decision["decision"] == "block_continue", command
+        assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_accepts_explicit_callable_with_neutral_output():
+    text = "The native module should run in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Native module runtime behavior proof.",
+                "status": "verified",
+                "evidence": "Command evidence #60 invoked native_module.run().",
+                "evidence_refs": [{"kind": "command_evidence", "id": 60}],
+            }
+        ],
+    }
+    session = {
+        "command_evidence": [
+            {
+                "id": 60,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python -c 'import native_module; print(native_module.run())'",
+                "output_tail": "ok\n",
+            }
+        ]
+    }
+
+    decision = runtime_component_finish_gate_decision(text, action, session=session)
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_rejects_claim_text_only_entrypoint_behavior_signal():
+    text = "The generated executable should run from the repository runtime context."
+    session = {
+        "command_evidence": [
+            {
+                "id": 70,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "./dist/tool",
+                "output_tail": "hello world\n",
+            },
+            {
+                "id": 71,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "python script.py",
+                "output_tail": "42\n",
+            },
+            {
+                "id": 72,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": "./dist/tool --smoke",
+                "output_tail": "execution smoke passed\n",
+            },
+        ]
+    }
+
+    spoofed_tool_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #70 ran the runtime component to verify behavior.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 70}],
+            }
+        ],
+    }
+    spoofed_script_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #71 ran successfully; behavior executed; runtime smoke passed.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 71}],
+            }
+        ],
+    }
+    objective_smoke_action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Generated executable runs.",
+                "status": "verified",
+                "evidence": "Command evidence #72 completed.",
+                "evidence_refs": [{"kind": "command_evidence", "id": 72}],
+            }
+        ],
+    }
+
+    blocked_tool = runtime_component_finish_gate_decision(text, spoofed_tool_action, session=session)
+    blocked_script = runtime_component_finish_gate_decision(text, spoofed_script_action, session=session)
+    allowed_smoke = runtime_component_finish_gate_decision(text, objective_smoke_action, session=session)
+
+    assert blocked_tool["decision"] == "block_continue"
+    assert blocked_tool["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+    assert blocked_script["decision"] == "block_continue"
+    assert blocked_script["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+    assert allowed_smoke["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_rejects_loader_api_calls_as_behavior():
+    text = "The shared library runtime component should run in its original runtime context."
+    blocked_commands = [
+        "python -c 'import ctypes; ctypes.CDLL(\"libx.so\")'",
+        "python -c 'import ctypes; ctypes.cdll.LoadLibrary(\"libx.so\")'",
+        "python -c 'ffi.dlopen(\"libx.so\")'",
+        "python -c 'import importlib; importlib.import_module(\"native_module\")'",
+        "python -c 'loader.load_library(\"libx\", \".\")'",
+    ]
+    session = {"command_evidence": []}
+    for offset, command in enumerate(blocked_commands, start=80):
+        session["command_evidence"].append(
+            {
+                "id": offset,
+                "tool": "run_command",
+                "terminal_success": True,
+                "status": "completed",
+                "exit_code": 0,
+                "command": command,
+                "output_tail": "loaded\n",
+            }
+        )
+
+    for offset, command in enumerate(blocked_commands, start=80):
+        action = {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Shared library runtime behavior proof.",
+                    "status": "verified",
+                    "evidence": f"Command evidence #{offset} loaded and invoked {command}.",
+                    "evidence_refs": [{"kind": "command_evidence", "id": offset}],
+                }
+            ],
+        }
+        decision = runtime_component_finish_gate_decision(text, action, session=session)
+        assert decision["decision"] == "block_continue", command
+        assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+
+
+def test_runtime_component_finish_gate_allows_pure_documentation_task():
+    decision = runtime_component_finish_gate_decision(
+        "Document how the runtime component interpreter works in README.md.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "README explains the interpreter.",
+                    "status": "verified",
+                    "evidence": "Read the updated README.",
+                }
+            ],
+        },
+        session={},
+    )
+
+    assert decision["decision"] == "allow_complete"
+
+
+def test_runtime_component_finish_gate_allows_no_change_investigation_task():
+    decision = runtime_component_finish_gate_decision(
+        "Investigate why the native module does not work; report findings only and do not modify source.",
+        {
+            "type": "finish",
+            "task_done": True,
+            "acceptance_checks": [
+                {
+                    "constraint": "Investigation findings are reported.",
+                    "status": "verified",
+                    "evidence": "Summarized the observed failure family.",
+                }
+            ],
+        },
+        session={},
+    )
+
+    assert decision["decision"] == "allow_complete"
 
 
 def test_acceptance_finish_blocker_rejects_runtime_component_behavior_claim_without_tool_proof():
@@ -250,6 +2041,27 @@ def test_acceptance_finish_blocker_rejects_shared_library_load_only_proof():
     blocker = acceptance_finish_blocker(text, action, session=session)
 
     assert "runtime component behavior evidence import-only" in blocker
+
+
+def test_acceptance_done_gate_prechecks_runtime_component_before_evidence_ref_validation():
+    text = "The loadable runtime component should work in its original runtime context."
+    action = {
+        "type": "finish",
+        "task_done": True,
+        "acceptance_checks": [
+            {
+                "constraint": "Behavior proof",
+                "status": "verified",
+                "evidence": "Checked the import path only.",
+            }
+        ],
+    }
+
+    decision = acceptance_done_gate_decision(text, action, session={"tool_calls": []})
+
+    assert decision["decision"] == "block_continue"
+    assert decision["blockers"][0]["code"] == "runtime_component_behavior_evidence"
+    assert decision["blockers"][1]["code"] == "acceptance_evidence_refs_missing"
 
 
 def test_acceptance_finish_blocker_rejects_stateful_output_without_checks():
@@ -597,6 +2409,63 @@ def test_acceptance_finish_blocker_accepts_runtime_artifact_command_evidence_ref
     assert blocker == ""
 
 
+def test_acceptance_finish_blocker_accepts_runtime_artifact_poll_command_ref():
+    text = "A fresh VM run will write /tmp/frame.bmp during execution."
+    checks = [
+        {
+            "constraint": "fresh VM run created /tmp/frame.bmp",
+            "status": "verified",
+            "evidence": "Tool #9 completed the final verifier and created /tmp/frame.bmp.",
+            "evidence_refs": [{"kind": "tool_call", "id": 9}],
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 9,
+                "tool": "poll_command",
+                "status": "completed",
+                "parameters": {
+                    "command_run_id": "cmd-1",
+                    "command": "rm -f /tmp/frame.bmp && node vm.js && test -s /tmp/frame.bmp",
+                    "execution_contract": {
+                        "role": "runtime",
+                        "stage": "verification",
+                        "proof_role": "verifier",
+                        "acceptance_kind": "external_verifier",
+                    },
+                },
+                "result": {
+                    "command": "rm -f /tmp/frame.bmp && node vm.js && test -s /tmp/frame.bmp",
+                    "exit_code": 0,
+                    "timed_out": False,
+                    "stderr": "vm stopped; /tmp/frame.bmp 1024054 bytes (first frame)\n",
+                    "verifier_evidence": {"verdict": "pass"},
+                    "artifact_evidence": [
+                        {
+                            "artifact_id": "/tmp/frame.bmp",
+                            "path": "/tmp/frame.bmp",
+                            "status": "passed",
+                            "blocking": False,
+                        }
+                    ],
+                },
+            },
+            {
+                "id": 10,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp"},
+                "result": {"command": "rm -f /tmp/frame.bmp", "exit_code": 0, "stdout": "removed /tmp/frame.bmp\n"},
+            },
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert blocker == ""
+
+
 def test_acceptance_finish_blocker_rejects_wrong_runtime_artifact_path():
     text = (
         "Implement a MIPS interpreter called vm.js so I can run `node vm.js`. "
@@ -696,6 +2565,112 @@ def test_acceptance_finish_blocker_rejects_runtime_visual_artifact_format_only_e
     assert "runtime visual artifact quality evidence ungrounded" in blocker
 
 
+def test_acceptance_finish_blocker_rejects_runtime_visual_artifact_loose_quality_aliases():
+    text = (
+        "Implement vm.js so I can run `node vm.js`. It should save rendered frames to /tmp/frame.bmp. "
+        "I will check that you booted doom correctly from the first rendered frame."
+    )
+    checks = [
+        {
+            "constraint": "first rendered frame is correct",
+            "status": "verified",
+            "evidence": (
+                "Tool #19 reported exact stdout, expected size, reference, and failed-l2 aliases for /tmp/frame.bmp."
+            ),
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 19,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "node vm.js && python3 weak_frame_claims.py"},
+                "result": {
+                    "command": "node vm.js && python3 weak_frame_claims.py",
+                    "exit_code": 0,
+                    "stdout": (
+                        "exact stdout I_InitGraphics\n"
+                        "expected size 768054\n"
+                        "reference file exists\n"
+                        "similarity failed l2=999.0\n"
+                        "saved /tmp/frame.bmp\n"
+                    ),
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "runtime visual artifact quality evidence ungrounded" in blocker
+
+
+def test_acceptance_finish_blocker_rejects_appropriate_visual_artifact_without_quality_evidence():
+    text = (
+        "I have provided /app/doomgeneric/, the source code to doom. "
+        "I have provided vm.js that will expect a file called doomgeneric_mips and will run it. "
+        "Please build the doomgeneric_mips ELF for me, so that I can run `node vm.js`. "
+        "After running `node vm.js` I expect that stdout will be printed appropriately, "
+        "and frames will be written to /tmp/frame.bmp."
+    )
+    checks = [
+        {
+            "constraint": "provided source tree is grounded",
+            "status": "verified",
+            "evidence": "Tool #23 listed /app/doomgeneric/ and confirmed doomgeneric_img.c exists.",
+        },
+        {
+            "constraint": "node vm.js writes a frame",
+            "status": "verified",
+            "evidence": (
+                "Tool #24 removed /tmp/frame.bmp, ran node vm.js, and proved a valid BMP was created /tmp/frame.bmp; "
+                "tool #25 removed the stale frame."
+            ),
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 23,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "find /app/doomgeneric -maxdepth 2 -type f | head"},
+                "result": {
+                    "command": "find /app/doomgeneric -maxdepth 2 -type f | head",
+                    "exit_code": 0,
+                    "stdout": "/app/doomgeneric/doomgeneric/doomgeneric_img.c\n",
+                },
+            },
+            {
+                "id": 24,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp && node vm.js && python3 inspect_frame.py"},
+                "result": {
+                    "command": "rm -f /tmp/frame.bmp && node vm.js && python3 inspect_frame.py",
+                    "exit_code": 0,
+                    "stdout": (
+                        "doomgeneric_mips: drawing one frame to /tmp/frame.bmp\n"
+                        "created /tmp/frame.bmp by node vm.js: BMP bytes 70 header 424d\n"
+                    ),
+                },
+            },
+            {
+                "id": 25,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {"command": "rm -f /tmp/frame.bmp"},
+                "result": {"command": "rm -f /tmp/frame.bmp", "exit_code": 0, "stdout": "removed /tmp/frame.bmp\n"},
+            },
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert "runtime visual artifact quality evidence ungrounded" in blocker
+
+
 def test_acceptance_finish_blocker_accepts_runtime_visual_artifact_quality_evidence():
     text = (
         "Implement vm.js so I can run `node vm.js`. It should save rendered frames to /tmp/frame.bmp. "
@@ -740,6 +2715,49 @@ def test_acceptance_finish_blocker_accepts_runtime_visual_artifact_quality_evide
     }
 
     assert acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session) == ""
+
+
+def test_acceptance_finish_blocker_does_not_promote_verifier_scratch_transcript_to_runtime_artifact():
+    text = (
+        "Implement vm.js so I can run `node vm.js`. It should save rendered frames. "
+        "I will check that you booted doom correctly from the first rendered frame."
+    )
+    checks = [
+        {
+            "constraint": "first rendered frame is correct",
+            "status": "verified",
+            "evidence": (
+                "Tool #19 confirmed exact stdout I_InitGraphics, expected dimensions 640x400, "
+                "reference similarity, and saved frame000000.bmp."
+            ),
+        }
+    ]
+    session = {
+        "tool_calls": [
+            {
+                "id": 19,
+                "tool": "run_command",
+                "status": "completed",
+                "parameters": {
+                    "command": "rm -f /tmp/vmout.txt frame000000.bmp; node vm.js | tee /tmp/vmout.txt"
+                },
+                "result": {
+                    "command": "rm -f /tmp/vmout.txt frame000000.bmp; node vm.js | tee /tmp/vmout.txt",
+                    "exit_code": 0,
+                    "stdout": (
+                        "I_InitGraphics: framebuffer: x_res: 640, y_res: 400\n"
+                        "saved frame000000.bmp\n"
+                        "FRAME_QUALITY_OK 640x400 reference similarity passed\n"
+                        "grep saved frame000000.bmp /tmp/vmout.txt succeeded\n"
+                    ),
+                },
+            }
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(text, {"type": "finish", "task_done": True, "acceptance_checks": checks}, session=session)
+
+    assert blocker == ""
 
 
 def test_runtime_visual_artifact_task_classifier_requires_quality_language():
@@ -956,6 +2974,47 @@ def test_acceptance_finish_blocker_accepts_post_write_edit_scope_validator():
         )
         == ""
     )
+
+
+def test_acceptance_finish_blocker_rejects_poll_as_post_write_edit_scope_validator():
+    text = (
+        "Ensure the output file exists. The only edits you may make are specified replacements. "
+        "Do not edit config.json."
+    )
+    checks = [
+        {"constraint": "Ensure the output file exists.", "status": "verified", "evidence": "tool #3 passed"},
+        {
+            "constraint": "The only edits you may make are specified replacements.",
+            "status": "verified",
+            "evidence": "Tool #4 poll_command reported the earlier validator completed.",
+        },
+        {
+            "constraint": "Do not edit config.json.",
+            "status": "verified",
+            "evidence": "Tool #4 poll_command reported the earlier validator completed.",
+        },
+    ]
+    session = {
+        "tool_calls": [
+            {"id": 1, "tool": "run_command", "status": "completed"},
+            {"id": 2, "tool": "edit_file", "status": "completed"},
+            {"id": 3, "tool": "run_command", "status": "completed"},
+            {
+                "id": 4,
+                "tool": "poll_command",
+                "status": "completed",
+                "result": {"status": "completed", "exit_code": 0},
+            },
+        ]
+    }
+
+    blocker = acceptance_finish_blocker(
+        text,
+        {"type": "finish", "task_done": True, "acceptance_checks": checks},
+        session=session,
+    )
+
+    assert "edit-scope acceptance evidence ungrounded" in blocker
 
 
 def test_acceptance_finish_blocker_rejects_numeric_single_fit_residual_only():
@@ -5136,3 +7195,117 @@ def test_acceptance_finish_blocker_accepts_cat_command_example_itself():
         )
         == ""
     )
+
+
+def test_compiled_task_contract_blocks_when_typed_obligations_are_missing():
+    decision = acceptance_done_gate_decision(
+        "The output must include a generated frame artifact.",
+        {"task_done": True, "outcome": "completed"},
+        session={"task_contract_compiler": {"status": "compiled"}},
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["gate_source"] == "typed_evidence"
+    assert "compiled task contract produced no typed acceptance obligations" in decision["reason"]
+
+
+def test_compiled_task_contract_uses_typed_gate_instead_of_legacy_string_constraints():
+    session = {
+        "task_contract_compiler": {"status": "compiled"},
+        "typed_acceptance": {
+            "oracle_bundle": {
+                "schema_version": 1,
+                "id": "oracle:bundle:test",
+                "source": "test",
+                "obligations": [
+                    {
+                        "schema_version": 1,
+                        "id": "oracle:verifier:any",
+                        "kind": "verifier_pass",
+                        "subject": {"any_verifier": True},
+                        "expected": {"verdict": "pass"},
+                        "source": "task_contract_compiler",
+                        "provenance_refs": [],
+                        "candidate_derived_allowed": False,
+                        "required": True,
+                    }
+                ],
+                "provenance_refs": [],
+            },
+            "evidence_events": [
+                {
+                    "schema_version": 1,
+                    "id": "ev:verifier:pass",
+                    "kind": "verifier_result",
+                    "status": "passed",
+                    "observed": {"verdict": "pass"},
+                    "refs": [{"kind": "verifier_evidence", "id": "verifier:pass"}],
+                }
+            ],
+        },
+    }
+
+    decision = acceptance_done_gate_decision(
+        "The solution must include acceptance checks that would normally trigger legacy string constraints.",
+        {
+            "task_done": True,
+            "outcome": "completed",
+            "typed_evidence_refs": ["ev:verifier:pass"],
+        },
+        session=session,
+    )
+
+    assert decision["decision"] == "allow_complete"
+    assert decision["gate_source"] == "typed_evidence"
+    assert decision["legacy_warnings"] == []
+
+
+def test_compiled_task_contract_verifier_obligation_matches_command():
+    session = {
+        "task_contract_compiler": {"status": "compiled"},
+        "typed_acceptance": {
+            "oracle_bundle": {
+                "schema_version": 1,
+                "id": "oracle:bundle:test",
+                "source": "test",
+                "obligations": [
+                    {
+                        "schema_version": 1,
+                        "id": "oracle:verifier:pytest",
+                        "kind": "verifier_pass",
+                        "subject": {"any_verifier": True, "verify_command": "pytest -q"},
+                        "expected": {"verdict": "pass"},
+                        "source": "task_contract_compiler",
+                        "provenance_refs": [],
+                        "candidate_derived_allowed": False,
+                        "required": True,
+                    }
+                ],
+                "provenance_refs": [],
+            },
+            "evidence_events": [
+                {
+                    "schema_version": 1,
+                    "id": "ev:verifier:wrong-command",
+                    "kind": "verifier_result",
+                    "status": "passed",
+                    "observed": {"verdict": "pass", "command": "echo ok"},
+                    "refs": [{"kind": "verifier_evidence", "id": "verifier:wrong-command"}],
+                }
+            ],
+        },
+    }
+
+    decision = acceptance_done_gate_decision(
+        "Run pytest -q before finishing.",
+        {
+            "task_done": True,
+            "outcome": "completed",
+            "typed_evidence_refs": ["ev:verifier:wrong-command"],
+        },
+        session=session,
+    )
+
+    assert decision["decision"] == "block_continue"
+    assert decision["gate_source"] == "typed_evidence"
+    assert decision["missing_obligations"]

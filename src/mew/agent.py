@@ -378,6 +378,9 @@ def transient_model_error(exc):
             "500",
             "failed to parse json plan",
             "response did not contain json",
+            "response did not contain assistant text",
+            "response without assistant text",
+            "no assistant text",
         )
     )
 

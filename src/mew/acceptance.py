@@ -62,6 +62,7 @@ _GROUNDING_TOOLS = {
     "run_tests",
     "search_text",
 }
+_TERMINAL_COMMAND_TOOLS = {"run_command", "run_tests", "poll_command"}
 
 _RUNTIME_FRESH_RUN_MARKERS = (
     "emulator",
@@ -128,6 +129,8 @@ _RUNTIME_VISUAL_ARTIFACT_MARKERS = (
     "screen size",
 )
 _RUNTIME_VISUAL_ARTIFACT_QUALITY_TASK_MARKERS = (
+    "appropriate",
+    "appropriately",
     "check that",
     "correct",
     "correctly",
@@ -140,17 +143,10 @@ _RUNTIME_VISUAL_ARTIFACT_QUALITY_TASK_MARKERS = (
 _RUNTIME_VISUAL_ARTIFACT_QUALITY_EVIDENCE_MARKERS = (
     "expected dimensions",
     "expected resolution",
-    "expected size",
-    "expected text",
-    "exact stdout",
-    "framebuffer",
-    "i_initgraphics",
-    "l2",
-    "reference",
-    "resolution",
-    "screen size",
-    "similarity",
-    "ssim",
+    "frame_quality_ok",
+    "reference similarity",
+    "similarity passed",
+    "ssim passed",
 )
 _RUNTIME_COMPONENT_TASK_MARKERS = (
     "compiled extension",
@@ -169,26 +165,138 @@ _RUNTIME_COMPONENT_TASK_MARKERS = (
     "native modules",
     "runtime module",
     "runtime modules",
+    "loadable runtime component",
+    "runtime component",
+    "runtime components",
     "shared library",
     "shared libraries",
+    "plugin entrypoint",
+    "plugin host",
+    "generated executable",
+    "runtime harness",
+    "custom runtime",
+    "interpreter",
+    "simulator",
 )
 _RUNTIME_COMPONENT_BEHAVIOR_MARKERS = (
     "behavior",
     "behavioral",
     "component-specific",
+    "component-specific test",
+    "component-specific tests",
+    "component test",
+    "component tests",
     "callable",
     "extension-specific",
+    "entry point",
+    "entrypoint",
+    "executed",
+    "execution smoke",
     "exported function",
+    "external verifier",
     "function-level",
     "invokable",
+    "invocation",
+    "invoke",
     "invoked",
     "non-import",
+    "repository test tail",
+    "repository-test-tail",
     "specific test",
+    "targeted component test",
+    "targeted component tests",
     "works in original context",
 )
-_RUNTIME_COMPONENT_BEHAVIOR_REQUIREMENT_RE = re.compile(
-    r"\b(?:work|works|working|compatib\w*|functional(?:ity)?|behavior(?:al)?)\b"
+_RUNTIME_COMPONENT_BEHAVIOR_CONTRACT_TERMS = {
+    "behavior",
+    "behavioral",
+    "candidate_final_proof",
+    "candidate_runtime_smoke",
+    "component",
+    "custom_runtime_smoke",
+    "external_verifier",
+    "repository_tail",
+    "runtime",
+    "runtime_behavior",
+    "smoke",
+    "test",
+    "tests",
+    "verification",
+    "verifier",
+}
+_RUNTIME_COMPONENT_VERIFIER_COMMAND_RE = re.compile(
+    r"(?:^|\s)(?:python|pytest|unittest|node|npm|pnpm|yarn|cargo|go|java|ruby|perl|php|lua|julia|Rscript|swift|dotnet|mono)\b"
+    r"|(?:^|\s)\./[^\s]+"
+    r"|\b(?:test|tests|verify|verifier|smoke|check)\b"
 )
+_RUNTIME_COMPONENT_CALLABLE_INVOCATION_RE = re.compile(
+    r"\b[A-Za-z_][\w.]*\.[A-Za-z_]\w*\s*\("
+    r"|\b(?:main|run|execute|invoke|entrypoint|entry_point)\s*\("
+)
+_RUNTIME_COMPONENT_LOADER_CALL_RE = re.compile(
+    r"\b(?:ctypes\.)?(?:CDLL|PyDLL|WinDLL|OleDLL)\s*\("
+    r"|\bctypes\.(?:cdll|pydll|windll|oledll)\.LoadLibrary\s*\("
+    r"|\bimportlib\.import_module\s*\("
+    r"|\b[A-Za-z_][\w.]*\.(?:import_module|load_library|LoadLibrary)\s*\("
+    r"|\b(?:import_module|load_library|LoadLibrary)\s*\("
+    r"|\b(?:dlopen|ffi\.load|ffi\.dlopen|cffi\.FFI\s*\(\s*\)\.dlopen)\s*\("
+)
+_RUNTIME_COMPONENT_ENTRYPOINT_EXECUTION_RE = re.compile(
+    r"(?:^|\s)(?:node|python|ruby|perl|php|lua|julia|Rscript|swift|java|dotnet|mono)\s+(?!-c\b)[^\s;]+"
+    r"|(?:^|\s)\./[^\s]+"
+)
+_RUNTIME_COMPONENT_NON_BEHAVIOR_COMMAND_RE = re.compile(
+    r"\b(?:build|building|configure|configured|install|installed|installing|list|listing|noop|no-op|probe|readback|read-back)\b"
+    r"|--help\b|--version\b|(?:^|\s)-h(?:\s|$)|(?:^|\s)-v(?:\s|$)"
+)
+_RUNTIME_COMPONENT_IMPORT_LOAD_PATH_SIGNAL_RE = re.compile(
+    r"\b(?:attribute|exists?|existence|file|hasattr|import(?:ed|s|ing)?|load(?:ed|s|ing)?|metadata|path|which)\b"
+    r"|__file__"
+    r"|\b(?:ldd|ls|nm|otool|readelf)\b"
+    r"|\.(?:so|pyd|dylib|dll|exe)\b"
+)
+_RUNTIME_COMPONENT_TARGETED_BEHAVIOR_TEST_RE = re.compile(
+    r"\b(?:behavior|behaviour|invocation|invoke[sd]?|execution smoke|entrypoint|entry point|callable|function-level)\b"
+)
+_RUNTIME_COMPONENT_BEHAVIOR_REQUIREMENT_RE = re.compile(
+    r"\b(?:work|works|working|compatib\w*|functional(?:ity)?|behavior(?:al)?|run|runs|running|runnable|execute[sd]?|executable|invokable|invocation|invoke[sd]?)\b"
+)
+_RUNTIME_COMPONENT_DOC_OR_INVESTIGATION_MARKERS = (
+    "analyze",
+    "diagnose",
+    "document",
+    "documentation",
+    "docs",
+    "explain",
+    "investigate",
+    "readme",
+    "report findings",
+)
+_RUNTIME_COMPONENT_REPAIR_OR_VERIFIER_MARKERS = (
+    "exercise",
+    "fix",
+    "implement",
+    "invoke",
+    "repair",
+    "test",
+    "validate",
+    "verify",
+)
+_RUNTIME_COMPONENT_INVOCATION_COMMAND_TOOLS = {
+    "dotnet",
+    "java",
+    "julia",
+    "lua",
+    "mono",
+    "node",
+    "perl",
+    "php",
+    "python",
+    "python3",
+    "ruby",
+    "rscript",
+    "swift",
+}
 
 _LONG_DEPENDENCY_BUILD_ACTION_MARKERS = (
     "build",
@@ -770,7 +878,7 @@ _IMPLEMENTATION_CONTRACT_CONTEXT_MARKERS = (
 _IMPLEMENTATION_SOURCE_REF_RE = re.compile(
     r"(?<![\w./-])(?:/[\w.+-]+(?:/[\w.+-]+)*/?|(?:[\w.+-]+/)+[\w.+-]*/?)"
 )
-_IMPLEMENTATION_SOURCE_GROUNDING_TOOLS = {"glob", "read_file", "run_command", "search_text"}
+_IMPLEMENTATION_SOURCE_GROUNDING_TOOLS = {"exec_command", "glob", "read_file", "run_command", "search_text"}
 
 
 def _clean_constraint_text(text: object, *, limit: int = 260) -> str:
@@ -984,6 +1092,22 @@ def _tool_call_text(call: object) -> str:
     return "\n".join(chunks)
 
 
+def _acceptance_tool_call_terminal_success(call: object) -> bool:
+    if not isinstance(call, dict):
+        return False
+    if call.get("tool") != "poll_command":
+        return tool_call_terminal_success(call)
+    if str(call.get("status") or "").casefold() != "completed":
+        return False
+    result = call.get("result") if isinstance(call.get("result"), dict) else {}
+    if result.get("timed_out"):
+        return False
+    payload_status = str(result.get("status") or "").casefold()
+    if payload_status and payload_status not in {"completed", "done", "success", "succeeded"}:
+        return False
+    return result.get("exit_code") == 0
+
+
 def _tool_call_result_text(call: object) -> str:
     if not isinstance(call, dict):
         return ""
@@ -1056,6 +1180,32 @@ def _runtime_tmp_artifacts_in_text(text: object, limit: int = 6) -> list[str]:
     return artifacts
 
 
+def _runtime_tmp_artifact_has_generation_context(text: object, artifact: str) -> bool:
+    value = str(text or "")
+    if not artifact:
+        return False
+    lowered_artifact = artifact.casefold()
+    for match in _RUNTIME_TMP_ARTIFACT_RE.finditer(value):
+        candidate = str(match.group(1) or "").rstrip("`'\".,;:)")
+        if candidate.casefold() != lowered_artifact:
+            continue
+        context = _path_context(value, match.start(), match.end()).casefold()
+        if any(
+            marker in context
+            for marker in (*_RUNTIME_ARTIFACT_CREATED_MARKERS, *_RUNTIME_ARTIFACT_EXPECTED_PATH_MARKERS)
+        ):
+            return True
+    return False
+
+
+def _runtime_tmp_artifact_is_verifier_scratch_path(artifact: str) -> bool:
+    lowered = str(artifact or "").casefold()
+    if not lowered.startswith("/tmp/") or not lowered.endswith((".log", ".txt", ".out", ".stdout", ".stderr")):
+        return False
+    name = lowered.rsplit("/", 1)[-1]
+    return any(token in name for token in ("log", "out", "stdout", "stderr", "trace", "transcript"))
+
+
 def _runtime_fresh_run_artifacts(task_description: object) -> list[str]:
     text = str(task_description or "")
     if "/tmp/" not in text.casefold():
@@ -1088,14 +1238,22 @@ def _runtime_fresh_run_artifacts_for_finish(
             ):
                 continue
             for artifact in _runtime_tmp_artifacts_in_text(text):
+                if _runtime_tmp_artifact_is_verifier_scratch_path(artifact):
+                    continue
+                if not _runtime_tmp_artifact_has_generation_context(text, artifact):
+                    continue
                 if artifact not in artifacts:
                     artifacts.append(artifact)
     return artifacts[:6]
 
 
 def _runtime_artifact_created_by_call(call: object, artifact: str) -> bool:
-    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+    if not isinstance(call, dict) or call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
         return False
+    if call.get("tool") == "poll_command" and not _acceptance_tool_call_terminal_success(call):
+        return False
+    if _runtime_artifact_created_by_structured_evidence(call, artifact):
+        return True
     text = _tool_call_text(call)
     lowered = text.casefold()
     if artifact.casefold() not in lowered:
@@ -1105,8 +1263,40 @@ def _runtime_artifact_created_by_call(call: object, artifact: str) -> bool:
     return any(marker in lowered for marker in _RUNTIME_ARTIFACT_CREATED_MARKERS)
 
 
+def _runtime_artifact_created_by_structured_evidence(call: object, artifact: str) -> bool:
+    if not isinstance(call, dict):
+        return False
+    result = call.get("result")
+    if not isinstance(result, dict):
+        return False
+    verifier = result.get("verifier_evidence")
+    if isinstance(verifier, dict) and str(verifier.get("verdict") or "").casefold() not in {"pass", "partial"}:
+        return False
+    artifact_lower = str(artifact or "").casefold()
+    if not artifact_lower:
+        return False
+    artifact_evidence = result.get("artifact_evidence")
+    if not isinstance(artifact_evidence, list):
+        return False
+    for item in artifact_evidence:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").casefold() != "passed":
+            continue
+        candidates = [
+            str(item.get("artifact_id") or ""),
+            str(item.get("path") or ""),
+            str(item.get("artifact_path") or ""),
+        ]
+        if any(candidate and candidate.casefold() == artifact_lower for candidate in candidates):
+            return True
+    return False
+
+
 def _runtime_artifact_cleanup_by_call(call: object, artifact: str) -> bool:
-    if not isinstance(call, dict) or call.get("tool") not in {"run_command", "run_tests"}:
+    if not isinstance(call, dict) or call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
+        return False
+    if call.get("tool") == "poll_command" and not _acceptance_tool_call_terminal_success(call):
         return False
     text = _tool_call_text(call)
     lowered = text.casefold()
@@ -1222,7 +1412,7 @@ def _runtime_artifact_final_state_blocker(
             continue
         return (
             "runtime final verifier artifact evidence ungrounded: "
-            f"{artifact} checks must cite a completed run_command or run_tests tool "
+            f"{artifact} checks must cite a completed run_command, run_tests, or poll_command tool "
             "whose output proves the artifact was created during the verifier-shaped run"
         )
     return ""
@@ -1269,7 +1459,7 @@ def _runtime_visual_artifact_quality_blocker(
         return (
             "runtime visual artifact quality evidence missing: rendered frame, screenshot, "
             "or image tasks with expected/correct output must cite expected dimensions, "
-            "reference similarity, or exact stdout/boot markers before task_done=true"
+            "reference similarity, or explicit expected-output markers before task_done=true"
         )
     if any(_has_runtime_visual_artifact_quality_evidence(check, session) for check in visual_checks):
         return ""
@@ -1277,7 +1467,7 @@ def _runtime_visual_artifact_quality_blocker(
         "runtime visual artifact quality evidence ungrounded: artifact existence, "
         "nonzero pixels, valid headers, or self-consistent dimensions are not enough; "
         "cite a completed grounding tool whose output checks expected dimensions, "
-        "reference similarity, or exact stdout/boot markers"
+        "reference similarity, or explicit expected-output markers"
     )
 
 
@@ -1395,6 +1585,16 @@ def is_runtime_component_behavior_task(text: object) -> bool:
     lowered = str(text or "").casefold()
     if not any(marker in lowered for marker in _RUNTIME_COMPONENT_TASK_MARKERS):
         return False
+    has_doc_or_investigation_marker = any(
+        re.search(rf"\b{re.escape(marker)}\b", lowered)
+        for marker in _RUNTIME_COMPONENT_DOC_OR_INVESTIGATION_MARKERS
+    )
+    has_repair_or_verifier_marker = any(
+        re.search(rf"\b{re.escape(marker)}\b", lowered)
+        for marker in _RUNTIME_COMPONENT_REPAIR_OR_VERIFIER_MARKERS
+    )
+    if has_doc_or_investigation_marker and not has_repair_or_verifier_marker:
+        return False
     return bool(_RUNTIME_COMPONENT_BEHAVIOR_REQUIREMENT_RE.search(lowered))
 
 
@@ -1408,17 +1608,190 @@ def _runtime_component_evidence_texts(check: object, session: object) -> list[st
     return [text for text in texts if str(text or "").strip()]
 
 
-def _command_evidence_text(evidence: object) -> str:
-    if not isinstance(evidence, dict):
-        return ""
-    return _tool_call_text(command_evidence_to_tool_call(evidence))
+def _runtime_component_call_contract_terms(call: object) -> set[str]:
+    if not isinstance(call, dict):
+        return set()
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    contract = parameters.get("execution_contract") if isinstance(parameters.get("execution_contract"), dict) else {}
+    terms: set[str] = set()
+    for key in ("purpose", "stage", "proof_role", "acceptance_kind", "risk_class"):
+        value = contract.get(key)
+        if isinstance(value, str):
+            terms.update(re.findall(r"[a-zA-Z0-9_]+", value.casefold()))
+        elif isinstance(value, list):
+            for item in value:
+                terms.update(re.findall(r"[a-zA-Z0-9_]+", str(item).casefold()))
+    return terms
+
+
+def _runtime_component_command_kind_allows_behavior(call: object) -> bool:
+    if not isinstance(call, dict):
+        return False
+    tool = call.get("tool")
+    if tool == "run_tests":
+        return True
+    if tool not in {"run_command", "poll_command"}:
+        return False
+    if _runtime_component_call_contract_terms(call) & _RUNTIME_COMPONENT_BEHAVIOR_CONTRACT_TERMS:
+        return True
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    return bool(_RUNTIME_COMPONENT_VERIFIER_COMMAND_RE.search(command))
+
+
+def _runtime_component_callable_invocation_seen(call: object) -> bool:
+    if not isinstance(call, dict):
+        return False
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    if re.search(r"\b(?:getattr|hasattr)\s*\(|(?:^|[.\s])load\s*\(", command):
+        return False
+    if _RUNTIME_COMPONENT_LOADER_CALL_RE.search(command):
+        return False
+    return bool(_RUNTIME_COMPONENT_CALLABLE_INVOCATION_RE.search(command))
+
+
+def _runtime_component_import_load_path_signal_seen(call: object, text: str) -> bool:
+    if not isinstance(call, dict):
+        return False
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    return bool(_RUNTIME_COMPONENT_IMPORT_LOAD_PATH_SIGNAL_RE.search(f"{command}\n{text}".casefold()))
+
+
+def _runtime_component_targeted_behavior_test_seen(call: object, text: str) -> bool:
+    if not isinstance(call, dict) or call.get("tool") != "run_tests":
+        return False
+    normalized_text = text.replace("_", " ")
+    if not _RUNTIME_COMPONENT_TARGETED_BEHAVIOR_TEST_RE.search(normalized_text):
+        return False
+    return any(
+        marker in normalized_text
+        for marker in (
+            "component",
+            "component-specific",
+            "runtime",
+            "targeted",
+            "test ",
+            "::test",
+        )
+    )
+
+
+def _runtime_component_repository_tail_behavior_seen(text: str) -> bool:
+    if "repository-test-tail" not in text and "repository test tail" not in text:
+        return False
+    return bool(_RUNTIME_COMPONENT_TARGETED_BEHAVIOR_TEST_RE.search(text.replace("_", " ")))
+
+
+def _runtime_component_external_verifier_behavior_seen(call: object, text: str) -> bool:
+    terms = _runtime_component_call_contract_terms(call)
+    if "external_verifier" not in terms:
+        return False
+    return any(
+        marker in text
+        for marker in (
+            "behavior",
+            "behaviour",
+            "callable",
+            "entrypoint",
+            "entry point",
+            "executed",
+            "execution smoke",
+            "function-level",
+            "invocation",
+            "invoked",
+            "runtime behavior",
+        )
+    )
+
+
+def _runtime_component_execution_smoke_seen(call: object, text: str) -> bool:
+    if not isinstance(call, dict) or call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
+        return False
+    if _runtime_component_call_contract_terms(call) & {
+        "candidate_runtime_smoke",
+        "custom_runtime_smoke",
+        "runtime_behavior",
+    }:
+        return True
+    return any(marker in text for marker in ("executed", "execution smoke", "entrypoint", "entry point"))
+
+
+def _runtime_component_non_behavior_command_shape_seen(call: object, text: str) -> bool:
+    if not isinstance(call, dict):
+        return False
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    return bool(_RUNTIME_COMPONENT_NON_BEHAVIOR_COMMAND_RE.search(f"{command}\n{text}".casefold()))
+
+
+def _runtime_component_entrypoint_behavior_signal_seen(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            "behavior",
+            "behaviour",
+            "executed",
+            "execution smoke",
+            "invocation",
+            "invoked",
+            "ran ",
+            "run ",
+            "runs",
+            "runtime behavior",
+        )
+    )
+
+
+def _runtime_component_entrypoint_execution_seen(call: object) -> bool:
+    if not isinstance(call, dict) or call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
+        return False
+    parameters = call.get("parameters") if isinstance(call.get("parameters"), dict) else {}
+    command = str(parameters.get("command") or "")
+    if re.search(r"\b(?:pytest|unittest|tox|nox)\b", command):
+        return False
+    return bool(_RUNTIME_COMPONENT_ENTRYPOINT_EXECUTION_RE.search(command))
+
+
+def _runtime_component_call_text_proves_behavior(call: object, proof_text: object = "") -> bool:
+    if not isinstance(call, dict):
+        return False
+    text = _tool_call_text(call).casefold()
+    if not text:
+        return False
+    proof_text = str(proof_text or "").casefold()
+    combined_text = f"{text}\n{proof_text}"
+    callable_invocation = _runtime_component_callable_invocation_seen(call)
+    targeted_test = _runtime_component_targeted_behavior_test_seen(call, text)
+    repository_tail = _runtime_component_repository_tail_behavior_seen(text)
+    execution_smoke = _runtime_component_execution_smoke_seen(call, text)
+    non_behavior_entrypoint = _runtime_component_non_behavior_command_shape_seen(call, combined_text)
+    entrypoint_execution = (
+        _runtime_component_entrypoint_execution_seen(call)
+        and not non_behavior_entrypoint
+        and _runtime_component_entrypoint_behavior_signal_seen(text)
+    )
+    import_load_path_signal = _runtime_component_import_load_path_signal_seen(call, text)
+    external_verifier = _runtime_component_external_verifier_behavior_seen(call, text) and not import_load_path_signal
+    import_load_path_only = import_load_path_signal and not (
+        callable_invocation or targeted_test or repository_tail or execution_smoke
+    )
+    if import_load_path_only:
+        return False
+    return bool(
+        callable_invocation
+        or targeted_test
+        or repository_tail
+        or execution_smoke
+        or entrypoint_execution
+        or external_verifier
+    )
 
 
 def _runtime_component_has_behavior_evidence(check: object, session: object) -> bool:
     claim_text = "\n".join(_runtime_component_evidence_texts(check, None)).casefold()
-    if not claim_text:
-        return False
-    if not any(marker in claim_text for marker in _RUNTIME_COMPONENT_TASK_MARKERS):
+    if not claim_text and not _check_evidence_refs(check):
         return False
     for ref in _check_evidence_refs(check):
         ref_id = ref.get("id")
@@ -1429,8 +1802,11 @@ def _runtime_component_has_behavior_evidence(check: object, session: object) -> 
             evidence = _command_evidence_by_id(session, ref_id)
             if not evidence or not evidence.get("terminal_success"):
                 continue
-            evidence_text = _command_evidence_text(evidence).casefold()
-            if any(marker in evidence_text for marker in _RUNTIME_COMPONENT_BEHAVIOR_MARKERS):
+            call = command_evidence_to_tool_call(evidence)
+            if _runtime_component_command_kind_allows_behavior(call) and _runtime_component_call_text_proves_behavior(
+                call,
+                claim_text,
+            ):
                 return True
             continue
         if kind != "tool_call":
@@ -1438,14 +1814,58 @@ def _runtime_component_has_behavior_evidence(check: object, session: object) -> 
         call = _tool_call_by_id(session, ref_id)
         if not call:
             continue
-        if call.get("tool") not in {"run_command", "run_tests"}:
+        if call.get("tool") not in _TERMINAL_COMMAND_TOOLS:
             continue
-        if not tool_call_terminal_success(call):
+        if not _acceptance_tool_call_terminal_success(call):
             continue
-        tool_text = _tool_call_text(call).casefold()
-        if any(marker in tool_text for marker in _RUNTIME_COMPONENT_BEHAVIOR_MARKERS):
+        if _runtime_component_command_kind_allows_behavior(call) and _runtime_component_call_text_proves_behavior(
+            call,
+            claim_text,
+        ):
             return True
     return False
+
+
+def _runtime_component_invocation_command_requirements(text: object, *, limit: int = 4) -> list[str]:
+    source = str(text or "")
+    requirements: list[str] = []
+    for match in _BACKTICK_TEXT_RE.finditer(source):
+        value = _clean_constraint_text(match.group(1), limit=240)
+        if not value:
+            continue
+        context = source[max(0, match.start() - 80) : min(len(source), match.end() + 80)].casefold()
+        if not re.search(r"\b(?:run|runs|running|execute|executes|invok(?:e|es|ing))\b", context):
+            continue
+        try:
+            tokens = shlex.split(value)
+        except ValueError:
+            tokens = value.split()
+        if len(tokens) < 2:
+            continue
+        if tokens[0].casefold() not in _RUNTIME_COMPONENT_INVOCATION_COMMAND_TOOLS:
+            continue
+        target = tokens[1]
+        if target.startswith("-") or not re.match(r"^(?:[\w.+/-]+|/[\w.+/-]+)$", target):
+            continue
+        if value not in requirements:
+            requirements.append(value)
+        if len(requirements) >= limit:
+            break
+    return requirements
+
+
+def _runtime_component_invocation_command_grounded(
+    task_description: object,
+    verified_checks: list[dict[str, str]],
+    session: object,
+) -> bool:
+    requirements = _runtime_component_invocation_command_requirements(task_description)
+    if not requirements or not verified_checks:
+        return False
+    return all(
+        any(_has_exact_command_example_evidence(check, session, command) for check in verified_checks)
+        for command in requirements
+    )
 
 
 def _runtime_component_behavior_blocker(
@@ -1460,6 +1880,8 @@ def _runtime_component_behavior_blocker(
         for check in checks
         if str(check.get("status") or "").casefold() in {"pass", "passed", "satisfied", "verified", "ok"}
     ]
+    if _runtime_component_invocation_command_grounded(task_description, verified_checks, session):
+        return ""
     if any(_runtime_component_has_behavior_evidence(check, session) for check in verified_checks):
         return ""
     return (
@@ -1691,6 +2113,11 @@ def _source_ref_matches_text(ref: object, text: object) -> bool:
     return False
 
 
+def implementation_source_ref_matches_text(ref: object, text: object) -> bool:
+    """Return whether text grounds an implementation source/binary reference."""
+    return _source_ref_matches_text(ref, text)
+
+
 def _has_implementation_source_grounding_evidence(evidence: object, session: object, source_ref: object) -> bool:
     for call in _evidence_command_calls(evidence, session):
         if not call or call.get("tool") not in _IMPLEMENTATION_SOURCE_GROUNDING_TOOLS:
@@ -1919,7 +2346,7 @@ def _evidence_ref_findings_for_checks(checks: list[dict], session: object) -> di
                 check_invalid.append(f"tool_call#{ref_id} missing")
                 check_invalid_refs.append({"kind": "tool_call", "id": ref_id, "reason": "missing"})
                 continue
-            if not tool_call_terminal_success(call):
+            if not _acceptance_tool_call_terminal_success(call):
                 evidence = tool_call_evidence_ref(call)
                 check_invalid.append(
                     "tool_call#"
@@ -2746,7 +3173,13 @@ def _numeric_artifact_quality_blocker(
     )
 
 
-def acceptance_finish_blocker(task_description: object, action: object, *, session: object = None) -> str:
+def acceptance_finish_blocker(
+    task_description: object,
+    action: object,
+    *,
+    session: object = None,
+    include_runtime_component_gate: bool = True,
+) -> str:
     action = action if isinstance(action, dict) else {}
     if not action.get("task_done"):
         return ""
@@ -2772,9 +3205,10 @@ def acceptance_finish_blocker(task_description: object, action: object, *, sessi
     runtime_artifact_blocker = _runtime_artifact_freshness_blocker(task_description, checks, session)
     if runtime_artifact_blocker:
         return runtime_artifact_blocker
-    runtime_component_blocker = _runtime_component_behavior_blocker(task_description, checks, session)
-    if runtime_component_blocker:
-        return runtime_component_blocker
+    if include_runtime_component_gate:
+        runtime_component_blocker = _runtime_component_behavior_blocker(task_description, checks, session)
+        if runtime_component_blocker:
+            return runtime_component_blocker
     long_dependency_blocker = _long_dependency_build_artifact_blocker(task_description, checks, session)
     if long_dependency_blocker:
         return long_dependency_blocker
@@ -2859,16 +3293,41 @@ def finish_continuation_prompt(blockers: list[object]) -> str:
     if not reasons:
         return ""
     bullets = "\n".join(f"- {reason}" for reason in reasons[:8])
+    next_action = (
+        "run the smallest read, diff, verifier, or artifact-smoke command that directly proves "
+        "the missing acceptance item, then cite its tool id in acceptance_checks evidence_refs or evidence text."
+    )
+    if any(finish_blocker_code(reason) == "runtime_visual_artifact_quality_evidence" for reason in reasons):
+        next_action = (
+            "first inspect task-provided verifier/test/reference artifacts or expected-output markers when available, "
+            "then run the smallest terminal command that checks those external expectations. Do not rely on artifact "
+            "existence, header validity, or size alone; cite the completed grounding tool in acceptance_checks "
+            "evidence_refs or evidence text."
+        )
     return (
         "Finish was blocked by the deterministic done gate. Continue the same task; "
         "do not mark task_done=true until each blocker is repaired with terminal tool evidence.\n"
         f"{bullets}\n"
-        "Next action: run the smallest read, diff, verifier, or artifact-smoke command that directly proves "
-        "the missing acceptance item, then cite its tool id in acceptance_checks evidence_refs or evidence text."
+        f"Next action: {next_action}"
     )
 
 
-def acceptance_done_gate_decision(
+def _combined_finish_continuation_prompt(
+    *,
+    typed_prompt: object,
+    typed_blockers: list[dict[str, object]],
+    blockers: list[str],
+) -> str:
+    typed_text = str(typed_prompt or "").strip()
+    typed_messages = {str(blocker.get("message") or "") for blocker in typed_blockers}
+    additional_blockers = [blocker for blocker in blockers if blocker and blocker not in typed_messages]
+    additional_text = finish_continuation_prompt(additional_blockers)
+    if typed_text and additional_text:
+        return f"{typed_text}\n{additional_text}"
+    return typed_text or additional_text
+
+
+def runtime_component_finish_gate_decision(
     task_description: object,
     action: object,
     *,
@@ -2883,16 +3342,9 @@ def acceptance_done_gate_decision(
             "invalid_evidence_refs": [],
             "continuation_prompt": "",
         }
-    blockers: list[str] = []
-    acceptance_blocker = acceptance_finish_blocker(task_description, action, session=session)
-    if acceptance_blocker:
-        blockers.append(acceptance_blocker)
     checks = coerce_acceptance_checks(action.get("acceptance_checks"))
-    evidence_ref_findings = _evidence_ref_findings_for_checks(checks, session)
-    evidence_ref_blocker = str(evidence_ref_findings.get("blocker") or "")
-    if evidence_ref_blocker:
-        blockers.append(evidence_ref_blocker)
-    if not blockers:
+    blocker = _runtime_component_behavior_blocker(task_description, checks, session)
+    if not blocker:
         return {
             "decision": "allow_complete",
             "reason": "",
@@ -2900,16 +3352,178 @@ def acceptance_done_gate_decision(
             "invalid_evidence_refs": [],
             "continuation_prompt": "",
         }
+    blockers = [blocker]
     return {
         "decision": "block_continue",
-        "reason": blockers[0],
+        "reason": blocker,
         "blockers": [
             {
                 "code": finish_blocker_code(blocker),
                 "message": blocker,
             }
-            for blocker in blockers
         ],
-        "invalid_evidence_refs": [dict(item) for item in evidence_ref_findings.get("invalid_refs") or []],
+        "invalid_evidence_refs": [],
         "continuation_prompt": finish_continuation_prompt(blockers),
     }
+
+
+def acceptance_done_gate_decision(
+    task_description: object,
+    action: object,
+    *,
+    session: object = None,
+) -> dict:
+    action = action if isinstance(action, dict) else {}
+    if not action.get("task_done"):
+        return {
+            "decision": "allow_complete",
+            "gate_source": "none",
+            "reason": "",
+            "blockers": [],
+            "invalid_evidence_refs": [],
+            "continuation_prompt": "",
+        }
+    blockers: list[str] = []
+    typed_gate = _typed_acceptance_done_gate_decision(action, session)
+    typed_decision = str(typed_gate.get("decision") or "")
+    typed_blockers = [dict(item) for item in typed_gate.get("blockers") or [] if isinstance(item, dict)]
+    retired_legacy_blocker_codes = _typed_retired_legacy_blocker_codes(typed_gate, session)
+    compiled_contract_gate = _compiled_task_contract_gate_active(session)
+    legacy_warnings: list[dict[str, str]] = []
+
+    def append_legacy_blocker(blocker: object) -> None:
+        message = str(blocker or "")
+        if not message:
+            return
+        code = finish_blocker_code(message)
+        if code in retired_legacy_blocker_codes:
+            legacy_warnings.append({"code": code, "message": message})
+            return
+        blockers.append(message)
+
+    if typed_decision == "block_continue":
+        blockers.extend(
+            blocker.get("message")
+            for blocker in typed_blockers
+            if blocker.get("message")
+        )
+    if compiled_contract_gate and typed_decision == "no_typed_decision":
+        blockers.append(
+            "compiled task contract produced no typed acceptance obligations; "
+            "finish must be resolved through typed task-contract evidence or opt into legacy task_contract_compiler=legacy"
+        )
+    if not compiled_contract_gate:
+        runtime_component_gate = runtime_component_finish_gate_decision(task_description, action, session=session)
+        if runtime_component_gate.get("decision") != "allow_complete":
+            for blocker in runtime_component_gate.get("blockers") or []:
+                if isinstance(blocker, dict) and blocker.get("message"):
+                    append_legacy_blocker(blocker.get("message"))
+        acceptance_blocker = acceptance_finish_blocker(
+            task_description,
+            action,
+            session=session,
+            include_runtime_component_gate=False,
+        )
+        if acceptance_blocker:
+            append_legacy_blocker(acceptance_blocker)
+    checks = coerce_acceptance_checks(action.get("acceptance_checks"))
+    evidence_ref_findings = _evidence_ref_findings_for_checks(checks, session)
+    evidence_ref_blocker = str(evidence_ref_findings.get("blocker") or "")
+    if evidence_ref_blocker:
+        append_legacy_blocker(evidence_ref_blocker)
+    if not blockers:
+        return {
+            "decision": "allow_complete",
+            "gate_source": typed_gate.get("gate_source") or "none",
+            "reason": "",
+            "blockers": [],
+            "invalid_evidence_refs": [],
+            "continuation_prompt": "",
+            "missing_obligations": [],
+            "failed_evidence_refs": [],
+            "legacy_warnings": legacy_warnings,
+        }
+    return {
+        "decision": "block_continue",
+        "gate_source": "typed_evidence" if typed_decision == "block_continue" or compiled_contract_gate else "legacy_string_safety",
+        "reason": blockers[0],
+        "blockers": [
+            *typed_blockers,
+            *[
+            {
+                "code": finish_blocker_code(blocker),
+                "message": blocker,
+            }
+            for blocker in blockers
+            if blocker not in {str(item.get("message") or "") for item in typed_blockers}
+            ],
+        ],
+        "invalid_evidence_refs": [dict(item) for item in evidence_ref_findings.get("invalid_refs") or []],
+        "missing_obligations": [dict(item) for item in typed_gate.get("missing_obligations") or []],
+        "failed_evidence_refs": [dict(item) for item in typed_gate.get("failed_evidence_refs") or []],
+        "continuation_prompt": _combined_finish_continuation_prompt(
+            typed_prompt=typed_gate.get("continuation_prompt"),
+            typed_blockers=typed_blockers,
+            blockers=blockers,
+        ),
+        "legacy_warnings": legacy_warnings,
+    }
+
+
+def _typed_acceptance_done_gate_decision(action: dict, session: object) -> dict:
+    typed = _typed_acceptance_session(session)
+    if not typed:
+        return {"decision": "no_typed_decision", "gate_source": "none", "blockers": []}
+    try:
+        from .implement_lane.execution_evidence import resolve_typed_finish
+    except ImportError:
+        return {"decision": "no_typed_decision", "gate_source": "none", "blockers": []}
+    finish_claim = {
+        "outcome": action.get("outcome") or action.get("status") or ("completed" if action.get("task_done") else ""),
+        "summary": action.get("summary") or action.get("message") or "",
+        "evidence_refs": action.get("evidence_refs") or action.get("typed_evidence_refs") or (),
+        "oracle_refs": action.get("oracle_refs") or (),
+        "acceptance_checks": action.get("acceptance_checks") or (),
+    }
+    decision = resolve_typed_finish(
+        finish_claim,
+        typed.get("oracle_bundle") if isinstance(typed.get("oracle_bundle"), dict) else None,
+        tuple(item for item in typed.get("evidence_events") or () if isinstance(item, dict)),
+    )
+    return decision.as_dict()
+
+
+def _compiled_task_contract_gate_active(session: object) -> bool:
+    if not isinstance(session, dict):
+        return False
+    compiler = session.get("task_contract_compiler")
+    if not isinstance(compiler, dict):
+        typed = session.get("typed_acceptance")
+        if isinstance(typed, dict):
+            compiler = typed.get("task_contract_compiler")
+    if not isinstance(compiler, dict):
+        return False
+    return str(compiler.get("status") or "").strip().casefold() in {"compiled", "typed_fallback"}
+
+
+def _typed_acceptance_session(session: object) -> dict:
+    if not isinstance(session, dict):
+        return {}
+    typed = session.get("typed_acceptance")
+    return dict(typed) if isinstance(typed, dict) else {}
+
+
+def _typed_retired_legacy_blocker_codes(typed_gate: dict, session: object) -> set[str]:
+    if str(typed_gate.get("decision") or "") != "allow_complete":
+        return set()
+    typed = _typed_acceptance_session(session)
+    raw_codes = typed.get("retired_legacy_blockers") or typed.get("retired_legacy_families") or ()
+    codes: set[str] = set()
+    if isinstance(raw_codes, str):
+        raw_codes = (raw_codes,)
+    if isinstance(raw_codes, (list, tuple, set)):
+        for raw in raw_codes:
+            code = str(raw or "").strip()
+            if code:
+                codes.add(code)
+    return codes

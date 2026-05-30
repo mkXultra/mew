@@ -1,4 +1,5 @@
 import json
+import hashlib
 import math
 import os
 import re
@@ -20,6 +21,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from .acceptance import (
     acceptance_done_gate_decision,
+    extract_acceptance_constraints,
     finish_blocker_code,
     finish_continuation_prompt,
     is_model_inference_output_task,
@@ -38,7 +40,7 @@ from .agent_runs import (
 )
 from .archive import archive_state_records, format_archive_result
 from .cli_command import mew_command, mew_executable
-from .compatibility_frontier import project_active_compatibility_frontier
+from .compatibility_frontier import project_active_compatibility_frontier, record_finish_false_positive_frontier
 from .brief import (
     build_activity_data,
     build_brief,
@@ -87,6 +89,12 @@ from .journal import (
 from .implementation_lane_baseline import (
     format_implementation_lane_baseline_report,
     summarize_implementation_lane_baseline,
+)
+from .implement_lane import IMPLEMENT_V2_NATIVE_RUNTIME_ID, ImplementLaneInput, run_live_native_implement_v2
+from .implement_lane.tool_lab import (
+    analyze_implement_v2_tool_lab_artifact,
+    format_implement_v2_tool_lab_text,
+    run_implement_v2_tool_lab_command,
 )
 from .long_build_substrate import (
     build_long_build_contract,
@@ -252,8 +260,10 @@ from .tasks import (
 from .thoughts import format_thought_entry
 from .timeutil import now_iso, parse_time
 from .toolbox import format_command_record, run_command_record, run_git_tool
+from .tool_kernel import ToolKernel, ToolKernelConfig, make_tool_call_envelope
 from .validation import format_validation_issues, validate_state, validation_errors
 from .write_tools import edit_file, restore_write_snapshot, snapshot_write_path, summarize_write_result, write_file
+from .work_lanes import IMPLEMENT_V2_LANE
 from .work_session import (
     active_work_session,
     active_work_sessions,
@@ -271,6 +281,7 @@ from .work_session import (
     create_work_session,
     execute_work_tool,
     find_work_session,
+    find_work_model_turn,
     find_work_tool_call,
     finish_work_model_turn,
     finish_work_tool_call,
@@ -354,6 +365,7 @@ RUNNING_OUTPUT_MIRROR_INTERVAL_SECONDS = 0.5
 RUNNING_OUTPUT_MIRROR_BUFFER_CHARS = 4_000
 WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS = 10.0
 WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS = 5.0
+IMPLEMENT_V2_NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS = 30.0
 WORK_WALL_TOOL_TIMEOUT_RESERVE_SECONDS = 2.0
 WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS = 60.0
 WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS = 600.0
@@ -2325,12 +2337,14 @@ def _work_control_options(args, session=None):
         "model_backend": option("model_backend"),
         "model": option("model"),
         "base_url": option("base_url"),
+        "model_timeout": option("model_timeout"),
         "cwd": cwd_option(),
         "allow_read": list(option("allow_read", []) or []),
         "allow_write": list(option("allow_write", []) or []),
         "allow_shell": bool(option("allow_shell", False)),
         "allow_verify": bool(option("allow_verify", False)),
         "verify_command": option("verify_command", ""),
+        "verify_command_source": option("verify_command_source", ""),
         "approval_mode": option("approval_mode", ""),
         "act_mode": option("act_mode"),
         "compact_live": bool(option("compact_live", False)),
@@ -2338,6 +2352,12 @@ def _work_control_options(args, session=None):
         "no_prompt_approval": bool(option("no_prompt_approval", False)),
         "quiet": bool(option("quiet", False)),
     }
+    if getattr(args, "verify_command", None) and not getattr(args, "verify_command_source", ""):
+        options["verify_command_source"] = "explicit"
+    elif options.get("verify_command") and not options.get("verify_command_source"):
+        options["verify_command_source"] = "configured"
+    if not options.get("verify_command"):
+        options["verify_command_source"] = ""
     options["allow_write"] = safe_work_write_roots(options.get("allow_write") or [])
     return options
 
@@ -2398,9 +2418,15 @@ def _work_tool_gate_options(args, session=None):
         "allow_shell": bool(defaults.get("allow_shell") or getattr(args, "allow_shell", False)),
         "allow_verify": bool((not verify_disabled and defaults.get("allow_verify")) or getattr(args, "allow_verify", False)),
         "verify_command": explicit_or_default("verify_command", ""),
+        "verify_command_source": explicit_or_default("verify_command_source", ""),
     }
+    if getattr(args, "verify_command", None) and not getattr(args, "verify_command_source", ""):
+        options["verify_command_source"] = "explicit"
+    elif options.get("verify_command") and not options.get("verify_command_source"):
+        options["verify_command_source"] = "configured"
     if verify_disabled and not getattr(args, "verify_command", ""):
         options["verify_command"] = ""
+        options["verify_command_source"] = ""
     return options
 
 
@@ -2420,6 +2446,7 @@ def remember_work_session_default_options(session, args):
             options.get("approval_mode"),
             options.get("model"),
             options.get("base_url"),
+            options.get("model_timeout") not in (None, "", 60.0),
             options.get("cwd"),
             options.get("act_mode") and options.get("act_mode") != "model",
             options.get("compact_live"),
@@ -2467,12 +2494,14 @@ def remember_work_session_default_options(session, args):
         "model_backend": merged_scalar("model_backend"),
         "model": merged_scalar("model"),
         "base_url": merged_scalar("base_url"),
+        "model_timeout": merged_scalar("model_timeout"),
         "cwd": merged_scalar("cwd"),
         "allow_read": merged_list("allow_read"),
         "allow_write": [] if clear_write_defaults else merged_list("allow_write"),
         "allow_shell": False if clear_write_defaults else bool(current.get("allow_shell") or options.get("allow_shell")),
         "allow_verify": False if clear_verify_defaults else bool(current.get("allow_verify") or options.get("allow_verify")),
         "verify_command": "" if clear_verify_defaults else merged_scalar("verify_command"),
+        "verify_command_source": "" if clear_verify_defaults else merged_scalar("verify_command_source"),
         "verify_disabled": verify_disabled,
         "approval_mode": merged_scalar("approval_mode"),
         "act_mode": merged_scalar("act_mode"),
@@ -2594,9 +2623,10 @@ def work_chat_continue_options(session):
         ("model_backend", "--model-backend"),
         ("model", "--model"),
         ("base_url", "--base-url"),
+        ("model_timeout", "--model-timeout"),
     ):
         if options.get(key):
-            parts.extend([flag, options[key]])
+            parts.extend([flag, str(options[key])])
     for root in options.get("allow_read") or []:
         parts.extend(["--allow-read", root])
     for root in options.get("allow_write") or []:
@@ -2607,8 +2637,7 @@ def work_chat_continue_options(session):
         parts.append("--allow-shell")
     if options.get("allow_verify"):
         parts.append("--allow-verify")
-    if options.get("verify_command"):
-        parts.extend(["--verify-command", options["verify_command"]])
+    _extend_verify_command_cli_parts(parts, options)
     if options.get("approval_mode"):
         parts.extend(["--approval-mode", options["approval_mode"]])
     if options.get("act_mode"):
@@ -2622,6 +2651,15 @@ def work_chat_continue_options(session):
     elif options.get("prompt_approval"):
         parts.append("--prompt-approval")
     return shlex.join(parts)
+
+
+def _extend_verify_command_cli_parts(parts, options):
+    if not options.get("verify_command"):
+        return
+    parts.extend(["--verify-command", options["verify_command"]])
+    source = options.get("verify_command_source")
+    if source:
+        parts.extend(["--verify-command-source", source])
 
 
 def _work_live_continue_command(args, task_id, session=None, max_steps=1, follow=False):
@@ -2647,8 +2685,7 @@ def _work_live_continue_command(args, task_id, session=None, max_steps=1, follow
         parts.append("--allow-shell")
     if options.get("allow_verify"):
         parts.append("--allow-verify")
-    if options.get("verify_command"):
-        parts.extend(["--verify-command", options["verify_command"]])
+    _extend_verify_command_cli_parts(parts, options)
     if options.get("approval_mode"):
         parts.extend(["--approval-mode", options["approval_mode"]])
     if options.get("act_mode"):
@@ -3049,8 +3086,7 @@ def _work_session_continue_command(task_id, session=None, max_steps=1, follow=Fa
         parts.append("--allow-shell")
     if options.get("allow_verify"):
         parts.append("--allow-verify")
-    if options.get("verify_command"):
-        parts.extend(["--verify-command", options["verify_command"]])
+    _extend_verify_command_cli_parts(parts, options)
     if options.get("approval_mode"):
         parts.extend(["--approval-mode", options["approval_mode"]])
     if options.get("act_mode"):
@@ -3674,6 +3710,13 @@ def apply_work_control_action(state, session, task, action):
                 session=session,
             )
             if acceptance_gate.get("decision") != "allow_complete":
+                record_finish_false_positive_frontier(
+                    session,
+                    task_description=(task or {}).get("description") or session.get("goal") or "",
+                    action=acceptance_action,
+                    acceptance_gate=acceptance_gate,
+                    current_time=current_time,
+                )
                 finish_blockers.extend(
                     blocker.get("message") for blocker in acceptance_gate.get("blockers") or [] if blocker.get("message")
                 )
@@ -4779,12 +4822,340 @@ def _work_oneshot_runtime_artifact_risk_from_report(task, work_report):
     )
 
 
+def _work_oneshot_implement_v2_manifest_path(args):
+    artifacts = str(getattr(args, "oneshot_artifacts", "") or "").strip()
+    if not artifacts:
+        return None
+    path = Path(artifacts) / "implement_v2" / "proof-manifest.json"
+    return path if path.is_file() else None
+
+
+def _work_oneshot_contract_token(value):
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").casefold()).strip("_")
+
+
+def _work_oneshot_contract_expected_artifacts(contract):
+    if not isinstance(contract, dict):
+        return False
+    artifacts = contract.get("expected_artifacts")
+    if isinstance(artifacts, list) and artifacts:
+        return True
+    for key in ("expected_artifact", "final_artifact", "output_artifact", "required_artifact"):
+        if contract.get(key):
+            return True
+    return False
+
+
+def _work_oneshot_single_manifest_final_verifier_contract(contract):
+    if not isinstance(contract, dict):
+        return False
+    proof_role = str(contract.get("proof_role") or "").casefold()
+    acceptance_kind = str(contract.get("acceptance_kind") or "").casefold()
+    stage = _work_oneshot_contract_token(contract.get("stage"))
+    purpose = _work_oneshot_contract_token(contract.get("purpose"))
+    if acceptance_kind not in {"external_verifier", "candidate_final_proof"}:
+        return False
+    if proof_role not in {"verifier", "final_artifact", "custom_runtime_smoke", "default_smoke"}:
+        return False
+    if stage in {"verification", "artifact_proof", "custom_runtime_smoke", "default_smoke", "final_verifier"}:
+        return True
+    if purpose in {
+        "verification",
+        "artifact_proof",
+        "smoke",
+    }:
+        return True
+    return stage == "command" and _work_oneshot_contract_expected_artifacts(contract)
+
+
+def _work_oneshot_manifest_final_verifier_contract(content):
+    contracts = []
+    for key in ("execution_contract", "execution_contract_normalized"):
+        contract = content.get(key)
+        if isinstance(contract, dict):
+            contracts.append(contract)
+    if not contracts:
+        return False
+    return any(_work_oneshot_single_manifest_final_verifier_contract(contract) for contract in contracts)
+
+
+def _work_oneshot_manifest_runtime_fresh_context(task, content):
+    task = task if isinstance(task, dict) else {}
+    text = "\n".join(
+        str(value or "")
+        for value in (
+            task.get("title"),
+            task.get("description"),
+            task.get("notes"),
+            content.get("command"),
+            content.get("stdout"),
+            content.get("stdout_tail"),
+            content.get("stderr"),
+            content.get("stderr_tail"),
+        )
+        if value
+    ).casefold()
+    runtime_markers = ("emulator", "fresh run", "interpreter", "node ", "run ", "vm")
+    artifact_markers = ("frame", "frames", "screenshot", "will write", "written", "saved", "bmp")
+    return any(marker in text for marker in runtime_markers) and any(marker in text for marker in artifact_markers)
+
+
+def _work_oneshot_task_explicitly_requires_artifact(task, artifact):
+    task = task if isinstance(task, dict) else {}
+    artifact = str(artifact or "").strip().casefold()
+    if not artifact:
+        return False
+    text = "\n".join(
+        str(value or "")
+        for value in (task.get("title"), task.get("description"), task.get("notes"))
+        if value
+    ).casefold()
+    index = text.find(artifact)
+    if index < 0:
+        return False
+    context = text[max(0, index - 120) : min(len(text), index + len(artifact) + 120)]
+    runtime_created_markers = (
+        "during a fresh",
+        "during the run",
+        "frame",
+        "fresh verifier",
+        "node",
+        "runtime",
+        "screenshot",
+        "verifier",
+        "vm.js",
+        "when run",
+        "when running",
+    )
+    if any(marker in context for marker in runtime_created_markers):
+        return False
+    deliverable_markers = (
+        "answer file",
+        "deliverable",
+        "final output",
+        "required output",
+        "save the output",
+        "submit",
+        "write the result",
+    )
+    return any(marker in context for marker in deliverable_markers)
+
+
+def _work_oneshot_manifest_tmp_artifacts_from_content(task, content):
+    if not isinstance(content, dict):
+        return []
+    verifier = content.get("verifier_evidence") if isinstance(content.get("verifier_evidence"), dict) else {}
+    if str(verifier.get("verdict") or "").casefold() != "pass":
+        return []
+    if not _work_oneshot_manifest_final_verifier_contract(content):
+        return []
+    if not _work_oneshot_manifest_runtime_fresh_context(task, content):
+        return []
+    artifacts = []
+    for item in content.get("artifact_evidence") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "").casefold() != "passed":
+            continue
+        kind = str(item.get("kind") or "").casefold()
+        path = str(item.get("path") or item.get("artifact_path") or item.get("artifact_id") or "").strip()
+        if kind != "file" or not path.startswith("/tmp/"):
+            continue
+        if path.endswith((".log", ".txt", ".out", ".stdout", ".stderr")):
+            continue
+        pre_run = item.get("pre_run_stat") if isinstance(item.get("pre_run_stat"), dict) else {}
+        post_run = item.get("post_run_stat") if isinstance(item.get("post_run_stat"), dict) else {}
+        pre_exists = pre_run.get("exists")
+        fresh_after_cleanup = pre_exists is True and _work_oneshot_manifest_cleanup_command(content.get("command"), path)
+        if (pre_exists is not False and not fresh_after_cleanup) or post_run.get("exists") is not True:
+            continue
+        if _work_oneshot_task_explicitly_requires_artifact(task, path):
+            continue
+        if path not in artifacts:
+            artifacts.append(path)
+    return artifacts
+
+
+def _work_oneshot_manifest_cleanup_command(command, artifact):
+    lowered = str(command or "").casefold()
+    artifact = str(artifact or "").casefold()
+    if not artifact or artifact not in lowered:
+        return False
+    return any(marker in lowered for marker in ("rm -f", "unlink", "remove", "removed", "delete", "cleanup"))
+
+
+def _work_oneshot_runtime_artifact_risk_from_implement_v2_manifest(args, *, task=None):
+    manifest_path = _work_oneshot_implement_v2_manifest_path(args)
+    if manifest_path is None:
+        return {}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    tool_results = manifest.get("tool_results") if isinstance(manifest, dict) else []
+    if not isinstance(tool_results, list):
+        return {}
+    latest_created = {}
+    latest_cleaned = {}
+    for index, result in enumerate(tool_results, start=1):
+        if not isinstance(result, dict):
+            continue
+        content_list = result.get("content") if isinstance(result.get("content"), list) else []
+        content = content_list[0] if content_list and isinstance(content_list[0], dict) else {}
+        provider_call_id = result.get("provider_call_id") or index
+        command = str(content.get("command") or "")
+        for artifact in list(latest_created):
+            if _work_oneshot_manifest_cleanup_command(command, artifact):
+                latest_cleaned[artifact] = index
+        if str(result.get("status") or "").casefold() != "completed":
+            continue
+        for artifact in _work_oneshot_manifest_tmp_artifacts_from_content(task, content):
+            latest_created[artifact] = {
+                "index": index,
+                "artifact": artifact,
+                "source_tool_call_id": provider_call_id,
+                "tool": result.get("tool_name") or "",
+                "suggested_cleanup": (
+                    f"preserve proof, then remove stale {artifact} before finish if the verifier creates it"
+                ),
+            }
+    stale = []
+    for artifact, item in latest_created.items():
+        if latest_cleaned.get(artifact, -1) > item.get("index", -1):
+            continue
+        stale.append({key: value for key, value in item.items() if key != "index"})
+    if not stale:
+        return {}
+    return {
+        "kind": "stale_runtime_artifact_risk",
+        "artifacts": stale,
+        "suggested_next": (
+            "runtime self-verification created /tmp artifacts that may short-circuit a fresh external verifier; "
+            "preserve evidence in acceptance_checks, then clean stale runtime artifacts before finish unless "
+            "the task explicitly requires them to pre-exist"
+        ),
+    }
+
+
+_WORK_ONESHOT_DEBUG_CLEANUP_MAX_MATCHES = 64
+
+
+def _work_oneshot_debug_cleanup_specs(args):
+    raw_specs = getattr(args, "debug_cleanup", []) or []
+    if isinstance(raw_specs, str):
+        raw_specs = [raw_specs]
+    return [str(spec or "").strip() for spec in raw_specs if str(spec or "").strip()]
+
+
+def _work_oneshot_debug_cleanup_matches(spec):
+    spec = str(spec or "").strip()
+    if not spec:
+        return [], "empty cleanup spec"
+    if not spec.startswith("/tmp/"):
+        return [], "debug cleanup only accepts /tmp/ paths"
+    if spec in {"/tmp", "/tmp/"}:
+        return [], "debug cleanup refuses the /tmp directory itself"
+    relative = spec[len("/tmp/") :]
+    if not relative or relative == ".":
+        return [], "debug cleanup refuses the /tmp directory itself"
+    if relative.startswith("/"):
+        return [], "debug cleanup refuses malformed /tmp// paths"
+    parts = Path(relative).parts
+    if any(part in {"", ".", ".."} for part in parts):
+        return [], "debug cleanup refuses empty, current, or parent path segments"
+    if "**" in parts:
+        return [], "debug cleanup refuses recursive glob patterns"
+    tmp_root = Path("/tmp").resolve(strict=False)
+    try:
+        matches = sorted(Path("/tmp").glob(relative))
+    except (NotImplementedError, ValueError) as exc:
+        return [], f"debug cleanup rejected invalid glob pattern: {exc}"
+    if not matches:
+        return [], "no files matched debug cleanup spec"
+    if len(matches) > _WORK_ONESHOT_DEBUG_CLEANUP_MAX_MATCHES:
+        return [], (
+            "debug cleanup matched too many files "
+            f"({len(matches)} > {_WORK_ONESHOT_DEBUG_CLEANUP_MAX_MATCHES})"
+        )
+    safe_matches = []
+    for match in matches:
+        try:
+            resolved = match.resolve(strict=False)
+        except OSError:
+            resolved = match
+        if resolved != tmp_root and tmp_root not in resolved.parents:
+            return [], f"debug cleanup match escaped /tmp: {match}"
+        if match.is_dir():
+            return [], f"debug cleanup refuses directory match: {match}"
+        safe_matches.append(match)
+    return safe_matches, ""
+
+
+def _work_oneshot_debug_cleanup_records(args):
+    specs = _work_oneshot_debug_cleanup_specs(args)
+    if not specs:
+        return [], []
+    if not getattr(args, "defer_verify", False):
+        return [], [
+            {
+                "spec": spec,
+                "status": "skipped",
+                "reason": "--debug-cleanup only runs with --defer-verify",
+            }
+            for spec in specs
+        ]
+    artifacts = []
+    spec_records = []
+    seen = set()
+    for spec in specs:
+        matches, error = _work_oneshot_debug_cleanup_matches(spec)
+        if error:
+            spec_records.append({"spec": spec, "status": "rejected", "reason": error})
+            continue
+        spec_records.append(
+            {
+                "spec": spec,
+                "status": "matched",
+                "match_count": len(matches),
+            }
+        )
+        for path in matches:
+            artifact = str(path)
+            if artifact in seen:
+                continue
+            seen.add(artifact)
+            record = {
+                "artifact": artifact,
+                "source": "debug_cleanup",
+                "spec": spec,
+                "status": "",
+            }
+            try:
+                path.unlink(missing_ok=True)
+                record["status"] = "removed"
+            except OSError as exc:
+                record["status"] = "error"
+                record["error"] = str(exc)
+            artifacts.append(record)
+    return artifacts, spec_records
+
+
 def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume, *, task=None, work_report=None):
     if not getattr(args, "defer_verify", False):
+        debug_artifacts, debug_specs = _work_oneshot_debug_cleanup_records(args)
+        if debug_artifacts or debug_specs:
+            return {
+                "kind": "deferred_verify_runtime_artifact_cleanup",
+                "artifacts": debug_artifacts,
+                "debug_cleanup_specs": debug_specs,
+                "reason": "--debug-cleanup is diagnostic-only and requires --defer-verify",
+            }
         return {}
     risk = (resume or {}).get("stale_runtime_artifact_risk") or {}
     if not risk:
         risk = _work_oneshot_runtime_artifact_risk_from_report(task, work_report)
+    if not risk:
+        risk = _work_oneshot_runtime_artifact_risk_from_implement_v2_manifest(args, task=task)
     artifacts = []
     for item in risk.get("artifacts") or []:
         if not isinstance(item, dict):
@@ -4804,9 +5175,11 @@ def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume, *, task=None,
             record["status"] = "error"
             record["error"] = str(exc)
         artifacts.append(record)
-    if not artifacts:
+    debug_artifacts, debug_specs = _work_oneshot_debug_cleanup_records(args)
+    artifacts.extend(debug_artifacts)
+    if not artifacts and not debug_specs:
         return {}
-    return {
+    cleanup = {
         "kind": "deferred_verify_runtime_artifact_cleanup",
         "artifacts": artifacts,
         "reason": (
@@ -4815,6 +5188,9 @@ def _work_oneshot_cleanup_deferred_runtime_artifacts(args, resume, *, task=None,
             "fresh runtime checks are not short-circuited"
         ),
     }
+    if debug_specs:
+        cleanup["debug_cleanup_specs"] = debug_specs
+    return cleanup
 
 
 def _parse_json_object(text):
@@ -4870,6 +5246,7 @@ def cmd_work_oneshot(args):
         )
         if auto_verify_command:
             work_args.verify_command = auto_verify_command
+            work_args.verify_command_source = "auto_detected"
     work_args.oneshot_verify_source = (
         "auto_detected"
         if auto_verify_command
@@ -4878,8 +5255,8 @@ def cmd_work_oneshot(args):
     report_path = _work_oneshot_report_path(args)
     if report_path:
         work_args.oneshot_report_path = str(report_path)
-        work_args.oneshot_artifacts = _work_oneshot_artifacts(args)
         work_args.oneshot_workspace_cwd = task.get("cwd") or ""
+    work_args.oneshot_artifacts = _work_oneshot_artifacts(args)
 
     stdout = StringIO()
     with redirect_stdout(stdout):
@@ -4901,7 +5278,8 @@ def cmd_work_oneshot(args):
     if post_run_cleanup:
         resume = dict(resume)
         resume["post_run_cleanup"] = post_run_cleanup
-        if all(item.get("status") == "removed" for item in post_run_cleanup.get("artifacts") or []):
+        cleanup_artifacts = post_run_cleanup.get("artifacts") or []
+        if cleanup_artifacts and all(item.get("status") == "removed" for item in cleanup_artifacts):
             resume["stale_runtime_artifact_risk"] = {}
 
     report = {
@@ -5278,7 +5656,9 @@ def positive_float_option(value, flag):
 
 
 def cmd_do(args):
-    verify_command = getattr(args, "verify_command", None) or detect_default_verify_command()
+    explicit_verify_command = getattr(args, "verify_command", None)
+    verify_command = explicit_verify_command or detect_default_verify_command()
+    verify_command_source = "explicit" if explicit_verify_command else ("auto_detected" if verify_command else "")
     allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
     try:
         max_steps = positive_max_steps(getattr(args, "max_steps", None), default=3)
@@ -5310,6 +5690,7 @@ def cmd_do(args):
         allow_shell=False,
         allow_verify=allow_verify,
         verify_command=verify_command if allow_verify else "",
+        verify_command_source=verify_command_source if allow_verify else "",
         verify_cwd=".",
         verify_timeout=getattr(args, "verify_timeout", 300),
         start_session=False,
@@ -5347,8 +5728,12 @@ def code_args_request_default_update(args):
 def code_default_update_args(args, session):
     current = (session or {}).get("default_options") or {}
     verify_command = getattr(args, "verify_command", None)
+    verify_command_source = ""
     if verify_command is None:
         verify_command = current.get("verify_command") or ""
+        verify_command_source = current.get("verify_command_source") or ""
+    else:
+        verify_command_source = getattr(args, "verify_command_source", None) or "explicit"
     allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
     return SimpleNamespace(
         auth=getattr(args, "auth", None),
@@ -5360,6 +5745,7 @@ def code_default_update_args(args, session):
         allow_shell=False,
         allow_verify=allow_verify,
         verify_command=verify_command if allow_verify else "",
+        verify_command_source=verify_command_source if allow_verify else "",
         verify_timeout=getattr(args, "verify_timeout", 300),
         act_mode=None,
         compact_live=bool(getattr(args, "compact_live", False)),
@@ -5384,7 +5770,9 @@ def format_code_task_not_found(task_id):
 def cmd_code(args):
     task_id = getattr(args, "task_id", None)
     if task_id:
-        verify_command = getattr(args, "verify_command", None) or detect_default_verify_command()
+        explicit_verify_command = getattr(args, "verify_command", None)
+        verify_command = explicit_verify_command or detect_default_verify_command()
+        verify_command_source = "explicit" if explicit_verify_command else ("auto_detected" if verify_command else "")
         allow_verify = bool(verify_command) and not getattr(args, "no_verify", False)
         start_args = SimpleNamespace(
             task_id=task_id,
@@ -5398,6 +5786,7 @@ def cmd_code(args):
             allow_shell=False,
             allow_verify=allow_verify,
             verify_command=verify_command if allow_verify else "",
+            verify_command_source=verify_command_source if allow_verify else "",
             verify_timeout=getattr(args, "verify_timeout", 300),
             act_mode="deterministic",
             compact_live=bool(getattr(args, "compact_live", False)),
@@ -6101,7 +6490,9 @@ def _auto_detect_work_verify_command(args, options, session, task):
     if not inferred:
         return ""
     options["verify_command"] = inferred
+    options["verify_command_source"] = "auto_detected"
     setattr(args, "verify_command", inferred)
+    setattr(args, "verify_command_source", "auto_detected")
     if session:
         with state_lock():
             state = load_state()
@@ -6434,6 +6825,19 @@ def _long_build_reserve_seconds(contract, recovery_decision):
     return WORK_WALL_LONG_TOOL_RECOVERY_RESERVE_SECONDS
 
 
+def _execution_contract_is_final_verifier(contract):
+    if not isinstance(contract, dict):
+        return False
+    if str(contract.get("stage") or "") != "verification":
+        return False
+    if str(contract.get("proof_role") or "") != "verifier":
+        return False
+    return str(contract.get("acceptance_kind") or "") in {
+        "candidate_final_proof",
+        "external_verifier",
+    }
+
+
 def work_tool_recovery_reserve_seconds(action_type, parameters, *, task=None, session=None):
     policy = work_tool_long_command_budget_policy(
         action_type,
@@ -6505,6 +6909,7 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
     minimum_timeout_seconds = WORK_WALL_LONG_TOOL_RECOVERY_MIN_TIMEOUT_SECONDS
     diagnostic_budget = False
     poll_spends_final_proof_reserve = False
+    final_verifier_spends_final_proof_reserve = False
     if recovery_decision:
         allowed_next = recovery_decision.get("allowed_next_action")
         allowed_next = allowed_next if isinstance(allowed_next, dict) else {}
@@ -6582,9 +6987,16 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
         elif not reserve and not poll_spends_final_proof_reserve:
             reserve = _long_build_reserve_seconds(contract, recovery_decision)
     elif typed_managed:
-        reserve = _positive_float_or_none(typed_continuation.get("final_proof_reserve_seconds")) or _long_build_reserve_seconds(
-            contract, recovery_decision
-        )
+        if _execution_contract_is_final_verifier(typed_contract):
+            # The final-proof reserve exists so the actual final verifier can
+            # run after build/repair work. Once the typed action is itself the
+            # final verifier, holding that reserve strands near-complete tasks.
+            reserve = 0.0
+            final_verifier_spends_final_proof_reserve = True
+        else:
+            reserve = _positive_float_or_none(typed_continuation.get("final_proof_reserve_seconds")) or _long_build_reserve_seconds(
+                contract, recovery_decision
+            )
         requested_yield = _positive_float_or_none(typed_continuation.get("yield_after_seconds"))
         minimum_timeout_seconds = requested_yield + 1.0 if requested_yield is not None else minimum_timeout_seconds
         if effective_timeout < minimum_timeout_seconds:
@@ -6611,6 +7023,7 @@ def work_tool_long_command_budget_policy(action_type, parameters, *, task=None, 
             "diagnostic_budget": diagnostic_budget,
             "execution_contract_managed": typed_managed,
             "poll_spends_final_proof_reserve": poll_spends_final_proof_reserve,
+            "final_verifier_spends_final_proof_reserve": final_verifier_spends_final_proof_reserve,
         }
     )
     return policy
@@ -6852,6 +7265,665 @@ def apply_work_tool_wall_timeout_ceiling(
     return ceiling
 
 
+def _work_guidance_selected_lane(guidance):
+    text = str(guidance or "")
+    for pattern in (
+        r"(?:^|\s)selected_lane\s*=\s*([A-Za-z0-9_.-]+)",
+        r"(?:^|\s)lane\s*=\s*([A-Za-z0-9_.-]+)",
+    ):
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return ""
+    if isinstance(payload, dict):
+        return str(payload.get("selected_lane") or payload.get("lane") or "").strip()
+    return ""
+
+
+def _work_guidance_json_payload(guidance):
+    text = str(guidance or "").strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _coerce_guidance_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return False
+
+
+def _work_guidance_bool_option(guidance, *names):
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        if name in payload:
+            return _coerce_guidance_bool(payload.get(name))
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            if name in lane_config:
+                return _coerce_guidance_bool(lane_config.get(name))
+    text = str(guidance or "")
+    for name in names:
+        pattern = rf"(?:^|\s){re.escape(name)}\s*=\s*([A-Za-z0-9_.-]+)"
+        match = re.search(pattern, text)
+        if match:
+            return _coerce_guidance_bool(match.group(1))
+    return False
+
+
+def _work_guidance_has_option(guidance, *names):
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        if name in payload:
+            return True
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            if name in lane_config:
+                return True
+    text = str(guidance or "")
+    for name in names:
+        pattern = rf"(?:^|\s){re.escape(name)}\s*="
+        if re.search(pattern, text):
+            return True
+    return False
+
+
+def _work_guidance_string_option(guidance, *names):
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        if name in payload:
+            return str(payload.get(name) or "").strip()
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            if name in lane_config:
+                return str(lane_config.get(name) or "").strip()
+    text = str(guidance or "")
+    for name in names:
+        pattern = rf"(?:^|\s){re.escape(name)}\s*=\s*([A-Za-z0-9_.-]+)"
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _work_guidance_dict_option(guidance, *names):
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        value = payload.get(name) if isinstance(payload, dict) else None
+        if isinstance(value, dict):
+            return dict(value)
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            value = lane_config.get(name)
+            if isinstance(value, dict):
+                return dict(value)
+    return {}
+
+
+def _work_guidance_persisted_lane_state(guidance):
+    payload = _work_guidance_json_payload(guidance)
+    if not payload:
+        return {}
+    persisted = {}
+    for container_name in ("persisted_lane_state", "lane_state"):
+        container = payload.get(container_name)
+        if isinstance(container, dict):
+            for key, value in container.items():
+                key_text = str(key)
+                if key_text.startswith(("lane_", "reentry_", "resume_")):
+                    persisted[key_text] = value
+                elif key_text == "active_work_todo" and isinstance(value, dict):
+                    persisted[key_text] = value
+    for key in (
+        "active_work_todo",
+        "lane_repair_history",
+        "lane_context_capsule",
+        "lane_hard_runtime_frontier",
+        "reentry_repair_history",
+        "resume_repair_history",
+    ):
+        if key in payload:
+            persisted[key] = payload.get(key)
+    return persisted
+
+
+_RETIRED_CONTRACT_MODEL_OPTION = "task_contract" + "_compiler"
+_RETIRED_CONTRACT_MODEL_OPTIONS = (
+    _RETIRED_CONTRACT_MODEL_OPTION,
+    f"{_RETIRED_CONTRACT_MODEL_OPTION}_mode",
+    f"{_RETIRED_CONTRACT_MODEL_OPTION}_model",
+    f"{_RETIRED_CONTRACT_MODEL_OPTION}_timeout_seconds",
+    f"{_RETIRED_CONTRACT_MODEL_OPTION}_required",
+)
+_RETIRED_CONTRACT_LEGACY_OPTIONS = (
+    "legacy" + "_task_contract",
+    "task_contract" + "_legacy",
+)
+_RETIRED_CONTRACT_LIVE_KNOBS = (
+    *_RETIRED_CONTRACT_MODEL_OPTIONS,
+    *_RETIRED_CONTRACT_LEGACY_OPTIONS,
+)
+
+
+def _work_guidance_float_option(guidance, *names):
+    raw = _work_guidance_string_option(guidance, *names)
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+    payload = _work_guidance_json_payload(guidance)
+    for name in names:
+        if name in payload:
+            try:
+                return float(payload.get(name))
+            except (TypeError, ValueError):
+                return None
+    lane_config = payload.get("lane_config") if isinstance(payload, dict) else None
+    if isinstance(lane_config, dict):
+        for name in names:
+            if name in lane_config:
+                try:
+                    return float(lane_config.get(name))
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+
+def _work_guidance_task_contract_guidance(guidance):
+    payload = _work_guidance_json_payload(guidance)
+    if not payload:
+        return _strip_internal_work_guidance_options(str(guidance or ""))
+    sanitized = dict(payload)
+    for key in (
+        "persisted_lane_state",
+        "lane_state",
+        "active_work_todo",
+        "lane_repair_history",
+        "lane_context_capsule",
+        "lane_hard_runtime_frontier",
+        "reentry_repair_history",
+        "resume_repair_history",
+        "workframe_variant",
+        "work_frame_variant",
+        "tool_surface_profile_id",
+        "tool_surface_profile",
+        "tool_surface_profile_options",
+        "finish_verifier_planner_enabled",
+        "finish_verifier_planner_selection_source",
+        "experimental_finish_verifier_planner",
+        "finish_verifier_planner",
+        "finish_verifier_planner_model",
+        *_RETIRED_CONTRACT_LIVE_KNOBS,
+    ):
+        sanitized.pop(key, None)
+    lane_config = sanitized.get("lane_config")
+    if isinstance(lane_config, dict):
+        lane_config = dict(lane_config)
+        lane_config.pop("workframe_variant", None)
+        lane_config.pop("work_frame_variant", None)
+        lane_config.pop("tool_surface_profile_id", None)
+        lane_config.pop("tool_surface_profile", None)
+        lane_config.pop("tool_surface_profile_options", None)
+        lane_config.pop("finish_verifier_planner_enabled", None)
+        lane_config.pop("finish_verifier_planner_selection_source", None)
+        lane_config.pop("experimental_finish_verifier_planner", None)
+        lane_config.pop("finish_verifier_planner", None)
+        lane_config.pop("finish_verifier_planner_model", None)
+        for key in _RETIRED_CONTRACT_LIVE_KNOBS:
+            lane_config.pop(key, None)
+        if lane_config:
+            sanitized["lane_config"] = lane_config
+        else:
+            sanitized.pop("lane_config", None)
+    return json.dumps(sanitized, ensure_ascii=True, sort_keys=True) if sanitized else ""
+
+
+def _strip_internal_work_guidance_options(guidance):
+    text = str(guidance or "")
+    for name in (
+        "workframe_variant",
+        "work_frame_variant",
+        "tool_surface_profile_id",
+        "tool_surface_profile",
+        "tool_surface_profile_options",
+        "finish_verifier_planner_enabled",
+        "finish_verifier_planner_selection_source",
+        "experimental_finish_verifier_planner",
+        "finish_verifier_planner",
+        "finish_verifier_planner_model",
+        *_RETIRED_CONTRACT_LIVE_KNOBS,
+    ):
+        text = re.sub(rf"(?:^|\s){re.escape(name)}\s*=\s*[A-Za-z0-9_.-]+", " ", text)
+    return " ".join(text.split())
+
+
+def _work_session_active_work_todo(session):
+    if not isinstance(session, dict):
+        return {}
+    value = session.get("active_work_todo")
+    if isinstance(value, dict) and value:
+        return dict(value)
+    resume = session.get("resume") if isinstance(session.get("resume"), dict) else {}
+    value = resume.get("active_work_todo") if isinstance(resume, dict) else {}
+    return dict(value) if isinstance(value, dict) and value else {}
+
+
+def _work_oneshot_implement_v2_active_work_todo(task):
+    if not isinstance(task, dict):
+        return {}
+    task_id = str(task.get("id") or "").strip()
+    description = str(task.get("description") or task.get("title") or "").strip()
+    if not task_id or not description:
+        return {}
+    return {
+        "id": f"oneshot-{task_id}-implement",
+        "lane": IMPLEMENT_V2_LANE,
+        "status": "drafting",
+        "source": {
+            "plan_item": "Make the first coherent source mutation for this one-shot implementation task.",
+            "target_paths": [],
+            "verify_command": "",
+        },
+    }
+
+
+def _merge_work_session_active_work_todo_readiness(session, updated_lane_state):
+    if not isinstance(session, dict) or not isinstance(updated_lane_state, dict):
+        return False
+    updated_todo = updated_lane_state.get("active_work_todo")
+    if not isinstance(updated_todo, dict):
+        return False
+    readiness = updated_todo.get("first_write_readiness")
+    if not isinstance(readiness, dict) or not readiness:
+        return False
+    active_todo = _work_session_active_work_todo(session)
+    if not active_todo:
+        active_todo = dict(updated_todo)
+    else:
+        updated_id = str(updated_todo.get("id") or "").strip()
+        active_id = str(active_todo.get("id") or "").strip()
+        if updated_id and active_id and updated_id != active_id:
+            return False
+        active_todo["first_write_readiness"] = dict(readiness)
+    session["active_work_todo"] = active_todo
+    resume = session.get("resume") if isinstance(session.get("resume"), dict) else None
+    if resume is not None:
+        resume["active_work_todo"] = dict(active_todo)
+    return True
+
+
+def _work_ai_workspace_roots(roots, workspace):
+    workspace_path = Path(str(workspace or ".")).expanduser().resolve(strict=False)
+    normalized = []
+    for root in roots or []:
+        root_path = Path(str(root)).expanduser()
+        if not root_path.is_absolute():
+            root_path = workspace_path / root_path
+        text = str(root_path.resolve(strict=False))
+        if text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
+def _work_ai_implement_v2_task_contract(
+    task,
+    *,
+    max_steps,
+    max_wall_seconds,
+    guidance,
+    verify_command,
+    verify_command_source="",
+):
+    description = (task or {}).get("description") or (task or {}).get("notes") or ""
+    return {
+        "title": (task or {}).get("title") or "",
+        "description": description,
+        "cwd": (task or {}).get("cwd") or "",
+        "kind": task_kind(task or {}),
+        "max_steps": max_steps,
+        "max_wall_seconds": max_wall_seconds,
+        "guidance": _work_guidance_task_contract_guidance(guidance),
+        "verify_command": verify_command or "",
+        "verify_command_source": verify_command_source or "",
+        "acceptance_constraints": extract_acceptance_constraints(description),
+    }
+
+
+def _run_work_ai_implement_v2(
+    args,
+    effective_args,
+    *,
+    report,
+    session_id,
+    task_id,
+    options,
+    model_auth,
+    model_backend,
+    model,
+    base_url,
+    max_steps,
+    max_wall_seconds,
+    progress,
+):
+    workspace = options.get("cwd") or os.getcwd()
+    selected_lane = _work_guidance_selected_lane(getattr(effective_args, "work_guidance", None))
+    requested_model_timeout_seconds = float(getattr(effective_args, "model_timeout", 60.0) or 60.0)
+    model_timeout_seconds = _implement_v2_native_model_timeout_seconds(
+        requested_model_timeout_seconds,
+        max_wall_seconds=max_wall_seconds,
+    )
+    implement_v2_runtime_metrics = {
+        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "selected_lane": selected_lane,
+        "model_backend": model_backend,
+        "model": model,
+        "model_timeout_seconds": model_timeout_seconds,
+        "requested_model_timeout_seconds": requested_model_timeout_seconds,
+        "native_timeout_reserve_seconds": (
+            round(max(0.0, requested_model_timeout_seconds - model_timeout_seconds), 3)
+            if model_timeout_seconds < requested_model_timeout_seconds
+            else 0.0
+        ),
+        "timeout_guard": "work_loop_process_guard",
+        "transport_kind": "provider_native",
+        "provider_native_tool_loop": True,
+        "model_json_main_path_detected": False,
+    }
+    report["selected_lane"] = selected_lane
+    report["runtime_id"] = IMPLEMENT_V2_NATIVE_RUNTIME_ID
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        task = work_session_task(state, session) or find_task(state, task_id)
+        planning_turn = start_work_model_turn(
+            state,
+            session,
+            {"summary": "running implement_v2 lane"},
+            {"summary": "running implement_v2 lane"},
+            {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE},
+            guidance=getattr(effective_args, "work_guidance", None) or "",
+        )
+        planning_turn["model_metrics"] = {**implement_v2_runtime_metrics, "status": "running"}
+        planning_turn_id = planning_turn.get("id")
+        save_state(state)
+
+    def record_implement_v2_progress(line):
+        if progress:
+            progress(line)
+        text = str(line or "")
+        metrics_update = {
+            "last_runtime_progress": text,
+            "last_runtime_progress_at": now_iso(),
+        }
+        if "native_request start" in text:
+            metrics_update["runtime_phase"] = "native_request"
+            metrics_update["prompt_render_started_at"] = metrics_update["last_runtime_progress_at"]
+        elif "native_request done" in text:
+            metrics_update["runtime_phase"] = "native_response_ready"
+            metrics_update["prompt_render_finished_at"] = metrics_update["last_runtime_progress_at"]
+        elif "native_response start" in text:
+            metrics_update["runtime_phase"] = "native_response_call"
+            metrics_update["native_response_started_at"] = metrics_update["last_runtime_progress_at"]
+            timeout_match = re.search(r"timeout_seconds=([0-9.]+)", text)
+            if timeout_match:
+                try:
+                    metrics_update["active_model_timeout_seconds"] = float(timeout_match.group(1))
+                except ValueError:
+                    pass
+        elif "native_response failed" in text:
+            metrics_update["runtime_phase"] = "native_response_failed"
+        with state_lock():
+            state = load_state()
+            session = find_work_session(state, session_id)
+            turn = find_work_model_turn(session, planning_turn_id)
+            if turn is None:
+                return
+            metrics = dict(turn.get("model_metrics") or {})
+            metrics.update(metrics_update)
+            turn["model_metrics"] = metrics
+            turn["updated_at"] = metrics_update["last_runtime_progress_at"]
+            if session is not None:
+                session["updated_at"] = metrics_update["last_runtime_progress_at"]
+            save_state(state)
+
+    persisted_lane_state = _work_guidance_persisted_lane_state(getattr(effective_args, "work_guidance", None))
+    if not isinstance(persisted_lane_state.get("active_work_todo"), dict) or not persisted_lane_state.get(
+        "active_work_todo"
+    ):
+        persisted_lane_state.pop("active_work_todo", None)
+        active_work_todo = _work_session_active_work_todo(session)
+        if not active_work_todo and getattr(effective_args, "oneshot_mode", False):
+            active_work_todo = _work_oneshot_implement_v2_active_work_todo(task)
+        if active_work_todo:
+            persisted_lane_state["active_work_todo"] = active_work_todo
+
+    tool_surface_profile_id = _work_guidance_string_option(
+        getattr(effective_args, "work_guidance", None),
+        "tool_surface_profile_id",
+        "tool_surface_profile",
+    )
+    tool_surface_profile_options = _work_guidance_dict_option(
+        getattr(effective_args, "work_guidance", None),
+        "tool_surface_profile_options",
+    )
+    work_guidance = getattr(effective_args, "work_guidance", None) or ""
+    task_contract = _work_ai_implement_v2_task_contract(
+        task,
+        max_steps=max_steps,
+        max_wall_seconds=max_wall_seconds,
+        guidance=work_guidance,
+        verify_command=getattr(effective_args, "verify_command", None) or "",
+        verify_command_source=getattr(effective_args, "verify_command_source", None) or "",
+    )
+    contract_compiler_report = {
+        "status": "retired",
+        "enabled": False,
+        "reason": "model-assisted task contract compilation is retired from the implement_v2 live path",
+        "raw_compiled_contract_stored": False,
+    }
+    report["contract_compiler"] = dict(contract_compiler_report)
+    implement_v2_runtime_metrics["contract_compiler_status"] = contract_compiler_report.get("status")
+    implement_v2_runtime_metrics["contract_compiler_enabled"] = False
+    lane_config = {
+        "mode": "full",
+        "allowed_read_roots": _work_ai_workspace_roots(effective_args.allow_read or [], workspace),
+        "allowed_write_roots": _work_ai_workspace_roots(effective_args.allow_write or [], workspace),
+        "allow_shell": bool(effective_args.allow_shell),
+        "allow_verify": bool(effective_args.allow_verify),
+        "verify_command": getattr(effective_args, "verify_command", None) or "",
+        "verify_command_source": getattr(effective_args, "verify_command_source", None) or "",
+        "auto_approve_writes": work_auto_approve_edits_enabled(effective_args),
+        "artifact_dir": getattr(effective_args, "oneshot_artifacts", "") or "",
+        "max_steps": max_steps,
+        "workframe_variant": _work_guidance_string_option(
+            getattr(effective_args, "work_guidance", None),
+            "workframe_variant",
+            "work_frame_variant",
+        ),
+        "write_integration_observation_detail": _work_guidance_bool_option(
+            getattr(effective_args, "work_guidance", None),
+            "write_integration_observation_detail",
+            "integration_observation_detail",
+        ),
+    }
+    if _work_guidance_has_option(work_guidance, "finish_verifier_planner_enabled"):
+        lane_config["finish_verifier_planner_enabled"] = _work_guidance_bool_option(
+            work_guidance,
+            "finish_verifier_planner_enabled",
+        )
+    if _work_guidance_has_option(work_guidance, "finish_verifier_planner"):
+        lane_config["finish_verifier_planner"] = _work_guidance_bool_option(
+            work_guidance,
+            "finish_verifier_planner",
+        )
+    if _work_guidance_has_option(work_guidance, "experimental_finish_verifier_planner"):
+        lane_config["experimental_finish_verifier_planner"] = _work_guidance_bool_option(
+            work_guidance,
+            "experimental_finish_verifier_planner",
+        )
+    from .implement_lane.finish_verifier_planner_policy import finish_verifier_planner_policy
+
+    planner_policy = finish_verifier_planner_policy(lane_config)
+    lane_config.pop("finish_verifier_planner", None)
+    lane_config.pop("experimental_finish_verifier_planner", None)
+    lane_config["finish_verifier_planner_enabled"] = planner_policy.enabled
+    lane_config["finish_verifier_planner_selection_source"] = planner_policy.selection_source
+    finish_verifier_planner_model = _work_guidance_string_option(
+        getattr(effective_args, "work_guidance", None),
+        "finish_verifier_planner_model",
+    )
+    if finish_verifier_planner_model:
+        lane_config["finish_verifier_planner_model"] = finish_verifier_planner_model
+    if tool_surface_profile_id:
+        lane_config["tool_surface_profile_id"] = tool_surface_profile_id
+    if tool_surface_profile_options:
+        lane_config["tool_surface_profile_options"] = tool_surface_profile_options
+    from .implement_lane.tool_registry import tool_surface_profile_selection
+
+    profile_selection = tool_surface_profile_selection(lane_config)
+    lane_config["tool_surface_profile_id"] = profile_selection.profile_id
+    lane_config["tool_surface_profile_default"] = profile_selection.profile_default
+    lane_config["tool_surface_profile_selection_source"] = profile_selection.selection_source
+    implement_v2_runtime_metrics["tool_surface_profile_id"] = profile_selection.profile_id
+    implement_v2_runtime_metrics["tool_surface_profile_default"] = profile_selection.profile_default
+    implement_v2_runtime_metrics["tool_surface_profile_selection_source"] = (
+        profile_selection.selection_source
+    )
+    implement_v2_runtime_metrics["finish_verifier_planner_enabled"] = planner_policy.enabled
+    implement_v2_runtime_metrics["finish_verifier_planner_selection_source"] = (
+        planner_policy.selection_source
+    )
+
+    lane_input = ImplementLaneInput(
+        work_session_id=str(session_id),
+        task_id=str(task_id),
+        workspace=str(workspace),
+        lane=IMPLEMENT_V2_LANE,
+        model_backend=model_backend,
+        model=model,
+        effort=os.environ.get("MEW_CODEX_REASONING_EFFORT", ""),
+        task_contract=task_contract,
+        persisted_lane_state=persisted_lane_state,
+        lane_config=lane_config,
+    )
+    if progress:
+        progress("selected implement_v2 native transcript runtime; bypassing v1 THINK/ACT")
+    try:
+        result = run_live_native_implement_v2(
+            lane_input,
+            model_auth=model_auth,
+            base_url=base_url,
+            timeout=model_timeout_seconds,
+            max_turns=max_steps,
+            progress=record_implement_v2_progress,
+        )
+    except Exception as exc:
+        result = None
+        error = str(exc)
+        status = "failed"
+    else:
+        error = "" if result.status == "completed" else result.user_visible_summary
+        status = result.status
+    action = {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE, "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID}
+    if result:
+        persisted_model_metrics = {**implement_v2_runtime_metrics, **dict(result.metrics or {})}
+    else:
+        persisted_model_metrics = {**implement_v2_runtime_metrics, "error": error}
+    persisted_model_metrics.setdefault("status", status)
+    with state_lock():
+        state = load_state()
+        session = find_work_session(state, session_id)
+        existing_turn = find_work_model_turn(session, planning_turn_id)
+        if existing_turn:
+            persisted_model_metrics = {
+                **dict(existing_turn.get("model_metrics") or {}),
+                **persisted_model_metrics,
+            }
+            persisted_model_metrics["status"] = status
+        turn = update_work_model_turn_plan(
+            state,
+            session_id,
+            planning_turn_id,
+            {"summary": "implement_v2 lane selected"},
+            {
+                "summary": (result.user_visible_summary if result else error) or "",
+                "action": action,
+                "act_mode": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+            },
+            action,
+            model_metrics=persisted_model_metrics,
+        )
+        turn = finish_work_model_turn(state, session_id, planning_turn_id, error=error if status != "completed" else "")
+        if session is not None:
+            if result is not None:
+                _merge_work_session_active_work_todo_readiness(session, result.updated_lane_state)
+            add_work_session_note(
+                session,
+                f"implement_v2 attempt status={status}: {(result.user_visible_summary if result else error) or ''}",
+                source="system",
+            )
+        save_state(state)
+    step = {
+        "index": 1,
+        "status": status,
+        "action": action,
+        "model_turn": turn,
+        "summary": (result.user_visible_summary if result else error) or "",
+    }
+    if result is not None:
+        step["implement_lane_result"] = result.as_dict()
+        report["implement_lane_result"] = result.as_dict()
+    if error and status != "completed":
+        step["error"] = error
+    report["steps"].append(step)
+    report["stop_reason"] = "finish" if status == "completed" else f"implement_v2_{status or 'failed'}"
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(format_work_ai_report(report, compact=getattr(effective_args, "compact_live", False)))
+    return 0 if status == "completed" else 1
+
+
+def _implement_v2_native_model_timeout_seconds(requested_timeout, *, max_wall_seconds):
+    try:
+        requested = float(requested_timeout)
+    except (TypeError, ValueError):
+        requested = 60.0
+    if requested <= 0:
+        return requested
+    try:
+        wall = float(max_wall_seconds)
+    except (TypeError, ValueError):
+        return requested
+    if wall <= 0:
+        return requested
+    reserve = min(
+        max(IMPLEMENT_V2_NATIVE_MODEL_TIMEOUT_RESERVE_SECONDS, WORK_WALL_MODEL_TIMEOUT_RESERVE_SECONDS),
+        max(0.0, wall - WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS),
+    )
+    available = max(WORK_WALL_MIN_MODEL_TURN_TIMEOUT_SECONDS, wall - reserve)
+    return min(requested, available)
+
+
 def cmd_work_ai(args):
     if getattr(args, "follow", False):
         args.live = True
@@ -7023,6 +8095,26 @@ def cmd_work_ai(args):
         )
         print(format_work_cli_controls(session, args, compact=compact_cli_controls))
         return 1
+
+    selected_lane = _work_guidance_selected_lane(getattr(effective_args, "work_guidance", None))
+    if selected_lane:
+        report["selected_lane"] = selected_lane
+    if selected_lane == IMPLEMENT_V2_LANE:
+        return _run_work_ai_implement_v2(
+            args,
+            effective_args,
+            report=report,
+            session_id=session_id,
+            task_id=task_id,
+            options=options,
+            model_auth=model_auth,
+            model_backend=model_backend,
+            model=model,
+            base_url=base_url,
+            max_steps=max_steps,
+            max_wall_seconds=max_wall_seconds,
+            progress=progress,
+        )
 
     for index in range(1, max_steps + 1):
         turn_model_timeout = float(getattr(effective_args, "model_timeout", 0) or 0)
@@ -14867,6 +15959,13 @@ def cmd_replay(args):
         assertions["mew_exit_code"] = args.assert_mew_exit_code
     if getattr(args, "assert_external_reward", None) is not None:
         assertions["external_reward"] = args.assert_external_reward
+    if getattr(args, "assert_structured_failure_class", None):
+        assertions["structured_execution_replay_required"] = True
+        assertions["structured_failure_class"] = args.assert_structured_failure_class
+    if getattr(args, "assert_structured_replay_mismatch_count", None) is not None:
+        assertions["structured_replay_mismatch_count"] = args.assert_structured_replay_mismatch_count
+    if getattr(args, "assert_source_output_contract_path", None):
+        assertions["source_output_contract_path"] = args.assert_source_output_contract_path
     report = replay_terminal_bench_job(
         args.job_dir,
         task=getattr(args, "task", None),
@@ -15109,15 +16208,48 @@ def _tool_allowed_roots(args):
     roots = getattr(args, "root", None) or ["."]
     return roots
 
+def _tool_root_relative_path(path, args):
+    raw_path = Path(str(path or ".")).expanduser()
+    if raw_path.is_absolute():
+        return str(raw_path)
+    roots = _tool_allowed_roots(args)
+    if len(roots) != 1:
+        return str(raw_path)
+    root = Path(str(roots[0] or ".")).expanduser()
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    return str(root / raw_path)
+
 def _print_json_or_text(result, as_json, text):
     if as_json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print(text)
 
+def cmd_tool_specs(args):
+    from .implement_lane.tool_registry import active_tool_specs_for_mode
+
+    specs = [spec.as_dict() for spec in active_tool_specs_for_mode(args.mode)]
+    result = {
+        "schema_version": 1,
+        "mode": args.mode,
+        "tools": specs,
+    }
+    lines = [f"{args.mode}: {len(specs)} tool(s)"]
+    for spec in specs:
+        flags = []
+        if spec.get("approval_required"):
+            flags.append("approval")
+        if spec.get("dry_run_supported"):
+            flags.append("dry-run")
+        suffix = f" ({', '.join(flags)})" if flags else ""
+        lines.append(f"- {spec['name']} [{spec['access']}]{suffix}: {spec['description']}")
+    _print_json_or_text(result, args.json, "\n".join(lines))
+    return 0
+
 def cmd_tool_list(args):
     try:
-        result = inspect_dir(args.path, _tool_allowed_roots(args), limit=args.limit)
+        result = inspect_dir(_tool_root_relative_path(args.path, args), _tool_allowed_roots(args), limit=args.limit)
     except ValueError as exc:
         print(f"mew: {exc}", file=sys.stderr)
         return 1
@@ -15127,7 +16259,7 @@ def cmd_tool_list(args):
 def cmd_tool_read(args):
     try:
         result = read_file(
-            args.path,
+            _tool_root_relative_path(args.path, args),
             _tool_allowed_roots(args),
             max_chars=args.max_chars,
             offset=args.offset,
@@ -15144,7 +16276,7 @@ def cmd_tool_search(args):
     try:
         result = search_text(
             args.query,
-            args.path,
+            _tool_root_relative_path(args.path, args),
             _tool_allowed_roots(args),
             max_matches=args.max_matches,
             context_lines=getattr(args, "context_lines", 3),
@@ -15160,7 +16292,7 @@ def cmd_tool_glob(args):
     try:
         result = glob_paths(
             args.pattern,
-            args.path,
+            _tool_root_relative_path(args.path, args),
             _tool_allowed_roots(args),
             max_matches=args.max_matches,
         )
@@ -15173,7 +16305,7 @@ def cmd_tool_glob(args):
 def cmd_tool_write(args):
     try:
         result = write_file(
-            args.path,
+            _tool_root_relative_path(args.path, args),
             args.content,
             _tool_allowed_roots(args),
             create=args.create,
@@ -15188,7 +16320,7 @@ def cmd_tool_write(args):
 def cmd_tool_edit(args):
     try:
         result = edit_file(
-            args.path,
+            _tool_root_relative_path(args.path, args),
             args.old,
             args.new,
             _tool_allowed_roots(args),
@@ -15252,6 +16384,115 @@ def cmd_tool_git(args):
         return 1
     _print_json_or_text(result, args.json, format_command_record(result))
     return 0 if result.get("exit_code") == 0 else 1
+
+
+def _tool_invoke_arguments(args) -> dict[str, object]:
+    if getattr(args, "arguments_file", None):
+        raw_text = Path(args.arguments_file).read_text(encoding="utf-8")
+    else:
+        raw_text = getattr(args, "arguments", None) or "{}"
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--arguments must be valid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("--arguments must decode to a JSON object")
+    return dict(parsed)
+
+
+def cmd_tool_invoke(args):
+    try:
+        arguments = _tool_invoke_arguments(args)
+    except (OSError, ValueError) as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    provider_call_id = "call-cli"
+    mew_tool_call_id = "tool-cli"
+    approved_write_calls = ()
+    if getattr(args, "approve", False):
+        approved_write_calls = (
+            {
+                "provider_call_id": provider_call_id,
+                "mew_tool_call_id": mew_tool_call_id,
+                "status": "approved",
+                "approval_id": "mew-tool-cli-approval",
+                "source": "mew_tool_cli",
+            },
+        )
+    kernel = ToolKernel(
+        ToolKernelConfig(
+            workspace=args.workspace,
+            mode=args.mode,
+            allowed_read_roots=tuple(args.allow_read or ()),
+            allowed_write_roots=tuple(args.allow_write or ()),
+            approved_write_calls=approved_write_calls,
+            allow_shell=bool(args.allow_shell),
+            allow_verify=bool(args.allow_verify),
+            allow_governance_writes=bool(args.allow_governance_writes),
+            source_mutation_roots=tuple(args.source_root or ()),
+        )
+    )
+    call = make_tool_call_envelope(
+        args.tool_name,
+        arguments,
+        provider_call_id=provider_call_id,
+        mew_tool_call_id=mew_tool_call_id,
+    )
+    result = kernel.execute(call)
+    payload = result.as_dict()
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(_format_tool_result_envelope(payload))
+    return 0 if result.status in {"completed", "yielded"} and not result.is_error else 1
+
+
+def _format_tool_result_envelope(payload: dict[str, object]) -> str:
+    status = payload.get("status")
+    tool_name = payload.get("tool_name")
+    content = payload.get("content")
+    summary = ""
+    if isinstance(content, list) and content and isinstance(content[0], dict):
+        first = content[0]
+        summary = str(first.get("summary") or first.get("reason") or first.get("error") or "")
+    lines = [f"{tool_name}: {status}"]
+    if summary:
+        lines.append(summary)
+    return "\n".join(lines)
+
+
+def cmd_implement_v2_tool_lab(args):
+    try:
+        if getattr(args, "command_text", None):
+            command_workspace = args.workspace or "."
+            result = run_implement_v2_tool_lab_command(
+                command=args.command_text,
+                workspace=command_workspace,
+                cwd=args.cwd,
+                allowed_read_roots=args.allow_read or [command_workspace],
+                allowed_write_roots=args.allow_write or [],
+                source_mutation_roots=args.source_root or [],
+                target_paths=args.target_path or [],
+                timeout=args.timeout,
+                command_intent=args.command_intent,
+                probe_threshold=args.probe_threshold,
+                requires_deep_runtime_coverage=args.requires_deep_runtime_coverage,
+            )
+        else:
+            result = analyze_implement_v2_tool_lab_artifact(
+                args.artifact,
+                workspace=args.workspace or "",
+                source_mutation_roots=args.source_root or [],
+                target_paths=args.target_path or [],
+                probe_threshold=args.probe_threshold,
+                requires_deep_runtime_coverage=args.requires_deep_runtime_coverage,
+            )
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    _print_json_or_text(result, args.json, format_implement_v2_tool_lab_text(result))
+    return 0
+
 
 def resolved_task_cwd_text(task):
     cwd = Path((task or {}).get("cwd") or ".").expanduser()
@@ -16415,6 +17656,160 @@ def cmd_memory(args):
             print("- none")
     return 0
 
+
+def cmd_memory_core(args):
+    from .memory_debug import (
+        chain_artifact,
+        format_artifact_summary,
+        inspect_artifact,
+        recall_artifact,
+        score_fixture_artifact,
+        write_artifact,
+    )
+
+    action = getattr(args, "memory_core_action", None)
+    if not action:
+        print("mew: memory-core requires a subcommand", file=sys.stderr)
+        return 1
+    try:
+        if action == "recall":
+            artifact = recall_artifact(
+                store_path=args.store,
+                query=args.query,
+                scope=args.scope or "",
+                memory_kinds=args.kind or (),
+                limit=args.limit,
+                include_stale=bool(args.include_stale),
+            )
+        elif action == "chain":
+            artifact = chain_artifact(
+                store_path=args.store,
+                entry_ids=args.entry,
+                max_depth=args.max_depth,
+                max_fanout=args.max_fanout,
+                max_nodes=args.max_nodes,
+                max_chars=args.max_chars,
+                edge_kinds=args.edge_kind or (),
+                include_stale=bool(args.include_stale),
+            )
+        elif action == "inspect":
+            artifact = inspect_artifact(store_path=args.store, entry_id=args.entry)
+        elif action == "score":
+            artifact = score_fixture_artifact(fixture_path=args.fixture, mode=args.mode)
+        elif action == "compress":
+            from .memory_compression import compress_memory_with_model
+            from .memory_core import MemoryCompressionRequest, MemorySystem, ProvenanceRef
+
+            if bool(args.raw_text) == bool(args.raw_file):
+                raise ValueError("memory-core compress requires exactly one of --raw-text or --raw-file")
+            raw_text = args.raw_text or Path(args.raw_file).read_text(encoding="utf-8")
+            raw_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+            source_uri = args.source_uri or (str(Path(args.raw_file).expanduser()) if args.raw_file else "memory-compression://inline")
+            source_ref = ProvenanceRef(
+                ref_id=args.source_ref_id or f"raw:{raw_hash[:16]}",
+                ref_kind=args.source_ref_kind,
+                artifact_path_or_uri=source_uri,
+                content_hash=f"sha256:{raw_hash}",
+                producer="memory_core_compress_cli",
+            )
+            model_auth = load_model_auth(args.model_backend, args.auth)
+            result = compress_memory_with_model(
+                MemorySystem(),
+                MemoryCompressionRequest(
+                    raw_text=raw_text,
+                    memory_kind=args.kind,
+                    scope=args.scope,
+                    source_refs=(source_ref,),
+                    created_at=now_iso(),
+                    title_hint=args.title_hint,
+                    applicability_hint=args.applicability_hint,
+                    max_summary_chars=args.max_summary_chars,
+                ),
+                model_backend=args.model_backend,
+                model_auth=model_auth,
+                model=args.model,
+                base_url=args.base_url,
+                timeout=args.timeout,
+            )
+            artifact = {
+                "operation": "memory_core_compress",
+                "llm_used": True,
+                "model_backend": args.model_backend,
+                "model": args.model,
+                "source_ref": source_ref.to_dict(),
+                "result": result.to_dict(),
+                "summary": (
+                    "memory core compress: "
+                    f"action={result.action} title={result.title!r} "
+                    f"merge_target={result.merge_target_entry_id or '-'}"
+                ),
+            }
+        elif action == "memory-arena-score":
+            from .memory_arena import format_memory_arena_summary, score_memory_arena_artifact
+
+            artifact = score_memory_arena_artifact(
+                input_path=args.input,
+                hf_config=args.hf_config,
+                hf_split=args.hf_split,
+                hf_revision=args.hf_revision,
+                mode=args.mode,
+                limit_rows=args.limit_rows,
+                limit=args.limit,
+                include_stale=bool(args.include_stale),
+            )
+            artifact["summary"] = format_memory_arena_summary(artifact)
+        elif action == "memory-arena-tool-score":
+            from .memory_arena import format_memory_arena_summary, score_memory_arena_tool_artifact
+
+            artifact = score_memory_arena_tool_artifact(
+                input_path=args.input,
+                hf_config=args.hf_config,
+                hf_split=args.hf_split,
+                hf_revision=args.hf_revision,
+                mode=args.mode,
+                limit_rows=args.limit_rows,
+                limit=args.limit,
+                include_stale=bool(args.include_stale),
+            )
+            artifact["summary"] = format_memory_arena_summary(artifact)
+        elif action == "memory-arena-agent-score":
+            from .memory_arena import format_memory_arena_summary, score_memory_arena_agent_artifact
+
+            model_auth = load_model_auth(args.model_backend, args.auth)
+            artifact = score_memory_arena_agent_artifact(
+                input_path=args.input,
+                hf_config=args.hf_config,
+                hf_split=args.hf_split,
+                hf_revision=args.hf_revision,
+                mode=args.mode,
+                limit_rows=args.limit_rows,
+                limit=args.limit,
+                include_stale=bool(args.include_stale),
+                max_turns=args.max_turns,
+                save_source=args.save_source,
+                answer_score_mode=args.answer_score_mode,
+                answer_threshold=args.answer_threshold,
+                model_backend=args.model_backend,
+                model_auth=model_auth,
+                model=args.model,
+                base_url=args.base_url,
+                timeout=args.timeout,
+            )
+            artifact["summary"] = format_memory_arena_summary(artifact)
+        else:
+            print(f"mew: unknown memory-core subcommand: {action}", file=sys.stderr)
+            return 1
+        write_artifact(args.artifact, artifact)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"mew: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(artifact, ensure_ascii=False, indent=2))
+    else:
+        print(format_artifact_summary(artifact))
+    return 0
+
+
 def cmd_snapshot(args):
     allowed = args.allow_read or []
     if not allowed:
@@ -17475,6 +18870,7 @@ def _parse_chat_work_ai_args(parts):
         "--allow-read",
         "--allow-write",
         "--verify-command",
+        "--verify-command-source",
         "--verify-timeout",
     }
     value_option_prefixes = tuple(f"{option}=" for option in value_options)
@@ -17504,6 +18900,7 @@ def _parse_chat_work_ai_args(parts):
         "allow_shell": False,
         "allow_verify": False,
         "verify_command": "",
+        "verify_command_source": "",
         "verify_timeout": 300.0,
         "json": False,
     }
@@ -17553,6 +18950,8 @@ def _parse_chat_work_ai_args(parts):
                 args["allow_write"].append(value)
             elif name == "--verify-command":
                 args["verify_command"] = value
+            elif name == "--verify-command-source":
+                args["verify_command_source"] = value
             elif name == "--verify-timeout":
                 try:
                     args["verify_timeout"] = float(value)
@@ -17688,6 +19087,7 @@ def _split_continue_options_and_guidance(rest):
         "--allow-read",
         "--allow-write",
         "--verify-command",
+        "--verify-command-source",
         "--verify-timeout",
     }
     flag_options = {
@@ -17744,6 +19144,7 @@ def _continue_options_should_use_cached_defaults(options):
         "--allow-read",
         "--allow-write",
         "--verify-command",
+        "--verify-command-source",
         "--verify-timeout",
     }
     explicit_target_flags = {

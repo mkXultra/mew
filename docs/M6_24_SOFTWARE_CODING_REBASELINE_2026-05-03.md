@@ -5,6 +5,11 @@ Date: 2026-05-03
 Scope: the 25 Terminal-Bench 2.0 tasks listed in
 `docs/M6_24_SOFTWARE_CODING_SCOPE_2026-05-03.md`.
 
+Status update 2026-05-06: this file is the historical scoped baseline built
+from pre-`implement_v2` evidence. The active measurement controller is now
+`docs/M6_24_IMPLEMENT_V2_REBASELINE_2026-05-06.md`; use that file for current
+task selection and v2 evidence.
+
 Frozen target: Codex `0.121.0` / `gpt-5.5@openai` from
 `docs/data/terminal_bench_2_codex_0_121_0_gpt_5_5_openai.json`.
 

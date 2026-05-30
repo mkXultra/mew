@@ -1,0 +1,126 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "update_forget_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "update_forget",
+  "phase": "P1",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_old_folder",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_140",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-16T09:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira first kept travel notes in folder Cedar."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_active_folder",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_140",
+      "turn_id": "turn_002",
+      "event_time": "2026-01-16T09:05:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira updates the travel notes home to folder Orion."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_removed_folder",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_140",
+      "turn_id": "turn_003",
+      "event_time": "2026-01-16T09:10:00Z",
+      "ingest_order": 3,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Mira used folder Birch for temporary travel notes staging."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "op_id": "mut_update_folder",
+      "mutation_type": "update",
+      "target_experience_id": "exp_old_folder",
+      "replacement_experience_id": "exp_active_folder",
+      "effective_time": "2026-01-16T09:06:00Z",
+      "reason": "newer travel home"
+    },
+    {
+      "op_id": "mut_remove_folder",
+      "mutation_type": "forget",
+      "target_experience_id": "exp_removed_folder",
+      "effective_time": "2026-01-16T09:11:00Z",
+      "reason": "remove temporary folder note"
+    }
+  ],
+  "requests": [
+    {
+      "request_id": "req_active_folder",
+      "mode": "update_forget",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "Which folder is the current travel notes home for Mira?",
+        "intent": "preference_lookup"
+      },
+      "k": 2,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"]
+      },
+      "budget": {
+        "max_evidence_items": 2,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "update", "forget"],
+      "on_unsupported": "not_applicable",
+      "gold": {
+        "relevant_evidence_ids": ["exp_active_folder"],
+        "must_not_return_evidence_ids": ["exp_old_folder", "exp_removed_folder"],
+        "stale_evidence_ids": ["exp_old_folder", "exp_removed_folder"],
+        "strict_stale": true,
+        "expected_abstention": false
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_old_folder", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_active_folder", "ingest_order": 2},
+    {"type": "ingest", "experience_id": "exp_removed_folder", "ingest_order": 3},
+    {"type": "mutate", "op_id": "mut_update_folder", "ingest_order": 4},
+    {"type": "mutate", "op_id": "mut_remove_folder", "ingest_order": 5},
+    {"type": "request", "request_id": "req_active_folder", "after_ingest_order": 5}
+  ]
+}

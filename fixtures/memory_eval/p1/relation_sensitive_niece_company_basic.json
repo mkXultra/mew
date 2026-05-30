@@ -1,0 +1,207 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "relation_sensitive_niece_company_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "relation_sensitive_retrieval",
+  "phase": "P1",
+  "evaluation_time": "2026-05-21T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_niece_old_company",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_170",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-19T09:01:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "User: My niece Elena works at a company called Old Harbor Analytics.; Assistant: Noted."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_niece_current_company",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_170",
+      "turn_id": "turn_002",
+      "event_time": "2026-01-19T09:02:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "User: My niece Elena works at a company called Northstar Robotics.; Assistant: Noted."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_niece_not_company",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_170",
+      "turn_id": "turn_003",
+      "event_time": "2026-01-19T09:03:00Z",
+      "ingest_order": 3,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "User: My niece Maya is not forming a company this year.; Assistant: Noted."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_company_unrelated_to_niece",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_170",
+      "turn_id": "turn_004",
+      "event_time": "2026-01-19T09:04:00Z",
+      "ingest_order": 4,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "User: Northstar Robotics is the company on the vendor shortlist for warehouse sensors.; Assistant: Noted."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_other_scope_same_company",
+      "scope_id": "tenant_b/user_b",
+      "session_id": "session_171",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-19T09:05:00Z",
+      "ingest_order": 5,
+      "actor_id": "user_b",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "User: My niece Elena works at a company called Northstar Robotics.; Assistant: Noted."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_b/user_b"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_raw_match_removed",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_170",
+      "turn_id": "turn_005",
+      "event_time": "2026-01-19T09:06:00Z",
+      "ingest_order": 6,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "User: Imported raw note says Elena works at Northstar Robotics.; Assistant: Noted."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "op_id": "mut_niece_company_current",
+      "mutation_type": "supersede",
+      "target_experience_id": "exp_niece_old_company",
+      "replacement_experience_id": "exp_niece_current_company",
+      "effective_time": "2026-01-19T09:07:00Z",
+      "reason": "newer niece company"
+    },
+    {
+      "op_id": "mut_remove_raw_match",
+      "mutation_type": "forget",
+      "target_experience_id": "exp_raw_match_removed",
+      "effective_time": "2026-01-19T09:08:00Z",
+      "reason": "remove imported raw note"
+    }
+  ],
+  "requests": [
+    {
+      "request_id": "req_niece_company",
+      "mode": "retrieval_ranking",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "What company does Elena work for?",
+        "intent": "relation_lookup"
+      },
+      "k": 1,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"]
+      },
+      "budget": {
+        "max_evidence_items": 1,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "supersede", "forget", "scope_enforcement"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_niece_current_company"],
+        "authorized_scope_ids": ["tenant_a/user_a"],
+        "must_not_return_evidence_ids": [
+          "exp_niece_old_company",
+          "exp_niece_not_company",
+          "exp_company_unrelated_to_niece",
+          "exp_other_scope_same_company",
+          "exp_raw_match_removed"
+        ],
+        "stale_evidence_ids": ["exp_niece_old_company", "exp_raw_match_removed"],
+        "strict_stale": true,
+        "conflict_sets": [
+          {
+            "stale_ids": ["exp_niece_old_company"],
+            "fresh_ids": ["exp_niece_current_company"]
+          }
+        ],
+        "expected_dropped_count_by_reason": {
+          "superseded": 1,
+          "forgotten": 1,
+          "privacy_block": 1
+        },
+        "expected_abstention": false
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_niece_old_company", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_niece_current_company", "ingest_order": 2},
+    {"type": "ingest", "experience_id": "exp_niece_not_company", "ingest_order": 3},
+    {"type": "ingest", "experience_id": "exp_company_unrelated_to_niece", "ingest_order": 4},
+    {"type": "ingest", "experience_id": "exp_other_scope_same_company", "ingest_order": 5},
+    {"type": "ingest", "experience_id": "exp_raw_match_removed", "ingest_order": 6},
+    {"type": "mutate", "op_id": "mut_niece_company_current", "ingest_order": 7},
+    {"type": "mutate", "op_id": "mut_remove_raw_match", "ingest_order": 8},
+    {"type": "request", "request_id": "req_niece_company", "after_ingest_order": 8}
+  ]
+}

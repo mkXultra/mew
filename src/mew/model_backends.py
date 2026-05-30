@@ -1,7 +1,12 @@
 from typing import Protocol
 
 from .anthropic_api import call_anthropic_json, load_anthropic_auth
-from .codex_api import call_codex_json, call_codex_web_api, load_codex_oauth
+from .codex_api import (
+    call_codex_json,
+    call_codex_structured_json,
+    call_codex_web_api,
+    load_codex_oauth,
+)
 from .config import (
     DEFAULT_ANTHROPIC_BASE_URL,
     DEFAULT_CODEX_MODEL,
@@ -22,6 +27,21 @@ class ModelBackend(Protocol):
         pass
 
     def call_json(self, auth, prompt, model, base_url, timeout, on_text_delta=None):
+        pass
+
+    def call_structured_json(
+        self,
+        auth,
+        prompt,
+        model,
+        base_url,
+        timeout,
+        *,
+        schema_name,
+        json_schema,
+        strict=True,
+        on_text_delta=None,
+    ):
         pass
 
     def call_text(self, auth, prompt, model, base_url, timeout, on_text_delta=None, image_inputs=None):
@@ -65,6 +85,28 @@ class CodexModelBackend:
             return call_codex_json(*args, on_text_delta=on_text_delta)
         return call_codex_json(*args)
 
+    def call_structured_json(
+        self,
+        auth,
+        prompt,
+        model,
+        base_url,
+        timeout,
+        *,
+        schema_name,
+        json_schema,
+        strict=True,
+        on_text_delta=None,
+    ):
+        args = (auth, prompt, model or self.default_model, base_url or self.default_base_url, timeout)
+        return call_codex_structured_json(
+            *args,
+            schema_name=schema_name,
+            json_schema=json_schema,
+            strict=strict,
+            on_text_delta=on_text_delta,
+        )
+
     def call_text(self, auth, prompt, model, base_url, timeout, on_text_delta=None, image_inputs=None):
         args = (auth, prompt, model or self.default_model, base_url or self.default_base_url, timeout)
         kwargs = {}
@@ -90,6 +132,21 @@ class ClaudeModelBackend:
         if on_text_delta:
             return call_anthropic_json(*args, on_text_delta=on_text_delta)
         return call_anthropic_json(*args)
+
+    def call_structured_json(
+        self,
+        auth,
+        prompt,
+        model,
+        base_url,
+        timeout,
+        *,
+        schema_name,
+        json_schema,
+        strict=True,
+        on_text_delta=None,
+    ):
+        raise ModelBackendError("Claude Messages API does not support provider-native structured JSON output in mew")
 
     def call_text(self, auth, prompt, model, base_url, timeout, on_text_delta=None, image_inputs=None):
         if image_inputs:
@@ -144,6 +201,43 @@ def call_model_json(backend, auth, prompt, model, base_url, timeout, on_text_del
         if on_text_delta:
             return model_backend.call_json(auth, prompt, model, base_url, timeout, on_text_delta=on_text_delta)
         return model_backend.call_json(auth, prompt, model, base_url, timeout)
+    except ModelBackendError:
+        raise
+    except MewError:
+        raise
+    except Exception as exc:
+        raise ModelBackendError(f"{model_backend_label(backend)} error: {exc}") from exc
+
+
+def call_model_structured_json(
+    backend,
+    auth,
+    prompt,
+    model,
+    base_url,
+    timeout,
+    *,
+    schema_name,
+    json_schema,
+    strict=True,
+    on_text_delta=None,
+):
+    try:
+        model_backend = get_model_backend(backend)
+        caller = getattr(model_backend, "call_structured_json", None)
+        if caller is None:
+            raise ModelBackendError(f"{model_backend.label} does not support provider-native structured JSON output")
+        return caller(
+            auth,
+            prompt,
+            model,
+            base_url,
+            timeout,
+            schema_name=schema_name,
+            json_schema=json_schema,
+            strict=strict,
+            on_text_delta=on_text_delta,
+        )
     except ModelBackendError:
         raise
     except MewError:

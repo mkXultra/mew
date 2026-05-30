@@ -582,8 +582,14 @@ def _strip_wrapping_search_quotes(query):
     return inner or text
 
 
-def _search_text_python(search_query, resolved, include_patterns, max_matches, context_lines):
+def _search_text_python(search_query, resolved, include_patterns, max_matches, context_lines, *, regex=False):
     base_root = resolved if resolved.is_dir() else resolved.parent
+    compiled_query = None
+    if regex:
+        try:
+            compiled_query = re.compile(str(search_query))
+        except re.error as exc:
+            raise ValueError(f"invalid search regex: {exc}") from exc
 
     def ignored(candidate):
         try:
@@ -649,7 +655,11 @@ def _search_text_python(search_query, resolved, include_patterns, max_matches, c
         except OSError:
             continue
         for line_number, line_text in enumerate(lines, 1):
-            if search_query not in line_text:
+            if compiled_query is not None:
+                matched = bool(compiled_query.search(line_text))
+            else:
+                matched = search_query in line_text
+            if not matched:
                 continue
             total_matches += 1
             if len(matches) >= max_matches:
@@ -689,6 +699,7 @@ def search_text(
     max_matches=DEFAULT_SEARCH_MAX_MATCHES,
     context_lines=DEFAULT_SEARCH_CONTEXT_LINES,
     pattern=None,
+    regex=False,
 ):
     max_matches = max(1, min(int(max_matches), 200))
     try:
@@ -705,16 +716,19 @@ def search_text(
     env = os.environ.copy()
     env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
 
+    regex = bool(regex)
+
     def run_search(search_query):
         command = [
             "rg",
             "--json",
             "--line-number",
-            "--fixed-strings",
             "--no-heading",
             "--color",
             "never",
         ]
+        if not regex:
+            command.append("--fixed-strings")
         for include_pattern in include_patterns:
             command.extend(["--glob", include_pattern])
         for exclude_pattern in SEARCH_EXCLUDE_GLOBS:
@@ -741,15 +755,30 @@ def search_text(
 
     stripped_query = _strip_wrapping_search_quotes(original_query)
     if used_python_fallback:
-        fallback = _search_text_python(search_query, resolved, include_patterns, max_matches, context_lines)
+        fallback = _search_text_python(
+            search_query,
+            resolved,
+            include_patterns,
+            max_matches,
+            context_lines,
+            regex=regex,
+        )
         if not fallback["matches"] and stripped_query != original_query:
             search_query = stripped_query
-            fallback = _search_text_python(search_query, resolved, include_patterns, max_matches, context_lines)
+            fallback = _search_text_python(
+                search_query,
+                resolved,
+                include_patterns,
+                max_matches,
+                context_lines,
+                regex=regex,
+            )
         payload = {
             "path": str(resolved),
             "query": search_query,
             "pattern": include_patterns[0] if len(include_patterns) == 1 else None,
             "patterns": include_patterns,
+            "regex": regex,
             "matches": fallback["matches"],
             "snippets": fallback["snippets"],
             "context_lines": context_lines,
@@ -766,12 +795,20 @@ def search_text(
         try:
             result = run_search(search_query)
         except FileNotFoundError:
-            fallback = _search_text_python(search_query, resolved, include_patterns, max_matches, context_lines)
+            fallback = _search_text_python(
+                search_query,
+                resolved,
+                include_patterns,
+                max_matches,
+                context_lines,
+                regex=regex,
+            )
             payload = {
                 "path": str(resolved),
                 "query": search_query,
                 "pattern": include_patterns[0] if len(include_patterns) == 1 else None,
                 "patterns": include_patterns,
+                "regex": regex,
                 "matches": fallback["matches"],
                 "snippets": fallback["snippets"],
                 "context_lines": context_lines,
@@ -821,6 +858,7 @@ def search_text(
         "query": search_query,
         "pattern": include_patterns[0] if len(include_patterns) == 1 else None,
         "patterns": include_patterns,
+        "regex": regex,
         "matches": matches,
         "snippets": snippets,
         "context_lines": context_lines,

@@ -61,7 +61,9 @@ unless a later milestone explicitly moves that boundary.
 
 ## Current Position
 
-M1-M5 are closed as of 2026-04-20.
+M1-M6.24 are closed as of 2026-05-20. M6.24 is a staged close, not a
+full-proof sweep: it preserves the measured Terminal-Bench baseline and moves
+the active roadmap to M6.25.
 
 mew already has the beginning of a resident task/coding shell:
 
@@ -78,13 +80,14 @@ mew already has the beginning of a resident task/coding shell:
 - recovery surfaces
 - self-improvement loops with audit evidence
 
-The remaining gap is no longer "hands". The next gap is **body**.
+The remaining gap is no longer "hands" or Codex-like terminal operation. The
+next gap is **resident advantage**.
 
-Today, mew is still mostly summoned. A resident that only exists when invoked
-is a capable work room, not a place a model truly lives. The next roadmap arc
-therefore moves from task/coding inhabitability toward persistent presence,
-inbound senses, cross-project identity, human legibility, multi-agent
-residence, and inner continuity.
+Today, mew can perform task/coding work through `implement_v2`, but it still
+needs to prove that resident state, repair memory, reentry, and cache transport
+make it preferable to inhabit over Codex CLI. The next roadmap arc is M6.25:
+Codex-plus resident advantage, then inbound senses, cross-project identity,
+human legibility, multi-agent residence, and inner continuity.
 
 ## Milestone 1: Native Hands
 
@@ -1339,6 +1342,51 @@ Why it matters:
   to see which failures share a shape, repair the shared mechanism, and prove
   the repair with benchmark deltas.
 
+## Milestone 6.23.2: Lane Isolation Substrate
+
+Create a lane boundary before implementing a provider-native implement lane v2.
+
+Target:
+
+- isolate lane selection so new lanes can be added without mutating the current
+  implement lane
+- keep the existing implement lane as `implement_v1` and default it through an
+  adapter with no behavior change
+- define lane input/result/transcript/tool-policy contracts that can support
+  implement, research, easy-task, deliberation, and future build-orchestration
+  lanes without sharing internal loop assumptions
+- add a default-off `implement_v2` plan that can use provider-native tool
+  calls after the lane boundary is in place
+- preserve M6.24 evidence quality by making any future Terminal-Bench proof
+  explicitly identify which lane produced the artifact
+
+Phases:
+
+1. Phase 1: lane isolation substrate.
+2. Phase 2: `implement_v2` native tool loop v0.
+3. Phase 3: v2 read/search spike.
+4. Phase 4: managed exec.
+5. Phase 5: write/edit/apply_patch.
+6. Phase 6: M6.24 reentry A/B gate.
+
+Done when:
+
+- v1 remains the default and focused regression shows no intended behavior
+  change
+- v1 and v2 lane artifacts are namespaced and cannot collide
+- a placeholder lane can be registered without editing v1 runtime internals
+- the v2 implementation covers provider-native read/search tools, managed
+  command execution, approval-gated writes, prompt sections, metrics, and replay
+- Phase 6 proves M6.24 can resume with an explicit lane selection decision and
+  a clean A/B gate between `implement_v1` and `implement_v2`
+
+Why it matters:
+
+- Retrofitting Codex/Claude Code style tool loops directly into the current
+  implement lane would blur benchmark evidence and risk unrelated lane
+  behavior. Lane isolation lets mew evolve toward multiple resident work loops
+  while keeping each loop testable.
+
 ## Milestone 6.24: Software/Coding Terminal-Bench Parity Campaign
 
 Run a measurement / improvement loop against the frozen Terminal-Bench 2.0
@@ -1421,6 +1469,18 @@ Target:
   reentry, diagnosis, and repair loops
 - show that repeated work benefits from previous classified failures and repair
   history instead of starting cold each time
+- integrate memory into `implement_v2` only after native tool-loop correctness
+  is debuggable:
+  - `implement_v2_v0`: memory-light, lane-local state and reentry hints only
+  - `implement_v2_v1`: bounded read-only memory summary as a prompt section
+  - `implement_v2_v2`: read-only `MemoryExploreProvider` tool/provider, not a
+    second planner
+  - `implement_v2_v3`: task/gap repair memory for strategy or lane selection
+    after same-shape repair evidence exists
+- keep typed-card memory evaluation evidence in
+  `docs/M6_25_MEMORY_EVAL_LOG.md`; update it whenever MemBench, live
+  extractor smoke, backend comparison, graph-on recall, or provider-memory
+  validation is run
 - connect the provider-neutral prompt section registry to provider-specific
   cache transport only after M6.24 scoring repairs settle:
   - keep M6.24 section ids, hashes, stability, cache policy, and cache hints as

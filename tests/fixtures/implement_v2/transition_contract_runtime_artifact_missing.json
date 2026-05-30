@@ -1,0 +1,197 @@
+{
+  "schema_version": 1,
+  "source_artifact": "proof-artifacts/terminal-bench/workframe-variant-speed-proof-make-mips-interpreter-transition-contract-after-apply-patch-20260511.json",
+  "description": "Compact fixture for the repeated runtime_artifact_missing shape observed after apply_patch transport repair.",
+  "workframe_inputs": {
+    "attempt_id": "attempt-runtime-artifact-repeat",
+    "turn_id": "turn-final",
+    "task_id": "terminal-bench/make-mips-interpreter",
+    "objective": "Produce a runtime artifact required by the configured verifier.",
+    "success_contract_ref": "node vm.js produces first_frame.ppm",
+    "sidecar_events": [
+      {
+        "event_id": "tool-result:call-46-rename-frame-loop-locals",
+        "event_sequence": 46,
+        "evidence_refs": [
+          "implement-v2-write://attempt/call-46/mutation"
+        ],
+        "kind": "edit",
+        "path": "$WORKSPACE/vm.js",
+        "status": "completed",
+        "target_paths": [
+          "$WORKSPACE/vm.js"
+        ]
+      },
+      {
+        "command_run_id": "command:call-47",
+        "event_id": "tool-result:call-47-verify-first-frame",
+        "event_sequence": 47,
+        "evidence_refs": [
+          "tool-run-record:call-47:interrupted",
+          "artifact-evidence:/app/first_frame.ppm:call-47"
+        ],
+        "execution_contract": {
+          "acceptance_kind": "external_verifier",
+          "expected_artifacts": [
+            {
+              "checks": [
+                {
+                  "type": "exists"
+                },
+                {
+                  "type": "non_empty"
+                },
+                {
+                  "text": "P6",
+                  "type": "text_contains"
+                }
+              ],
+              "id": "$WORKSPACE/first_frame.ppm",
+              "kind": "file",
+              "path": "$WORKSPACE/first_frame.ppm",
+              "required": true
+            }
+          ],
+          "id": "contract:call-47",
+          "proof_role": "verifier",
+          "role": "runtime"
+        },
+        "failure_kind": "missing_artifact",
+        "family": "runtime_artifact_missing",
+        "kind": "verifier",
+        "side_effects": [
+          {
+            "kind": "artifact_evidence",
+            "record": {
+              "artifact_id": "$WORKSPACE/first_frame.ppm",
+              "blocking": true,
+              "checks": [
+                {
+                  "passed": false,
+                  "type": "exists"
+                },
+                {
+                  "passed": false,
+                  "type": "non_empty"
+                },
+                {
+                  "passed": false,
+                  "type": "text_contains"
+                }
+              ],
+              "command_run_id": "command:call-47",
+              "evidence_id": "artifact-evidence:/app/first_frame.ppm:call-47",
+              "path": "$WORKSPACE/first_frame.ppm",
+              "status": "failed"
+            }
+          }
+        ],
+        "status": "interrupted",
+        "summary": "hard-runtime verifier had no observable output or expected-artifact progress"
+      },
+      {
+        "command_intent": "diagnostic",
+        "event_id": "tool-result:call-48-inspect-producer",
+        "event_sequence": 48,
+        "evidence_refs": [
+          "inspect:call-48"
+        ],
+        "kind": "inspection",
+        "status": "completed",
+        "summary": "inspected vm.js frame producer and output directory",
+        "target_paths": [
+          "$WORKSPACE/vm.js",
+          "$WORKSPACE/first_frame.ppm"
+        ]
+      },
+      {
+        "event_id": "tool-result:call-49-periodic-frame-probe-repair",
+        "event_sequence": 49,
+        "evidence_refs": [
+          "implement-v2-write://attempt/call-49/mutation"
+        ],
+        "kind": "apply_patch",
+        "path": "$WORKSPACE/vm.js",
+        "status": "completed",
+        "target_paths": [
+          "$WORKSPACE/vm.js"
+        ]
+      },
+      {
+        "command_run_id": "command:call-50",
+        "event_id": "tool-result:call-50-verify-first-frame",
+        "event_sequence": 50,
+        "evidence_refs": [
+          "tool-run-record:call-50:interrupted",
+          "artifact-evidence:/app/first_frame.ppm:call-50"
+        ],
+        "execution_contract": {
+          "acceptance_kind": "external_verifier",
+          "expected_artifacts": [
+            {
+              "checks": [
+                {
+                  "type": "exists"
+                },
+                {
+                  "type": "non_empty"
+                },
+                {
+                  "text": "P6",
+                  "type": "text_contains"
+                }
+              ],
+              "id": "$WORKSPACE/first_frame.ppm",
+              "kind": "file",
+              "path": "$WORKSPACE/first_frame.ppm",
+              "required": true
+            }
+          ],
+          "id": "contract:call-50",
+          "proof_role": "verifier",
+          "role": "runtime"
+        },
+        "failure_kind": "missing_artifact",
+        "family": "runtime_artifact_missing",
+        "kind": "verifier",
+        "side_effects": [
+          {
+            "kind": "artifact_evidence",
+            "record": {
+              "artifact_id": "$WORKSPACE/first_frame.ppm",
+              "blocking": true,
+              "checks": [
+                {
+                  "passed": false,
+                  "type": "exists"
+                },
+                {
+                  "passed": false,
+                  "type": "non_empty"
+                },
+                {
+                  "passed": false,
+                  "type": "text_contains"
+                }
+              ],
+              "command_run_id": "command:call-50",
+              "evidence_id": "artifact-evidence:/app/first_frame.ppm:call-50",
+              "path": "$WORKSPACE/first_frame.ppm",
+              "status": "failed"
+            }
+          }
+        ],
+        "status": "interrupted",
+        "summary": "hard-runtime verifier had no observable output or expected-artifact progress"
+      }
+    ]
+  },
+  "expected": {
+    "artifact_path": "first_frame.ppm",
+    "producer_path": "vm.js",
+    "repeat_count": 2,
+    "repeat_key": "runtime_artifact_missing|first_frame.ppm|exists,non_empty,text_contains",
+    "required_next_kind": "inspect_latest_failure",
+    "rule_id": "transition_contract.runtime_artifact_missing.repeat_requires_inspection"
+  }
+}

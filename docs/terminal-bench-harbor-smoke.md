@@ -37,18 +37,70 @@ PYTHONPATH=.harbor harbor run \
   -i terminal-bench/make-mips-interpreter \
   -n 1 \
   -y \
+  --agent-timeout-multiplier 2 \
   --job-name mew-work-oneshot-make-mips \
   --jobs-dir proof-artifacts/terminal-bench/harbor-smoke \
   --agent-import-path mew_terminal_bench_agent:MewTerminalBenchAgent \
   --ak install_command="python -m pip install -e /mew" \
   --ak command_cwd="/app" \
   --ak container_repo_root="/mew" \
-  --ak command_template="mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-write . --allow-shell --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 --max-steps 30 --report {report_path} --artifacts {artifact_dir} --json" \
+  --ak timeout_seconds=1800 \
+  --ak command_template="mew work --oneshot --instruction {instruction_shell} --cwd /app --allow-read . --allow-read /etc/apt --allow-read /tmp --allow-write . --allow-write /usr/local/bin --allow-write /tmp --allow-shell --allow-verify --approval-mode accept-edits --defer-verify --no-prompt-approval --auth /codex-auth/auth.json --model-backend codex --model gpt-5.5 --model-timeout 300 {max_wall_seconds_option} --max-steps 30 --work-guidance 'selected_lane=implement_v2 write_integration_observation_detail=true' --report {report_path} --artifacts {artifact_dir} --json" \
   --mounts-json "[{\"type\":\"bind\",\"source\":\"${MEW_REPO}\",\"target\":\"/mew\"},{\"type\":\"bind\",\"source\":\"/Users/mk/.codex/auth.json\",\"target\":\"/codex-auth/auth.json\"}]"
 ```
 
 This is still a generic work-session run: Terminal-Bench only provides the
 workspace cwd, instruction, artifact path, and verifier harness.
+For M6.24 speed/proof runs, keep `timeout_seconds` plus
+`{max_wall_seconds_option}` in the command template. Without that, mew cannot
+compute an inner wall budget, and hard-runtime continuation gates are disabled.
+
+For repeatable implementation-lane diagnostics, prefer the checked-in runner
+instead of hand-building Harbor commands:
+
+```sh
+uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter
+```
+
+The runner fixes the default diagnostic shape:
+
+- `selected_lane=implement_v2 write_integration_observation_detail=true` in a
+  single `--work-guidance` string;
+- local checkout mounted at `/mew` and `~/.codex/auth.json` mounted at
+  `/codex-auth/auth.json`;
+- no assumed `/tests` read surface; the 2026-05-12 diagnostic showed that path
+  is absent inside this Harbor agent environment;
+- `timeout_seconds=660` and `timeout_reserve_seconds=60`, which makes
+  `{max_wall_seconds_option}` expand to a 600 second mew wall budget;
+- post-run summary that reports whether integration-observation detail was
+  enabled, written, and host-visible.
+
+This avoids context-compression or copy/paste drift where a manual diagnostic
+forgets observer detail, passes duplicate `--work-guidance`, or lets Harbor
+template formatting consume JSON braces.
+
+Use explicit modes to keep diagnostics and proof runs separate:
+
+```sh
+# 10 minute step-shape check. Diagnostic only; not score proof.
+uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter \
+  --mode step-check-10min
+
+# One-trial speed proof after local/replay/dogfood/emulator are green.
+uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter \
+  --mode speed-proof
+
+# Five-trial proof after the speed proof is accepted.
+uv run python scripts/run_harbor_mew_diagnostic.py make-mips-interpreter \
+  --mode proof-5
+```
+
+`step-check-10min` uses `-k 1 -n 1`, `timeout_seconds=660`, and a 600 second
+mew wall budget. `speed-proof` uses one trial with the normal 1800 second
+wrapper budget. `proof-5` uses `-k 5 -n 1` with the same 1800 second budget.
+All modes keep observer detail on by default so a failed run is debuggable;
+use `--allow-missing-observer-detail` only for harness debugging, not for
+M6.24 evidence.
 
 The agent class lives at `.harbor/mew_terminal_bench_agent.py` and follows Harbor's installed-agent shape:
 
