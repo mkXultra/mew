@@ -65,6 +65,13 @@ Recent independent side-project dogfood:
   row 68 records `source_only_patch_rollback_then_report_schema_repair`.
   Codex rewrote only the invalid local side-dogfood report JSON into canonical
   schema and opened issue #36 for the reusable closeout/schema gap.
+- 2026-05-05: `mew-passive-bundle` self-memory audit integration failed in
+  task #72/session #103. mew-authored a partial source helper and existing
+  focused tests still passed, but the required Promotion audit test/README/report
+  did not land after two verifier rollbacks and a steer-boundary block on
+  fixture path literals. Ledger row 69 records
+  `steer_boundary_fixture_path_literals_block_allowed_test_edit`; rescue edits
+  stayed `0`, and issue #37 tracks the reusable implementation-lane blocker.
 
 Current target:
 

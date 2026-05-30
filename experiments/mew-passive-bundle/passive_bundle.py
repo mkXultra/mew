@@ -58,6 +58,43 @@ def first_non_empty_line(markdown: str) -> str:
     return ""
 
 
+def markdown_heading(line: str) -> tuple[int, str] | None:
+    text = line.strip()
+    if not text.startswith("#"):
+        return None
+    level = len(text) - len(text.lstrip("#"))
+    if level > 6 or len(text) <= level or text[level] != " ":
+        return None
+    return level, text[level + 1 :].strip()
+
+
+def first_section_line(markdown: str, section_title: str) -> str:
+    target = section_title.casefold()
+    active_level: int | None = None
+    for line in markdown.splitlines():
+        heading = markdown_heading(line)
+        if heading is not None:
+            level, title = heading
+            if active_level is not None and level <= active_level:
+                return ""
+            if title.casefold() == target:
+                active_level = level
+            continue
+        if active_level is not None:
+            text = line.strip()
+            if text:
+                return text
+    return ""
+
+
+def reentry_hint(spec: ReportSpec, markdown: str) -> str:
+    if spec.key == "self-memory":
+        audit_hint = first_section_line(markdown, "Promotion audit")
+        if audit_hint:
+            return audit_hint
+    return first_non_empty_line(markdown)
+
+
 def collect_reports(root: Path, day: str) -> tuple[list[tuple[ReportSpec, Path, str]], list[ReportSpec]]:
     found = []
     missing = []
@@ -88,7 +125,7 @@ def render_bundle(day: str, found: list[tuple[ReportSpec, Path, str]], missing: 
     lines.extend(["", "## Reentry hints"])
     if found:
         for spec, path, content in found:
-            hint = first_non_empty_line(content)
+            hint = reentry_hint(spec, content)
             if hint:
                 lines.append(f"- {spec.title}: {hint}")
             else:
