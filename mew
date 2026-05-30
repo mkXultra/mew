@@ -1,15 +1,12 @@
-#!/usr/bin/env python3
-import sys
-from pathlib import Path
+#!/usr/bin/env sh
+set -eu
 
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PY="$ROOT/.venv/bin/python"
 
-ROOT = Path(__file__).resolve().parent
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+if [ ! -x "$PY" ]; then
+  echo "mew: .venv Python not found. Run: uv sync" >&2
+  exit 1
+fi
 
-from mew.cli import main
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m mew "$@"

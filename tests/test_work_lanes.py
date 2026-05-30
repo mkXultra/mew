@@ -12,6 +12,7 @@ from mew.work_lanes import (
     LANE_ROLE_SHADOW,
     LANE_ROLE_UNSUPPORTED,
     MIRROR_LANE,
+    RESEARCH_DESIGN_LANE,
     TINY_LANE,
     build_lane_attempt_event,
     get_work_lane_view,
@@ -26,7 +27,7 @@ class WorkLaneRegistryTests(unittest.TestCase):
 
         self.assertEqual(
             [lane.name for lane in lanes],
-            [TINY_LANE, IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, MIRROR_LANE, DELIBERATION_LANE],
+            [TINY_LANE, IMPLEMENT_V1_LANE, IMPLEMENT_V2_LANE, RESEARCH_DESIGN_LANE, MIRROR_LANE, DELIBERATION_LANE],
         )
         self.assertTrue(all(lane.supported for lane in lanes))
 
@@ -64,6 +65,18 @@ class WorkLaneRegistryTests(unittest.TestCase):
         self.assertEqual(lane.role, LANE_ROLE_AUTHORITATIVE)
         self.assertTrue(lane.requires_model_binding)
         self.assertEqual(lane.fallback_lane, IMPLEMENT_V1_LANE)
+        self.assertTrue(lane.runtime_available)
+
+    def test_work_lane_research_design_is_independent_authoritative_runtime(self):
+        lane = get_work_lane_view(RESEARCH_DESIGN_LANE)
+
+        self.assertTrue(lane.supported)
+        self.assertTrue(lane.authoritative)
+        self.assertTrue(lane.write_capable)
+        self.assertEqual(lane.layout, LANE_LAYOUT_LANE_SCOPED)
+        self.assertEqual(lane.role, LANE_ROLE_AUTHORITATIVE)
+        self.assertTrue(lane.requires_model_binding)
+        self.assertEqual(lane.fallback_lane, IMPLEMENT_V2_LANE)
         self.assertTrue(lane.runtime_available)
 
     def test_work_lane_mirror_is_non_authoritative_mirror_with_tiny_fallback(self):

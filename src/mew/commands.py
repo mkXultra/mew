@@ -96,6 +96,7 @@ from .implement_lane.tool_lab import (
     format_implement_v2_tool_lab_text,
     run_implement_v2_tool_lab_command,
 )
+from .research_design_lane import RESEARCH_DESIGN_NATIVE_RUNTIME_ID, run_live_native_research_design
 from .long_build_substrate import (
     build_long_build_contract,
     execution_contract_continuation_policy,
@@ -263,7 +264,7 @@ from .toolbox import format_command_record, run_command_record, run_git_tool
 from .tool_kernel import ToolKernel, ToolKernelConfig, make_tool_call_envelope
 from .validation import format_validation_issues, validate_state, validation_errors
 from .write_tools import edit_file, restore_write_snapshot, snapshot_write_path, summarize_write_result, write_file
-from .work_lanes import IMPLEMENT_V2_LANE
+from .work_lanes import IMPLEMENT_V2_LANE, RESEARCH_DESIGN_LANE
 from .work_session import (
     active_work_session,
     active_work_sessions,
@@ -7527,7 +7528,7 @@ def _work_session_active_work_todo(session):
     return dict(value) if isinstance(value, dict) and value else {}
 
 
-def _work_oneshot_implement_v2_active_work_todo(task):
+def _work_oneshot_implement_v2_active_work_todo(task, *, lane=IMPLEMENT_V2_LANE):
     if not isinstance(task, dict):
         return {}
     task_id = str(task.get("id") or "").strip()
@@ -7536,7 +7537,7 @@ def _work_oneshot_implement_v2_active_work_todo(task):
         return {}
     return {
         "id": f"oneshot-{task_id}-implement",
-        "lane": IMPLEMENT_V2_LANE,
+        "lane": lane,
         "status": "drafting",
         "source": {
             "plan_item": "Make the first coherent source mutation for this one-shot implementation task.",
@@ -7623,16 +7624,20 @@ def _run_work_ai_implement_v2(
     max_steps,
     max_wall_seconds,
     progress,
+    lane_name=IMPLEMENT_V2_LANE,
+    runtime_id=IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+    run_live_native_lane=None,
 ):
     workspace = options.get("cwd") or os.getcwd()
-    selected_lane = _work_guidance_selected_lane(getattr(effective_args, "work_guidance", None))
+    lane_label = str(lane_name)
+    selected_lane = _work_guidance_selected_lane(getattr(effective_args, "work_guidance", None)) or lane_label
     requested_model_timeout_seconds = float(getattr(effective_args, "model_timeout", 60.0) or 60.0)
     model_timeout_seconds = _implement_v2_native_model_timeout_seconds(
         requested_model_timeout_seconds,
         max_wall_seconds=max_wall_seconds,
     )
     implement_v2_runtime_metrics = {
-        "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+        "runtime_id": runtime_id,
         "selected_lane": selected_lane,
         "model_backend": model_backend,
         "model": model,
@@ -7649,7 +7654,7 @@ def _run_work_ai_implement_v2(
         "model_json_main_path_detected": False,
     }
     report["selected_lane"] = selected_lane
-    report["runtime_id"] = IMPLEMENT_V2_NATIVE_RUNTIME_ID
+    report["runtime_id"] = runtime_id
     with state_lock():
         state = load_state()
         session = find_work_session(state, session_id)
@@ -7657,9 +7662,9 @@ def _run_work_ai_implement_v2(
         planning_turn = start_work_model_turn(
             state,
             session,
-            {"summary": "running implement_v2 lane"},
-            {"summary": "running implement_v2 lane"},
-            {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE},
+            {"summary": f"running {lane_label} lane"},
+            {"summary": f"running {lane_label} lane"},
+            {"type": "implement_lane", "lane": lane_name},
             guidance=getattr(effective_args, "work_guidance", None) or "",
         )
         planning_turn["model_metrics"] = {**implement_v2_runtime_metrics, "status": "running"}
@@ -7712,7 +7717,7 @@ def _run_work_ai_implement_v2(
         persisted_lane_state.pop("active_work_todo", None)
         active_work_todo = _work_session_active_work_todo(session)
         if not active_work_todo and getattr(effective_args, "oneshot_mode", False):
-            active_work_todo = _work_oneshot_implement_v2_active_work_todo(task)
+            active_work_todo = _work_oneshot_implement_v2_active_work_todo(task, lane=lane_name)
         if active_work_todo:
             persisted_lane_state["active_work_todo"] = active_work_todo
 
@@ -7737,7 +7742,7 @@ def _run_work_ai_implement_v2(
     contract_compiler_report = {
         "status": "retired",
         "enabled": False,
-        "reason": "model-assisted task contract compilation is retired from the implement_v2 live path",
+        "reason": f"model-assisted task contract compilation is retired from the {lane_label} live path",
         "raw_compiled_contract_stored": False,
     }
     report["contract_compiler"] = dict(contract_compiler_report)
@@ -7817,7 +7822,7 @@ def _run_work_ai_implement_v2(
         work_session_id=str(session_id),
         task_id=str(task_id),
         workspace=str(workspace),
-        lane=IMPLEMENT_V2_LANE,
+        lane=lane_name,
         model_backend=model_backend,
         model=model,
         effort=os.environ.get("MEW_CODEX_REASONING_EFFORT", ""),
@@ -7826,9 +7831,10 @@ def _run_work_ai_implement_v2(
         lane_config=lane_config,
     )
     if progress:
-        progress("selected implement_v2 native transcript runtime; bypassing v1 THINK/ACT")
+        progress(f"selected {lane_label} native transcript runtime; bypassing v1 THINK/ACT")
+    live_native_lane_runner = run_live_native_lane or run_live_native_implement_v2
     try:
-        result = run_live_native_implement_v2(
+        result = live_native_lane_runner(
             lane_input,
             model_auth=model_auth,
             base_url=base_url,
@@ -7843,7 +7849,7 @@ def _run_work_ai_implement_v2(
     else:
         error = "" if result.status == "completed" else result.user_visible_summary
         status = result.status
-    action = {"type": "implement_lane", "lane": IMPLEMENT_V2_LANE, "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID}
+    action = {"type": "implement_lane", "lane": lane_name, "runtime_id": runtime_id}
     if result:
         persisted_model_metrics = {**implement_v2_runtime_metrics, **dict(result.metrics or {})}
     else:
@@ -7863,11 +7869,11 @@ def _run_work_ai_implement_v2(
             state,
             session_id,
             planning_turn_id,
-            {"summary": "implement_v2 lane selected"},
+            {"summary": f"{lane_label} lane selected"},
             {
                 "summary": (result.user_visible_summary if result else error) or "",
                 "action": action,
-                "act_mode": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
+                "act_mode": runtime_id,
             },
             action,
             model_metrics=persisted_model_metrics,
@@ -7878,7 +7884,7 @@ def _run_work_ai_implement_v2(
                 _merge_work_session_active_work_todo_readiness(session, result.updated_lane_state)
             add_work_session_note(
                 session,
-                f"implement_v2 attempt status={status}: {(result.user_visible_summary if result else error) or ''}",
+                f"{lane_label} attempt status={status}: {(result.user_visible_summary if result else error) or ''}",
                 source="system",
             )
         save_state(state)
@@ -7895,7 +7901,7 @@ def _run_work_ai_implement_v2(
     if error and status != "completed":
         step["error"] = error
     report["steps"].append(step)
-    report["stop_reason"] = "finish" if status == "completed" else f"implement_v2_{status or 'failed'}"
+    report["stop_reason"] = "finish" if status == "completed" else f"{lane_label}_{status or 'failed'}"
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:
@@ -8114,6 +8120,25 @@ def cmd_work_ai(args):
             max_steps=max_steps,
             max_wall_seconds=max_wall_seconds,
             progress=progress,
+        )
+    if selected_lane == RESEARCH_DESIGN_LANE:
+        return _run_work_ai_implement_v2(
+            args,
+            effective_args,
+            report=report,
+            session_id=session_id,
+            task_id=task_id,
+            options=options,
+            model_auth=model_auth,
+            model_backend=model_backend,
+            model=model,
+            base_url=base_url,
+            max_steps=max_steps,
+            max_wall_seconds=max_wall_seconds,
+            progress=progress,
+            lane_name=RESEARCH_DESIGN_LANE,
+            runtime_id=RESEARCH_DESIGN_NATIVE_RUNTIME_ID,
+            run_live_native_lane=run_live_native_research_design,
         )
 
     for index in range(1, max_steps + 1):

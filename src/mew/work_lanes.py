@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 TINY_LANE = "tiny"
 IMPLEMENT_V1_LANE = "implement_v1"
 IMPLEMENT_V2_LANE = "implement_v2"
+RESEARCH_DESIGN_LANE = "research_design"
 MIRROR_LANE = "mirror"
 DELIBERATION_LANE = "deliberation"
 
@@ -33,6 +34,7 @@ _LANE_DISPLAY_NAMES_BY_LANE = {
     TINY_LANE: LANE_DISPLAY_IMPLEMENTATION,
     IMPLEMENT_V1_LANE: "implementation_v1",
     IMPLEMENT_V2_LANE: "implementation_v2",
+    RESEARCH_DESIGN_LANE: "research_design",
     MIRROR_LANE: MIRROR_LANE,
     DELIBERATION_LANE: DELIBERATION_LANE,
 }
@@ -138,6 +140,17 @@ _SUPPORTED_WORK_LANES: tuple[WorkLaneView, ...] = (
         role=LANE_ROLE_AUTHORITATIVE,
         requires_model_binding=True,
         fallback_lane=IMPLEMENT_V1_LANE,
+        runtime_available=True,
+    ),
+    WorkLaneView(
+        name=RESEARCH_DESIGN_LANE,
+        supported=True,
+        authoritative=True,
+        write_capable=True,
+        layout=LANE_LAYOUT_LANE_SCOPED,
+        role=LANE_ROLE_AUTHORITATIVE,
+        requires_model_binding=True,
+        fallback_lane=IMPLEMENT_V2_LANE,
         runtime_available=True,
     ),
     WorkLaneView(

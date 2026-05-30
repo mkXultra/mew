@@ -136,11 +136,12 @@ class NativeImplementV2HarnessResult:
     proof_artifacts: tuple[str, ...]
     metrics: dict[str, object]
     finish_summary: str = ""
+    lane: str = "implement_v2"
 
     def as_lane_result(self) -> ImplementLaneResult:
         return ImplementLaneResult(
             status=self.status,
-            lane="implement_v2",
+            lane=self.lane,
             user_visible_summary=self.finish_summary,
             proof_artifacts=self.proof_artifacts,
             metrics=self.metrics,
@@ -1061,6 +1062,7 @@ def run_native_implement_v2(
         proof_artifacts=proof_artifacts,
         metrics=metrics,
         finish_summary=finish_summary,
+        lane=_lane_name(lane_input),
     )
 
 
@@ -1095,8 +1097,10 @@ def run_unavailable_native_implement_v2(lane_input: ImplementLaneInput) -> Imple
     )
     return ImplementLaneResult(
         status="unavailable",
-        lane="implement_v2",
-        user_visible_summary="implement_v2 native transcript loop is selected but live provider transport is not wired yet.",
+        lane=_lane_name(lane_input),
+        user_visible_summary=(
+            f"{_lane_name(lane_input)} native transcript loop is selected but live provider transport is not wired yet."
+        ),
         proof_artifacts=(),
         updated_lane_state={
             "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
@@ -1106,7 +1110,7 @@ def run_unavailable_native_implement_v2(lane_input: ImplementLaneInput) -> Imple
             "requested_task_id": lane_input.task_id,
         },
         next_reentry_hint={
-            "reason": "implement_v2_native_provider_not_wired",
+            "reason": f"{_safe_lane_name(_lane_name(lane_input))}_native_provider_not_wired",
             "fallback_lane": "implement_v1",
             "requires_separate_lane_attempt": True,
         },
@@ -2164,6 +2168,7 @@ def _unavailable_result(
         transcript=transcript,
         proof_artifacts=(),
         metrics={**PHASE3_NATIVE_SURFACE, "fallback_lane": "implement_v1", "provider_native_tool_loop": False},
+        lane=_lane_name(lane_input),
     )
 
 
@@ -2846,8 +2851,8 @@ def _live_failure_lane_result(
     )
     return ImplementLaneResult(
         status="failed",
-        lane="implement_v2",
-        user_visible_summary=f"implement_v2 native provider failed: {error}",
+        lane=_lane_name(lane_input),
+        user_visible_summary=f"{_lane_name(lane_input)} native provider failed: {error}",
         proof_artifacts=proof_artifacts,
         updated_lane_state={
             "runtime_id": IMPLEMENT_V2_NATIVE_RUNTIME_ID,
@@ -2960,6 +2965,7 @@ def _partial_failure_harness_result(
         proof_artifacts=proof_artifacts,
         metrics=metrics,
         finish_summary=f"native provider failed: {error}",
+        lane=_lane_name(lane_input),
     )
 
 
@@ -3387,4 +3393,19 @@ def _turn_number(turn_id: str) -> int:
 
 
 def _lane_attempt_id(lane_input: ImplementLaneInput) -> str:
-    return f"{lane_input.work_session_id}:{lane_input.task_id}:implement_v2:native"
+    return f"{lane_input.work_session_id}:{lane_input.task_id}:{_safe_lane_name(_lane_name(lane_input))}:native"
+
+
+def _lane_name(lane_input: ImplementLaneInput) -> str:
+    return str(lane_input.lane or "implement_v2").strip() or "implement_v2"
+
+
+def _safe_lane_name(lane: object) -> str:
+    text = str(lane or "").strip()
+    safe = []
+    for char in text:
+        if char.isalnum() or char in ("-", "_", "."):
+            safe.append(char)
+        else:
+            safe.append("-")
+    return "".join(safe).strip("-") or "implement_v2"

@@ -11232,6 +11232,79 @@ class WorkSessionTests(unittest.TestCase):
             finally:
                 os.chdir(old_cwd)
 
+    def test_work_oneshot_selected_research_design_routes_to_independent_clone_lane(self):
+        from mew.implement_lane import ImplementLaneResult
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            state_root = Path(tmp) / "state"
+            workspace = Path(tmp) / "workspace"
+            state_root.mkdir()
+            workspace.mkdir()
+            os.chdir(state_root)
+            try:
+                lane_result = ImplementLaneResult(
+                    status="completed",
+                    lane="research_design",
+                    user_visible_summary="research design completed",
+                    metrics={
+                        "provider": "provider-native",
+                        "runtime_id": "research_design_native_implement_v2_clone",
+                        "provider_native_tool_loop": True,
+                        "model_json_main_path_detected": False,
+                    },
+                )
+                with patch("mew.commands.load_model_auth", return_value={"path": "auth.json"}):
+                    with patch("mew.commands.plan_work_model_turn") as v1_plan:
+                        with patch("mew.commands.run_live_native_implement_v2") as v2_run:
+                            with patch(
+                                "mew.commands.run_live_native_research_design",
+                                return_value=lane_result,
+                            ) as research_run:
+                                with redirect_stdout(StringIO()) as stdout:
+                                    self.assertEqual(
+                                        main(
+                                            [
+                                                "work",
+                                                "--oneshot",
+                                                "--instruction",
+                                                "Read papers and draft a design from the hypothesis.",
+                                                "--cwd",
+                                                str(workspace),
+                                                "--auth",
+                                                "auth.json",
+                                                "--allow-read",
+                                                ".",
+                                                "--allow-write",
+                                                ".",
+                                                "--allow-shell",
+                                                "--approval-mode",
+                                                "accept-edits",
+                                                "--work-guidance",
+                                                json.dumps({"selected_lane": "research_design"}),
+                                                "--max-steps",
+                                                "2",
+                                                "--json",
+                                            ]
+                                        ),
+                                        0,
+                                    )
+
+                v1_plan.assert_not_called()
+                v2_run.assert_not_called()
+                research_run.assert_called_once()
+                lane_input = research_run.call_args.args[0]
+                self.assertEqual(lane_input.lane, "research_design")
+                self.assertEqual(lane_input.persisted_lane_state["active_work_todo"]["lane"], "research_design")
+                payload = json.loads(stdout.getvalue())
+                work_report = payload["work_report"]
+                self.assertEqual(work_report["selected_lane"], "research_design")
+                self.assertEqual(work_report["runtime_id"], "research_design_native_implement_v2_clone")
+                self.assertEqual(work_report["steps"][0]["action"]["lane"], "research_design")
+                self.assertEqual(work_report["implement_lane_result"]["lane"], "research_design")
+            finally:
+                os.chdir(old_cwd)
+
     def test_work_oneshot_selected_implement_v2_preserves_timeout_metrics_after_failed_result(self):
         from mew.implement_lane import ImplementLaneResult
 
