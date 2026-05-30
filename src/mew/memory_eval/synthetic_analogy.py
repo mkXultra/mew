@@ -1,23 +1,26 @@
-"""Synthetic analogy smoke loop, metrics, and MVP-1 pack for memory_eval.
+"""Synthetic analogy smoke loop, metrics, pack, and local profiles for memory_eval.
 
 This module follows the reduced MVP scope described in:
 
 - docs/IMPLEMENTATION_PLAN_2026-05-28_M6_25_SYNTHETIC_ANALOGY_MINIMAL_BENCH.md
 - docs/DESIGN_2026-05-27_M6_25_SYNTHETIC_ANALOGY_MINIMAL_BENCH.md
 
-It intentionally does not implement profile command or CLI integration.
+The profile command surface is intentionally module-local and manual by default.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import random
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .adapter_contract import MemoryEvalAdapter
+from .adapters.dummy import DummyPassAdapter
 from .artifacts import make_failure, write_artifact
 from .hashing import stable_hash
 
@@ -40,10 +43,16 @@ DEFAULT_SOLVER_PROFILE = {
     "answer_format": "json_single_token",
     "token_counter": "mvp_whitespace_v1",
 }
+SYNTHETIC_ANALOGY_PROFILE_SMOKE = "synthetic-analogy-mvp-smoke"
+SYNTHETIC_ANALOGY_PROFILE_PACK20 = "synthetic-analogy-mvp-pack20"
+SYNTHETIC_ANALOGY_PROFILE_NAMES = (
+    SYNTHETIC_ANALOGY_PROFILE_SMOKE,
+    SYNTHETIC_ANALOGY_PROFILE_PACK20,
+)
 KNOWN_LIMITATIONS = [
     "Smoke fixture score; not benchmark-quality memory scoring.",
     "Single fixed solver stub only; no live model execution.",
-    "No CLI profile wiring.",
+    "Profile command is local/manual only; no default CI integration.",
     "No terminal bench, behavior_eval, or network dependency.",
 ]
 SCORER_ONLY_FIELDS = frozenset({"hidden_world", "gold_answer", "oracle_context", "family"})
@@ -77,6 +86,13 @@ class SyntheticAnalogyViews:
     scorer_view: dict[str, Any]
     report_view: dict[str, Any]
     id_maps: dict[str, dict[str, str]]
+
+
+@dataclass(frozen=True)
+class SyntheticAnalogyProfileResult:
+    report: dict[str, Any]
+    summary: str
+    output_path: str
 
 
 class SyntheticAnalogyLeakageError(ValueError):
@@ -435,13 +451,126 @@ def run_mvp1_pack20(
     report["known_limitations"] = [
         "MVP-1 fixed synthetic pack only; no live model execution.",
         "memory_off floor is diagnostic only; no hard threshold yet.",
-        "No CLI profile wiring.",
+        "Profile command is local/manual only; no default CI integration.",
         "No terminal bench, behavior_eval, or network dependency.",
         "No long-horizon, stale, update, scope, forget, or full-design metrics.",
     ]
     if report_path is not None:
         write_artifact(report_path, report)
     return report
+
+
+def run_synthetic_analogy_profile(
+    profile_name: str,
+    *,
+    output_path: str | Path,
+    adapter: MemoryEvalAdapter | None = None,
+    seed: int = DEFAULT_MVP1_PACK_SEED,
+    artifact_provider: str = "harness_baseline_packet",
+) -> SyntheticAnalogyProfileResult:
+    """Run one local/manual Phase 3 profile and write its JSON report."""
+
+    if profile_name not in SYNTHETIC_ANALOGY_PROFILE_NAMES:
+        allowed = ", ".join(SYNTHETIC_ANALOGY_PROFILE_NAMES)
+        raise ValueError(
+            f"unknown synthetic analogy profile {profile_name!r}; "
+            f"available profiles: {allowed}"
+        )
+
+    runner_adapter = adapter if adapter is not None else DummyPassAdapter()
+    if profile_name == SYNTHETIC_ANALOGY_PROFILE_SMOKE:
+        report = run_phase0_smoke(
+            _phase0_relation_lookup_smoke_fixture(),
+            runner_adapter,
+            artifact_provider=artifact_provider,
+        )
+    elif profile_name == SYNTHETIC_ANALOGY_PROFILE_PACK20:
+        report = run_mvp1_pack20(
+            runner_adapter,
+            seed=seed,
+            artifact_provider=artifact_provider,
+        )
+    else:  # Defensive guard for type checkers if profile constants drift.
+        raise AssertionError(f"unhandled synthetic analogy profile: {profile_name!r}")
+
+    report = _with_profile_metadata(report, profile_name=profile_name)
+    write_artifact(output_path, report)
+    summary = format_synthetic_analogy_profile_summary(report, output_path=output_path)
+    return SyntheticAnalogyProfileResult(
+        report=report,
+        summary=summary,
+        output_path=str(output_path),
+    )
+
+
+def format_synthetic_analogy_profile_summary(
+    report: Mapping[str, Any],
+    *,
+    output_path: str | Path | None = None,
+) -> str:
+    profile_name = str(report.get("profile") or "")
+    phase = str(report.get("phase") or "")
+    conditions = report.get("conditions") or {}
+    condition_parts = []
+    if isinstance(conditions, Mapping):
+        for condition in PHASE0_CONDITIONS:
+            summary = conditions.get(condition) or {}
+            if not isinstance(summary, Mapping):
+                continue
+            condition_parts.append(
+                (
+                    f"{condition}: accuracy={float(summary.get('accuracy') or 0.0):.3f}, "
+                    f"pass_rate={float(summary.get('pass_rate') or 0.0):.3f}, "
+                    f"avg_total_tokens={float(summary.get('avg_total_context_tokens') or 0.0):.1f}"
+                )
+            )
+    comparisons = report.get("comparisons") or {}
+    if not isinstance(comparisons, Mapping):
+        comparisons = {}
+    lines = [
+        f"Synthetic analogy profile {profile_name} completed ({phase}).",
+    ]
+    if output_path is not None:
+        lines.append(f"JSON report: {output_path}")
+    lines.append("Conditions: " + "; ".join(condition_parts))
+    lines.append(
+        "Comparisons: "
+        f"memory_lift={float(comparisons.get('memory_lift') or 0.0):.3f}, "
+        f"oracle_gap={float(comparisons.get('oracle_gap') or 0.0):.3f}"
+    )
+    lines.append("Manual/local only: ci_default=false, terminal_bench=false, behavior_eval=false.")
+    return "\n".join(lines)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run local synthetic analogy MVP profiles.")
+    parser.add_argument("--profile", required=True, help="Synthetic analogy profile name.")
+    parser.add_argument("--output", required=True, help="Path for the JSON profile report.")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_MVP1_PACK_SEED,
+        help="Seed for synthetic-analogy-mvp-pack20 runtime generation.",
+    )
+    parser.add_argument(
+        "--artifact-provider",
+        default="harness_baseline_packet",
+        choices=sorted(PHASE0_ALLOWED_ARTIFACT_PROVIDERS),
+        help="MVP artifact provider to use for memory_on.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        result = run_synthetic_analogy_profile(
+            args.profile,
+            output_path=args.output,
+            seed=args.seed,
+            artifact_provider=args.artifact_provider,
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(result.summary)
+    return 0
 
 
 def mvp1_task_determinism_signature(fixture: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -862,6 +991,48 @@ def _effective_budget_profile(budget_profile: Mapping[str, int] | None) -> dict[
     return effective
 
 
+def _phase0_relation_lookup_smoke_fixture() -> dict[str, Any]:
+    return {
+        "world_id": "world_relation_lookup_smoke",
+        "hidden_world": {
+            "entities": ["dax", "wug"],
+            "relations": [{"subject": "dax", "relation": "nava", "object": "wug"}],
+        },
+        "public_experiences": [
+            {
+                "experience_id": "exp_relation_fact",
+                "text": "dax is nava-related to wug.",
+            }
+        ],
+        "tasks": [
+            {
+                "task_id": "task_relation_lookup",
+                "family": "relation_lookup",
+                "prompt": "In this local world, what is dax related to by nava?",
+                "gold_answer": "wug",
+                "oracle_context": ["dax is nava-related to wug."],
+            }
+        ],
+    }
+
+
+def _with_profile_metadata(report: Mapping[str, Any], *, profile_name: str) -> dict[str, Any]:
+    enriched = dict(report)
+    enriched["profile"] = profile_name
+    enriched["profile_phase"] = "P3_profile_command_manual_gate"
+    enriched["profile_execution"] = {
+        "local_manual_default": True,
+        "ci_default_integration": False,
+        "terminal_bench_integration": False,
+        "behavior_eval_integration": False,
+        "live_model_execution": False,
+    }
+    enriched["profile_report_hash"] = stable_hash(
+        {key: value for key, value in enriched.items() if key != "profile_report_hash"}
+    )
+    return enriched
+
+
 def _normalize_oracle_context(value: Any) -> list[str]:
     if value is None:
         return []
@@ -956,6 +1127,10 @@ __all__ = [
     "MVP1_ALLOWED_FAMILIES",
     "MVP1_PACK_TASK_COUNT",
     "PHASE0_ALLOWED_ARTIFACT_PROVIDERS",
+    "SYNTHETIC_ANALOGY_PROFILE_NAMES",
+    "SYNTHETIC_ANALOGY_PROFILE_PACK20",
+    "SYNTHETIC_ANALOGY_PROFILE_SMOKE",
+    "SyntheticAnalogyProfileResult",
     "SyntheticAnalogyLeakageError",
     "SyntheticAnalogyViews",
     "assert_no_scorer_field_leakage",
@@ -964,15 +1139,22 @@ __all__ = [
     "count_mvp_whitespace_tokens",
     "find_scorer_field_leakage",
     "find_answer_token_leakage_tasks",
+    "format_synthetic_analogy_profile_summary",
     "generate_mvp1_pack",
     "is_ascii_lowercase_single_token",
+    "main",
     "mvp1_task_determinism_signature",
     "normalize_answer",
     "phase0_artifact_hash",
     "phase0_artifact_hash_payload",
     "run_mvp1_pack20",
     "run_phase0_smoke",
+    "run_synthetic_analogy_profile",
     "score_exact_json_answer",
     "split_synthetic_analogy_fixture",
     "summarize_phase0_conditions",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

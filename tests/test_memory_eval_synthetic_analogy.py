@@ -9,17 +9,23 @@ from mew.memory_eval.synthetic_analogy import (
     EXACT_JSON_SCORING_ID,
     MVP1_ALLOWED_FAMILIES,
     MVP1_PACK_TASK_COUNT,
+    SYNTHETIC_ANALOGY_PROFILE_NAMES,
+    SYNTHETIC_ANALOGY_PROFILE_PACK20,
+    SYNTHETIC_ANALOGY_PROFILE_SMOKE,
     SyntheticAnalogyLeakageError,
     assert_no_scorer_field_leakage,
     count_mvp_whitespace_tokens,
     find_answer_token_leakage_tasks,
+    format_synthetic_analogy_profile_summary,
     generate_mvp1_pack,
     is_ascii_lowercase_single_token,
+    main as synthetic_analogy_main,
     mvp1_task_determinism_signature,
     normalize_answer,
     phase0_artifact_hash,
     run_mvp1_pack20,
     run_phase0_smoke,
+    run_synthetic_analogy_profile,
     score_exact_json_answer,
     split_synthetic_analogy_fixture,
 )
@@ -449,3 +455,117 @@ def test_mvp1_pack20_run_report_includes_phase2_metrics_and_diagnostics(tmp_path
     assert report["diagnostics"]["answer_token_leakage"]["normal_aggregate_excludes_suspicious"] is True
     assert report["diagnostics"]["memory_off_floor"]["status"] == "diagnostic_only"
     assert report["diagnostics"]["memory_off_floor"]["accuracy"] == 0.0
+
+
+def test_synthetic_analogy_profile_smoke_writes_report_and_summary(tmp_path):
+    report_path = tmp_path / "smoke_profile_report.json"
+
+    result = run_synthetic_analogy_profile(
+        SYNTHETIC_ANALOGY_PROFILE_SMOKE,
+        output_path=report_path,
+    )
+
+    persisted = json.loads(report_path.read_text(encoding="utf-8"))
+    assert persisted == result.report
+    assert result.output_path == str(report_path)
+    assert result.report["profile"] == SYNTHETIC_ANALOGY_PROFILE_SMOKE
+    assert result.report["phase"] == "P0"
+    assert result.report["profile_phase"] == "P3_profile_command_manual_gate"
+    assert result.report["profile_execution"] == {
+        "local_manual_default": True,
+        "ci_default_integration": False,
+        "terminal_bench_integration": False,
+        "behavior_eval_integration": False,
+        "live_model_execution": False,
+    }
+    assert result.report["profile_report_hash"].startswith("sha256:")
+    assert result.report["conditions"]["memory_on"]["accuracy"] == 1.0
+    assert "JSON report: " + str(report_path) in result.summary
+    assert "memory_lift=1.000" in result.summary
+    assert "Manual/local only" in result.summary
+
+
+def test_synthetic_analogy_profile_pack20_report_is_deterministic(tmp_path):
+    first_path = tmp_path / "pack20_profile_first.json"
+    second_path = tmp_path / "pack20_profile_second.json"
+
+    first = run_synthetic_analogy_profile(
+        SYNTHETIC_ANALOGY_PROFILE_PACK20,
+        output_path=first_path,
+    )
+    second = run_synthetic_analogy_profile(
+        SYNTHETIC_ANALOGY_PROFILE_PACK20,
+        output_path=second_path,
+    )
+
+    assert first.report == second.report
+    assert json.loads(first_path.read_text(encoding="utf-8")) == first.report
+    assert json.loads(second_path.read_text(encoding="utf-8")) == second.report
+    assert first.report["profile"] == SYNTHETIC_ANALOGY_PROFILE_PACK20
+    assert first.report["phase"] == "P2"
+    assert first.report["pack_generation"]["task_count"] == MVP1_PACK_TASK_COUNT
+    assert first.report["profile_execution"]["ci_default_integration"] is False
+    assert first.report["profile_execution"]["terminal_bench_integration"] is False
+    assert first.report["profile_execution"]["behavior_eval_integration"] is False
+    assert first.report["conditions"]["memory_off"]["accuracy"] == 0.0
+    assert first.report["conditions"]["memory_on"]["accuracy"] == 1.0
+    assert first.report["comparisons"]["memory_lift"] == 1.0
+
+
+def test_synthetic_analogy_profile_main_writes_json_and_prints_summary(tmp_path, capsys):
+    report_path = tmp_path / "pack20_profile_cli.json"
+
+    exit_code = synthetic_analogy_main(
+        [
+            "--profile",
+            SYNTHETIC_ANALOGY_PROFILE_PACK20,
+            "--output",
+            str(report_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert report["profile"] == SYNTHETIC_ANALOGY_PROFILE_PACK20
+    assert "Synthetic analogy profile synthetic-analogy-mvp-pack20 completed (P2)." in captured.out
+    assert "JSON report: " + str(report_path) in captured.out
+    assert "memory_lift=1.000" in captured.out
+
+
+def test_synthetic_analogy_profile_rejects_unknown_profile(tmp_path, capsys):
+    assert SYNTHETIC_ANALOGY_PROFILE_NAMES == (
+        "synthetic-analogy-mvp-smoke",
+        "synthetic-analogy-mvp-pack20",
+    )
+
+    with pytest.raises(ValueError, match="unknown synthetic analogy profile"):
+        run_synthetic_analogy_profile(
+            "synthetic-analogy-missing",
+            output_path=tmp_path / "missing.json",
+        )
+
+    exit_code = synthetic_analogy_main(
+        [
+            "--profile",
+            "synthetic-analogy-missing",
+            "--output",
+            str(tmp_path / "missing_cli.json"),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "unknown synthetic analogy profile" in captured.err
+
+
+def test_synthetic_analogy_profile_summary_can_be_formatted_without_output_path(tmp_path):
+    result = run_synthetic_analogy_profile(
+        SYNTHETIC_ANALOGY_PROFILE_SMOKE,
+        output_path=tmp_path / "smoke_profile_report.json",
+    )
+
+    summary = format_synthetic_analogy_profile_summary(result.report)
+
+    assert "JSON report:" not in summary
+    assert "synthetic-analogy-mvp-smoke completed (P0)" in summary
+    assert "oracle_gap=0.000" in summary
