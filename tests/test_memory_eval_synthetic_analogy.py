@@ -9,6 +9,7 @@ from mew.memory_eval.synthetic_analogy import (
     EXACT_JSON_SCORING_ID,
     MVP1_ALLOWED_FAMILIES,
     MVP1_PACK_TASK_COUNT,
+    PHASE4_CONDITION_COMPARISON_SCHEMA,
     SYNTHETIC_ANALOGY_PROFILE_NAMES,
     SYNTHETIC_ANALOGY_PROFILE_PACK20,
     SYNTHETIC_ANALOGY_PROFILE_SMOKE,
@@ -134,6 +135,9 @@ def test_phase0_smoke_loop_emits_json_report_for_three_conditions(tmp_path, arti
     assert rows_by_condition["memory_on"]["artifact_hash"].startswith("sha256:")
 
     expected_support_tokens = count_mvp_whitespace_tokens("dax is nava-related to wug.")
+    expected_prompt_tokens = count_mvp_whitespace_tokens(
+        "In this local world, what is dax related to by nava?"
+    )
     assert rows_by_condition["memory_on"]["memory_artifact_tokens_used"] == expected_support_tokens
     assert rows_by_condition["oracle_context"]["normalized_answer"] == "wug"
     assert rows_by_condition["oracle_context"]["per_task_success"] == 1
@@ -150,6 +154,47 @@ def test_phase0_smoke_loop_emits_json_report_for_three_conditions(tmp_path, arti
     assert report["conditions"]["memory_on"]["oracle_gap"] == 0.0
     assert report["comparisons"]["memory_lift"] == 1.0
     assert report["comparisons"]["oracle_gap"] == 0.0
+    assert report["condition_comparison"]["schema"] == PHASE4_CONDITION_COMPARISON_SCHEMA
+    assert report["condition_comparison"]["purpose"] == "display_only_same_task_set_condition_comparison"
+    assert report["condition_comparison"]["task_set"] == {
+        "same_task_set_across_conditions": True,
+        "task_count": 1,
+        "task_ids": ["task_relation_lookup"],
+        "task_ids_by_condition": {
+            "memory_off": ["task_relation_lookup"],
+            "memory_on": ["task_relation_lookup"],
+            "oracle_context": ["task_relation_lookup"],
+        },
+        "diagnostic_task_ids_excluded": [],
+    }
+    assert report["condition_comparison"]["budget_limits"] == {
+        "max_memory_calls": 1,
+        "max_total_context_tokens": 600,
+        "max_evidence_items": 8,
+    }
+    comparison_rows = {
+        row["condition"]: row for row in report["condition_comparison"]["condition_rows"]
+    }
+    assert comparison_rows["memory_off"]["accuracy"] == 0.0
+    assert comparison_rows["memory_on"]["accuracy"] == 1.0
+    assert comparison_rows["oracle_context"]["accuracy"] == 1.0
+    assert comparison_rows["memory_on"]["budget_usage"]["budget_pass_rate"] == 1.0
+    assert comparison_rows["memory_on"]["budget_usage"]["avg_memory_calls"] == 1.0
+    assert comparison_rows["memory_on"]["budget_usage"]["avg_total_context_tokens"] == float(
+        expected_prompt_tokens + expected_support_tokens
+    )
+    assert report["condition_comparison"]["comparisons"] == {
+        "memory_lift": 1.0,
+        "oracle_gap": 0.0,
+    }
+    assert "Smoke score is not benchmark-quality MVP-1 memory scoring." in report["known_limitations"]
+    assert "No long-term retention; state is reset inside the local harness." in report["known_limitations"]
+    assert "No structured claim scoring; exact JSON single-token scoring only." in report["known_limitations"]
+    assert (
+        "No terminal bench, full agent behavior, behavior_eval, or network dependency."
+        in report["known_limitations"]
+    )
+    assert expected_prompt_tokens > 0
 
 
 @pytest.mark.parametrize(
@@ -451,6 +496,22 @@ def test_mvp1_pack20_run_report_includes_phase2_metrics_and_diagnostics(tmp_path
     assert report["conditions"]["oracle_context"]["accuracy"] == 1.0
     assert report["comparisons"]["memory_lift"] == 1.0
     assert report["comparisons"]["oracle_gap"] == 0.0
+    assert report["condition_comparison"]["schema"] == PHASE4_CONDITION_COMPARISON_SCHEMA
+    assert report["condition_comparison"]["task_set"]["same_task_set_across_conditions"] is True
+    assert report["condition_comparison"]["task_set"]["task_count"] == MVP1_PACK_TASK_COUNT
+    assert len(report["condition_comparison"]["condition_rows"]) == 3
+    comparison_rows = {
+        row["condition"]: row for row in report["condition_comparison"]["condition_rows"]
+    }
+    assert comparison_rows["memory_off"]["accuracy"] == 0.0
+    assert comparison_rows["memory_on"]["pass_rate"] == 1.0
+    assert comparison_rows["oracle_context"]["budget_usage"]["budget_pass_rate"] == 1.0
+    assert "No long-term retention; state is reset inside the local harness." in report["known_limitations"]
+    assert "No structured claim scoring; exact JSON single-token scoring only." in report["known_limitations"]
+    assert (
+        "No terminal bench, full agent behavior, behavior_eval, or network dependency."
+        in report["known_limitations"]
+    )
     assert report["diagnostics"]["answer_token_leakage"]["suspicious_task_ids"] == []
     assert report["diagnostics"]["answer_token_leakage"]["normal_aggregate_excludes_suspicious"] is True
     assert report["diagnostics"]["memory_off_floor"]["status"] == "diagnostic_only"
@@ -481,7 +542,18 @@ def test_synthetic_analogy_profile_smoke_writes_report_and_summary(tmp_path):
     assert result.report["profile_report_hash"].startswith("sha256:")
     assert result.report["conditions"]["memory_on"]["accuracy"] == 1.0
     assert "JSON report: " + str(report_path) in result.summary
+    assert "JSON artifact is the source of record." in result.summary
+    assert "Score qualification: smoke-only; benchmark_quality=false" in result.summary
+    assert "not MVP-1 benchmark-quality" in result.summary
+    assert "Task set: same_task_set=true, task_count=1" in result.summary
+    assert "- memory_off: accuracy=0.000, pass_rate=0.000" in result.summary
+    assert "- memory_on: accuracy=1.000, pass_rate=1.000" in result.summary
+    assert "- oracle_context: accuracy=1.000, pass_rate=1.000" in result.summary
+    assert "budget=pass=1.000" in result.summary
     assert "memory_lift=1.000" in result.summary
+    assert "No long-term retention" in result.summary
+    assert "No structured claim scoring" in result.summary
+    assert "full agent behavior" in result.summary
     assert "Manual/local only" in result.summary
 
 
@@ -510,6 +582,7 @@ def test_synthetic_analogy_profile_pack20_report_is_deterministic(tmp_path):
     assert first.report["conditions"]["memory_off"]["accuracy"] == 0.0
     assert first.report["conditions"]["memory_on"]["accuracy"] == 1.0
     assert first.report["comparisons"]["memory_lift"] == 1.0
+    assert first.report["condition_comparison"]["task_set"]["task_count"] == MVP1_PACK_TASK_COUNT
 
 
 def test_synthetic_analogy_profile_main_writes_json_and_prints_summary(tmp_path, capsys):
@@ -530,6 +603,9 @@ def test_synthetic_analogy_profile_main_writes_json_and_prints_summary(tmp_path,
     assert report["profile"] == SYNTHETIC_ANALOGY_PROFILE_PACK20
     assert "Synthetic analogy profile synthetic-analogy-mvp-pack20 completed (P2)." in captured.out
     assert "JSON report: " + str(report_path) in captured.out
+    assert "Score qualification: benchmark_quality=true, level=mvp1_minimal_fixed_solver" in captured.out
+    assert "same_task_set=true, task_count=20" in captured.out
+    assert "No structured claim scoring" in captured.out
     assert "memory_lift=1.000" in captured.out
 
 

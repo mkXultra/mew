@@ -49,11 +49,14 @@ SYNTHETIC_ANALOGY_PROFILE_NAMES = (
     SYNTHETIC_ANALOGY_PROFILE_SMOKE,
     SYNTHETIC_ANALOGY_PROFILE_PACK20,
 )
+PHASE4_CONDITION_COMPARISON_SCHEMA = "synthetic_analogy_condition_comparison_v1"
 KNOWN_LIMITATIONS = [
-    "Smoke fixture score; not benchmark-quality memory scoring.",
     "Single fixed solver stub only; no live model execution.",
     "Profile command is local/manual only; no default CI integration.",
-    "No terminal bench, behavior_eval, or network dependency.",
+    "Smoke score is not benchmark-quality MVP-1 memory scoring.",
+    "No long-term retention; state is reset inside the local harness.",
+    "No structured claim scoring; exact JSON single-token scoring only.",
+    "No terminal bench, full agent behavior, behavior_eval, or network dependency.",
 ]
 SCORER_ONLY_FIELDS = frozenset({"hidden_world", "gold_answer", "oracle_context", "family"})
 _RELATION_PROMPT_RE = re.compile(r"what\s+is\s+([a-z0-9_]+)\s+related\s+to\s+by\s+([a-z0-9_]+)\??", re.IGNORECASE)
@@ -265,6 +268,10 @@ def run_phase0_smoke(
 
     condition_summaries = summarize_phase0_conditions(rows)
     comparisons = compare_phase0_conditions(rows)
+    enriched_condition_summaries = attach_phase1_comparisons_to_condition_summaries(
+        condition_summaries,
+        comparisons,
+    )
     report = {
         "benchmark_id": BENCHMARK_ID,
         "phase": "P0",
@@ -279,7 +286,13 @@ def run_phase0_smoke(
             "reuse_allowed_for_mvp1_benchmark": False,
             "reason": "Phase 0 uses a fixed solver stub and must not be reused as MVP-1 benchmark scoring.",
         },
-        "conditions": attach_phase1_comparisons_to_condition_summaries(condition_summaries, comparisons),
+        "conditions": enriched_condition_summaries,
+        "condition_comparison": build_phase4_condition_comparison(
+            rows,
+            conditions=enriched_condition_summaries,
+            comparisons=comparisons,
+            budget_profile=effective_budget,
+        ),
         "comparisons": comparisons,
         "per_task_rows": rows,
         "known_limitations": list(KNOWN_LIMITATIONS),
@@ -452,7 +465,9 @@ def run_mvp1_pack20(
         "MVP-1 fixed synthetic pack only; no live model execution.",
         "memory_off floor is diagnostic only; no hard threshold yet.",
         "Profile command is local/manual only; no default CI integration.",
-        "No terminal bench, behavior_eval, or network dependency.",
+        "No long-term retention; state is reset inside the local harness.",
+        "No structured claim scoring; exact JSON single-token scoring only.",
+        "No terminal bench, full agent behavior, behavior_eval, or network dependency.",
         "No long-horizon, stale, update, scope, forget, or full-design metrics.",
     ]
     if report_path is not None:
@@ -510,35 +525,50 @@ def format_synthetic_analogy_profile_summary(
 ) -> str:
     profile_name = str(report.get("profile") or "")
     phase = str(report.get("phase") or "")
-    conditions = report.get("conditions") or {}
-    condition_parts = []
-    if isinstance(conditions, Mapping):
-        for condition in PHASE0_CONDITIONS:
-            summary = conditions.get(condition) or {}
-            if not isinstance(summary, Mapping):
-                continue
-            condition_parts.append(
-                (
-                    f"{condition}: accuracy={float(summary.get('accuracy') or 0.0):.3f}, "
-                    f"pass_rate={float(summary.get('pass_rate') or 0.0):.3f}, "
-                    f"avg_total_tokens={float(summary.get('avg_total_context_tokens') or 0.0):.1f}"
-                )
-            )
-    comparisons = report.get("comparisons") or {}
+    condition_comparison = _condition_comparison_for_summary(report)
+    comparison_rows = list(condition_comparison.get("condition_rows") or [])
+    task_set = condition_comparison.get("task_set") or {}
+    if not isinstance(task_set, Mapping):
+        task_set = {}
+    budget_limits = condition_comparison.get("budget_limits") or {}
+    if not isinstance(budget_limits, Mapping):
+        budget_limits = {}
+    comparisons = condition_comparison.get("comparisons") or {}
     if not isinstance(comparisons, Mapping):
         comparisons = {}
+    known_limitations = [
+        str(item).strip().rstrip(".")
+        for item in list(report.get("known_limitations") or [])
+        if str(item).strip()
+    ]
     lines = [
         f"Synthetic analogy profile {profile_name} completed ({phase}).",
     ]
     if output_path is not None:
         lines.append(f"JSON report: {output_path}")
-    lines.append("Conditions: " + "; ".join(condition_parts))
+    lines.append("JSON artifact is the source of record.")
+    lines.append(_format_score_qualification(report))
+    lines.append(
+        "Task set: "
+        f"same_task_set={str(bool(task_set.get('same_task_set_across_conditions'))).lower()}, "
+        f"task_count={int(task_set.get('task_count') or 0)}, "
+        f"diagnostic_excluded={len(list(task_set.get('diagnostic_task_ids_excluded') or []))}"
+    )
+    lines.append("Condition comparison:")
+    for row in comparison_rows:
+        if isinstance(row, Mapping):
+            lines.append("- " + _format_condition_comparison_row(row, budget_limits))
     lines.append(
         "Comparisons: "
         f"memory_lift={float(comparisons.get('memory_lift') or 0.0):.3f}, "
         f"oracle_gap={float(comparisons.get('oracle_gap') or 0.0):.3f}"
     )
-    lines.append("Manual/local only: ci_default=false, terminal_bench=false, behavior_eval=false.")
+    if known_limitations:
+        lines.append("Known limitations: " + "; ".join(known_limitations) + ".")
+    lines.append(
+        "Manual/local only: ci_default=false, terminal_bench=false, "
+        "behavior_eval=false, live_model=false."
+    )
     return "\n".join(lines)
 
 
@@ -756,6 +786,92 @@ def attach_phase1_comparisons_to_condition_summaries(
             "oracle_gap": float(comparisons.get("oracle_gap", 0.0)),
         }
     return enriched
+
+
+def build_phase4_condition_comparison(
+    rows: list[Mapping[str, Any]],
+    *,
+    conditions: Mapping[str, Mapping[str, Any]],
+    comparisons: Mapping[str, float],
+    budget_profile: Mapping[str, int],
+) -> dict[str, Any]:
+    effective_budget = _effective_budget_profile(budget_profile)
+    task_ids_by_condition: dict[str, list[str]] = {}
+    diagnostic_task_ids: set[str] = set()
+    for condition in PHASE0_CONDITIONS:
+        seen_task_ids: set[str] = set()
+        task_ids: list[str] = []
+        for row in rows:
+            if row.get("condition") != condition:
+                continue
+            task_id = str(row.get("task_id") or "")
+            if bool(row.get("diagnostic", False)):
+                if task_id:
+                    diagnostic_task_ids.add(task_id)
+                continue
+            if task_id and task_id not in seen_task_ids:
+                task_ids.append(task_id)
+                seen_task_ids.add(task_id)
+        task_ids_by_condition[condition] = task_ids
+
+    reference_task_ids = task_ids_by_condition.get(PHASE0_CONDITIONS[0], [])
+    same_task_set = all(
+        task_ids_by_condition.get(condition, []) == reference_task_ids
+        for condition in PHASE0_CONDITIONS
+    )
+
+    condition_rows = []
+    for condition in PHASE0_CONDITIONS:
+        summary = conditions.get(condition) or {}
+        if not isinstance(summary, Mapping):
+            summary = {}
+        condition_rows.append(
+            {
+                "condition": condition,
+                "task_count": int(summary.get("task_count") or 0),
+                "accuracy": float(summary.get("accuracy") or 0.0),
+                "pass_rate": float(summary.get("pass_rate") or 0.0),
+                "budget_usage": {
+                    "budget_pass_rate": float(summary.get("budget_pass") or 0.0),
+                    "budget_violation_rate": float(
+                        summary.get("budget_violation_rate") or 0.0
+                    ),
+                    "avg_memory_calls": float(summary.get("avg_memory_calls") or 0.0),
+                    "avg_total_context_tokens": float(
+                        summary.get("avg_total_context_tokens") or 0.0
+                    ),
+                    "avg_memory_artifact_tokens": float(
+                        summary.get("avg_memory_artifact_tokens") or 0.0
+                    ),
+                    "avg_oracle_context_tokens": float(
+                        summary.get("avg_oracle_context_tokens") or 0.0
+                    ),
+                    "avg_evidence_items": float(summary.get("avg_evidence_items") or 0.0),
+                },
+            }
+        )
+
+    return {
+        "schema": PHASE4_CONDITION_COMPARISON_SCHEMA,
+        "purpose": "display_only_same_task_set_condition_comparison",
+        "task_set": {
+            "same_task_set_across_conditions": same_task_set,
+            "task_count": len(reference_task_ids),
+            "task_ids": list(reference_task_ids),
+            "task_ids_by_condition": task_ids_by_condition,
+            "diagnostic_task_ids_excluded": sorted(diagnostic_task_ids),
+        },
+        "budget_limits": {
+            "max_memory_calls": int(effective_budget["max_memory_calls"]),
+            "max_total_context_tokens": int(effective_budget["max_total_context_tokens"]),
+            "max_evidence_items": int(effective_budget["max_evidence_items"]),
+        },
+        "condition_rows": condition_rows,
+        "comparisons": {
+            "memory_lift": float(comparisons.get("memory_lift", 0.0)),
+            "oracle_gap": float(comparisons.get("oracle_gap", 0.0)),
+        },
+    }
 
 
 def _run_condition_rows(
@@ -1060,6 +1176,82 @@ def _task_has_answer_token_leakage(*, prompt: str, gold_answer: str) -> bool:
     return normalized_gold in prompt_tokens
 
 
+def _condition_comparison_for_summary(report: Mapping[str, Any]) -> dict[str, Any]:
+    condition_comparison = report.get("condition_comparison")
+    if isinstance(condition_comparison, Mapping) and isinstance(
+        condition_comparison.get("condition_rows"),
+        list,
+    ):
+        return dict(condition_comparison)
+
+    conditions = report.get("conditions") or {}
+    if not isinstance(conditions, Mapping):
+        conditions = {}
+    comparisons = report.get("comparisons") or {}
+    if not isinstance(comparisons, Mapping):
+        comparisons = {}
+    budget_profile = report.get("budget_profile") or DEFAULT_BUDGET_PROFILE
+    if not isinstance(budget_profile, Mapping):
+        budget_profile = DEFAULT_BUDGET_PROFILE
+    rows = [
+        row
+        for row in list(report.get("per_task_rows") or [])
+        if isinstance(row, Mapping)
+    ]
+    return build_phase4_condition_comparison(
+        rows,
+        conditions=conditions,
+        comparisons=comparisons,
+        budget_profile=budget_profile,
+    )
+
+
+def _format_score_qualification(report: Mapping[str, Any]) -> str:
+    qualification = report.get("score_qualification") or {}
+    if not isinstance(qualification, Mapping):
+        qualification = {}
+    if bool(qualification.get("smoke_only")):
+        return (
+            "Score qualification: smoke-only; benchmark_quality=false; "
+            "not MVP-1 benchmark-quality."
+        )
+    benchmark_quality = bool(qualification.get("benchmark_quality"))
+    level = str(qualification.get("benchmark_quality_level") or "none")
+    live_model = str(bool(qualification.get("live_model"))).lower()
+    return (
+        "Score qualification: "
+        f"benchmark_quality={str(benchmark_quality).lower()}, "
+        f"level={level}, live_model={live_model}."
+    )
+
+
+def _format_condition_comparison_row(
+    row: Mapping[str, Any],
+    budget_limits: Mapping[str, Any],
+) -> str:
+    budget_usage = row.get("budget_usage") or {}
+    if not isinstance(budget_usage, Mapping):
+        budget_usage = {}
+    max_memory_calls = int(budget_limits.get("max_memory_calls") or 0)
+    max_total_context_tokens = int(budget_limits.get("max_total_context_tokens") or 0)
+    max_evidence_items = int(budget_limits.get("max_evidence_items") or 0)
+    return (
+        f"{row.get('condition')}: "
+        f"accuracy={float(row.get('accuracy') or 0.0):.3f}, "
+        f"pass_rate={float(row.get('pass_rate') or 0.0):.3f}, "
+        "budget="
+        f"pass={float(budget_usage.get('budget_pass_rate') or 0.0):.3f}, "
+        f"violation={float(budget_usage.get('budget_violation_rate') or 0.0):.3f}, "
+        f"avg_calls={float(budget_usage.get('avg_memory_calls') or 0.0):.1f}/"
+        f"{max_memory_calls}, "
+        "avg_total_tokens="
+        f"{float(budget_usage.get('avg_total_context_tokens') or 0.0):.1f}/"
+        f"{max_total_context_tokens}, "
+        f"avg_evidence={float(budget_usage.get('avg_evidence_items') or 0.0):.1f}/"
+        f"{max_evidence_items}"
+    )
+
+
 def _sample_token_pool(rng: random.Random, *, count: int) -> list[str]:
     consonants = "bcdfghjklmnpqrstvwxyz"
     vowels = "aeiou"
@@ -1127,6 +1319,7 @@ __all__ = [
     "MVP1_ALLOWED_FAMILIES",
     "MVP1_PACK_TASK_COUNT",
     "PHASE0_ALLOWED_ARTIFACT_PROVIDERS",
+    "PHASE4_CONDITION_COMPARISON_SCHEMA",
     "SYNTHETIC_ANALOGY_PROFILE_NAMES",
     "SYNTHETIC_ANALOGY_PROFILE_PACK20",
     "SYNTHETIC_ANALOGY_PROFILE_SMOKE",
@@ -1135,6 +1328,7 @@ __all__ = [
     "SyntheticAnalogyViews",
     "assert_no_scorer_field_leakage",
     "attach_phase1_comparisons_to_condition_summaries",
+    "build_phase4_condition_comparison",
     "compare_phase0_conditions",
     "count_mvp_whitespace_tokens",
     "find_scorer_field_leakage",
