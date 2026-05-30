@@ -170,3 +170,42 @@ Decision:
 
 - Graph expansion now gates both normal edge traversal and seed-card edge-derived frontier construction on visible graph-edge support evidence.
 - Memory eval covers redacted graph-edge support drift through derived verifier issue counts, not only through direct retrieval absence.
+
+## 2026-05-30 - Synthetic Analogy Minimal Bench Availability
+
+Context:
+
+- Implementation commit under test before this discoverability update:
+  `2983088`.
+- New usage entry point:
+  `python -m mew.memory_eval.synthetic_analogy`.
+- Usage documentation:
+  `docs/MEMORY_EVAL_USAGE.md`.
+- Profiles:
+  - `synthetic-analogy-mvp-smoke`
+  - `synthetic-analogy-mvp-pack20`
+
+Commands:
+
+- `uv run --group dev python -m mew.memory_eval.synthetic_analogy --profile synthetic-analogy-mvp-smoke --output /tmp/mew_synthetic_usage_smoke.json`
+- `uv run --group dev python -m mew.memory_eval.synthetic_analogy --profile synthetic-analogy-mvp-pack20 --output /tmp/mew_synthetic_usage_pack20.json`
+
+Result:
+
+- Smoke profile passed with `memory_off=0.000`, `memory_on=1.000`,
+  `oracle_context=1.000`, `memory_lift=1.000`, and `oracle_gap=0.000`.
+- Pack20 profile passed on 20 deterministic tasks with `memory_off=0.000`,
+  `memory_on=1.000`, `oracle_context=1.000`, `memory_lift=1.000`, and
+  `oracle_gap=0.000`.
+- JSON artifacts include task rows, condition summaries, comparisons,
+  display-only `condition_comparison`, and known limitations.
+
+Decision:
+
+- Synthetic analogy minimal bench is runnable as a local/manual memory-eval
+  profile surface.
+- Current default execution uses `DummyPassAdapter`; this proves harness,
+  scoring, budget accounting, profile command, and report ergonomics, not real
+  typed-card memory quality.
+- Next adapter-integration work is to connect this profile to
+  `TypedCardsMemoryEvalAdapter` or expose a controlled adapter selection path.

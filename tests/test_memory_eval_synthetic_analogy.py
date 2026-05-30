@@ -634,6 +634,21 @@ def test_synthetic_analogy_profile_rejects_unknown_profile(tmp_path, capsys):
     assert "unknown synthetic analogy profile" in captured.err
 
 
+def test_synthetic_analogy_profile_help_lists_profiles_and_usage(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        synthetic_analogy_main(["--help"])
+
+    captured = capsys.readouterr()
+    assert exc_info.value.code == 0
+    assert "Run local synthetic analogy MVP profiles." in captured.out
+    assert "Profiles:" in captured.out
+    assert SYNTHETIC_ANALOGY_PROFILE_SMOKE in captured.out
+    assert SYNTHETIC_ANALOGY_PROFILE_PACK20 in captured.out
+    assert "Default adapter: DummyPassAdapter" in captured.out
+    assert "real memory" in captured.out
+    assert "subsystem is a separate adapter-integration step" in captured.out
+
+
 def test_synthetic_analogy_profile_summary_can_be_formatted_without_output_path(tmp_path):
     result = run_synthetic_analogy_profile(
         SYNTHETIC_ANALOGY_PROFILE_SMOKE,

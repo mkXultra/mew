@@ -573,8 +573,40 @@ def format_synthetic_analogy_profile_summary(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run local synthetic analogy MVP profiles.")
-    parser.add_argument("--profile", required=True, help="Synthetic analogy profile name.")
+    parser = argparse.ArgumentParser(
+        description="Run local synthetic analogy MVP profiles.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Profiles:\n"
+            f"  {SYNTHETIC_ANALOGY_PROFILE_SMOKE}\n"
+            "    One hand-authored relation_lookup smoke fixture across memory_off,\n"
+            "    memory_on, and oracle_context.\n"
+            f"  {SYNTHETIC_ANALOGY_PROFILE_PACK20}\n"
+            "    Runtime-generated deterministic 20-task MVP-1 pack across the\n"
+            "    same three conditions.\n"
+            "\n"
+            "Examples:\n"
+            "  python -m mew.memory_eval.synthetic_analogy \\\n"
+            f"    --profile {SYNTHETIC_ANALOGY_PROFILE_SMOKE} \\\n"
+            "    --output tmp/synthetic-analogy-smoke.json\n"
+            "  python -m mew.memory_eval.synthetic_analogy \\\n"
+            f"    --profile {SYNTHETIC_ANALOGY_PROFILE_PACK20} \\\n"
+            "    --output tmp/synthetic-analogy-pack20.json\n"
+            "\n"
+            "Default adapter: DummyPassAdapter. This command verifies the local\n"
+            "benchmark harness/profile surface; connecting it to a real memory\n"
+            "subsystem is a separate adapter-integration step.\n"
+        ),
+    )
+    parser.add_argument(
+        "--profile",
+        required=True,
+        metavar="PROFILE",
+        help=(
+            "Synthetic analogy profile name. Available: "
+            + ", ".join(SYNTHETIC_ANALOGY_PROFILE_NAMES)
+        ),
+    )
     parser.add_argument("--output", required=True, help="Path for the JSON profile report.")
     parser.add_argument(
         "--seed",
