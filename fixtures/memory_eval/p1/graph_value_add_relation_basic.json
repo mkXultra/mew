@@ -119,7 +119,10 @@
         "stale_evidence_ids": [],
         "expected_abstention": false,
         "expected_usage": {
-          "index_mode": "direct_scan"
+          "index_mode": "direct_scan",
+          "max_graph_nodes_expanded": 0,
+          "max_graph_edges_expanded": 0,
+          "max_graph_cards_expanded": 0
         }
       }
     },

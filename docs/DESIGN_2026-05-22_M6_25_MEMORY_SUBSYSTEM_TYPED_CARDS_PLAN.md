@@ -2779,7 +2779,7 @@ Normative Phase D requirements:
 - actor/lineage and negative governance edge types do not contribute scored retrieval support; only allowlisted retrieval edges such as `related`, `mentions`, `supports`, `proved_by`, `located_in`, and `fixes` expand。
 - unresolved or stale graph endpoints are counted by reason in caller-visible aggregate drop counts, while node/edge IDs remain internal-audit only。
 - graph-expanded cards receive an explicit deterministic `graph_modifier` score component, and usage records `index_mode=graph_index`, `graph_nodes_expanded`, and `graph_edges_expanded`。
-- graph-generation fixtures may set scorer-only `gold.expected_usage` gates, so a fixture can require `index_mode=graph_index` and minimum graph expansion counts without exposing those expectations to the adapter。When graph fixtures are enabled as deterministic/replay tests, they must satisfy these usage gates。
+- graph-generation fixtures may set scorer-only `gold.expected_usage` gates, so a fixture can require `index_mode=graph_index` and minimum/maximum graph expansion counts without exposing those expectations to the adapter。When graph fixtures are enabled as deterministic/replay tests, they must satisfy these usage gates。
 - graph negative fixtures cover raw graph-edge cross-scope non-leak, forgotten-support non-leak, stale endpoints, and uncanonicalized endpoints; scorer-only dropped-count gates validate caller-visible reasons without exposing blocked card/provenance IDs。
 - graph expansion treats `CurrentEvidenceSnapshot` file/symbol/command endpoint states as a freshness overlay: missing endpoints stop expansion as uncanonicalized, and changed/moved/unknown/hash-mismatched endpoints stop expansion as stale。
 - derived graph index verification rebuilds a canonical snapshot/hash from `memory_cards`, `graph_nodes`, and `graph_edges`; it excludes forgotten/deleted cards from active card refs, reports missing/stale graph refs as drift issues, and exposes a safe aggregate verifier summary in memory-eval retrieval artifacts with scorer-only expected verification gates。
@@ -2792,23 +2792,27 @@ Current Phase D.1 implementation status, 2026-05-22:
 - graph expansion supports explicit node, edge, card, and per-node fanout budget controls through `graph_max_nodes`, `graph_max_edges`, `graph_max_cards`, and `graph_max_fanout`。
 - graph expansion supports `graph_max_latency_ms`; when the budget is exhausted, traversal stops and caller-visible output receives aggregate `graph_latency_budget_exhausted` counts。
 - recall supports `max_projection_chars`, which drops otherwise ranked evidence when returning its projected summary would exceed the caller/eval character budget。
+- memory-eval scoring supports scorer-only `gold.expected_usage` maximum count gates such as `max_graph_edges_expanded` and `max_projection_chars`, so budget fixtures can fail adapters that over-expand while still keeping gold labels hidden from adapter-visible input。
 - graph expansion rejects edges whose active support/proof provenance is missing, restricted, deleted, or otherwise not caller-safe; caller-visible output exposes only aggregate `missing_graph_edge_evidence` counts while internal audit may retain the edge ID。
 - duplicate deterministic graph-edge additions merge evidence links instead of overwriting support, so one forgotten support source does not invalidate the edge when another active current-support/proof source remains。
+- derived graph index verification records aggregate `graph_edge_support_evidence_unavailable` issues when an expansion edge still exists but all active support/proof provenance for that edge is redacted, deleted, or otherwise not visible。
 - current-evidence graph invalidation has focused coverage for file hash changes, moved symbol endpoints, and changed command endpoints。
 - graph value-add evaluation includes a graph-off / graph-on fixture where the same query retrieves only seed support without expansion and retrieves an additional graph-only related support when expansion is enabled。
+- graph negative evaluation includes a redacted edge-support fixture where `seed_graph` uses a dedicated support experience, that support is forgotten, and graph expansion plus derived verifier gates confirm the related card is not returned。
 - raw extraction can emit explicit `graph_nodes` and `graph_edges` from raw text; proposed graph refs are carried through proposal/commit and can be evaluated without `seed_graph` setup。
 - raw extraction treats the caller-provided runtime scope as authoritative; LLM-emitted scope may narrow, annotate, or request clarification, but it cannot broaden scope, switch namespace, change `user_id`, change `repo_ref`, or create `team` / `shared` scope。Mismatches are proposal warnings / dropped scope overrides, not stored card scope。
 
 Remaining Phase D work:
 
 - broader graph-specific memory-eval fixtures。
-- remaining graph budget coverage: broader fixture coverage。Node/edge/card/fanout/latency/projection-char budget controls exist as of 2026-05-28 through `graph_max_nodes`, `graph_max_edges`, `graph_max_cards`, `graph_max_fanout`, `graph_max_latency_ms`, and `max_projection_chars` with focused core/adapter coverage。
-- additional graph invalidation coverage, especially verifier/index drift checks for redacted graph-edge support and broader invalidation matrix fixtures。
+- additional graph invalidation coverage, especially broader invalidation matrix fixtures beyond redacted graph-edge support。
 - deeper graph-aware rebuild drift fixtures。
 
 Observed Phase D.1 validation artifacts, non-normative and allowed to become stale:
 
 - graph value-add fixture passed on 2026-05-28 (`fixtures/memory_eval/p1/graph_value_add_relation_basic.json`): graph-off baseline returned seed support only, while graph-on returned the graph-only related support with `index_mode=graph_index` and positive graph expansion counts。
+- graph budget controls fixture passed on 2026-05-28 (`fixtures/memory_eval/p1/graph_budget_controls_basic.json`): fanout, projection-char, and latency budget requests satisfied scorer-only expected usage limits and caller-visible aggregate dropped-count gates without exposing internal graph node/edge IDs。
+- graph redacted edge-support fixture passed on 2026-05-28 (`fixtures/memory_eval/p1/graph_redacted_edge_support_no_leak_basic.json`): a graph edge whose dedicated support experience was forgotten produced only aggregate `missing_graph_edge_evidence` retrieval drops and `graph_edge_support_evidence_unavailable` derived verifier issue counts。
 - graph-on live normal suite passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_suite_graph_on_20260522`, 9/9 passed); because current P0/P1 fixtures contain no graph seed material, all graph expansion counts were zero and this run is a no-regression check, not graph retrieval quality proof。
 - graph-generation live fixture passed on 2026-05-22 with `gpt-5.5` (`run_id=manual_graph_generation_20260522_v3`): `raw_text -> LLM extractor graph_nodes -> proposal/commit -> graph-on recall` returned the graph-related support with `index_mode=graph_index` and `graph_nodes_expanded=1`。
 - graph-generation live suite passed on 2026-05-23 with `gpt-5.5` (`run_id=manual_graph_edge_generation_20260523_scopefix`, 2/2 passed): both `graph_nodes` and `graph_edges` extraction paths satisfied scorer-only graph usage gates。
@@ -3112,7 +3116,7 @@ MemoryToolProvider does not import prompt projection internals
 | retrieval index is derived, rebuildable, not authoritative, and Phase B simple index behavior is distinct from Phase D graph-aware index behavior。 | derived graph snapshot/hash verifier and index rebuild/equality/phasing tests。 |
 | vector indexes, when present, record embedding model/config, index snapshot hash, and corpus surface hash。 | vector replay identity tests。 |
 | rerankers, when present, record reranker model/config, replay artifact, and deterministic mode; non-deterministic rerankers are not direct P1 hermetic gates。 | reranker replay/non-gating tests。 |
-| expansion is bounded by depth/fanout/node/card/latency/char budgets。 | budget tests。 |
+| expansion is bounded by depth/fanout/node/card/latency/char budgets。 | budget tests, including scorer-only `min_*` / `max_*` expected-usage gates and `graph_budget_controls_basic` fixture coverage。 |
 | expansion happens after seed retrieval and after Phase C adapter gate。 | trace/gate test。 |
 | expansion does not bypass governance。 | stale/scope/contradiction graph tests。 |
 | graph invalidation uses node hashes/staleness and current evidence。 | invalidation tests。 |

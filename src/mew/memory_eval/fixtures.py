@@ -328,7 +328,14 @@ def _rewrite_graph_experience_ids(value: Any, experience_id_map: Mapping[str, st
     if isinstance(value, Mapping):
         rewritten = {}
         for key, child in value.items():
-            if key in {"experience_id", "from_experience_id", "to_experience_id", "card_experience_id"}:
+            if key in {
+                "experience_id",
+                "from_experience_id",
+                "to_experience_id",
+                "card_experience_id",
+                "support_experience_id",
+                "evidence_experience_id",
+            }:
                 original = str(child or "")
                 rewritten[key] = experience_id_map.get(original, original)
             elif key == "experience_ids" and isinstance(child, list):

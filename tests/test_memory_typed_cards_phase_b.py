@@ -932,6 +932,13 @@ def test_graph_expansion_drops_edges_with_redacted_support_provenance() -> None:
     assert expanded.dropped_count_by_reason["missing_graph_edge_evidence"] == 1
     assert all(item.evidence_ref != edge.edge_id for item in expanded.dropped)
     assert any(item.reason == "missing_graph_edge_evidence" and item.ref_id == edge.edge_id for item in expanded.audit_event.dropped)
+    verification = core.verify_derived_graph_index()
+    edge_snapshot = next(item for item in verification["snapshot"]["edges"] if item["edge_id"] == edge.edge_id)
+    issue_types = {item["issue_type"] for item in verification["issues"]}
+    assert verification["ok"] is False
+    assert edge_snapshot["active_support_evidence_count"] == 1
+    assert edge_snapshot["visible_support_evidence_count"] == 0
+    assert "graph_edge_support_evidence_unavailable" in issue_types
 
 
 def test_derived_graph_index_snapshot_is_rebuildable_and_excludes_forgotten_cards() -> None:

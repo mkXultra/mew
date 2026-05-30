@@ -17,8 +17,10 @@ P1_FIXTURES = ROOT / "fixtures" / "memory_eval" / "p1"
 GRAPH_FIXTURE = P1_FIXTURES / "graph_expansion_basic.json"
 GRAPH_EDGE_FIXTURE = P1_FIXTURES / "graph_edge_expansion_basic.json"
 GRAPH_VALUE_ADD_FIXTURE = P1_FIXTURES / "graph_value_add_relation_basic.json"
+GRAPH_BUDGET_FIXTURE = P1_FIXTURES / "graph_budget_controls_basic.json"
 GRAPH_CROSS_SCOPE_FIXTURE = P1_FIXTURES / "graph_cross_scope_no_leak_basic.json"
 GRAPH_FORGET_FIXTURE = P1_FIXTURES / "graph_forget_no_leak_basic.json"
+GRAPH_REDACTED_EDGE_SUPPORT_FIXTURE = P1_FIXTURES / "graph_redacted_edge_support_no_leak_basic.json"
 GRAPH_STALE_ENDPOINT_FIXTURE = P1_FIXTURES / "graph_stale_endpoint_no_leak_basic.json"
 GRAPH_UNCANONICALIZED_ENDPOINT_FIXTURE = P1_FIXTURES / "graph_uncanonicalized_endpoint_no_leak_basic.json"
 RELATION_NIECE_COMPANY_FIXTURE = P1_FIXTURES / "relation_sensitive_niece_company_basic.json"
@@ -829,15 +831,50 @@ def test_graph_value_add_fixture_compares_graph_off_and_graph_on_recall() -> Non
     assert len(on_support_ids) > len(off_support_ids)
 
 
+def test_graph_budget_controls_fixture_passes_with_scorer_visible_limits() -> None:
+    artifact = run_fixture(
+        json.loads(GRAPH_BUDGET_FIXTURE.read_text(encoding="utf-8")),
+        TypedCardsMemoryEvalAdapter(),
+        run_id="run_graph_budget_controls",
+        created_at="2026-05-28T00:00:00Z",
+    )
+    by_request = {request["request_id"]: request for request in artifact["requests"]}
+    fanout = by_request["req_graph_budget_fanout"]
+    projection = by_request["req_graph_budget_projection_chars"]
+    latency = by_request["req_graph_budget_latency"]
+
+    assert fanout["result_status"] == "passed"
+    assert fanout["metrics"]["expected_usage_satisfied"] == 1.0
+    assert fanout["metrics"]["expected_dropped_counts_satisfied"] == 1.0
+    assert fanout["usage"]["counts"]["graph_edges_expanded"] == 1
+    assert fanout["usage"]["counts"]["graph_cards_expanded"] <= 1
+    assert fanout["retrieval"]["dropped_count_by_reason"]["graph_fanout_budget_exhausted"] >= 1
+
+    assert projection["result_status"] == "passed"
+    assert projection["metrics"]["expected_usage_satisfied"] == 1.0
+    assert projection["metrics"]["expected_dropped_counts_satisfied"] == 1.0
+    assert projection["usage"]["counts"]["projection_chars"] <= 240
+    assert projection["retrieval"]["dropped_count_by_reason"]["projection_char_budget_exhausted"] >= 1
+
+    assert latency["result_status"] == "passed"
+    assert latency["metrics"]["expected_usage_satisfied"] == 1.0
+    assert latency["metrics"]["expected_dropped_counts_satisfied"] == 1.0
+    assert latency["usage"]["counts"]["index_mode"] == "direct_scan"
+    assert latency["usage"]["counts"]["graph_nodes_expanded"] == 0
+    assert latency["usage"]["counts"]["graph_edges_expanded"] == 0
+    assert latency["retrieval"]["dropped_count_by_reason"]["graph_latency_budget_exhausted"] >= 1
+
+
 @pytest.mark.parametrize(
     "fixture_path, forbidden_id, dropped_reason",
     [
         (GRAPH_CROSS_SCOPE_FIXTURE, "exp_graph_scope_foreign", "privacy_block"),
         (GRAPH_FORGET_FIXTURE, "exp_graph_forget_related", "forgotten"),
+        (GRAPH_REDACTED_EDGE_SUPPORT_FIXTURE, "exp_graph_redacted_edge_related", "missing_graph_edge_evidence"),
         (GRAPH_STALE_ENDPOINT_FIXTURE, "exp_graph_stale_related", "stale_graph_node"),
         (GRAPH_UNCANONICALIZED_ENDPOINT_FIXTURE, "exp_graph_missing_related", "uncanonicalized_graph_endpoint"),
     ],
-    ids=["cross_scope", "forgotten", "stale_endpoint", "uncanonicalized_endpoint"],
+    ids=["cross_scope", "forgotten", "redacted_edge_support", "stale_endpoint", "uncanonicalized_endpoint"],
 )
 def test_graph_negative_fixtures_do_not_leak_blocked_support(
     fixture_path: Path,
@@ -861,6 +898,11 @@ def test_graph_negative_fixtures_do_not_leak_blocked_support(
     assert request["metrics"]["expected_usage_satisfied"] == 1.0
     assert request["metrics"]["expected_dropped_counts_satisfied"] == 1.0
     assert request["retrieval"]["dropped_count_by_reason"][dropped_reason] == 1
+    if dropped_reason == "missing_graph_edge_evidence":
+        verification = request["retrieval"]["derived_graph_index_verification"]
+        assert request["metrics"]["expected_derived_graph_index_verification_satisfied"] == 1.0
+        assert verification["ok"] is False
+        assert verification["issue_count_by_type"]["graph_edge_support_evidence_unavailable"] >= 1
     if dropped_reason == "uncanonicalized_graph_endpoint":
         verification = request["retrieval"]["derived_graph_index_verification"]
         assert request["metrics"]["expected_derived_graph_index_verification_satisfied"] == 1.0

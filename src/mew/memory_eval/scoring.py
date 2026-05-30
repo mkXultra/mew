@@ -832,6 +832,24 @@ def _expected_usage_failures(
                     actual={f"counts.{count_key}": actual},
                 )
             )
+    for key, maximum in expected.items():
+        if not str(key).startswith("max_"):
+            continue
+        count_key = str(key)[4:]
+        actual = counts.get(count_key)
+        if not _meets_maximum(actual, maximum):
+            failures.append(
+                make_failure(
+                    stage="scoring",
+                    type="usage_expectation_mismatch",
+                    message=f"Expected usage counts.{count_key}<={maximum!r}, got {actual!r}.",
+                    request_id=request_id,
+                    gate_id="expected_usage_satisfied",
+                    metric_id="expected_usage_satisfied",
+                    expected={f"counts.{count_key}": {"max": maximum}},
+                    actual={f"counts.{count_key}": actual},
+                )
+            )
     return failures
 
 
@@ -942,6 +960,13 @@ def _expected_graph_verification_failures(
 def _meets_minimum(actual: Any, minimum: Any) -> bool:
     try:
         return float(actual) >= float(minimum)
+    except (TypeError, ValueError):
+        return False
+
+
+def _meets_maximum(actual: Any, maximum: Any) -> bool:
+    try:
+        return float(actual) <= float(maximum)
     except (TypeError, ValueError):
         return False
 

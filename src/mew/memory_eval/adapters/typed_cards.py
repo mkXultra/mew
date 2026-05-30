@@ -462,6 +462,12 @@ class TypedCardsMemoryEvalAdapter:
                 to_card = self._graph_card_for_experience(str(link.get("to_experience_id") or ""))
                 if from_card.scope.scope_key() != to_card.scope.scope_key():
                     raise ValueError("graph link card scopes must match")
+                support_card = from_card
+                support_experience_id = str(link.get("support_experience_id") or link.get("evidence_experience_id") or "")
+                if support_experience_id:
+                    support_card = self._graph_card_for_experience(support_experience_id)
+                    if support_card.scope.scope_key() != from_card.scope.scope_key():
+                        raise ValueError("graph link support card scope must match endpoints")
                 created_at = self.core.clock()
                 from_node = self._graph_node_from_spec(
                     link.get("from_node") if isinstance(link.get("from_node"), Mapping) else {},
@@ -489,7 +495,7 @@ class TypedCardsMemoryEvalAdapter:
                     scope=from_card.scope,
                     evidence_links=(
                         EvidenceLink(
-                            ref_id=_first_active_support_ref(from_card),
+                            ref_id=_first_active_support_ref(support_card),
                             role="current_support",
                             active=True,
                             note="memory-eval graph setup",

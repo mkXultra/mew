@@ -2106,6 +2106,8 @@ class TypedMemoryCore:
                     "to_node_type": edge.to_node_type,
                     "to_node_present": edge.to_node_id in self.graph_nodes,
                     "staleness_state": edge.staleness_state,
+                    "active_support_evidence_count": _graph_edge_active_support_link_count(edge),
+                    "visible_support_evidence_count": self._graph_edge_visible_support_count(edge),
                 }
                 for edge in sorted(self.graph_edges.values(), key=lambda item: item.edge_id)
             ],
@@ -2178,6 +2180,12 @@ class TypedMemoryCore:
                 issues.extend(_derived_graph_edge_endpoint_issues(edge, card_id=card.card_id, nodes=self.graph_nodes))
         for edge in sorted(self.graph_edges.values(), key=lambda item: item.edge_id):
             issues.extend(_derived_graph_edge_endpoint_issues(edge, card_id=None, nodes=self.graph_nodes))
+            if (
+                edge.edge_type in _GRAPH_EXPANSION_EDGE_TYPES
+                and _graph_edge_active_support_link_count(edge) > 0
+                and self._graph_edge_visible_support_count(edge) == 0
+            ):
+                issues.append(_derived_graph_issue("graph_edge_support_evidence_unavailable", edge_id=edge.edge_id))
         return _dedupe_graph_issues(issues)
 
     def store_transient_reentry(
@@ -2895,6 +2903,12 @@ class TypedMemoryCore:
                 if edge is None:
                     _add_graph_drop("uncanonicalized_graph_edge", edge_id, dropped_counts, dropped)
                     continue
+                if edge.edge_type not in _GRAPH_EXPANSION_EDGE_TYPES:
+                    continue
+                edge_drop_reason = self._graph_edge_drop_reason(edge)
+                if edge_drop_reason is not None:
+                    _add_graph_drop(edge_drop_reason, edge.edge_id, dropped_counts, dropped)
+                    continue
                 from_node = self.graph_nodes.get(edge.from_node_id)
                 from_drop_reason = _graph_node_drop_reason(from_node, current_evidence)
                 if from_drop_reason is None:
@@ -3095,6 +3109,9 @@ class TypedMemoryCore:
             return False
         return event.redaction_state != RedactionState.RESTRICTED.value and event.retention_state == RetentionState.ACTIVE.value
 
+    def _graph_edge_visible_support_count(self, edge: GraphEdge) -> int:
+        return sum(1 for link in edge.evidence_links if self._visible_graph_edge_support_link(link))
+
     def _validate_commit_card(self, card: MemoryCard, *, actor: str, operation: str) -> None:
         if card.approval_state != ApprovalState.COMMITTED.value:
             raise ValueError("commit validation requires approval_state=committed")
@@ -3278,6 +3295,14 @@ def _dedupe_evidence_links(links: Sequence[EvidenceLink]) -> tuple[EvidenceLink,
         seen.add(key)
         unique.append(link)
     return tuple(sorted(unique, key=lambda item: (item.ref_id, item.role, item.added_by_mutation_id or "", item.note or "", item.active)))
+
+
+def _graph_edge_active_support_link_count(edge: GraphEdge) -> int:
+    return sum(
+        1
+        for link in edge.evidence_links
+        if link.active and link.role in {EvidenceRole.CURRENT_SUPPORT.value, EvidenceRole.PROOF.value}
+    )
 
 
 def _optional_non_negative_int(value: Any, field_name: str) -> int | None:

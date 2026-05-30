@@ -132,3 +132,41 @@ Decision:
 
 - Memory eval now covers graph expansion value-add, not only correctness/safety.
 - This fixture demonstrates that graph expansion can recover a related memory whose text does not directly match the query terms but shares a role-bearing graph edge with the seed memory.
+
+## 2026-05-28 - Graph Budget Controls Fixture
+
+Context:
+
+- New fixture: `fixtures/memory_eval/p1/graph_budget_controls_basic.json`.
+- Test command:
+  - `uv run pytest --no-testmon -q tests/test_memory_eval_typed_cards_adapter.py::test_graph_budget_controls_fixture_passes_with_scorer_visible_limits`
+
+Result:
+
+- Fanout request passed with `index_mode=graph_index`, `graph_edges_expanded == 1`, `graph_cards_expanded <= 1`, and aggregate `graph_fanout_budget_exhausted` drops.
+- Projection-char request passed with `projection_chars <= 240` and aggregate `projection_char_budget_exhausted` drops.
+- Latency request passed with `graph_max_latency_ms=0`, direct-scan fallback usage, zero graph expansion counts, and aggregate `graph_latency_budget_exhausted` drops.
+
+Decision:
+
+- Memory eval now covers scorer-visible graph expansion budget limits, not only happy-path graph retrieval.
+- `gold.expected_usage` supports both `min_*` and `max_*` count gates, so fixtures can catch over-expansion without exposing hidden budget expectations to the adapter.
+
+## 2026-05-28 - Graph Redacted Edge-Support Fixture
+
+Context:
+
+- New fixture: `fixtures/memory_eval/p1/graph_redacted_edge_support_no_leak_basic.json`.
+- Test command:
+  - `uv run pytest --no-testmon -q tests/test_memory_eval_typed_cards_adapter.py::test_graph_negative_fixtures_do_not_leak_blocked_support`
+
+Result:
+
+- The fixture seeds a graph edge with a dedicated support experience, then forgets that support experience before recall.
+- Recall passed with the related graph target absent, aggregate `missing_graph_edge_evidence` drops, and no caller-visible edge/provenance IDs.
+- Derived graph index verification passed the scorer-only expectation for `ok=false` and `graph_edge_support_evidence_unavailable >= 1`.
+
+Decision:
+
+- Graph expansion now gates both normal edge traversal and seed-card edge-derived frontier construction on visible graph-edge support evidence.
+- Memory eval covers redacted graph-edge support drift through derived verifier issue counts, not only through direct retrieval absence.

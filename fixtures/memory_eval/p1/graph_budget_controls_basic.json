@@ -1,0 +1,228 @@
+{
+  "schema_version": "memory_eval_fixture.v1",
+  "fixture_id": "graph_budget_controls_basic",
+  "fixture_version": "1.0.0",
+  "fixture_family": "graph_budget_controls",
+  "phase": "P1",
+  "evaluation_time": "2026-05-28T00:00:00Z",
+  "experiences": [
+    {
+      "experience_id": "exp_graph_budget_seed",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_budget_101",
+      "turn_id": "turn_001",
+      "event_time": "2026-01-13T09:00:00Z",
+      "ingest_order": 1,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "Sirius budget anchor is attached to file:mew:main:src/mew/memory_typed_card_core.py."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_graph_budget_related_a",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_budget_101",
+      "turn_id": "turn_002",
+      "event_time": "2026-01-13T09:05:00Z",
+      "ingest_order": 2,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "The first bounded traversal target is attached to graph_edge(file:mew:main:src/mew/memory_typed_card_core.py,related,test:mew:tests/test_memory_typed_cards_phase_b.py)."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    },
+    {
+      "experience_id": "exp_graph_budget_related_b",
+      "scope_id": "tenant_a/user_a",
+      "session_id": "session_graph_budget_101",
+      "turn_id": "turn_003",
+      "event_time": "2026-01-13T09:10:00Z",
+      "ingest_order": 3,
+      "actor_id": "user_a",
+      "payload": {
+        "mime_type": "text/plain",
+        "text": "The second bounded traversal target is attached to graph_edge(file:mew:main:src/mew/memory_typed_card_core.py,related,test:mew:tests/test_memory_eval_typed_cards_adapter.py)."
+      },
+      "visibility": {
+        "allowed_scope_ids": ["tenant_a/user_a"],
+        "retrievable": true
+      },
+      "metadata": {
+        "source_kind": "conversation"
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "op_id": "mut_seed_graph_budget_seed",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_budget_seed",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph budget fixture setup"
+    },
+    {
+      "op_id": "mut_seed_graph_budget_related_a",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_budget_related_a",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph budget fixture setup"
+    },
+    {
+      "op_id": "mut_seed_graph_budget_related_b",
+      "mutation_type": "seed_eval",
+      "target_experience_id": "exp_graph_budget_related_b",
+      "effective_time": "2026-05-28T00:00:00Z",
+      "reason": "graph budget fixture setup"
+    }
+  ],
+  "requests": [
+    {
+      "request_id": "req_graph_budget_fanout",
+      "mode": "graph_budget_fanout",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "What is connected to the Sirius budget anchor?",
+        "intent": "graph_budget_fanout"
+      },
+      "k": 3,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"],
+        "expand_graph": true,
+        "graph_max_depth": 1,
+        "graph_max_items": 6,
+        "graph_max_fanout": 1
+      },
+      "budget": {
+        "max_evidence_items": 3,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "graph_expansion"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_graph_budget_seed"],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": [],
+        "expected_abstention": false,
+        "expected_usage": {
+          "index_mode": "graph_index",
+          "min_graph_edges_expanded": 1,
+          "max_graph_edges_expanded": 1,
+          "max_graph_cards_expanded": 1
+        },
+        "expected_dropped_count_by_reason": {
+          "graph_fanout_budget_exhausted": 1
+        }
+      }
+    },
+    {
+      "request_id": "req_graph_budget_projection_chars",
+      "mode": "graph_budget_projection_chars",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "What is connected to the Sirius budget anchor?",
+        "intent": "graph_budget_projection_chars"
+      },
+      "k": 3,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"],
+        "expand_graph": true,
+        "graph_max_depth": 1,
+        "graph_max_items": 6
+      },
+      "budget": {
+        "max_evidence_items": 3,
+        "max_chars": 240,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "graph_expansion"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_graph_budget_seed"],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": [],
+        "expected_abstention": false,
+        "expected_usage": {
+          "index_mode": "graph_index",
+          "min_graph_cards_expanded": 2,
+          "max_projection_chars": 240
+        },
+        "expected_dropped_count_by_reason": {
+          "projection_char_budget_exhausted": 1
+        }
+      }
+    },
+    {
+      "request_id": "req_graph_budget_latency",
+      "mode": "graph_budget_latency",
+      "scope_id": "tenant_a/user_a",
+      "query_time": "2026-03-01T12:00:00Z",
+      "query": {
+        "text": "What is connected to the Sirius budget anchor?",
+        "intent": "graph_budget_latency"
+      },
+      "k": 3,
+      "filters": {
+        "valid_at": "2026-03-01T12:00:00Z",
+        "allowed_states": ["active"],
+        "expand_graph": true,
+        "graph_max_depth": 1,
+        "graph_max_items": 6,
+        "graph_max_latency_ms": 0
+      },
+      "budget": {
+        "max_evidence_items": 3,
+        "max_latency_ms": 200,
+        "max_cost_units": null
+      },
+      "requires_capabilities": ["retrieve", "graph_expansion"],
+      "on_unsupported": "hard_failure",
+      "gold": {
+        "relevant_evidence_ids": ["exp_graph_budget_seed"],
+        "must_not_return_evidence_ids": [],
+        "stale_evidence_ids": [],
+        "expected_abstention": false,
+        "expected_usage": {
+          "index_mode": "direct_scan",
+          "max_graph_nodes_expanded": 0,
+          "max_graph_edges_expanded": 0,
+          "max_graph_cards_expanded": 0
+        },
+        "expected_dropped_count_by_reason": {
+          "graph_latency_budget_exhausted": 1
+        }
+      }
+    }
+  ],
+  "operation_sequence": [
+    {"type": "ingest", "experience_id": "exp_graph_budget_seed", "ingest_order": 1},
+    {"type": "mutate", "op_id": "mut_seed_graph_budget_seed", "ingest_order": 1},
+    {"type": "ingest", "experience_id": "exp_graph_budget_related_a", "ingest_order": 2},
+    {"type": "mutate", "op_id": "mut_seed_graph_budget_related_a", "ingest_order": 2},
+    {"type": "ingest", "experience_id": "exp_graph_budget_related_b", "ingest_order": 3},
+    {"type": "mutate", "op_id": "mut_seed_graph_budget_related_b", "ingest_order": 3},
+    {"type": "request", "request_id": "req_graph_budget_fanout", "after_ingest_order": 3},
+    {"type": "request", "request_id": "req_graph_budget_projection_chars", "after_ingest_order": 3},
+    {"type": "request", "request_id": "req_graph_budget_latency", "after_ingest_order": 3}
+  ]
+}
