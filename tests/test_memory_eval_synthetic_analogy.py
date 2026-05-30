@@ -5,12 +5,20 @@ import pytest
 from mew.memory_eval.adapters import DummyPassAdapter
 from mew.memory_eval.hashing import canonical_json
 from mew.memory_eval.synthetic_analogy import (
+    DEFAULT_MVP1_PACK_SEED,
     EXACT_JSON_SCORING_ID,
+    MVP1_ALLOWED_FAMILIES,
+    MVP1_PACK_TASK_COUNT,
     SyntheticAnalogyLeakageError,
     assert_no_scorer_field_leakage,
     count_mvp_whitespace_tokens,
+    find_answer_token_leakage_tasks,
+    generate_mvp1_pack,
+    is_ascii_lowercase_single_token,
+    mvp1_task_determinism_signature,
     normalize_answer,
     phase0_artifact_hash,
+    run_mvp1_pack20,
     run_phase0_smoke,
     score_exact_json_answer,
     split_synthetic_analogy_fixture,
@@ -100,6 +108,9 @@ def test_phase0_smoke_loop_emits_json_report_for_three_conditions(tmp_path, arti
     assert report["state_isolation"] == "reset_per_condition_world"
     assert report["solver_profile"]["token_counter"] == "mvp_whitespace_v1"
     assert report["score_qualification"]["smoke_only"] is True
+    assert report["score_qualification"]["benchmark_quality"] is False
+    assert isinstance(report["score_qualification"]["benchmark_quality"], bool)
+    assert report["score_qualification"]["benchmark_quality_level"] is None
     assert report["score_qualification"]["reuse_allowed_for_mvp1_benchmark"] is False
     assert set(report["conditions"]) == {"memory_off", "memory_on", "oracle_context"}
 
@@ -319,3 +330,122 @@ def test_invalid_oracle_context_shape_raises_clear_error():
 
     with pytest.raises(ValueError, match="oracle_context must be None, a string, or a list/tuple of strings"):
         split_synthetic_analogy_fixture(fixture)
+
+
+def test_diagnostic_task_rows_are_retained_but_excluded_from_condition_aggregates():
+    fixture = _relation_lookup_fixture()
+    fixture["public_experiences"].append(
+        {
+            "experience_id": "exp_relation_fact_2",
+            "text": "zup is mavo-related to mip.",
+        }
+    )
+    fixture["tasks"][0]["diagnostic"] = True
+    fixture["tasks"][0]["diagnostics"] = {"forced_diagnostic": True}
+    fixture["tasks"][0]["gold_answer"] = "nix"
+    fixture["tasks"].append(
+        {
+            "task_id": "task_relation_lookup_normal",
+            "family": "relation_lookup",
+            "prompt": "In this local world, what is zup related to by mavo?",
+            "gold_answer": "mip",
+            "oracle_context": ["zup is mavo-related to mip."],
+        }
+    )
+
+    report = run_phase0_smoke(fixture, DummyPassAdapter())
+    diagnostic_rows = [row for row in report["per_task_rows"] if row["diagnostic"]]
+    normal_rows = [row for row in report["per_task_rows"] if not row["diagnostic"]]
+    diagnostic_by_condition = {row["condition"]: row for row in diagnostic_rows}
+    normal_by_condition = {row["condition"]: row for row in normal_rows}
+
+    assert len(report["per_task_rows"]) == 6
+    assert len(diagnostic_rows) == 3
+    assert len(normal_rows) == 3
+    assert {row["task_id"] for row in diagnostic_rows} == {"task_relation_lookup"}
+    assert {row["condition"] for row in diagnostic_rows} == {"memory_off", "memory_on", "oracle_context"}
+    assert all(row["diagnostics"] == {"forced_diagnostic": True} for row in diagnostic_rows)
+    assert diagnostic_by_condition["memory_on"]["per_task_success"] == 0
+    assert diagnostic_by_condition["memory_on"]["task_pass"] == 0
+    assert diagnostic_by_condition["oracle_context"]["per_task_success"] == 0
+    assert diagnostic_by_condition["oracle_context"]["task_pass"] == 0
+    assert normal_by_condition["memory_on"]["per_task_success"] == 1
+    assert normal_by_condition["memory_on"]["task_pass"] == 1
+    assert normal_by_condition["oracle_context"]["per_task_success"] == 1
+    assert normal_by_condition["oracle_context"]["task_pass"] == 1
+    assert report["conditions"]["memory_off"]["task_count"] == 1
+    assert report["conditions"]["memory_on"]["task_count"] == 1
+    assert report["conditions"]["oracle_context"]["task_count"] == 1
+    assert report["conditions"]["memory_on"]["accuracy"] == 1.0
+    assert report["conditions"]["memory_on"]["pass_rate"] == 1.0
+    assert report["conditions"]["oracle_context"]["accuracy"] == 1.0
+    assert report["conditions"]["oracle_context"]["pass_rate"] == 1.0
+
+
+def test_mvp1_pack20_generation_is_deterministic_and_family_limited():
+    first = generate_mvp1_pack(DEFAULT_MVP1_PACK_SEED)
+    second = generate_mvp1_pack(DEFAULT_MVP1_PACK_SEED)
+
+    assert first["pack_metadata"]["fixture_materialization"] == "runtime_generation_only"
+    assert len(first["tasks"]) == MVP1_PACK_TASK_COUNT
+    assert len(first["public_experiences"]) == MVP1_PACK_TASK_COUNT
+    assert mvp1_task_determinism_signature(first) == mvp1_task_determinism_signature(second)
+    assert {task["family"] for task in first["tasks"]} == set(MVP1_ALLOWED_FAMILIES)
+    assert {task["family"] for task in first["tasks"]} == {
+        "relation_lookup",
+        "analogy_completion",
+        "rule_application",
+    }
+
+    signature = mvp1_task_determinism_signature(first)
+    assert all(item["oracle_support_hash"].startswith("sha256:") for item in signature)
+    assert [item["task_id"] for item in signature] == [task["task_id"] for task in first["tasks"]]
+
+
+def test_mvp1_pack20_answers_are_single_ascii_tokens_without_prompt_leakage():
+    fixture = generate_mvp1_pack()
+
+    assert find_answer_token_leakage_tasks(fixture) == []
+    for task in fixture["tasks"]:
+        assert is_ascii_lowercase_single_token(task["gold_answer"])
+        assert task["diagnostic"] is False
+        assert task["diagnostics"]["answer_token_leakage"] is False
+        assert task["gold_answer"] not in task["prompt"].lower().split()
+
+
+def test_mvp1_pack20_run_report_includes_phase2_metrics_and_diagnostics(tmp_path):
+    report_path = tmp_path / "mvp1_pack20_report.json"
+
+    report = run_mvp1_pack20(DummyPassAdapter(), report_path=report_path)
+
+    persisted = json.loads(report_path.read_text(encoding="utf-8"))
+    assert persisted == report
+    assert report["phase"] == "P2"
+    assert report["pack_generation"]["pack_id"] == "synthetic_analogy_mvp1_pack20"
+    assert report["pack_generation"]["seed"] == DEFAULT_MVP1_PACK_SEED
+    assert report["pack_generation"]["task_count"] == MVP1_PACK_TASK_COUNT
+    assert report["pack_generation"]["fixture_materialization"] == "runtime_generation_only"
+    assert report["score_qualification"]["benchmark_quality"] is True
+    assert isinstance(report["score_qualification"]["benchmark_quality"], bool)
+    assert report["score_qualification"]["benchmark_quality_level"] == "mvp1_minimal_fixed_solver"
+    assert set(report["conditions"]) == {"memory_off", "memory_on", "oracle_context"}
+    assert len(report["per_task_rows"]) == MVP1_PACK_TASK_COUNT * 3
+
+    for condition in ("memory_off", "memory_on", "oracle_context"):
+        summary = report["conditions"][condition]
+        assert summary["task_count"] == MVP1_PACK_TASK_COUNT
+        assert "avg_memory_calls" in summary
+        assert "avg_total_context_tokens" in summary
+        assert "budget_violation_rate" in summary
+        assert "memory_lift" in summary
+        assert "oracle_gap" in summary
+
+    assert report["conditions"]["memory_off"]["accuracy"] == 0.0
+    assert report["conditions"]["memory_on"]["accuracy"] == 1.0
+    assert report["conditions"]["oracle_context"]["accuracy"] == 1.0
+    assert report["comparisons"]["memory_lift"] == 1.0
+    assert report["comparisons"]["oracle_gap"] == 0.0
+    assert report["diagnostics"]["answer_token_leakage"]["suspicious_task_ids"] == []
+    assert report["diagnostics"]["answer_token_leakage"]["normal_aggregate_excludes_suspicious"] is True
+    assert report["diagnostics"]["memory_off_floor"]["status"] == "diagnostic_only"
+    assert report["diagnostics"]["memory_off_floor"]["accuracy"] == 0.0

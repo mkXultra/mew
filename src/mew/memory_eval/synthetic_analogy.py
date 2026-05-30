@@ -1,17 +1,17 @@
-"""Synthetic analogy smoke loop and Phase 1 metric hardening for memory_eval.
+"""Synthetic analogy smoke loop, metrics, and MVP-1 pack for memory_eval.
 
-This module intentionally implements only the MVP-0 plumbing described in:
+This module follows the reduced MVP scope described in:
 
 - docs/IMPLEMENTATION_PLAN_2026-05-28_M6_25_SYNTHETIC_ANALOGY_MINIMAL_BENCH.md
 - docs/DESIGN_2026-05-27_M6_25_SYNTHETIC_ANALOGY_MINIMAL_BENCH.md
 
-It does not implement the deterministic benchmark pack, profile command, or CLI
-integration.
+It intentionally does not implement profile command or CLI integration.
 """
 
 from __future__ import annotations
 
 import json
+import random
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +27,9 @@ EXACT_JSON_SCORING_ID = "exact_json_single_token_v1"
 PHASE0_ALLOWED_ARTIFACT_PROVIDERS = frozenset({"retrieve_packet", "harness_baseline_packet"})
 PHASE0_CONDITIONS = ("memory_off", "memory_on", "oracle_context")
 PHASE0_STATE_ISOLATIONS = frozenset({"reset_per_condition_world", "reset_per_task"})
+MVP1_ALLOWED_FAMILIES = frozenset({"relation_lookup", "analogy_completion", "rule_application"})
+MVP1_PACK_TASK_COUNT = 20
+DEFAULT_MVP1_PACK_SEED = 62525
 DEFAULT_BUDGET_PROFILE = {
     "max_memory_calls": 1,
     "max_total_context_tokens": 600,
@@ -40,7 +43,7 @@ DEFAULT_SOLVER_PROFILE = {
 KNOWN_LIMITATIONS = [
     "Smoke fixture score; not benchmark-quality memory scoring.",
     "Single fixed solver stub only; no live model execution.",
-    "No deterministic generator pack or CLI profile wiring.",
+    "No CLI profile wiring.",
     "No terminal bench, behavior_eval, or network dependency.",
 ]
 SCORER_ONLY_FIELDS = frozenset({"hidden_world", "gold_answer", "oracle_context", "family"})
@@ -49,6 +52,23 @@ _RELATION_FACT_RE = re.compile(
     r"\b([a-z0-9_]+)\s+is\s+([a-z0-9_]+)-related\s+to\s+([a-z0-9_]+)\b",
     re.IGNORECASE,
 )
+_ANALOGY_PROMPT_RE = re.compile(
+    r"complete\s+the\s+analogy:\s+([a-z0-9_]+)\s+is\s+to\s+\[blank\]\s+by\s+bridge\s+([a-z0-9_]+)",
+    re.IGNORECASE,
+)
+_ANALOGY_FACT_RE = re.compile(
+    r"\banalogy\s+([a-z0-9_]+)\s+maps\s+to\s+([a-z0-9_]+)\s+by\s+bridge\s+([a-z0-9_]+)\b",
+    re.IGNORECASE,
+)
+_RULE_PROMPT_RE = re.compile(
+    r"applying\s+rule\s+([a-z0-9_]+)\s+to\s+([a-z0-9_]+)\s+gives\s+which\s+token",
+    re.IGNORECASE,
+)
+_RULE_FACT_RE = re.compile(
+    r"\brule\s+([a-z0-9_]+)\s+maps\s+([a-z0-9_]+)\s+to\s+([a-z0-9_]+)\b",
+    re.IGNORECASE,
+)
+_ASCII_LOWERCASE_SINGLE_TOKEN_RE = re.compile(r"^[a-z]+$")
 
 
 @dataclass(frozen=True)
@@ -124,6 +144,8 @@ def split_synthetic_analogy_fixture(
                 "prompt": prompt,
                 "gold_answer": str(task.get("gold_answer") or ""),
                 "oracle_context": oracle_context,
+                "diagnostic": bool(task.get("diagnostic", False)),
+                "diagnostics": dict(task.get("diagnostics") or {}),
             }
         )
         adapter_tasks.append(
@@ -139,6 +161,8 @@ def split_synthetic_analogy_fixture(
                 "task_id": source_task_id,
                 "family": str(task.get("family") or ""),
                 "prompt": prompt,
+                "diagnostic": bool(task.get("diagnostic", False)),
+                "diagnostics": dict(task.get("diagnostics") or {}),
             }
         )
 
@@ -235,6 +259,7 @@ def run_phase0_smoke(
         "score_qualification": {
             "smoke_only": True,
             "benchmark_quality": False,
+            "benchmark_quality_level": None,
             "reuse_allowed_for_mvp1_benchmark": False,
             "reason": "Phase 0 uses a fixed solver stub and must not be reused as MVP-1 benchmark scoring.",
         },
@@ -246,6 +271,207 @@ def run_phase0_smoke(
     if report_path is not None:
         write_artifact(report_path, report)
     return report
+
+
+def generate_mvp1_pack(seed: int = DEFAULT_MVP1_PACK_SEED) -> dict[str, Any]:
+    """Generate the deterministic Phase 2 MVP-1 pack at runtime."""
+
+    rng = random.Random(int(seed))
+    tokens = _sample_token_pool(rng, count=80)
+    token_index = 0
+
+    hidden_world: dict[str, Any] = {
+        "seed": int(seed),
+        "entities": [],
+        "relations": [],
+        "analogies": [],
+        "rules": [],
+    }
+    public_experiences: list[dict[str, str]] = []
+    tasks: list[dict[str, Any]] = []
+    family_plan = (
+        ["relation_lookup"] * 7
+        + ["analogy_completion"] * 7
+        + ["rule_application"] * 6
+    )
+    rng.shuffle(family_plan)
+    family_counts = {family: 0 for family in sorted(MVP1_ALLOWED_FAMILIES)}
+
+    def next_token() -> str:
+        nonlocal token_index
+        token = tokens[token_index]
+        token_index += 1
+        return token
+
+    for task_number, family in enumerate(family_plan, start=1):
+        family_counts[family] += 1
+        task_id = f"mvp1_{task_number:02d}_{family}"
+        experience_id = f"mvp1_exp_{task_number:02d}"
+
+        if family == "relation_lookup":
+            subject = next_token()
+            relation = next_token()
+            answer = next_token()
+            hidden_world["entities"].extend([subject, answer])
+            hidden_world["relations"].append(
+                {"subject": subject, "relation": relation, "object": answer}
+            )
+            support = f"{subject} is {relation}-related to {answer}."
+            prompt = f"In this local world, what is {subject} related to by {relation}?"
+        elif family == "analogy_completion":
+            source = next_token()
+            bridge = next_token()
+            answer = next_token()
+            hidden_world["entities"].extend([source, answer])
+            hidden_world["analogies"].append(
+                {"source": source, "bridge": bridge, "target": answer}
+            )
+            support = f"analogy {source} maps to {answer} by bridge {bridge}."
+            prompt = (
+                f"In this local world, complete the analogy: {source} is to "
+                f"[blank] by bridge {bridge}. Respond with one token."
+            )
+        elif family == "rule_application":
+            rule = next_token()
+            input_token = next_token()
+            answer = next_token()
+            hidden_world["entities"].extend([input_token, answer])
+            hidden_world["rules"].append(
+                {"rule_id": rule, "input": input_token, "output": answer}
+            )
+            support = f"rule {rule} maps {input_token} to {answer}."
+            prompt = (
+                f"In this local world, applying rule {rule} to {input_token} "
+                "gives which token?"
+            )
+        else:
+            raise ValueError(f"unsupported MVP-1 family: {family}")
+
+        if not is_ascii_lowercase_single_token(answer):
+            raise ValueError(f"generated invalid answer token for {task_id}: {answer!r}")
+        task = {
+            "task_id": task_id,
+            "family": family,
+            "prompt": prompt,
+            "gold_answer": answer,
+            "oracle_context": [support],
+            "diagnostic": False,
+            "diagnostics": {
+                "answer_token_leakage": _task_has_answer_token_leakage(
+                    prompt=prompt,
+                    gold_answer=answer,
+                )
+            },
+        }
+        if task["diagnostics"]["answer_token_leakage"]:
+            task["diagnostic"] = True
+        public_experiences.append({"experience_id": experience_id, "text": support})
+        tasks.append(task)
+
+    fixture = {
+        "world_id": f"synthetic_analogy_mvp1_pack20_seed_{int(seed)}",
+        "hidden_world": hidden_world,
+        "public_experiences": public_experiences,
+        "tasks": tasks,
+        "pack_metadata": {
+            "pack_id": "synthetic_analogy_mvp1_pack20",
+            "seed": int(seed),
+            "task_count": MVP1_PACK_TASK_COUNT,
+            "families": sorted(MVP1_ALLOWED_FAMILIES),
+            "fixture_materialization": "runtime_generation_only",
+        },
+    }
+    if len(tasks) != MVP1_PACK_TASK_COUNT:
+        raise ValueError(f"MVP-1 pack must contain {MVP1_PACK_TASK_COUNT} tasks")
+    return fixture
+
+
+def run_mvp1_pack20(
+    adapter: MemoryEvalAdapter,
+    *,
+    seed: int = DEFAULT_MVP1_PACK_SEED,
+    artifact_provider: str = "harness_baseline_packet",
+    report_path: str | Path | None = None,
+    state_isolation: str = "reset_per_condition_world",
+    budget_profile: Mapping[str, int] | None = None,
+) -> dict[str, Any]:
+    """Run the existing three-condition harness over the generated pack20."""
+
+    fixture = generate_mvp1_pack(seed)
+    suspicious_task_ids = find_answer_token_leakage_tasks(fixture)
+    report = run_phase0_smoke(
+        fixture,
+        adapter,
+        artifact_provider=artifact_provider,
+        state_isolation=state_isolation,
+        budget_profile=budget_profile,
+    )
+    report["phase"] = "P2"
+    report["metrics_phase"] = "P2_deterministic_generator_mvp1_pack"
+    report["pack_generation"] = {
+        **dict(fixture["pack_metadata"]),
+        "task_signature": mvp1_task_determinism_signature(fixture),
+    }
+    report["score_qualification"] = {
+        "smoke_only": False,
+        "benchmark_quality": True,
+        "benchmark_quality_level": "mvp1_minimal_fixed_solver",
+        "live_model": False,
+        "reason": "Phase 2 uses the fixed in-process solver on a deterministic generated MVP-1 pack.",
+    }
+    report["diagnostics"] = {
+        "answer_token_leakage": {
+            "checked_task_count": len(fixture["tasks"]),
+            "suspicious_task_ids": suspicious_task_ids,
+            "normal_aggregate_excludes_suspicious": True,
+        },
+        "memory_off_floor": {
+            "accuracy": report["conditions"]["memory_off"]["accuracy"],
+            "pass_rate": report["conditions"]["memory_off"]["pass_rate"],
+            "hard_threshold": None,
+            "status": "diagnostic_only",
+        },
+    }
+    report["known_limitations"] = [
+        "MVP-1 fixed synthetic pack only; no live model execution.",
+        "memory_off floor is diagnostic only; no hard threshold yet.",
+        "No CLI profile wiring.",
+        "No terminal bench, behavior_eval, or network dependency.",
+        "No long-horizon, stale, update, scope, forget, or full-design metrics.",
+    ]
+    if report_path is not None:
+        write_artifact(report_path, report)
+    return report
+
+
+def mvp1_task_determinism_signature(fixture: Mapping[str, Any]) -> list[dict[str, str]]:
+    signature = []
+    for task in list(fixture.get("tasks") or []):
+        signature.append(
+            {
+                "task_id": str(task.get("task_id") or ""),
+                "family": str(task.get("family") or ""),
+                "prompt": str(task.get("prompt") or ""),
+                "gold_answer": str(task.get("gold_answer") or ""),
+                "oracle_support_hash": stable_hash(_normalize_oracle_context(task.get("oracle_context"))),
+            }
+        )
+    return signature
+
+
+def find_answer_token_leakage_tasks(fixture: Mapping[str, Any]) -> list[str]:
+    suspicious: list[str] = []
+    for task in list(fixture.get("tasks") or []):
+        if _task_has_answer_token_leakage(
+            prompt=str(task.get("prompt") or ""),
+            gold_answer=str(task.get("gold_answer") or ""),
+        ):
+            suspicious.append(str(task.get("task_id") or ""))
+    return suspicious
+
+
+def is_ascii_lowercase_single_token(value: str) -> bool:
+    return bool(_ASCII_LOWERCASE_SINGLE_TOKEN_RE.fullmatch(str(value or "")))
 
 
 def count_mvp_whitespace_tokens(text: str) -> int:
@@ -337,7 +563,11 @@ def find_scorer_field_leakage(payload: Mapping[str, Any], *, context: str) -> li
 def summarize_phase0_conditions(rows: list[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
     conditions: dict[str, dict[str, Any]] = {}
     for condition in PHASE0_CONDITIONS:
-        subset = [row for row in rows if row.get("condition") == condition]
+        subset = [
+            row
+            for row in rows
+            if row.get("condition") == condition and not bool(row.get("diagnostic", False))
+        ]
         task_count = len(subset)
         if task_count == 0:
             conditions[condition] = {
@@ -473,6 +703,8 @@ def _run_single_condition_task(
         "world_id": str(views.report_view.get("world_id") or ""),
         "condition": condition,
         "family": str(scorer_task.get("family") or ""),
+        "diagnostic": bool(scorer_task.get("diagnostic", False)),
+        "diagnostics": dict(scorer_task.get("diagnostics") or {}),
         "solver_output": solver_output,
         "normalized_answer": scoring["normalized_answer"],
         "per_task_success": per_task_success,
@@ -585,6 +817,20 @@ def _fixed_solver_v1(*, prompt: str, condition_context: str) -> str:
         for fact_subject, fact_relation, fact_object in _RELATION_FACT_RE.findall(condition_context):
             if fact_subject.lower() == subject and fact_relation.lower() == relation:
                 return json.dumps({"answer": fact_object.lower()}, separators=(",", ":"))
+    analogy_match = _ANALOGY_PROMPT_RE.search(prompt)
+    if analogy_match:
+        source = analogy_match.group(1).lower()
+        bridge = analogy_match.group(2).lower()
+        for fact_source, fact_target, fact_bridge in _ANALOGY_FACT_RE.findall(condition_context):
+            if fact_source.lower() == source and fact_bridge.lower() == bridge:
+                return json.dumps({"answer": fact_target.lower()}, separators=(",", ":"))
+    rule_match = _RULE_PROMPT_RE.search(prompt)
+    if rule_match:
+        rule = rule_match.group(1).lower()
+        input_token = rule_match.group(2).lower()
+        for fact_rule, fact_input, fact_output in _RULE_FACT_RE.findall(condition_context):
+            if fact_rule.lower() == rule and fact_input.lower() == input_token:
+                return json.dumps({"answer": fact_output.lower()}, separators=(",", ":"))
     return json.dumps({"answer": "unknown"}, separators=(",", ":"))
 
 
@@ -635,6 +881,31 @@ def _normalize_answer_text(value: str) -> str:
     return "".join(normalized_chars)
 
 
+def _task_has_answer_token_leakage(*, prompt: str, gold_answer: str) -> bool:
+    normalized_gold = _normalize_answer_text(gold_answer)
+    if not normalized_gold:
+        return False
+    prompt_tokens = set(re.findall(r"[a-z0-9]+", str(prompt).lower()))
+    return normalized_gold in prompt_tokens
+
+
+def _sample_token_pool(rng: random.Random, *, count: int) -> list[str]:
+    consonants = "bcdfghjklmnpqrstvwxyz"
+    vowels = "aeiou"
+    candidates = [
+        f"{first}{vowel}{second}"
+        for first in consonants
+        for vowel in vowels
+        for second in consonants
+        if first != second
+    ]
+    rng.shuffle(candidates)
+    tokens = [token for token in candidates if is_ascii_lowercase_single_token(token)]
+    if len(tokens) < count:
+        raise ValueError(f"not enough deterministic token candidates for {count} tokens")
+    return tokens[:count]
+
+
 def _evidence_items_used(
     *,
     condition: str,
@@ -679,8 +950,11 @@ def condition_name(value: str) -> str:
 __all__ = [
     "BENCHMARK_ID",
     "DEFAULT_BUDGET_PROFILE",
+    "DEFAULT_MVP1_PACK_SEED",
     "DEFAULT_SOLVER_PROFILE",
     "EXACT_JSON_SCORING_ID",
+    "MVP1_ALLOWED_FAMILIES",
+    "MVP1_PACK_TASK_COUNT",
     "PHASE0_ALLOWED_ARTIFACT_PROVIDERS",
     "SyntheticAnalogyLeakageError",
     "SyntheticAnalogyViews",
@@ -689,9 +963,14 @@ __all__ = [
     "compare_phase0_conditions",
     "count_mvp_whitespace_tokens",
     "find_scorer_field_leakage",
+    "find_answer_token_leakage_tasks",
+    "generate_mvp1_pack",
+    "is_ascii_lowercase_single_token",
+    "mvp1_task_determinism_signature",
     "normalize_answer",
     "phase0_artifact_hash",
     "phase0_artifact_hash_payload",
+    "run_mvp1_pack20",
     "run_phase0_smoke",
     "score_exact_json_answer",
     "split_synthetic_analogy_fixture",
